@@ -446,6 +446,7 @@ test("check and outdated expose the same pending migration", () => {
   const outdatedResult = JSON.parse(outdated.stdout);
   assert.equal(outdatedResult.status, "partial");
   assert.equal(outdatedResult.packageApis[0].migrationId, "partial-resolver-to-markdown");
+  assert.equal(outdatedResult.packageApis[0].mode, "automatic");
   assert.equal(outdatedResult.packageApis[0].action.automatic, true);
   assert.deepEqual(outdatedResult.packageApis[0].action.command.args.slice(-3), ["migrate", "--yes", "--json"]);
   assert.equal(outdatedResult.errors[0].code, "no-provenance");

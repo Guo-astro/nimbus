@@ -12,7 +12,7 @@ import * as p from "@clack/prompts";
 
 import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
-import { resolveUpgradeBaseline, selectUpgradeEntries, type UpgradeMode } from "../_internal/upgrades.js";
+import { resolveUpgradeBaseline, selectUpgradeEntries, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
 import {
   latestTemplatesTag,
   listTreeFiles,
@@ -288,7 +288,7 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
     ]);
     packageApis.push({
       migrationId: plan.id,
-      mode: "automatic",
+      mode: UPGRADE_MANIFEST.entries.find((entry) => entry.migrationId === plan.id)?.mode ?? "automatic",
       locations: plan.locations.map((location) => `${location.file}:${location.line}:${location.column}`),
       action: { kind: "migrate", command: migrate, automatic, instructions: plan.instructions },
     });

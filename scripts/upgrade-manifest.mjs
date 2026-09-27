@@ -120,7 +120,13 @@ export function validateManifestContinuity(previousManifest, currentManifest, cu
       throw new Error(
         `Upgrade manifest entry ${previous.id} cannot be removed.`,
       );
-    if (!isDeepStrictEqual(entry, previous) && (!currentVersion || !lt(currentVersion, previous.introducedIn)))
+    // Unreleased entries may still be refined, but never moved to another
+    // release or relinked to another changeset.
+    const unreleased = Boolean(currentVersion) && lt(currentVersion, previous.introducedIn);
+    const changed = unreleased
+      ? entry.introducedIn !== previous.introducedIn || entry.changeset !== previous.changeset
+      : !isDeepStrictEqual(entry, previous);
+    if (changed)
       throw new Error(
         `Upgrade manifest entry ${previous.id} cannot be changed.`,
       );

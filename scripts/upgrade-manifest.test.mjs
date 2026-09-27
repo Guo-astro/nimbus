@@ -151,6 +151,24 @@ test("manifest continuity preserves shipped entries", () => {
       ),
     /cannot be changed/,
   );
+  assert.throws(
+    () =>
+      validateManifestContinuity(
+        manifest([entry("unreleased", { introducedIn: "0.15.0" })]),
+        manifest([entry("unreleased", { introducedIn: "0.14.1" })]),
+        "0.14.2",
+      ),
+    /cannot be changed/,
+  );
+  assert.throws(
+    () =>
+      validateManifestContinuity(
+        manifest([entry("unreleased", { introducedIn: "0.15.0" })]),
+        manifest([entry("unreleased", { introducedIn: "0.15.0", changeset: "other-change" })]),
+        "0.14.2",
+      ),
+    /cannot be changed/,
+  );
 });
 
 test("breaking declarations require a new entry linked to a Nimbus changeset", () => {

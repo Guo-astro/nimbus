@@ -161,7 +161,11 @@ test("migrate plans, diffs, applies, preserves modes, and becomes idempotent", (
 });
 
 test("historical jumps stay blocked until a clean consented rerun records the range", () => {
-  const expectedReviewIds = selectUpgradeEntries("0.11.0", CURRENT_VERSION).map(entry => entry.id);
+  const expectedEntries = selectUpgradeEntries("0.11.0", CURRENT_VERSION);
+  const expectedReviewIds = expectedEntries.map(entry => entry.id);
+  // Optional entries enter this range once the package version reaches their release.
+  const expectedRequiredIds = expectedEntries.filter(entry => entry.mode !== "optional").map(entry => entry.id);
+  const expectedOptionalIds = expectedEntries.filter(entry => entry.mode === "optional").map(entry => entry.id);
   assert.ok(expectedReviewIds.includes("partial-resolver-to-markdown"));
   const root = makeProject();
   const nimbusFile = path.join(root, "nimbus.json");
@@ -186,11 +190,21 @@ test("historical jumps stay blocked until a clean consented rerun records the ra
 
   const pendingCheck = run(root, ["check", "--migrations", "--json"]);
   assert.equal(pendingCheck.status, 1, pendingCheck.stderr);
-  assert.deepEqual(
-    JSON.parse(pendingCheck.stdout).findings.map((finding: { migration: { id: string } }) => finding.migration.id),
-    expectedReviewIds,
-  );
-  assert.ok(JSON.parse(pendingCheck.stdout).findings.every((finding: { code: string }) => finding.code === "nimbus/upgrade-review"));
+  const pendingFindings = JSON.parse(pendingCheck.stdout).findings as Array<{
+    code: string;
+    severity: string;
+    message: string;
+    migration?: { id: string };
+  }>;
+  const requiredFindings = pendingFindings.filter((finding) => finding.code === "nimbus/upgrade-review");
+  const optionalFindings = pendingFindings.filter((finding) => finding.code === "nimbus/upgrade-optional");
+  assert.equal(requiredFindings.length + optionalFindings.length, pendingFindings.length);
+  assert.deepEqual(requiredFindings.map((finding) => finding.migration?.id), expectedRequiredIds);
+  assert.equal(optionalFindings.length, expectedOptionalIds.length);
+  for (const [index, id] of expectedOptionalIds.entries()) {
+    assert.equal(optionalFindings[index].severity, "info");
+    assert.match(optionalFindings[index].message, new RegExp(`\`${id}\``));
+  }
 
   const completed = run(root, ["migrate", "--yes", "--json"]);
   assert.equal(completed.status, 0, completed.stderr);

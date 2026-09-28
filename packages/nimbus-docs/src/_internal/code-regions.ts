@@ -20,21 +20,36 @@ export interface FencedBlock {
   prefix: string;
 }
 
-/** Closed fenced blocks in `lines`, in order. An unclosed fence is left as prose. */
+/**
+ * Closed fenced blocks in `lines`, in order. An unclosed fence is left as
+ * prose, including one whose `>` quote ends before the fence closes.
+ */
 export function fencedBlocks(lines: readonly string[]): FencedBlock[] {
   const blocks: FencedBlock[] = [];
   for (let i = 0; i < lines.length; i++) {
     const open = FENCE_OPEN.exec(lines[i]!);
     const [, prefix = "", fence = "", info = ""] = open ?? [];
     if (!open || (fence[0] === "`" && info.includes("`"))) continue;
-    const close = new RegExp(`^${fence[0]}{${fence.length},}[ \\t]*\\r?$`);
+    // A closing fence may be indented up to three spaces within its container.
+    const close = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[ \\t]*\\r?$`);
+    const depth = quoteDepth(prefix);
     let end = i + 1;
-    while (end < lines.length && !close.test(stripPrefix(lines[end]!, prefix))) end++;
-    if (end === lines.length) continue;
+    while (
+      end < lines.length &&
+      quoteDepth(lines[end]!) >= depth &&
+      !close.test(stripPrefix(lines[end]!, prefix))
+    ) {
+      end++;
+    }
+    if (end === lines.length || quoteDepth(lines[end]!) < depth) continue;
     blocks.push({ open: i, close: end, prefix });
     i = end;
   }
   return blocks;
+}
+
+function quoteDepth(line: string): number {
+  return /^[ \t]*((?:>[ \t]?)*)/.exec(line)![1]!.split(">").length - 1;
 }
 
 /**

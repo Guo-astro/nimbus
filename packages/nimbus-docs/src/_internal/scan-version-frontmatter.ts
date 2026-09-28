@@ -60,7 +60,8 @@ export async function scanVersionFrontmatter(
       if (parseBoolField(front, "draft") === true) continue;
 
       const previousSlug = parsePreviousSlugField(front);
-      const id = idFromPath(dir, file);
+      // Astro's glob loader uses a frontmatter `slug` as the entry ID.
+      const id = parseSlugField(front) ?? idFromPath(dir, file);
       out.push({ collection, id, previousSlug });
     }
   }
@@ -117,6 +118,13 @@ function parseBoolField(yaml: string, field: string): boolean | undefined {
   const m = yaml.match(re);
   if (!m) return undefined;
   return m[1] === "true";
+}
+
+/** The top-level scalar `slug` field, e.g. `slug: 1.2.3/setup`. */
+function parseSlugField(yaml: string): string | undefined {
+  const m = yaml.match(/^slug\s*:\s*(.+?)\s*$/m);
+  const value = m ? unquote(m[1]!) : "";
+  return value.length > 0 ? value : undefined;
 }
 
 /**

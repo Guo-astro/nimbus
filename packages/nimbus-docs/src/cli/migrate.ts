@@ -700,7 +700,8 @@ function completionCommand(
   const from = baseline.source === "argument" && baseline.fromVersion
     ? ` --from ${baseline.fromVersion}`
     : "";
-  return invocation(`migrate${cwd}${srcDir}${from} --yes`, options.projectRoot);
+  // With --cwd the command runs from here, not from the project.
+  return invocation(`migrate${cwd}${srcDir}${from} --yes`, options.cwd ? process.cwd() : options.projectRoot);
 }
 
 function shellQuote(value: string): string {

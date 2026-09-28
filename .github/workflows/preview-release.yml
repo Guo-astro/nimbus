@@ -44,6 +44,25 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # changelog-github finds the commit that added each changeset
 
+      # The preview version comes from the branch's package versions. A branch
+      # behind the latest release would be stamped as a pre-release of a version
+      # that already shipped, which sites on that release reject as older.
+      - name: Require the latest release
+        run: |
+          for pkg in nimbus-docs create-nimbus-docs; do
+            branch=$(jq -r .version "packages/$pkg/package.json")
+            main=$(git show "origin/main:packages/$pkg/package.json" | jq -r .version)
+            if [ "$branch" != "$main" ]; then
+              gh pr edit "$PR" --repo "$REPO" --remove-label "pr preview"
+              echo "::error::This branch has @cloudflare/$pkg $branch, but main has $main. Merge main into the branch, then add the label again."
+              exit 1
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.number }}
+
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4

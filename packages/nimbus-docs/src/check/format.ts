@@ -24,8 +24,8 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
-  /** `--fix` already ran without a terminal, so its prompts were skipped. */
-  needsTerminal?: boolean;
+  /** Fixes `--fix` skipped: prompts need a terminal, installs need `--yes`. */
+  skippedFixes?: "needs-terminal" | "needs-yes";
 }
 
 const SCOPE_LABELS: Record<CheckScope, string> = {
@@ -89,6 +89,11 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
 
   lines.push("");
   lines.push(...renderHeadline(result, opts, paint));
+  if (opts.skippedFixes === "needs-terminal") {
+    lines.push(paint(COLORS.yellow, `  → Some fixes need a terminal: run \`${opts.invocation}\` in one`));
+  } else if (opts.skippedFixes === "needs-yes") {
+    lines.push(paint(COLORS.yellow, `  → Some fixes need consent: run \`${opts.invocation}\``));
+  }
   lines.push("");
   return lines.join("\n");
 }
@@ -268,9 +273,7 @@ function problemHeadline(
   // `blocked` is verified non-buildable; `unknown` is unverified — don't claim either.
   const lead = result.readiness === "blocked" ? "Not buildable — " : "";
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
-  if (autoFixable + needsInput > 0) {
-    head += ` → run \`${opts.invocation}\`${opts.needsTerminal ? " in a terminal" : ""}`;
-  }
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes) head += ` → run \`${opts.invocation}\``;
   return [paint(COLORS.red, head), checkedIn];
 }
 

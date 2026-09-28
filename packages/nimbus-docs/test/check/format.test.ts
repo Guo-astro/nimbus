@@ -148,9 +148,10 @@ test("after a non-interactive --fix, the footer says the prompts need a terminal
       findings: [placeholder],
       scopes: [scope({ status: "failed", findings: [placeholder] })],
     }),
-    { ...OPTS, needsTerminal: true },
+    { ...OPTS, skippedFixes: "needs-terminal" },
   );
-  assert.match(out, /run `nimbus-docs check --fix` in a terminal/);
+  assert.match(out, /Some fixes need a terminal: run `nimbus-docs check --fix` in one/);
+  assert.equal(out.match(/check --fix/g)?.length, 1);
 });
 
 test("passed full run → Ready", () => {

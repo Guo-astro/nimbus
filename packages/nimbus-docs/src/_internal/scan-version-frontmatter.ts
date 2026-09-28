@@ -16,6 +16,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { parse as parseYaml } from "yaml";
+
 import { walkFiles } from "./fs-walk.js";
 import type { ResolvedVersions } from "../types.js";
 import type { VersionEntryInput } from "./version-alternates.js";
@@ -60,7 +62,8 @@ export async function scanVersionFrontmatter(
       if (parseBoolField(front, "draft") === true) continue;
 
       const previousSlug = parsePreviousSlugField(front);
-      const id = idFromPath(dir, file);
+      // Astro's glob loader uses a frontmatter `slug` as the entry ID.
+      const id = parseSlugField(front) ?? idFromPath(dir, file);
       out.push({ collection, id, previousSlug });
     }
   }
@@ -117,6 +120,17 @@ function parseBoolField(yaml: string, field: string): boolean | undefined {
   const m = yaml.match(re);
   if (!m) return undefined;
   return m[1] === "true";
+}
+
+/** The top-level `slug` field, read as YAML like Astro does (comments, quotes). */
+function parseSlugField(yaml: string): string | undefined {
+  if (!/^slug\s*:/m.test(yaml)) return undefined;
+  try {
+    const slug = (parseYaml(yaml) as { slug?: unknown } | null)?.slug;
+    return typeof slug === "string" && slug.length > 0 ? slug : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

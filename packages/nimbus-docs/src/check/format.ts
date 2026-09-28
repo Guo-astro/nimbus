@@ -24,8 +24,8 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
-  /** `--fix` already ran without a terminal, so its prompts were skipped. */
-  needsTerminal?: boolean;
+  /** Fixes `--fix` skipped: prompts need a terminal, installs need `--yes`. */
+  skippedFixes?: "needs-terminal" | "needs-yes";
 }
 
 const SCOPE_LABELS: Record<CheckScope, string> = {
@@ -89,8 +89,18 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
 
   lines.push("");
   lines.push(...renderHeadline(result, opts, paint));
+  const hint = skippedFixHint(result, opts);
+  if (hint) lines.push(paint(COLORS.yellow, hint));
   lines.push("");
   return lines.join("\n");
+}
+
+function skippedFixHint(result: CheckResult, opts: PrettyOptions): string | undefined {
+  // With --quiet, a skipped fix for a hidden warning isn't worth a line.
+  if (!result.findings.some((f) => f.fixable && (!opts.quiet || f.severity === "error"))) return undefined;
+  if (opts.skippedFixes === "needs-terminal") return `  → Some fixes need a terminal: run \`${opts.invocation}\` in one`;
+  if (opts.skippedFixes === "needs-yes") return `  → Some fixes need consent: run \`${opts.invocation}\``;
+  return undefined;
 }
 
 function renderScope(
@@ -268,9 +278,7 @@ function problemHeadline(
   // `blocked` is verified non-buildable; `unknown` is unverified — don't claim either.
   const lead = result.readiness === "blocked" ? "Not buildable — " : "";
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
-  if (autoFixable + needsInput > 0) {
-    head += ` → run \`${opts.invocation}\`${opts.needsTerminal ? " in a terminal" : ""}`;
-  }
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes) head += ` → run \`${opts.invocation}\``;
   return [paint(COLORS.red, head), checkedIn];
 }
 

@@ -90,8 +90,9 @@ The label is removed automatically; re-add it to publish a fresh preview.
 
 Preview packages carry the version the release PR would give them, as a
 pre-release such as `0.16.0-pr.<number>.sha<sha>`, so installing one on a site runs
-the next release's upgrade entries. CI tests every PR at that version. A package
-without a pending changeset gets a patch bump.
+the next release's upgrade entries. A package without a pending changeset gets a
+patch bump. CI also tests every PR at the version its changesets produce. A branch
+behind the latest release gets no preview; merge main into it first.
 
 `create-nimbus-docs` previews scaffold from the PR's own starter, bundled into the
 preview package and pinned to the matching `@cloudflare/nimbus-docs` preview. They

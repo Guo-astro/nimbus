@@ -80,3 +80,28 @@ test("check --fix without a terminal asks for --yes when only installs remain", 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("check --fix without a terminal names the skipped prompt even when only a warning remains", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-fix-terminal-"));
+  fs.writeFileSync(path.join(dir, "package.json"), `{ "name": "fixture" }`);
+  fs.writeFileSync(path.join(dir, "package-lock.json"), "{}\n");
+  fs.writeFileSync(
+    path.join(dir, "astro.config.ts"),
+    `import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://example.com", title: "X", search: false })] };`,
+  );
+  try {
+    const res = spawnSync(process.execPath, ["--import", TSX, CLI, "check", "--env", "--fix"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.match(
+      res.stdout,
+      /Some fixes need a terminal: run `npx @cloudflare\/nimbus-docs check --fix` in one/,
+      res.stdout + res.stderr,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

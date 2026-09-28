@@ -223,6 +223,27 @@ test("historical jumps stay blocked until a clean consented rerun records the ra
   assert.equal(JSON.parse(checked.stdout).findings.length, 0);
 });
 
+test("with --cwd, the printed command runs from where migrate was run", () => {
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cli-migrate-outer-"));
+  roots.push(outer);
+  fs.writeFileSync(path.join(outer, "package.json"), `{ "name": "workspace" }`);
+  fs.writeFileSync(path.join(outer, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+  const site = path.join(outer, "site");
+  fs.renameSync(makeCleanUpgradeProject(), site);
+  fs.writeFileSync(
+    path.join(site, "package.json"),
+    JSON.stringify({ devDependencies: { "@cloudflare/nimbus-docs": "*" } }),
+  );
+  fs.writeFileSync(path.join(site, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+
+  const result = runWithManifest(outer, ["migrate", "--dry-run", "--cwd", "site"], [syntheticEntry("optional-one", "optional")]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(
+    result.stdout.includes(`pnpm dlx @cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd 'site' --yes`),
+    result.stdout,
+  );
+});
+
 test("synthetic optional entries are informational across migrate, check, and outdated", () => {
   const root = makeCleanUpgradeProject();
   const entries = [
@@ -385,7 +406,7 @@ test("missing baselines require --from before completion", () => {
 
   const task = run(root, ["migrate", "--cwd", ".", "--src-dir", "src", "--from", "0.11.0", "--print"]);
   assert.equal(task.status, 0, task.stderr);
-  assert.match(task.stdout, /nimbus-docs migrate --cwd '\.' --src-dir 'src' --from 0\.11\.0 --yes/);
+  assert.ok(task.stdout.includes(`@cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd '.' --src-dir 'src' --from 0.11.0 --yes`), task.stdout);
   assert.match(task.stdout, /rerun with consent before project verification/);
 });
 

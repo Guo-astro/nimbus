@@ -27,7 +27,7 @@ test("without a terminal, the first prompt asks for --yes or flags instead of cr
   const { cwd, output, status } = scaffoldWithoutTerminal(["site"]);
   try {
     assert.equal(status, 1, output);
-    assert.match(output, /No terminal to ask "Starter content\?" Pass --yes to accept the defaults/);
+    assert.match(output, /No terminal to ask "Starter content\?" Pass --content starter\|empty to answer it, or --yes/);
     assert.equal(existsSync(join(cwd, "site")), false);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -39,7 +39,7 @@ test("without a terminal, flags that answer every prompt need no --yes", () => {
     "site",
     "--content", "empty",
     "--package-manager", "npm",
-    "--no-git",
+    "--git",
     "--deploy", "other",
     "--skip-install",
     "--template-dir", "missing-templates",

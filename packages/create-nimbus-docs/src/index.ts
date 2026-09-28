@@ -10,7 +10,7 @@
  *   --yes, -y              Use defaults, skip prompts.
  *   --skip-install         Don't run package-manager install after scaffold.
  *   --package-manager <pm> Package manager (npm|pnpm|yarn|bun). Auto-detected if omitted.
- *   --no-git               Don't initialize a git repository.
+ *   --git, --no-git        Initialize a git repository, or don't.
  *   --template-dir <path>  Scaffold from a local template directory (offline).
  *   --help, -h
  *   --version, -v
@@ -42,7 +42,6 @@ const args = mri(process.argv.slice(2), {
   boolean: ["yes", "help", "version", "skip-install", "git"],
   string: ["package-manager", "deploy", "adapter", "content", "template-dir"],
   alias: { y: "yes", h: "help", v: "version" },
-  default: { git: true },
 });
 
 if (args.help) {
@@ -59,7 +58,7 @@ if (args.help) {
     --yes, -y              Use defaults for everything
     --skip-install         Skip dependency install
     --package-manager <pm> npm | pnpm | yarn | bun
-    --no-git               Skip git init
+    --git, --no-git        Initialize git, or skip it
     --template-dir <path>  Scaffold from a local template directory (no network)
     --help, -h
     --version, -v

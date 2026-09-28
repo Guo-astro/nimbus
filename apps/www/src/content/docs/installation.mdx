@@ -32,7 +32,7 @@ The scaffolder asks:
     npm, pnpm, yarn, or bun. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
   </Step>
   <Step title="Git">
-    Whether to initialize a repository. Flag: `--no-git` to skip.
+    Whether to initialize a repository. Flag: `--git` or `--no-git`.
   </Step>
   <Step title="Output mode">
     **Static** prerenders every content collection route and deploys anywhere. **Server** renders those routes on request. You can override individual collections later.
@@ -42,7 +42,7 @@ The scaffolder asks:
   </Step>
 </Steps>
 
-Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, `--yes` is required. Pass `--help` to list every flag.
+Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, pass `--yes` or a flag for every question. Pass `--help` to list every flag.
 
 ## What lands in your repo
 

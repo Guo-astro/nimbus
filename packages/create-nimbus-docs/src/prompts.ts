@@ -73,7 +73,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   // Interactive mode
   const dir =
     opts.dir ??
-    (await ask("Where should we create your project?", () =>
+    (await ask("Where should we create your project?", "a directory argument", () =>
       p.text({
         message: "Where should we create your project?",
         placeholder: "./my-docs",
@@ -93,7 +93,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const content =
     opts.content ??
-    ((await ask("Starter content?", () =>
+    ((await ask("Starter content?", "--content starter|empty", () =>
       p.select({
         message: "Starter content?",
         options: [
@@ -109,7 +109,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const packageManager =
     opts.packageManager ??
-    ((await ask("Which package manager?", () =>
+    ((await ask("Which package manager?", "--package-manager npm|pnpm|yarn|bun", () =>
       p.select({
         message: "Which package manager?",
         options: [
@@ -123,14 +123,13 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
     )) as PackageManager);
 
   const git =
-    opts.git === false
-      ? false
-      : await ask("Initialize a git repository?", () =>
-          p.confirm({
-            message: "Initialize a git repository?",
-            initialValue: true,
-          }),
-        );
+    opts.git ??
+    (await ask("Initialize a git repository?", "--git or --no-git", () =>
+      p.confirm({
+        message: "Initialize a git repository?",
+        initialValue: true,
+      }),
+    ));
 
   const base: ResponsesBase = {
     dir,
@@ -145,7 +144,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   if (opts.adapter) return { ...base, output: "server", adapter: opts.adapter };
   if (opts.deploy) return { ...base, output: "static", deploy: opts.deploy };
 
-  const output = (await ask("Output mode?", () =>
+  const output = (await ask("Output mode?", "--deploy or --adapter", () =>
     p.select({
       message: "Output mode?",
       options: [
@@ -157,7 +156,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   )) as OutputMode;
 
   if (output === "server") {
-    const adapter = (await ask("Which adapter?", () =>
+    const adapter = (await ask("Which adapter?", "--adapter cloudflare", () =>
       p.select({
         message: "Which adapter?",
         options: INTERACTIVE_ADAPTER_OPTIONS,
@@ -167,7 +166,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
     return { ...base, output: "server", adapter };
   }
 
-  const deploy = (await ask("Deploy target?", () =>
+  const deploy = (await ask("Deploy target?", "--deploy cloudflare|other", () =>
     p.select({
       message: "Deploy target?",
       options: [
@@ -185,11 +184,9 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
  * with the flags that skip it instead of crashing inside the prompt library.
  * A cancelled prompt exits cleanly.
  */
-async function ask<T>(question: string, prompt: () => Promise<T | symbol>): Promise<T> {
+async function ask<T>(question: string, answer: string, prompt: () => Promise<T | symbol>): Promise<T> {
   if (!process.stdin.isTTY) {
-    p.log.error(
-      `No terminal to ask "${question}" Pass --yes to accept the defaults, and flags such as --content, --package-manager, --no-git, --deploy, or --adapter to choose others.`,
-    );
+    p.log.error(`No terminal to ask "${question}" Pass ${answer} to answer it, or --yes to accept the defaults.`);
     process.exit(1);
   }
   const value = await prompt();

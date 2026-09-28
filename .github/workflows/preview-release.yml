@@ -42,6 +42,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0 # changelog-github finds the commit that added each changeset
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -51,6 +52,21 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Stamp the packages with the version the release PR would give them, as
+      # a pre-release such as 0.16.0-pr.<number>.sha<sha>, so installs select the next
+      # release's upgrade entries. The floor changeset gives a package with no
+      # pending changeset a patch bump; changesets keeps any larger pending
+      # bump. Nothing is committed. changelog-github reads PR metadata, hence
+      # the token.
+      - name: Stamp preview versions
+        run: |
+          printf -- '---\n"@cloudflare/nimbus-docs": patch\n"@cloudflare/create-nimbus-docs": patch\n---\n\nPreview version floor.\n' > .changeset/preview-version-floor.md
+          pnpm exec changeset version --snapshot "pr.$PR_NUMBER"
+          grep -H '"version"' packages/nimbus-docs/package.json packages/create-nimbus-docs/package.json
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       # Build only what gets published. The root `build` also builds the private
       # @nimbus/www site + starter source; a failure there must not block a

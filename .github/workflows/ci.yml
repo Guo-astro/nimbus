@@ -35,13 +35,30 @@ jobs:
       # Root script builds nimbus-docs, then runs `pnpm -r typecheck`.
       - run: pnpm typecheck
 
+  # `next` applies pending changesets exactly as the release PR will (versions,
+  # CHANGELOGs, reviewed baselines, registry) before testing, so a test that
+  # depends on the version fails here instead of on the release PR. Nothing is
+  # committed.
   test:
-    name: Test
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Test
+            next: false
+            fetch-depth: 1
+          - name: Test at the next release version
+            next: true
+            fetch-depth: 0 # changelog-github finds the commit that added each changeset
     permissions:
       contents: read
+      pull-requests: read # changelog-github reads the PR behind each changeset
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: ${{ matrix.fetch-depth }}
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -51,6 +68,11 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - if: matrix.next
+        run: pnpm changeset:version
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - run: pnpm --filter ./packages/nimbus-docs build
 

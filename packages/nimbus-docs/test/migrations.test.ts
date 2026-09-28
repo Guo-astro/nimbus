@@ -23,6 +23,8 @@ afterEach(() => {
 function project(options: { route?: string; config?: string } = {}): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-migrate-"));
   roots.push(root);
+  // An npm project, so hints don't depend on the package manager running the tests.
+  fs.writeFileSync(path.join(root, "package-lock.json"), "{}\n");
   fs.mkdirSync(path.join(root, "src", "pages"), { recursive: true });
   fs.writeFileSync(
     path.join(root, "src", "pages", "[...slug].astro"),
@@ -368,7 +370,7 @@ export default defineConfig({ integrations: [nimbus({ site: "https://example.com
       logger: { error: () => {} },
     } as never),
     {
-      message: "nimbus-docs: Nimbus has no reviewed upgrade baseline. Run `nimbus-docs migrate --from <version>`, complete every review, then rerun migrate with consent before building.",
+      message: "nimbus-docs: Nimbus has no reviewed upgrade baseline. Run `npx @cloudflare/nimbus-docs migrate --from <version>`, complete every review, then rerun migrate with consent before building.",
     },
   );
 });
@@ -387,7 +389,7 @@ test("Astro integration treats synthetic optional upgrades as information", () =
   ]);
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.infos, [
-    "Nimbus optional upgrades available (optional-one, optional-two). Run `nimbus-docs migrate` to review them.",
+    "Nimbus optional upgrades available (optional-one, optional-two). Run `npx @cloudflare/nimbus-docs migrate` to review them.",
   ]);
 });
 
@@ -404,7 +406,7 @@ test("Astro integration still blocks required upgrades alone and mixed with opti
     assert.throws(
       () => invokeBuildCheck(root, entries),
       {
-        message: "nimbus-docs: Nimbus upgrade review required (required-one). Run `nimbus-docs migrate`, complete every review, then rerun migrate with consent before building.",
+        message: "nimbus-docs: Nimbus upgrade review required (required-one). Run `npx @cloudflare/nimbus-docs migrate`, complete every review, then rerun migrate with consent before building.",
       },
     );
   }
@@ -419,7 +421,7 @@ test("Astro integration preserves the invalid-baseline build error", () => {
   assert.throws(
     () => invokeBuildCheck(root, []),
     {
-      message: "nimbus-docs: nimbus.json lastReviewedNimbusVersion must be an exact semantic version or null. Run `nimbus-docs migrate` to repair the upgrade baseline.",
+      message: "nimbus-docs: nimbus.json lastReviewedNimbusVersion must be an exact semantic version or null. Run `npx @cloudflare/nimbus-docs migrate` to repair the upgrade baseline.",
     },
   );
 });

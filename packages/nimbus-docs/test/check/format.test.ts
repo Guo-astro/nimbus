@@ -132,6 +132,27 @@ test("failed + blocked → Not buildable", () => {
   assert.match(out, /✗ Not buildable — 1 problem · 1 needs input → run `nimbus-docs check --fix`/);
 });
 
+test("after a non-interactive --fix, the footer says the prompts need a terminal", () => {
+  const placeholder: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "error",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const out = formatCheckPretty(
+    result({
+      status: "failed",
+      readiness: "blocked",
+      findings: [placeholder],
+      scopes: [scope({ status: "failed", findings: [placeholder] })],
+    }),
+    { ...OPTS, needsTerminal: true },
+  );
+  assert.match(out, /run `nimbus-docs check --fix` in a terminal/);
+});
+
 test("passed full run → Ready", () => {
   const out = formatCheckPretty(
     result({

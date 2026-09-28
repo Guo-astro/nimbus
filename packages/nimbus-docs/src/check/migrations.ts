@@ -1,7 +1,6 @@
-import fs from "node:fs";
-
 import { discoverMigrations } from "../_internal/migrations.js";
 import { resolveUpgradeBaseline, selectUpgradeEntries } from "../_internal/upgrades.js";
+import { selfCommand } from "../cli/pm.js";
 import type { ScopeReport } from "./finding.js";
 
 export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeReport {
@@ -15,14 +14,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
     allowUnresolvedLayout: baseline.fromVersion === baseline.targetVersion && !baseline.error,
   });
   const baselineBlocked = Boolean(baseline.error || (!baseline.fromVersion && baseline.source !== "preview"));
-  const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : "nimbus-docs";
-  const migrateArgs = [entry, "migrate", ...(srcDirOverride ? ["--src-dir", srcDirOverride] : [])];
-  const command = {
-    bin: process.execPath,
-    args: migrateArgs,
-    cwd: ".",
-    display: [process.execPath, ...migrateArgs].map(shell).join(" "),
-  };
+  const command = selfCommand(["migrate", ...(srcDirOverride ? ["--src-dir", srcDirOverride] : [])], cwd);
   return {
     scope: "migrations",
     findings: [
@@ -94,8 +86,4 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
     ],
     evaluated: true,
   };
-}
-
-function shell(value: string): string {
-  return /^[A-Za-z0-9@._/:+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }

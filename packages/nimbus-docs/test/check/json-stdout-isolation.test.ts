@@ -59,3 +59,24 @@ test("check --json --fix --yes: installer stdout never corrupts the JSON payload
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("check --fix without a terminal asks for --yes when only installs remain", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-fix-remedy-"));
+  fs.writeFileSync(path.join(dir, "package.json"), `{ "name": "fixture" }`);
+  fs.writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+  fs.writeFileSync(
+    path.join(dir, "astro.config.ts"),
+    `import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X" })] };`,
+  );
+  try {
+    const res = spawnSync(process.execPath, ["--import", TSX, CLI, "check", "--env", "--fix"], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.match(res.stdout, /run `pnpm dlx @cloudflare\/nimbus-docs check --fix --yes`/, res.stdout + res.stderr);
+    assert.doesNotMatch(res.stdout, /in a terminal/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

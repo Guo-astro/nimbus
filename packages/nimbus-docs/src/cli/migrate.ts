@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 
-import { compare } from "semver";
+import { compare, valid } from "semver";
 
 import {
   discoverMigrations,
@@ -19,6 +19,7 @@ import {
 } from "../_internal/upgrades.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 import { NIMBUS_JSON, readNimbusJson } from "./nimbus-json.js";
+import { invocation } from "./pm.js";
 
 export interface MigrateOptions {
   cwd?: string;
@@ -61,10 +62,10 @@ interface MigrateReport {
   errors: ResultError[];
 }
 
-type CompletionOptions = Pick<MigrateOptions, "cwd" | "srcDir">;
+type CompletionOptions = Pick<MigrateOptions, "cwd" | "srcDir"> & { projectRoot?: string };
 
 export async function migrateCommand(input: MigrateOptions): Promise<void> {
-  const completionOptions = { cwd: input.cwd, srcDir: input.srcDir };
+  const completionOptions: CompletionOptions = { cwd: input.cwd, srcDir: input.srcDir };
   const options = {
     srcDir: input.srcDir,
     yes: input.yes ?? false,
@@ -86,18 +87,19 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
 
   const selectedRoot = resolveProjectRoot(process.cwd(), input.cwd);
   if (!selectedRoot.ok) {
-    finish(makeReport(emptyBaseline(options.targetVersion), [], [], [{ code: "invalid-project-root", message: selectedRoot.message }]), options.json, false, completionOptions);
+    finish(makeReport(emptyBaseline(options.targetVersion), [], [], [{ code: "invalid-project-root", message: selectedRoot.message }]), { json: options.json, completionOptions });
     process.exitCode = 1;
     return;
   }
   const projectRoot = selectedRoot.root;
+  completionOptions.projectRoot = projectRoot;
   const baseline = resolveUpgradeBaseline({
     projectRoot,
     fromVersion: options.fromVersion,
     targetVersion: options.targetVersion,
   });
   if (baseline.error) {
-    finish(makeReport(baseline, [], [], [{ code: "invalid-upgrade-baseline", message: baseline.error }], false, false, false), options.json, false, completionOptions);
+    finish(makeReport(baseline, [], [], [{ code: "invalid-upgrade-baseline", message: baseline.error }], { baselineRecorded: false }), { json: options.json, completionOptions });
     process.exitCode = 1;
     return;
   }
@@ -112,7 +114,12 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
     : [];
   const reviews = entries;
   const requiredReviews = reviews.filter((entry) => entry.mode !== "optional");
-  const optionalOnly = reviews.length > 0 && requiredReviews.length === 0;
+  // Fail only when work remains that the build also rejects: a recorded
+  // baseline that is merely behind builds fine.
+  const baselineMissing = baseline.source !== "preview" &&
+    !(typeof recordedVersion === "string" && valid(recordedVersion));
+  const requiredWork = (plans: number) =>
+    plans > 0 || requiredReviews.length > 0 || baselineMissing;
   let discovery: ReturnType<typeof discoverMigrations>;
   try {
     discovery = discoverMigrations({
@@ -121,7 +128,7 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
       allowUnresolvedLayout: !baselineNeedsRecording && entries.every((entry) => !entry.migrationId),
     });
   } catch (error) {
-    finish(makeReport(baseline, [], reviews, [{ code: "discovery-failed", message: errorMessage(error) }]), options.json, false, completionOptions);
+    finish(makeReport(baseline, [], reviews, [{ code: "discovery-failed", message: errorMessage(error) }]), { json: options.json, completionOptions });
     process.exitCode = 1;
     return;
   }
@@ -141,7 +148,7 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
   let consent = options.yes;
 
   if (!readOnly && !consent && process.stdin.isTTY && process.stdout.isTTY) {
-    printHumanPlan(discovery.plans, reviews, baseline, completionOptions);
+    printHumanPlan(discovery.plans, reviews, baseline, { completionOptions, baselineNeedsRecording, prompting: true });
     if (safe.length > 0) {
       consent = await confirm(`Apply ${safe.length} safe migration${safe.length === 1 ? "" : "s"}?`);
     } else if (blocked.length === 0 && canRecordBaseline) {
@@ -150,8 +157,8 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
   }
 
   if (readOnly && !options.json && !options.diff) {
-    printHumanPlan(discovery.plans, reviews, baseline, completionOptions);
-    process.exitCode = discovery.plans.length > 0 || requiredReviews.length > 0 || (baselineNeedsRecording && !optionalOnly) ? 1 : 0;
+    printHumanPlan(discovery.plans, reviews, baseline, { completionOptions, baselineNeedsRecording });
+    process.exitCode = requiredWork(discovery.plans.length) ? 1 : 0;
     return;
   }
 
@@ -167,29 +174,32 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
     for (const plan of blocked) printBlockedPlan(plan);
     printUpgradeReviews(reviews, baseline);
     printCompletionCommand(reviews, baseline, completionOptions);
-    process.exitCode = discovery.plans.length > 0 || requiredReviews.length > 0 || (baselineNeedsRecording && !optionalOnly) || (!baseline.fromVersion && baseline.source !== "preview") ? 1 : 0;
+    process.exitCode = requiredWork(discovery.plans.length) ? 1 : 0;
     return;
   }
-  const report = makeReport(baseline, results, reviews, [], false, baselineNeedsRecording);
+  const report = makeReport(baseline, results, reviews, [], {
+    baselinePending: baselineNeedsRecording,
+    baselineBlocking: baselineMissing,
+  });
   if (!readOnly && consent && canRecordBaseline) {
     const latest = discoverMigrations({ projectRoot, srcDirOverride: options.srcDir });
     if (latest.plans.length > 0) {
       const latestResults = latest.plans.map((plan) =>
         plan.blockers.length > 0 ? blockedResult(plan) : availableResult(plan)
       );
-      const changed = makeReport(baseline, latestResults, reviews, [], false, true, false);
-      finish(changed, options.json, false, completionOptions);
+      const changed = makeReport(baseline, latestResults, reviews, [], { baselinePending: true });
+      finish(changed, { json: options.json, completionOptions });
       process.exitCode = 1;
       return;
     }
     const errors = recordUpgradeBaseline(projectRoot, baseline.targetVersion, baselinePreimage);
     const recorded = errors.length === 0;
-    const completed = makeReport(baseline, [], reviews, errors, recorded, !recorded, recorded);
-    finish(completed, options.json, recorded, completionOptions);
+    const completed = makeReport(baseline, [], reviews, errors, { reviewsCompleted: recorded, baselinePending: !recorded });
+    finish(completed, { json: options.json, reviewsCompleted: recorded, completionOptions });
     if (completed.status !== "passed") process.exitCode = 1;
     return;
   }
-  finish(report, options.json, false, completionOptions);
+  finish(report, { json: options.json, completionOptions });
   if (report.status !== "passed") process.exitCode = 1;
 }
 
@@ -321,15 +331,17 @@ function makeReport(
   migrations: MigrationResult[],
   reviews: UpgradeEntry[],
   errors: ResultError[],
-  reviewsCompleted = false,
-  baselinePending = false,
-  baselineRecorded = !baselinePending && Boolean(baseline.fromVersion),
+  {
+    reviewsCompleted = false,
+    baselinePending = false,
+    baselineRecorded = !baselinePending && Boolean(baseline.fromVersion),
+    baselineBlocking = baselinePending,
+  }: { reviewsCompleted?: boolean; baselinePending?: boolean; baselineRecorded?: boolean; baselineBlocking?: boolean } = {},
 ): MigrateReport {
   const requiredReviews = reviews.filter((entry) => entry.mode !== "optional");
-  const optionalOnly = reviews.length > 0 && requiredReviews.length === 0;
   let status: MigrateReport["status"] = "passed";
   if (errors.length > 0 || migrations.some((migration) => migration.state === "failed")) status = "failed";
-  else if ((!baseline.fromVersion && baseline.source !== "preview") || (baselinePending && !optionalOnly) || (!reviewsCompleted && requiredReviews.length > 0) || migrations.some((migration) => migration.state === "blocked")) status = "blocked";
+  else if ((!baseline.fromVersion && baseline.source !== "preview") || baselineBlocking || (!reviewsCompleted && requiredReviews.length > 0) || migrations.some((migration) => migration.state === "blocked")) status = "blocked";
   else if (migrations.some((migration) => migration.state === "available")) status = "changes_available";
   return {
     schemaVersion: 1,
@@ -343,9 +355,11 @@ function makeReport(
 
 function finish(
   report: MigrateReport,
-  json: boolean,
-  reviewsCompleted = false,
-  completionOptions: CompletionOptions = {},
+  { json, reviewsCompleted = false, completionOptions = {} }: {
+    json: boolean;
+    reviewsCompleted?: boolean;
+    completionOptions?: CompletionOptions;
+  },
 ): void {
   if (json) {
     process.stdout.write(`${JSON.stringify(report)}\n`);
@@ -355,8 +369,13 @@ function finish(
   if (!report.baseline.fromVersion && report.baseline.source !== "preview" && report.errors.length === 0) {
     console.error(`Upgrade baseline unknown. Rerun with --from <version>, complete every review, then rerun with consent.`);
   }
-  if (report.migrations.length === 0 && report.reviews.length === 0 && report.errors.length === 0 && report.baseline.fromVersion) {
-    console.log("No Nimbus migrations detected.");
+  if (report.migrations.length === 0 && report.reviews.length === 0 && report.errors.length === 0 && report.baseline.fromVersion && !reviewsCompleted) {
+    if (report.baseline.recorded) {
+      console.log(`Nimbus ${report.baseline.targetVersion} is up to date: no migrations or upgrade reviews.`);
+    } else {
+      console.log(`To record ${report.baseline.targetVersion} as reviewed, rerun with consent:`);
+      console.log(`  ${completionCommand(report.reviews, report.baseline, completionOptions)}`);
+    }
   }
   for (const migration of report.migrations) {
     console.log(`${migration.id}: ${migration.state}`);
@@ -379,10 +398,27 @@ function printHumanPlan(
   plans: MigrationPlan[],
   reviews: UpgradeEntry[],
   baseline: UpgradeBaseline,
-  completionOptions: CompletionOptions,
+  { completionOptions, baselineNeedsRecording, prompting = false }: {
+    completionOptions: CompletionOptions;
+    baselineNeedsRecording: boolean;
+    prompting?: boolean;
+  },
 ): void {
   if (!baseline.fromVersion && baseline.source !== "preview") {
     console.error("Upgrade baseline unknown. Pass --from <version> to include every crossed breaking change.");
+  }
+  if (baseline.fromVersion && plans.length === 0 && reviews.length === 0) {
+    // With a prompt to follow, `finish` reports the outcome.
+    if (!baselineNeedsRecording) {
+      if (!prompting) console.log(`Nimbus ${baseline.targetVersion} is up to date: no migrations or upgrade reviews.`);
+      return;
+    }
+    console.log(`No migrations or upgrade reviews between Nimbus ${baseline.fromVersion} and ${baseline.targetVersion}.`);
+    if (!prompting) {
+      console.log(`To record ${baseline.targetVersion} as reviewed, rerun with consent:`);
+      console.log(`  ${completionCommand(reviews, baseline, completionOptions)}`);
+    }
+    return;
   }
   for (const plan of plans) {
     console.log(`${plan.id}: ${plan.blockers.length > 0 ? "blocked" : `${plan.changes.length} planned file${plan.changes.length === 1 ? "" : "s"}`}`);
@@ -390,7 +426,7 @@ function printHumanPlan(
     else for (const blocker of plan.blockers) console.error(`  ${blocker.message}`);
   }
   printUpgradeReviews(reviews, baseline);
-  printCompletionCommand(reviews, baseline, completionOptions);
+  if (!prompting) printCompletionCommand(reviews, baseline, completionOptions);
 }
 
 function printPlanDiff(plan: MigrationPlan): void {
@@ -664,7 +700,7 @@ function completionCommand(
   const from = baseline.source === "argument" && baseline.fromVersion
     ? ` --from ${baseline.fromVersion}`
     : "";
-  return `nimbus-docs migrate${cwd}${srcDir}${from} --yes`;
+  return invocation(`migrate${cwd}${srcDir}${from} --yes`, options.projectRoot);
 }
 
 function shellQuote(value: string): string {

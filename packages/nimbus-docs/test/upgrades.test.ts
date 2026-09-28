@@ -121,6 +121,7 @@ test("selectUpgradeEntries composes the open-closed version range", () => {
     selectUpgradeEntries("0.11.0", "0.13.0").map((entry) => entry.id),
     [
       "remove-gated-config",
+      "custom-loaders-with-nimbus-markdown",
       "index-route-normalization",
       "llms-full-prepared-artifact",
       "logical-authored-links",
@@ -150,6 +151,19 @@ test("selectUpgradeEntries composes the open-closed version range", () => {
   assert.match(processor?.instructions.join("\n") ?? "", /admonitions: false/);
   assert.match(processor?.affected ?? "", /\.md files/);
   assert.match(processor?.instructions.join("\n") ?? "", /only \.mdx files/);
+});
+
+test("sites upgrading from 0.12.x are told to wrap custom loaders", () => {
+  const entry = selectUpgradeEntries("0.12.3", "0.15.0").find(
+    (candidate) => candidate.id === "custom-loaders-with-nimbus-markdown",
+  );
+  assert.equal(entry?.mode, "review-required");
+  assert.match(entry?.instructions.join("\n") ?? "", /withNimbusMarkdown\(\)/);
+  assert.match(entry?.affected ?? "", /not prepared/);
+  assert.equal(
+    selectUpgradeEntries("0.13.0", "0.15.0").some((candidate) => candidate.id === entry?.id),
+    false,
+  );
 });
 
 test("a preview pre-release selects the entries of the release it previews", () => {

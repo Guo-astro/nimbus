@@ -9,6 +9,7 @@ import fs, { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path, { dirname, join, posix } from "node:path";
 
 import * as p from "@clack/prompts";
+import { lt, minVersion, satisfies, valid, validRange } from "semver";
 
 import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
@@ -21,7 +22,7 @@ import {
   type FetchedTree,
 } from "./_templates.js";
 import { bytesHash, readNimbusJson, resolveWriteRoot, type InstalledComponent, type NimbusJson } from "./nimbus-json.js";
-import { invocation, updateCommand } from "./pm.js";
+import { invocation, selfCommand, type SelfCommand, updateCommand } from "./pm.js";
 import { fetchComponent, type ComponentItem } from "./resolver.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 
@@ -132,12 +133,7 @@ export interface UpgradeFlags {
 type OutdatedStatus = "current" | "attention" | "partial" | "failed";
 type LocalRegistryStatus = "clean" | "customized" | "missing" | "unverifiable";
 
-interface OutdatedCommand {
-  bin: string;
-  args: string[];
-  cwd: string;
-  display: string;
-}
+type OutdatedCommand = SelfCommand;
 
 interface OutdatedAction {
   kind: "migrate" | "view" | "apply" | "review" | "preserve";
@@ -149,7 +145,7 @@ interface OutdatedAction {
 export interface OutdatedResult {
   schemaVersion: 1;
   status: OutdatedStatus;
-  summary: { packageApis: number; starter: number; registry: number; hiddenContent: number };
+  summary: { packageApis: number; requiredPackageApis: number; starter: number; registry: number; hiddenContent: number };
   packageApis: Array<{ migrationId: string; mode: UpgradeMode; locations: string[]; action: OutdatedAction }>;
   starter: Array<{ file: string; status: StarterStatus; action: OutdatedAction }>;
   registry: Array<{
@@ -166,6 +162,12 @@ export interface OutdatedResult {
     message: string;
     recoverable: boolean;
   }>;
+  warnings: Array<{ scope: "starter"; code: StarterCompatibility["code"]; message: string }>;
+}
+
+interface StarterCompatibility {
+  code: "starter-needs-newer-package";
+  message: string;
 }
 
 interface Gathered {
@@ -173,7 +175,7 @@ interface Gathered {
   baseDir: string;
   upstreamDir: string;
   findings: StarterFinding[];
-  frameworkNote: string | null;
+  compatibility: StarterCompatibility | null;
   cleanup: () => void;
 }
 
@@ -224,7 +226,7 @@ async function gatherStarter(cwd: string, nimbus: NimbusJson, flags: UpgradeFlag
     baseDir: base.dir,
     upstreamDir: upstream.dir,
     findings,
-    frameworkNote: frameworkNote(upstream.dir, cwd),
+    compatibility: starterCompatibility(upstream.dir, upstreamTag, cwd),
     cleanup: () => {
       base.cleanup();
       upstream.cleanup();
@@ -243,11 +245,12 @@ export async function outdatedCommand(flags: UpgradeFlags): Promise<void> {
     result = {
       schemaVersion: 1,
       status: "failed",
-      summary: { packageApis: 0, starter: 0, registry: 0, hiddenContent: 0 },
+      summary: { packageApis: 0, requiredPackageApis: 0, starter: 0, registry: 0, hiddenContent: 0 },
       packageApis: [],
       starter: [],
       registry: [],
       errors: [{ scope: "project", code: "outdated-failed", message: errorMessage(error), recoverable: false }],
+      warnings: [],
     };
   }
   if (flags.json) {
@@ -264,6 +267,7 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
   const packageApis: OutdatedResult["packageApis"] = [];
   const starter: OutdatedResult["starter"] = [];
   const registry: OutdatedResult["registry"] = [];
+  const warnings: OutdatedResult["warnings"] = [];
   let hiddenContent = 0;
   let fatal = false;
 
@@ -281,11 +285,11 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
   }
   for (const plan of discovery.plans) {
     const automatic = plan.blockers.length === 0;
-    const migrate = selfCommand(cwd, [
+    const migrate = selfCommand([
       "migrate",
       ...(automatic ? ["--yes", "--json"] : ["--print"]),
       ...(flags.srcDir ? ["--src-dir", flags.srcDir] : []),
-    ]);
+    ], cwd);
     packageApis.push({
       migrationId: plan.id,
       mode: UPGRADE_MANIFEST.entries.find((entry) => entry.migrationId === plan.id)?.mode ?? "automatic",
@@ -310,7 +314,7 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
         locations: [],
         action: {
           kind: "review",
-          command: selfCommand(cwd, ["migrate", "--print", ...(flags.srcDir ? ["--src-dir", flags.srcDir] : [])]),
+          command: selfCommand(["migrate", "--print", ...(flags.srcDir ? ["--src-dir", flags.srcDir] : [])], cwd),
           automatic: false,
           instructions: [...entry.instructions, ...entry.verify],
         },
@@ -357,8 +361,11 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
       gathered = await gatherStarter(cwd, nimbus, flags);
       const shown = (finding: StarterFinding) => flags.all || !isContent(finding.treeFile);
       hiddenContent = gathered.findings.filter((finding) => isContent(finding.treeFile) && !flags.all).length;
+      const { compatibility } = gathered;
+      if (compatibility) warnings.push({ scope: "starter", ...compatibility });
+      const applyBlocker = compatibility?.code === "starter-needs-newer-package" ? compatibility.message : null;
       for (const finding of gathered.findings.filter(shown)) {
-        starter.push({ file: finding.file, status: finding.status, action: starterAction(cwd, finding, gathered.frameworkNote) });
+        starter.push({ file: finding.file, status: finding.status, action: starterAction(cwd, finding, applyBlocker) });
       }
     } catch (error) {
       if (!fatal) errors.push({ scope: "starter", code: "starter-unavailable", message: errorMessage(error), recoverable: true });
@@ -399,22 +406,24 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
   starter.sort((a, b) => a.file.localeCompare(b.file));
   registry.sort((a, b) => a.slug.localeCompare(b.slug));
   errors.sort((a, b) => a.scope.localeCompare(b.scope) || a.code.localeCompare(b.code));
-  const attention = packageApis.some((item) => item.mode !== "optional") || starter.some((item) => item.status !== "local") || registry.some((item) => item.upstream === "behind");
+  const requiredPackageApis = packageApis.filter((item) => item.mode !== "optional").length;
+  const attention = requiredPackageApis > 0 || starter.some((item) => item.status !== "local") || registry.some((item) => item.upstream === "behind");
   const partial = errors.some((error) => error.recoverable);
   const status: OutdatedStatus = fatal ? "failed" : partial ? "partial" : attention ? "attention" : "current";
   return {
     schemaVersion: 1,
     status,
-    summary: { packageApis: packageApis.length, starter: starter.length, registry: registry.length, hiddenContent },
+    summary: { packageApis: packageApis.length, requiredPackageApis, starter: starter.length, registry: registry.length, hiddenContent },
     packageApis,
     starter,
     registry,
     errors,
+    warnings,
   };
 }
 
 function starterAction(cwd: string, finding: StarterFinding, compatibility: string | null): OutdatedAction {
-  const view = selfCommand(cwd, ["diff", finding.file]);
+  const view = selfCommand(["diff", finding.file], cwd);
   if (finding.status === "clean" || finding.status === "added" || finding.status === "removed") {
     if (compatibility) {
       return {
@@ -426,7 +435,7 @@ function starterAction(cwd: string, finding: StarterFinding, compatibility: stri
     }
     return {
       kind: "apply",
-      command: selfCommand(cwd, ["diff", finding.file, "--apply"]),
+      command: selfCommand(["diff", finding.file, "--apply"], cwd),
       automatic: true,
       instructions: ["Review the diff, then apply only while the clean preimage or absence still matches."],
     };
@@ -435,12 +444,6 @@ function starterAction(cwd: string, finding: StarterFinding, compatibility: stri
     return { kind: "preserve", command: view, automatic: false, instructions: ["Upstream is unchanged; preserve this project-owned edit unless asked otherwise."] };
   }
   return { kind: "review", command: view, automatic: false, instructions: ["Review and reconcile by hand; automatic apply would discard project-owned work."] };
-}
-
-function selfCommand(cwd: string, args: string[]): OutdatedCommand {
-  const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : "nimbus-docs";
-  const tokens = [process.execPath, entry, ...args];
-  return { bin: process.execPath, args: [entry, ...args], cwd: ".", display: tokens.map(shell).join(" ") };
 }
 
 function classifyRegistryLocal(cwd: string, nimbus: NimbusJson, component: InstalledComponent): LocalRegistryStatus {
@@ -491,7 +494,7 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
   if (requiredPackageApis.length === 0 && unavailable("package-apis")) lines.push("Package APIs: unavailable");
   else if (requiredPackageApis.length === 0) lines.push("Package APIs: up to date ✓");
   else {
-    lines.push(`Package APIs: ${requiredPackageApis.length} migration${requiredPackageApis.length === 1 ? "" : "s"} pending`);
+    lines.push(`Package APIs: ${requiredPackageApis.length} required ${requiredPackageApis.length === 1 ? "migration or upgrade review" : "migrations or upgrade reviews"}`);
     for (const item of requiredPackageApis) lines.push(`  ${item.migrationId} → ${item.action.command?.display ?? "nimbus-docs migrate"}`);
   }
   if (optionalPackageApis.length > 0) {
@@ -508,10 +511,7 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
     lines.push(`  → \`${invocation("diff <file>")}\` to review; --apply is limited to clean/add/remove cases.`);
   }
   if (local.length > 0) lines.push(`  ${local.length} local-only starter edit${local.length === 1 ? "" : "s"} preserved.`);
-  const compatibility = new Set(
-    result.starter.flatMap((item) => item.action.kind === "review" && item.status !== "hand-merge" ? item.action.instructions.slice(0, 1) : []),
-  );
-  for (const note of compatibility) lines.push(`  ${note}`);
+  for (const warning of result.warnings) lines.push(`  ! ${warning.message}`);
   if (result.summary.hiddenContent > 0 && !flags.all) lines.push(`  (${result.summary.hiddenContent} content file${result.summary.hiddenContent === 1 ? "" : "s"} hidden — --all to include)`);
   const behind = result.registry.filter((item) => item.upstream === "behind");
   if (unavailable("registry") || result.status === "failed" || unavailable("project")) lines.push("", "Registry components: unavailable");
@@ -523,10 +523,6 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
   for (const error of result.errors) lines.push("", `${error.scope}: ${error.message}`);
   if (flags.templateDir) lines.push("", "Offline template mode compares against the recorded local tag only.");
   return lines.join("\n");
-}
-
-function shell(value: string): string {
-  return /^[A-Za-z0-9@._/:+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function errorMessage(error: unknown): string {
@@ -548,9 +544,9 @@ export async function diffCommand(file: string | undefined, flags: UpgradeFlags)
 
   const g = await gatherStarter(cwd, nimbus, flags);
   try {
-    if (g.frameworkNote) {
-      p.log.warn(g.frameworkNote);
-      if (flags.apply) {
+    if (g.compatibility) {
+      p.log.warn(g.compatibility.message);
+      if (flags.apply && g.compatibility.code === "starter-needs-newer-package") {
         p.log.error("Update the Nimbus package and rerun outdated before applying starter files.");
         process.exitCode = 1;
         return;
@@ -731,32 +727,37 @@ function readDisk(cwd: string, srcRoot: string, f: StarterFinding): string | nul
 }
 
 /**
- * Warn when upstream starter markup targets a newer framework than the user has
- * installed — hand-applying it would break at build. Ties starter drift back to
- * the "behavior upgrades via a package-manager update" boundary. Null when unknowable.
+ * A starter that needs a newer framework than the project has would apply
+ * markup the installed package can't resolve. Null when compatible or unknowable.
  */
-function frameworkNote(upstreamDir: string, cwd: string): string | null {
-  const up = pkgNimbusVersion(join(upstreamDir, "package.json"));
+function starterCompatibility(upstreamDir: string, tag: string, cwd: string): StarterCompatibility | null {
+  const range = pkgNimbusRange(join(upstreamDir, "package.json"));
   // Compare against what's actually installed, not the declared range — a user
   // who updated past their `^0.7.0` pin shouldn't see a false nudge.
-  const mine = installedNimbusVersion(cwd) ?? pkgNimbusVersion(join(cwd, "package.json"));
-  if (!up || !mine || cmpVersion(up, mine) <= 0) return null;
-  return `Note: upstream starter targets @cloudflare/nimbus-docs ${up.join(".")}; you have ${mine.join(".")} — run \`${updateCommand(cwd)}\` first so new markup resolves.`;
+  const mine = installedNimbusVersion(cwd) ?? minVersionOf(pkgNimbusRange(join(cwd, "package.json")));
+  if (!range || !validRange(range) || !mine) return null;
+  if (satisfies(mine, range, { includePrerelease: true })) return null;
+  const min = minVersionOf(range);
+  if (!min || !lt(mine, min)) return null;
+  return {
+    code: "starter-needs-newer-package",
+    message: `Starter ${tag} targets @cloudflare/nimbus-docs ${range}, but the project has ${mine}. Run \`${updateCommand(cwd)}\` first so new markup resolves.`,
+  };
 }
 
-function parseVersion(raw: string | undefined): [number, number, number] | null {
-  const m = raw && /(\d+)\.(\d+)\.(\d+)/.exec(raw);
-  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
-}
-
-function pkgNimbusVersion(pkgPath: string): [number, number, number] | null {
+function pkgNimbusRange(pkgPath: string): string | null {
   if (!existsSync(pkgPath)) return null;
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, Record<string, string>>;
-    return parseVersion(pkg.dependencies?.["@cloudflare/nimbus-docs"] ?? pkg.devDependencies?.["@cloudflare/nimbus-docs"]);
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, Record<string, string> | undefined>;
+    return pkg.dependencies?.["@cloudflare/nimbus-docs"] ?? pkg.devDependencies?.["@cloudflare/nimbus-docs"] ?? null;
   } catch {
     return null;
   }
+}
+
+function minVersionOf(range: string | null): string | null {
+  if (!range || !validRange(range)) return null;
+  return minVersion(range)?.version ?? null;
 }
 
 export function selectStarterApplyTarget(
@@ -771,17 +772,13 @@ export function selectStarterApplyTarget(
   return targets[0] ?? null;
 }
 
-function installedNimbusVersion(cwd: string): [number, number, number] | null {
+function installedNimbusVersion(cwd: string): string | null {
   const pkgPath = join(cwd, "node_modules", "@cloudflare", "nimbus-docs", "package.json");
   if (!existsSync(pkgPath)) return null;
   try {
-    return parseVersion((JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string }).version);
+    const version = (JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string }).version;
+    return version && valid(version) ? version : null;
   } catch {
     return null;
   }
-}
-
-function cmpVersion(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i]! - b[i]!;
-  return 0;
 }

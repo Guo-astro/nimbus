@@ -226,7 +226,7 @@ function unresolvedDiscovery(projectRoot: string, message: string): MigrationDis
         blockers: [{ code: "project-layout-unresolved", message }],
         instructions: [
           "Resolve Astro srcDir statically or rerun nimbus-docs migrate with a project-contained --src-dir path.",
-          "Rerun nimbus-docs migrate, nimbus-docs check, astro check, and the project build.",
+          "Run the Nimbus migrate and check commands again, then astro check and the project build.",
         ],
       },
     ],
@@ -284,7 +284,7 @@ function discoverPartialResolverMigration(context: {
       'Configure markdown.partialResolver as { revision: "partial-resolver-v1", resolve: ({ file, product }) => product ? `${product}/${file}` : file } in astro.config.',
       "Preserve the exact product-prefixed file ID behavior shown by that resolve callback.",
       "Call getDocsPageProps with only Astro.",
-      "Rerun nimbus-docs migrate, nimbus-docs check, astro check, and the project build.",
+      "Run the Nimbus migrate and check commands again, then astro check and the project build.",
     ],
   };
 }

@@ -89,13 +89,18 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
 
   lines.push("");
   lines.push(...renderHeadline(result, opts, paint));
-  if (opts.skippedFixes === "needs-terminal") {
-    lines.push(paint(COLORS.yellow, `  → Some fixes need a terminal: run \`${opts.invocation}\` in one`));
-  } else if (opts.skippedFixes === "needs-yes") {
-    lines.push(paint(COLORS.yellow, `  → Some fixes need consent: run \`${opts.invocation}\``));
-  }
+  const hint = skippedFixHint(result, opts);
+  if (hint) lines.push(paint(COLORS.yellow, hint));
   lines.push("");
   return lines.join("\n");
+}
+
+function skippedFixHint(result: CheckResult, opts: PrettyOptions): string | undefined {
+  // With --quiet, a skipped fix for a hidden warning isn't worth a line.
+  if (!result.findings.some((f) => f.fixable && (!opts.quiet || f.severity === "error"))) return undefined;
+  if (opts.skippedFixes === "needs-terminal") return `  → Some fixes need a terminal: run \`${opts.invocation}\` in one`;
+  if (opts.skippedFixes === "needs-yes") return `  → Some fixes need consent: run \`${opts.invocation}\``;
+  return undefined;
 }
 
 function renderScope(

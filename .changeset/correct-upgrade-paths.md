@@ -17,7 +17,7 @@ Fix upgrade checks and CLI guidance.
 
 **CLI**
 
-- Upgrade and migrate hints, and the build errors that point at `migrate` or `init`, print a runnable command instead of a raw Node path or a bare `nimbus-docs`. pnpm and Yarn projects that declare the package get the local bin, such as `pnpm nimbus-docs migrate`. With `--cwd`, the command is the one to run from the current directory.
+- Upgrade and migrate hints, and the build errors that point at `migrate` or `init`, print a runnable command instead of a raw Node path or a bare `nimbus-docs`. pnpm and Yarn projects that declare the package get the local bin, such as `pnpm nimbus-docs migrate`. With `--cwd`, the command runs from the current directory and pins the project's Nimbus version, such as `npx @cloudflare/nimbus-docs@0.15.1 migrate --cwd 'site' --yes`.
 - After `check --fix` without a terminal, the hint says what the remaining fixes need: a terminal for prompts, or `--yes` for installs.
 - `check` lists what it skipped when the `api` config or the rendering policy isn't a plain literal, or when `src/content.config.ts` is missing.
 - `lint --help` lists the lint rules and the `--color` and `--no-color` flags.

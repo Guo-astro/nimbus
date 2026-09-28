@@ -83,6 +83,11 @@ export function invocation(sub: string, cwd = process.cwd()): string {
     : getCommand(pm, "dlx", CLI_PACKAGE, { args: sub })!;
 }
 
+/** Download and run exactly `version`, e.g. for a project other than `cwd`. */
+export function pinnedInvocation(sub: string, version: string, cwd = process.cwd()): string {
+  return getCommand(detectPackageManager(cwd), "dlx", `${CLI_PACKAGE}@${version}`, { args: sub })!;
+}
+
 /** A command that reruns this CLI: executed as-is, displayed as `invocation()`. */
 export interface SelfCommand {
   bin: string;

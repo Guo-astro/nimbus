@@ -238,7 +238,10 @@ test("with --cwd, the printed command runs from where migrate was run", () => {
 
   const result = runWithManifest(outer, ["migrate", "--dry-run", "--cwd", "site"], [syntheticEntry("optional-one", "optional")]);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /pnpm dlx @cloudflare\/nimbus-docs migrate --cwd 'site' --yes/, result.stdout);
+  assert.ok(
+    result.stdout.includes(`pnpm dlx @cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd 'site' --yes`),
+    result.stdout,
+  );
 });
 
 test("synthetic optional entries are informational across migrate, check, and outdated", () => {
@@ -403,7 +406,7 @@ test("missing baselines require --from before completion", () => {
 
   const task = run(root, ["migrate", "--cwd", ".", "--src-dir", "src", "--from", "0.11.0", "--print"]);
   assert.equal(task.status, 0, task.stderr);
-  assert.match(task.stdout, /nimbus-docs migrate --cwd '\.' --src-dir 'src' --from 0\.11\.0 --yes/);
+  assert.ok(task.stdout.includes(`@cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd '.' --src-dir 'src' --from 0.11.0 --yes`), task.stdout);
   assert.match(task.stdout, /rerun with consent before project verification/);
 });
 

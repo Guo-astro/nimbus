@@ -55,6 +55,7 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
 
   let result = await runChecks(cwd, scopes, { srcDir: flags.srcDir });
   let interrupted = false;
+  const skipped = new Set<FixSkip>();
 
   if (flags.fix) {
     const interactive = isTTY() && !wantJson;
@@ -75,6 +76,7 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
         wantJson,
         scopes,
         signal: ac.signal,
+        skipped,
       });
     } finally {
       process.off("SIGINT", onSigint);
@@ -89,7 +91,11 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
       formatCheckPretty(result, {
         color: shouldUseColor(flags.color),
         quiet: flags.quiet,
-        invocation: invocation("check --fix", cwd),
+        invocation: invocation(
+          skipped.has("needs-yes") && !skipped.has("needs-terminal") ? "check --fix --yes" : "check --fix",
+          cwd,
+        ),
+        needsTerminal: skipped.has("needs-terminal"),
       }),
     );
   }
@@ -110,12 +116,16 @@ export function resolveScopes(flags: CheckCliFlags): CheckScopes {
   };
 }
 
+/** Why a fix was left for the user: it prompts for a value, or it needs consent. */
+type FixSkip = "needs-terminal" | "needs-yes";
+
 interface FixContext {
   interactive: boolean;
   yes: boolean;
   wantJson: boolean;
   scopes: CheckScopes;
   signal: AbortSignal;
+  skipped: Set<FixSkip>;
 }
 
 async function applyFixes(
@@ -164,7 +174,10 @@ async function fixSetConfig(
   applied: string[],
 ): Promise<void> {
   if (key !== "site" || !result.location) return;
-  if (!ctx.interactive) return;
+  if (!ctx.interactive) {
+    ctx.skipped.add("needs-terminal");
+    return;
+  }
 
   const value = await p.text({
     message:
@@ -223,6 +236,7 @@ async function fixInstallDep(
     const ok = await p.confirm({ message: `Install now? (${cmd})` });
     if (p.isCancel(ok) || !ok) return;
   } else if (!ctx.yes) {
+    ctx.skipped.add("needs-yes");
     return;
   }
 

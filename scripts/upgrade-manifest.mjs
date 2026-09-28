@@ -6,7 +6,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { inc, lt, major, valid } from "semver";
+import { inc, lt, lte, major, valid } from "semver";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST = path.join(
@@ -46,6 +46,8 @@ export function validateUpgradeManifest(value) {
       throw new Error(`${entry.id} automatic entries require migrationId.`);
     if (entry.mode === "optional" && entry.migrationId)
       throw new Error(`${entry.id} optional entries cannot have migrationId.`);
+    if (entry.backfill !== undefined && entry.backfill !== true)
+      throw new Error(`${entry.id} backfill must be true when present.`);
     for (const field of ["summary", "affected"]) {
       if (typeof entry[field] !== "string" || !entry[field].trim())
         throw new Error(`${entry.id} requires ${field}.`);
@@ -69,17 +71,22 @@ export function validateUpgradeManifest(value) {
   return value;
 }
 
+/**
+ * Returns the IDs of the added entries that backfill a shipped release, so the
+ * check can report them for review.
+ */
 export function validateBreakingDeclaration({
   breaking,
   previousEntries,
   currentEntries,
   changesets,
   currentVersion,
+  releasedVersions,
 }) {
-  if (previousEntries === null) return;
+  if (previousEntries === null) return [];
   const previous = new Set(previousEntries.map((entry) => entry.id));
   const added = currentEntries.filter((entry) => !previous.has(entry.id));
-  if (breaking && added.length === 0)
+  if (breaking && !added.some((entry) => !entry.backfill))
     throw new Error(
       "A PR labeled breaking-change must add at least one upgrade manifest entry.",
     );
@@ -92,6 +99,23 @@ export function validateBreakingDeclaration({
         `${entry.id} references missing changeset .changeset/${entry.changeset}.md.`,
       );
     const bump = changesetBump(body, "@cloudflare/nimbus-docs");
+    // A missed entry for a shipped release keeps that release's introducedIn,
+    // so sites upgrading across it are told. It announces nothing new.
+    if (entry.backfill) {
+      if (!currentVersion || !lte(entry.introducedIn, currentVersion) || !releasedVersions?.has(entry.introducedIn))
+        throw new Error(
+          `${entry.id} backfills ${entry.introducedIn}, which is not a shipped @cloudflare/nimbus-docs release.`,
+        );
+      if (entry.mode !== "review-required" || entry.migrationId)
+        throw new Error(
+          `${entry.id} backfills shipped release ${entry.introducedIn}, so it must be review-required without a migrationId.`,
+        );
+      if (!bump)
+        throw new Error(
+          `${entry.id}'s changeset must release @cloudflare/nimbus-docs so users learn about the backfilled entry.`,
+        );
+      continue;
+    }
     const requiredBump = currentVersion && major(currentVersion) > 0 ? "major" : "minor";
     if (bump !== requiredBump) {
       throw new Error(
@@ -107,6 +131,7 @@ export function validateBreakingDeclaration({
       }
     }
   }
+  return added.filter((entry) => entry.backfill).map((entry) => entry.id);
 }
 
 export function validateManifestContinuity(previousManifest, currentManifest, currentVersion) {
@@ -143,6 +168,14 @@ function changesetBump(body, packageName) {
     if (match?.[1]?.trim() === packageName) return match[2];
   }
   return null;
+}
+
+function releasedVersions() {
+  const changelog = fs.readFileSync(
+    path.join(ROOT, "packages/nimbus-docs/CHANGELOG.md"),
+    "utf8",
+  );
+  return new Set([...changelog.matchAll(/^## (\S+)$/gm)].map((match) => match[1]));
 }
 
 function loadManifest(file = MANIFEST) {
@@ -214,12 +247,13 @@ export function runUpgradeManifestCheck({
     ),
   ).version;
   if (previous) validateManifestContinuity(previous, manifest, currentVersion);
-  validateBreakingDeclaration({
+  return validateBreakingDeclaration({
     breaking,
     previousEntries: previous?.entries ?? null,
     currentEntries: manifest.entries,
     changesets: pendingChangesets(),
     currentVersion,
+    releasedVersions: releasedVersions(),
   });
 }
 
@@ -228,12 +262,15 @@ if (
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
-    runUpgradeManifestCheck({
+    const backfills = runUpgradeManifestCheck({
       breaking:
         process.env.BREAKING_CHANGE === "1" ||
         process.env.BREAKING_CHANGE === "true",
       baseRef: resolveUpgradeBaseRef(),
     });
+    for (const id of backfills) {
+      console.log(`[upgrade-manifest] backfill: ${id} is added to a shipped release; review it.`);
+    }
     console.log("[upgrade-manifest] valid");
   } catch (error) {
     console.error(

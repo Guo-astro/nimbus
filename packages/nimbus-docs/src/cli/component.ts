@@ -269,3 +269,35 @@ function runCommand(
     child.on("error", rejectP);
   });
 }
+
+// Named exports of a component's barrel (`components/ui/<slug>/index.ts`), for
+// the "register in components.ts" hint after install.
+function barrelExports(item: ComponentItem): string[] {
+  const index = item.files.find((f) => f.path.endsWith(`/${item.name}/index.ts`));
+  if (!index) return [];
+  const names: string[] = [];
+  for (const block of index.content.matchAll(/export\s*\{([^}]*)\}/g)) {
+    for (const part of (block[1] ?? "").split(",")) {
+      const seg = part.trim();
+      if (!seg) continue;
+      const name = seg.includes(" as ") ? seg.split(" as ").pop()!.trim() : seg;
+      if (/^[A-Za-z_]\w*$/.test(name)) names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * The "register in components.ts" hint for the UI component the user asked
+ * for. Its registry dependencies are installed too but aren't meant to be
+ * registered, so they get no hint.
+ */
+export function registerHint(installed: ComponentItem[], slug: string, srcRoot: string): string | null {
+  const item = installed.find((i) => i.type === "registry:ui" && i.name === slug);
+  if (!item) return null;
+  const names = barrelExports(item);
+  const snippet = names.length > 0
+    ? `  import { ${names.join(", ")} } from "./components/ui/${item.name}";  // then add ${names.join(", ")} to the map`
+    : `  // ${item.name} — see ${srcRoot}/components/ui/${item.name}`;
+  return `To use in .mdx, register in ${srcRoot}/components.ts — import and add to the \`components\` map:\n${snippet}`;
+}

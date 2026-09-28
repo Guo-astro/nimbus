@@ -33,11 +33,11 @@ import {
 } from "./adapter.js";
 import { BUNDLED_INDEX } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents } from "./component.js";
+import { installComponents, registerHint } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
 import { installFeature, shouldUseAgentHandoff } from "./feature.js";
 import { initCommand } from "./init.js";
-import { lintCommand } from "./lint.js";
+import { lintCommand, lintHelp } from "./lint.js";
 import { migrateCommand } from "./migrate.js";
 import {
   readNimbusJson,
@@ -57,26 +57,8 @@ import {
   listEntries,
   registrySource,
   resolveComponentTree,
-  type ComponentItem,
 } from "./resolver.js";
 import { diffCommand, outdatedCommand } from "./upgrade.js";
-
-// Named exports of a component's barrel (`components/ui/<slug>/index.ts`), for
-// the "register in components.ts" hint after install.
-function barrelExports(item: ComponentItem): string[] {
-  const index = item.files.find((f) => f.path.endsWith(`/${item.name}/index.ts`));
-  if (!index) return [];
-  const names: string[] = [];
-  for (const block of index.content.matchAll(/export\s*\{([^}]*)\}/g)) {
-    for (const part of (block[1] ?? "").split(",")) {
-      const seg = part.trim();
-      if (!seg) continue;
-      const name = seg.includes(" as ") ? seg.split(" as ").pop()!.trim() : seg;
-      if (/^[A-Za-z_]\w*$/.test(name)) names.push(name);
-    }
-  }
-  return names;
-}
 
 // Load the CLI-only registry override without importing feature/build variables
 // into process.env before the Vite-parity preflight runs.
@@ -196,6 +178,10 @@ async function main(): Promise<void> {
     alias: { y: "yes", h: "help", v: "version" },
   }) as unknown as CliArgs;
 
+  if (args.help && args._[0] === "lint") {
+    process.stdout.write(lintHelp(invocation("lint [--fix] [--rule <code>] [--format json]")));
+    return;
+  }
   if (args.help) {
     process.stdout.write(
       `\n  Usage:  ${invocation("<command> [args]")}\n` +
@@ -497,19 +483,8 @@ async function addCommand(
     );
   }
 
-  const uiInstalled = installed.filter((i) => i.type === "registry:ui");
-  if (uiInstalled.length > 0) {
-    const snippets = uiInstalled.map((i) => {
-      const names = barrelExports(i);
-      return names.length > 0
-        ? `  import { ${names.join(", ")} } from "./components/ui/${i.name}";  // then add ${names.join(", ")} to the map`
-        : `  // ${i.name} — see ${srcRoot}/components/ui/${i.name}`;
-    });
-    p.log.info(
-      `To use in .mdx, register in ${srcRoot}/components.ts — import and add to the \`components\` map:\n` +
-        snippets.join("\n"),
-    );
-  }
+  const hint = registerHint(installed, slug, srcRoot);
+  if (hint) p.log.info(hint);
 
   if (lines.length === 0) {
     p.outro("Nothing to do.");
@@ -604,7 +579,9 @@ function appendRequestRenderingStatus(
     return;
   }
   if (status === "inserted") {
-    lines.push('+ Enabled request rendering in the active Nimbus config.');
+    lines.push(
+      '+ Set rendering: { default: "request" } in the Nimbus config: every collection renders on request.',
+    );
     return;
   }
   if (status === "explicit") {

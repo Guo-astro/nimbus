@@ -1,9 +1,9 @@
-// User-facing CLI hints must print a runnable, scoped invocation, never
-// the bare `nimbus-docs` bin (not on PATH for a dlx/npx first-run, and unscoped
-// `nimbus-docs` on npm is a different, legacy package).
+// User-facing CLI hints must print a runnable invocation: the local bin for a
+// pnpm/yarn project that declares the package, otherwise the scoped package
+// (unscoped `nimbus-docs` on npm is a different, legacy package).
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -28,6 +28,13 @@ const DLX: Record<Manager, string> = {
   pnpm: "pnpm dlx",
   yarn: "yarn dlx",
   bun: "bunx",
+};
+
+const INSTALLED: Record<Manager, string> = {
+  npm: `npx ${CLI_PACKAGE}`,
+  pnpm: "pnpm nimbus-docs",
+  yarn: "yarn nimbus-docs",
+  bun: `bunx ${CLI_PACKAGE}`,
 };
 
 const ADD: Record<Manager, string> = {
@@ -60,6 +67,23 @@ for (const mgr of MANAGERS) {
       assert.equal(cmd, `${DLX[mgr]} ${CLI_PACKAGE} list`);
       assert.ok(cmd.includes(CLI_PACKAGE), "must be scoped");
       assert.ok(!BARE_BIN.test(cmd), `must not print the bare unscoped bin: ${cmd}`);
+    });
+  });
+
+  test(`invocation() → ${INSTALLED[mgr]} for a ${mgr} project that declares the package`, () => {
+    withLock(mgr, (cwd) => {
+      writeFileSync(join(cwd, "package.json"), JSON.stringify({ devDependencies: { [CLI_PACKAGE]: "^0.15.0" } }));
+      assert.equal(invocation("migrate --dry-run", cwd), `${INSTALLED[mgr]} migrate --dry-run`);
+      const nested = join(cwd, "docs");
+      mkdirSync(nested);
+      writeFileSync(join(nested, LOCKFILE[mgr]), "");
+      assert.equal(invocation("check", nested), `${INSTALLED[mgr]} check`);
+      // A sibling workspace that doesn't declare it can't run the bin.
+      const other = join(cwd, "packages", "other");
+      mkdirSync(other, { recursive: true });
+      writeFileSync(join(other, "package.json"), "{}");
+      writeFileSync(join(other, LOCKFILE[mgr]), "");
+      assert.equal(invocation("check", other), `${DLX[mgr]} ${CLI_PACKAGE} check`);
     });
   });
 

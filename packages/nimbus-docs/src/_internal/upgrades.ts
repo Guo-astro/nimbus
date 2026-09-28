@@ -15,6 +15,7 @@ export interface UpgradeEntry {
   mode: UpgradeMode;
   migrationId?: string;
   changeset?: string;
+  backfill?: true;
   summary: string;
   affected: string;
   instructions: string[];

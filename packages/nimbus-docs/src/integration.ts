@@ -161,6 +161,7 @@ import {
   type EndpointRouteRecord,
 } from "./_internal/agent-endpoint-coverage.js";
 import { pagefindDocument } from "./_internal/pagefind-document.js";
+import { invocation } from "./cli/pm.js";
 import {
   beginPreparedMarkdownSession,
   getPreparedMarkdownSnapshot,
@@ -1501,7 +1502,7 @@ export function nimbus(
           const migrationIds = migrationDiscovery.plans.map((plan) => plan.id).join(", ");
           const message =
             `Nimbus could not complete package API migration detection (${migrationIds}): ${migrationDiscovery.coverage.message} ` +
-            "Run `nimbus-docs migrate --src-dir <relative-dir>` from the selected project.";
+            `Run \`${invocation("migrate --src-dir <relative-dir>", migrationRoot)}\` from the selected project.`;
           logger?.error(message);
           throw new Error(`nimbus-docs: ${message}`);
         }
@@ -1515,20 +1516,20 @@ export function nimbus(
             .join(", ");
           const message =
             `Nimbus package API migration required (${details}). ` +
-            "Run `nimbus-docs migrate` to move route-level partial resolution to `markdown.partialResolver`.";
+            `Run \`${invocation("migrate", migrationRoot)}\` to move route-level partial resolution to \`markdown.partialResolver\`.`;
           logger?.error(message);
           throw new Error(`nimbus-docs: ${message}`);
         }
         if (migrationRoot) {
           const baseline = resolveUpgradeBaseline({ projectRoot: migrationRoot });
           if (baseline.error) {
-            const message = `${baseline.error} Run \`nimbus-docs migrate\` to repair the upgrade baseline.`;
+            const message = `${baseline.error} Run \`${invocation("migrate", migrationRoot)}\` to repair the upgrade baseline.`;
             logger?.error(message);
             throw new Error(`nimbus-docs: ${message}`);
           }
           if (!baseline.fromVersion && baseline.source !== "preview") {
             const message =
-              "Nimbus has no reviewed upgrade baseline. Run `nimbus-docs migrate --from <version>`, complete every review, then rerun migrate with consent before building.";
+              `Nimbus has no reviewed upgrade baseline. Run \`${invocation("migrate --from <version>", migrationRoot)}\`, complete every review, then rerun migrate with consent before building.`;
             logger?.error(message);
             throw new Error(`nimbus-docs: ${message}`);
           }
@@ -1538,13 +1539,13 @@ export function nimbus(
             if (requiredReviews.length > 0) {
               const message =
                 `Nimbus upgrade review required (${requiredReviews.map((entry) => entry.id).join(", ")}). ` +
-                "Run `nimbus-docs migrate`, complete every review, then rerun migrate with consent before building.";
+                `Run \`${invocation("migrate", migrationRoot)}\`, complete every review, then rerun migrate with consent before building.`;
               logger?.error(message);
               throw new Error(`nimbus-docs: ${message}`);
             }
             if (reviews.length > 0) {
               logger?.info(
-                `Nimbus optional upgrades available (${reviews.map((entry) => entry.id).join(", ")}). Run \`nimbus-docs migrate\` to review them.`,
+                `Nimbus optional upgrades available (${reviews.map((entry) => entry.id).join(", ")}). Run \`${invocation("migrate", migrationRoot)}\` to review them.`,
               );
             }
           }

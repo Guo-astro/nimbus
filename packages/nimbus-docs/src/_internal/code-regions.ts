@@ -7,7 +7,7 @@
  * nested in `>` quotes); `code-regions.test.ts` checks it against the parser.
  */
 
-const FENCE_OPEN = /^([ \t]*(?:>[ \t]?)*)(`{3,}|~{3,})([^\r]*)/;
+const FENCE_OPEN = /^([ \t]*(?:>[ \t]*)*)(`{3,}|~{3,})([^\r]*)/;
 
 export const INLINE_CODE = /`[^`\n]+`/g;
 
@@ -49,7 +49,7 @@ export function fencedBlocks(lines: readonly string[]): FencedBlock[] {
 }
 
 function quoteDepth(line: string): number {
-  return /^[ \t]*((?:>[ \t]?)*)/.exec(line)![1]!.split(">").length - 1;
+  return /^[ \t]*((?:>[ \t]*)*)/.exec(line)![1]!.split(">").length - 1;
 }
 
 /**

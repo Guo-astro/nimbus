@@ -22,6 +22,8 @@ const FIXTURES = [
   "```\nunclosed\n",
   "```js\na\n  ```\n\nSee [x](api.ref:a/b)\n\n```sh\nb\n```\n",
   "> ```js\n> a\n\nafter\n\n```sh\nb\n```\n",
+  ">  ```md\n>  See [x](api.ref:a/b)\n>  ```\n",
+  "> - item\n>\n>   ```js\n>   code\n>   ```\n",
   "prose `inline` only\n",
 ];
 

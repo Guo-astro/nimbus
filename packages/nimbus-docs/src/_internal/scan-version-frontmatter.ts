@@ -16,6 +16,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { parse as parseYaml } from "yaml";
+
 import { walkFiles } from "./fs-walk.js";
 import type { ResolvedVersions } from "../types.js";
 import type { VersionEntryInput } from "./version-alternates.js";
@@ -120,11 +122,15 @@ function parseBoolField(yaml: string, field: string): boolean | undefined {
   return m[1] === "true";
 }
 
-/** The top-level scalar `slug` field, e.g. `slug: 1.2.3/setup`. */
+/** The top-level `slug` field, read as YAML like Astro does (comments, quotes). */
 function parseSlugField(yaml: string): string | undefined {
-  const m = yaml.match(/^slug\s*:\s*(.+?)\s*$/m);
-  const value = m ? unquote(m[1]!) : "";
-  return value.length > 0 ? value : undefined;
+  if (!/^slug\s*:/m.test(yaml)) return undefined;
+  try {
+    const slug = (parseYaml(yaml) as { slug?: unknown } | null)?.slug;
+    return typeof slug === "string" && slug.length > 0 ? slug : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

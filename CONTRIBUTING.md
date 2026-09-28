@@ -88,7 +88,11 @@ pnpm add https://pkg.pr.new/@cloudflare/nimbus-docs@<PR#>
 
 The label is removed automatically; re-add it to publish a fresh preview.
 
-Note that `create-nimbus-docs` previews are limited: the scaffolder fetches
-templates pinned to `#templates-v<version>`, so a preview still pulls the last
-*released* templates, not the PR's starter edits. To test starter changes end to
-end, scaffold with `--template-dir` against a local checkout (see `pnpm local`).
+Preview packages carry the version the release PR would give them, as a
+pre-release such as `0.16.0-pr.<number>.sha<sha>`, so installing one on a site runs
+the next release's upgrade entries. CI tests every PR at that version. A package
+without a pending changeset gets a patch bump.
+
+`create-nimbus-docs` previews scaffold from the PR's own starter, bundled into the
+preview package and pinned to the matching `@cloudflare/nimbus-docs` preview. They
+record no reviewed baseline in `nimbus.json`.

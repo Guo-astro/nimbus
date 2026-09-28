@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { compare, eq, gt, lt, lte, valid } from "semver";
+import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from "semver";
 
 import rawManifest from "./upgrade-manifest.json";
 
@@ -50,7 +50,7 @@ export function runningNimbusVersion(): string {
 export function selectUpgradeEntries(fromVersion: string, targetVersion: string): UpgradeEntry[] {
   if (!valid(fromVersion)) throw new Error(`Invalid upgrade baseline version: ${fromVersion}.`);
   if (!valid(targetVersion)) throw new Error(`Invalid installed Nimbus version: ${targetVersion}.`);
-  if (gt(fromVersion, targetVersion)) {
+  if (isAhead(fromVersion, targetVersion)) {
     throw new Error(`Upgrade baseline ${fromVersion} is newer than installed Nimbus ${targetVersion}.`);
   }
   if (lt(fromVersion, UPGRADE_MANIFEST.oldestSupportedVersion)) {
@@ -58,9 +58,28 @@ export function selectUpgradeEntries(fromVersion: string, targetVersion: string)
       `Upgrade baseline ${fromVersion} predates the complete manifest. Start from Nimbus ${UPGRADE_MANIFEST.oldestSupportedVersion} or upgrade in supported stages.`,
     );
   }
+  // A prerelease such as 0.16.0-pr.1.shaabc carries 0.16.0's entries. Once one
+  // prerelease of 0.16.0 has been reviewed, another one has no new range; the
+  // final release deliberately replays 0.16.0 in case later PRs added work.
+  const fromBoundary = prereleasesOfOneRelease(fromVersion, targetVersion)
+    ? withoutPrerelease(fromVersion)
+    : fromVersion;
   return UPGRADE_MANIFEST.entries
-    .filter((entry) => gt(entry.introducedIn, fromVersion) && lte(entry.introducedIn, targetVersion))
+    .filter((entry) => gt(entry.introducedIn, fromBoundary) && lte(entry.introducedIn, withoutPrerelease(targetVersion)))
     .sort((a, b) => compare(a.introducedIn, b.introducedIn) || a.id.localeCompare(b.id));
+}
+
+function withoutPrerelease(version: string): string {
+  return `${major(version)}.${minor(version)}.${patch(version)}`;
+}
+
+function prereleasesOfOneRelease(a: string, b: string): boolean {
+  return prerelease(a) !== null && prerelease(b) !== null && withoutPrerelease(a) === withoutPrerelease(b);
+}
+
+// Prereleases of one release (previews differ only by PR and commit) have no order.
+function isAhead(baseline: string, installed: string): boolean {
+  return !prereleasesOfOneRelease(baseline, installed) && gt(baseline, installed);
 }
 
 export function resolveUpgradeBaseline(options: {
@@ -99,7 +118,7 @@ export function resolveUpgradeBaseline(options: {
     if (!valid(fromVersion)) {
       return { fromVersion: null, targetVersion, source: "argument", error: `--from must be an exact semantic version, received ${options.fromVersion}.` };
     }
-    if (gt(fromVersion, targetVersion)) {
+    if (isAhead(fromVersion, targetVersion)) {
       return { fromVersion, targetVersion, source: "argument", error: `--from ${fromVersion} is newer than installed Nimbus ${targetVersion}.` };
     }
     if (lt(fromVersion, UPGRADE_MANIFEST.oldestSupportedVersion)) {
@@ -155,7 +174,7 @@ export function resolveUpgradeBaseline(options: {
     if (typeof value !== "string" || !valid(value)) {
       return { fromVersion: null, targetVersion, source: "nimbus-json", error: "nimbus.json lastReviewedNimbusVersion must be an exact semantic version or null." };
     }
-    if (gt(value, targetVersion)) {
+    if (isAhead(value, targetVersion)) {
       return { fromVersion: value, targetVersion, source: "nimbus-json", error: `nimbus.json was reviewed with Nimbus ${value}, newer than installed Nimbus ${targetVersion}.` };
     }
     if (lt(value, UPGRADE_MANIFEST.oldestSupportedVersion)) {

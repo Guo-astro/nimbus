@@ -120,9 +120,11 @@ const EXCLUDED_TEMPLATE_ENTRIES = new Set([
   ".nimbus",
 ]);
 
-const LOCKFILES_BY_PACKAGE_MANAGER = {
+// Files a template may ship that belong to one package manager; a scaffold
+// keeps only the chosen manager's.
+const PACKAGE_MANAGER_FILES = {
   npm: ["package-lock.json"],
-  pnpm: ["pnpm-lock.yaml"],
+  pnpm: ["pnpm-lock.yaml", "pnpm-workspace.yaml"],
   yarn: ["yarn.lock"],
   bun: ["bun.lock", "bun.lockb"],
 } as const;
@@ -558,11 +560,11 @@ function normalizePackageManagerFiles(
     rmSync(join(dir, entry), { recursive: true, force: true });
   }
 
-  const keep = new Set<string>(LOCKFILES_BY_PACKAGE_MANAGER[packageManager]);
-  for (const lockfiles of Object.values(LOCKFILES_BY_PACKAGE_MANAGER)) {
-    for (const lockfile of lockfiles) {
-      if (keep.has(lockfile)) continue;
-      rmSync(join(dir, lockfile), { force: true });
+  const keep = new Set<string>(PACKAGE_MANAGER_FILES[packageManager]);
+  for (const files of Object.values(PACKAGE_MANAGER_FILES)) {
+    for (const file of files) {
+      if (keep.has(file)) continue;
+      rmSync(join(dir, file), { force: true });
     }
   }
 

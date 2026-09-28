@@ -35,7 +35,7 @@ Cloudflare deploys also have `wrangler.jsonc` at the project root.
 
 ## Writing docs
 
-Frontmatter validates against `docsSchema` (`nimbus-docs/schemas`). Required: `title`.
+Frontmatter validates against the schema from `docsCollection()` (`@cloudflare/nimbus-docs/content`). Required: `title`.
 
 ```mdx
 ---
@@ -52,7 +52,7 @@ Rules:
 
 - **Components must be PascalCase and registered in `src/components.ts`.** A pre-build validator catches typos with a "did you mean" hint.
 - **Partials use `<Render file="..." />`.** Don't import `.mdx` directly. Shared content lives in `src/content/partials/<slug>.mdx`.
-- **Icons use `astro-icon` + Phosphor.** `<Icon name="ph:<glyph>" class="w-4 h-4" />` from `astro-icon/components`. Glyphs: [phosphoricons.com](https://phosphoricons.com).
+- **Icons use Nimbus's `Icon` + Phosphor.** `<Icon name="ph:<glyph>" class="w-4 h-4" />` from `@cloudflare/nimbus-docs/components/Icon.astro`. Glyphs: [phosphoricons.com](https://phosphoricons.com).
 - **Don't remove `<AgentDirective />` from `BaseLayout.astro`.** It points agents at `/llms.txt`.
 
 ## Adding things
@@ -61,37 +61,37 @@ Rules:
 |---|---|
 | New doc page | Create `src/content/docs/<slug>.mdx`. Sidebar picks it up. |
 | New partial | Create `src/content/partials/<slug>.mdx`. Use via `<Render file="<slug>" />`. |
-| UI from registry | `pnpm exec nimbus-docs add <slug>`. Register in `src/components.ts` if used in MDX. |
-| Feature recipe | `pnpm exec nimbus-docs add <feature-slug>`. Pipe the printed brief to your agent. |
-| Check it builds | `pnpm exec nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
+| UI from registry | `pnpm nimbus-docs add <slug>`. Register in `src/components.ts` if used in MDX. |
+| Feature recipe | `pnpm nimbus-docs add <feature-slug>`. Pipe the printed brief to your agent. |
+| Check it builds | `pnpm nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
 | Custom page route | Add a file under `src/pages/`. |
 | Custom OG style | Edit `src/pages/og/_og-card-config.ts`. |
-| Check for updates | `pnpm exec nimbus-docs outdated` — starter files behind their tag + registry components behind. |
-| Upgrade Nimbus | Update the package, then run `pnpm exec nimbus-docs migrate --dry-run --diff`. Review every change and required manual step before applying. |
-| Upgrade a starter file | `pnpm exec nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change. |
-| Upgrade a registry component | `pnpm exec nimbus-docs add <slug> --overwrite`, then review with `git diff`. |
+| Check for updates | `pnpm nimbus-docs outdated` — starter files behind their tag + registry components behind. |
+| Upgrade Nimbus | Update the package, then run `pnpm nimbus-docs migrate --dry-run --diff`. Review every change and required manual step before applying. |
+| Upgrade a starter file | `pnpm nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change. |
+| Upgrade a registry component | `pnpm nimbus-docs add <slug> --overwrite`, then review with `git diff`. |
 
 Extend Sätteri using `markdown.mdastPlugins` for Markdown AST transformations or `markdown.hastPlugins` for HTML AST transformations.
 If the site replaces Sätteri with another processor, set `admonitions: false` and keep that processor's existing callout implementation.
 
-List installable items: `pnpm exec nimbus-docs list`.
+List installable items: `pnpm nimbus-docs list`.
 
 ## Upgrading Nimbus
 
 Keep `nimbus.json` committed. Its `lastReviewedNimbusVersion` is the baseline Nimbus uses to select the versioned reviews crossed by a package upgrade; state-detected migrations come from the current project files. It is not a package pin and should not be edited by hand.
 
 1. Update `@cloudflare/nimbus-docs` with the project's package manager.
-2. Preview the complete plan with `pnpm exec nimbus-docs migrate --dry-run --diff`. If no baseline exists yet, add `--from <previous-version>`.
+2. Preview the complete plan with `pnpm nimbus-docs migrate --dry-run --diff`. If no baseline exists yet, add `--from <previous-version>`.
 3. Review every versioned entry and resolve each blocked/manual item.
-4. Apply safe edits only with explicit consent: `pnpm exec nimbus-docs migrate --yes`. Review the resulting diff, then rerun the preview.
-5. When no migration remains, run `pnpm exec nimbus-docs migrate --yes` again to record the completed review in `nimbus.json`.
-6. Run the project's typecheck and production build, then run `pnpm exec nimbus-docs check` again for post-build coverage.
+4. Apply safe edits only with explicit consent: `pnpm nimbus-docs migrate --yes`. Review the resulting diff, then rerun the preview.
+5. When no migration remains, run `pnpm nimbus-docs migrate --yes` again to record the completed review in `nimbus.json`.
+6. Run the project's typecheck and production build, then run `pnpm nimbus-docs check` again for post-build coverage.
 
 Except for task-printing mode (`--print`), `migrate` exits nonzero while work or review remains; that is a pending-upgrade signal, not necessarily a command failure. Never skip versions by changing `nimbus.json` directly.
 
 ## Audit this site
 
-Start with `pnpm exec nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free — config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check — and returns three top-level signals plus per-scope detail:
+Start with `pnpm nimbus-docs check --json`. It runs the environment, structural, authoring, and type checks build-free — config validity, `site` placeholder, route collisions, MDX component resolution, the lint rules, and a `tsc` type-check — and returns three top-level signals plus per-scope detail:
 
 - **`status`** (`passed` | `failed` | `partial`) and **`readiness`** (`buildable` | `blocked` | `unknown`) are the primary signals. `status` is the whole-run verdict; `readiness` answers "does env + structure say it builds?". `ok` (=== zero errors) is kept for back-compat only.
 - **`findings[{scope,code,severity,file,line,message,fixable,fix}]`** are problems we evaluated. Apply each `fix` (or `check --fix`).

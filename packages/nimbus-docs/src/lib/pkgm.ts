@@ -6,20 +6,19 @@
  * pnpm, yarn, and bun. Pure data + a string-builder — runs at build
  * time in Astro frontmatter, not in the browser.
  *
- * Currently consumed by the PackageManagers component. Free-standing —
- * customize freely or use elsewhere; you own this code.
+ * Consumed by the PackageManagers component, its Markdown output, and the
+ * CLI's printed commands, so all three agree.
  */
 
 export type Manager = "npm" | "yarn" | "pnpm" | "bun";
 
-export type CommandType =
-  | "add"
-  | "create"
-  | "dlx"
-  | "exec"
-  | "install"
-  | "remove"
-  | "run";
+const COMMAND_TYPES = ["add", "create", "dlx", "exec", "install", "remove", "run"] as const;
+
+export type CommandType = (typeof COMMAND_TYPES)[number];
+
+export function isCommandType(value: string): value is CommandType {
+  return (COMMAND_TYPES as readonly string[]).includes(value);
+}
 
 export interface CommandOptions {
   args?: string;

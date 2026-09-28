@@ -164,6 +164,8 @@ export async function getEntryMarkdown(
 ): Promise<string> {
   const { loadCitationIndex } =
     await import("./_internal/api/load-citation-index.js");
+  // Loading the config sets the link policy, so citations get Astro's URL shape.
+  await loadNimbusConfig();
   return renderEntryAsMarkdown(entry, {
     ...options,
     citationIndex: await loadCitationIndex(),

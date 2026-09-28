@@ -11,8 +11,12 @@
  *
  * Read in `load()`, never when the collection is defined: after a dev restart
  * Astro refreshes content with the loader instances it evaluated before the
- * restart, and only a load-time read sees the edited entries.
+ * restart, and only a load-time read sees the edited entries. Those instances
+ * also receive the previous Astro config, so the output mode is registered
+ * here too.
  */
+
+import type { AstroConfig } from "astro";
 
 import type { ApiSpec } from "../types.js";
 import { preparedMarkdownRootKey } from "./prepared-markdown-registry.js";
@@ -21,8 +25,10 @@ import { preparedMarkdownRootKey } from "./prepared-markdown-registry.js";
 export const NIMBUS_CONFIG_FILE = "the Nimbus config (astro.config.*)";
 
 interface ApiCollectionRegistryState {
-  version: 1;
+  version: 2;
   roots: Map<string, readonly ApiSpec[]>;
+  /** The current Astro config's `output`, per root. */
+  outputs: Map<string, AstroConfig["output"]>;
   /**
    * `apiCollection()` loads since the last registration: Astro collection key
    * (in `src/content.config.ts`) → the `collection` of the entry it indexed.
@@ -34,30 +40,38 @@ interface ApiCollectionRegistryState {
 }
 
 const REGISTRY_KEY = Symbol.for(
-  "@cloudflare/nimbus-docs/api-collection-registry/v1",
+  "@cloudflare/nimbus-docs/api-collection-registry/v2",
 );
 const registryGlobal = globalThis as typeof globalThis & {
   [REGISTRY_KEY]?: ApiCollectionRegistryState;
 };
 const existingState = registryGlobal[REGISTRY_KEY];
-if (existingState && existingState.version !== 1) {
+if (existingState && existingState.version !== 2) {
   throw new Error("Nimbus API collection registry version mismatch");
 }
-const state = (registryGlobal[REGISTRY_KEY] ??= {
-  version: 1,
+const state: ApiCollectionRegistryState = (registryGlobal[REGISTRY_KEY] ??= {
+  version: 2,
   roots: new Map(),
+  outputs: new Map(),
   loads: new Map(),
   loadCounts: new Map(),
 });
 
-/** Replace the `api` entries registered for a project root. */
+/** Replace the `api` entries and output mode registered for a project root. */
 export function registerApiCollections(
   root: URL | string,
   api: readonly ApiSpec[] | undefined,
+  output: AstroConfig["output"] = "static",
 ): void {
   const key = preparedMarkdownRootKey(root);
   state.roots.set(key, [...(api ?? [])]);
+  state.outputs.set(key, output);
   state.loads.delete(key);
+}
+
+/** The registered `output` for a root; `undefined` when the integration has not run. */
+export function registeredOutput(root: URL | string): AstroConfig["output"] | undefined {
+  return state.outputs.get(preparedMarkdownRootKey(root));
 }
 
 /**
@@ -232,6 +246,7 @@ export function apiCollectionIndexError(
 
 export function clearApiCollectionRegistry(): void {
   state.roots.clear();
+  state.outputs.clear();
   state.loads.clear();
   state.loadCounts.clear();
 }

@@ -1,6 +1,7 @@
 /**
  * Ambient declarations for virtual modules referenced from this package.
  *
+ *   - `astro:config/client` — Astro's serializable config subset.
  *   - `virtual:nimbus/config` — emitted by the integration's Vite plugin
  *     at build time; resolves at runtime in the consuming Astro project.
  *   - `astro:content` — Astro's content-layer virtual module, generated
@@ -14,6 +15,14 @@
  * ambient (resolvable from dynamic `await import("…")` calls, not just
  * static imports).
  */
+
+// The subset of Astro's client config this package reads, typed from Astro's
+// own config. Referencing all of `astro/client` would also replace the
+// `astro:content` stub below with Astro's generic declarations.
+declare module "astro:config/client" {
+  export const trailingSlash: import("astro").AstroConfig["trailingSlash"];
+  export const build: Pick<import("astro").AstroConfig["build"], "format">;
+}
 
 declare module "virtual:nimbus/config" {
   export const config: import("../types.js").NimbusConfig;

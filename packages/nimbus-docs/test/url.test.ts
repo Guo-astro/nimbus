@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  setLinkPolicy,
   stripBase,
   toBrowserHref,
   toRouteKey,
@@ -142,4 +143,31 @@ test("toBrowserHref treats a dotted version root and numeric segments as documen
   assert.equal(toBrowserHref("/docs/1.1.1.1"), "/docs/1.1.1.1/");
   assert.equal(toBrowserHref("/media/clip.mp4"), "/media/clip.mp4");
   assert.equal(toBrowserHref("/fonts/inter.woff2"), "/fonts/inter.woff2");
+});
+
+test("toBrowserHref adds a slash exactly when Astro does", (t) => {
+  const policy = (trailingSlash: "always" | "never" | "ignore", format: "directory" | "file" | "preserve" = "directory") =>
+    setLinkPolicy({ trailingSlash, format });
+  t.after(() => policy("ignore"));
+
+  policy("never");
+  assert.equal(toBrowserHref("/cli/"), "/cli");
+  assert.equal(toBrowserHref("/cli"), "/cli");
+  assert.equal(toBrowserHref("/cli/?v=1#install"), "/cli?v=1#install");
+  assert.equal(toBrowserHref("/"), "/");
+  assert.equal(toBrowserHref("/cli/index.md"), "/cli/index.md");
+  assert.equal(toBrowserHref("https://example.com/a/"), "https://example.com/a/");
+
+  policy("always");
+  assert.equal(toBrowserHref("/cli"), "/cli/");
+  assert.equal(toBrowserHref("/cli#install"), "/cli/#install");
+  policy("always", "file");
+  assert.equal(toBrowserHref("/cli"), "/cli/");
+
+  policy("ignore");
+  assert.equal(toBrowserHref("/cli"), "/cli/");
+  policy("ignore", "file");
+  assert.equal(toBrowserHref("/cli/"), "/cli");
+  policy("ignore", "preserve");
+  assert.equal(toBrowserHref("/cli"), "/cli");
 });

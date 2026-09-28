@@ -141,6 +141,7 @@ async function driveBuild(
       srcDir: dirUrl(path.join(projectRoot, "src")),
       cacheDir: dirUrl(path.join(projectRoot, ".cache")),
       base: opts.base ?? "",
+      build: { format: "directory" },
     },
     logger,
     command: "build",

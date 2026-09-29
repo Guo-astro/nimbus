@@ -168,3 +168,10 @@ describe("renderEntryAsMarkdown: <PackageManagers>", () => {
     assert.match(out, /^npx @cloudflare\/nimbus-docs init$/m);
   });
 });
+
+test("a fence opened on a list-item line stays inside the item", () => {
+  const source = ["1. Run:", "", "- ```yaml", "  paths:", "    /a: {}", "  ```", "", "  Then build."].join("\n");
+  const out = mdx(source);
+  assert.ok(out.includes(["- ```yaml", "  paths:", "    /a: {}", "  ```"].join("\n")), out);
+  assert.ok(out.includes("  Then build."), out);
+});

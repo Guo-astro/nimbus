@@ -23,7 +23,7 @@
 
 import { suggest } from "../levenshtein.js";
 import { fencedBlocks, INLINE_CODE } from "../code-regions.js";
-import { toBrowserHref } from "../url.js";
+import { toDocumentHref } from "../url.js";
 
 /** The one prefix that marks a link target as a coordinate citation. */
 export const CITATION_SENTINEL = "api.ref:";
@@ -145,7 +145,7 @@ export function isSafeCitationPath(value: string): boolean {
  */
 export function resolveCitation(parsed: ParsedCitation, citationIndex: CitationIndex): string | undefined {
   const url = citationIndex.get(citationKey(parsed.collection, parsed.version, parsed.coordinate));
-  return url === undefined ? undefined : toBrowserHref(url);
+  return url === undefined ? undefined : toDocumentHref(url);
 }
 
 export interface ResolveCitationsResult {

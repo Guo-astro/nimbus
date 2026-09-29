@@ -174,8 +174,8 @@ describe("api markdown emitter", () => {
     const props = getApiPageProps(smallco, "EitherAccount") as ApiSchemaPage;
     const md = renderApiPageMarkdown(props);
     assert.match(md, /^One of:$/m);
-    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\)/);
-    assert.match(md, /- \[BankAccount\]\(\/smallco\/schemas\/BankAccount\)/);
+    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\/\)/);
+    assert.match(md, /- \[BankAccount\]\(\/smallco\/schemas\/BankAccount\/\)/);
     assert.doesNotMatch(md, /No fields documented/);
   });
 
@@ -183,7 +183,7 @@ describe("api markdown emitter", () => {
     const props = getApiPageProps(smallco, "Mixed") as ApiSchemaPage;
     const md = renderApiPageMarkdown(props);
     assert.match(md, /^Any of:$/m);
-    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\)/);
+    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\/\)/);
     assert.match(md, /- `string`/);
   });
 
@@ -211,8 +211,8 @@ describe("api markdown emitter", () => {
     });
     const md = renderApiPageMarkdown(getApiPageProps(model, "U"));
     assert.match(md, /Discriminator: `k`/);
-    assert.match(md, /- `a` → \[A\]\(\/disc\/schemas\/A\)/);
-    assert.match(md, /- `b` → \[B\]\(\/disc\/schemas\/B\)/);
+    assert.match(md, /- `a` → \[A\]\(\/disc\/schemas\/A\/\)/);
+    assert.match(md, /- `b` → \[B\]\(\/disc\/schemas\/B\/\)/);
   });
 
   test("a union field renders its variants XOR its children — no hidden coordinates leak", () => {
@@ -252,7 +252,7 @@ describe("api markdown emitter", () => {
     // backtick isn't a route delimiter, so the name is legal; the markdown
     // escaper still has to neutralise it (route-hostile names — backslash,
     // control chars, `\ ? #` — are rejected at build; see api-resilience).
-    assert.match(md, /- \[Ev\\`il\]\(\/inj\/schemas\/Ev%60il\)/);
+    assert.match(md, /- \[Ev\\`il\]\(\/inj\/schemas\/Ev%60il\/\)/);
   });
 
   test("malformed non-string schema `type` is coerced, never crashes the emitter", async () => {

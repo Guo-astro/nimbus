@@ -21,6 +21,7 @@ import {
   type ApiSchemaPage,
 } from "../src/api/index.js";
 import { coordinateAnchor } from "../src/_internal/api/view-model.js";
+import { setLinkPolicy } from "../src/_internal/url.js";
 
 function fixture(rel: string): string {
   return fileURLToPath(new URL(`./fixtures/api/${rel}`, import.meta.url));
@@ -88,9 +89,29 @@ describe("seam: serializable + version-stamped across page kinds", () => {
     });
   }
 
+  test("API links follow trailingSlash: never, like the rest of the site", async (t) => {
+    t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+    setLinkPolicy({ trailingSlash: "never", format: "directory" });
+    // Its own model: the nav is cached per model, and the policy is fixed per build.
+    const model = await buildApiModel({
+      collection: "never",
+      spec: readFileSync(fixture("smallco.yaml"), "utf8"),
+      label: "smallco.yaml",
+    });
+    const create = getApiPageProps(model, "create");
+    const links = [
+      create.href,
+      ...create.breadcrumbs.map((crumb) => crumb.href),
+      ...flattenNavItems(getApiNav(model).items).map((item) => item.href),
+    ].filter((href): href is string => href !== undefined);
+    assert.ok(links.length > 3);
+    for (const href of links) assert.ok(!href.endsWith("/"), href);
+    assert.equal(create.markdownHref, "/never/charges/create/index.md");
+  });
+
   test("markdownHref is the pre-resolved .md version of href", () => {
     const create = getApiPageProps(smallco, "create");
-    assert.equal(create.markdownHref, `${create.href}/index.md`);
+    assert.equal(create.markdownHref, `${create.href}index.md`);
   });
 
   test("prepares sanitized HTML for page, response, and field descriptions", () => {
@@ -200,8 +221,8 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       p.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["Card", "/smallco/schemas/Card"],
-        ["BankAccount", "/smallco/schemas/BankAccount"],
+        ["Card", "/smallco/schemas/Card/"],
+        ["BankAccount", "/smallco/schemas/BankAccount/"],
       ],
     );
     assert.doesNotThrow(() => structuredClone(p.union));
@@ -221,7 +242,7 @@ describe("nesting: children, childCount, required-first", () => {
     const p = getApiPageProps(smallco, "Mixed") as ApiSchemaPage;
     assert.equal(p.union!.kind, "anyOf");
     const [card, inline] = p.union!.variants;
-    assert.deepEqual(card, { label: "Card", href: "/smallco/schemas/Card" });
+    assert.deepEqual(card, { label: "Card", href: "/smallco/schemas/Card/" });
     assert.equal(inline.label, "string");
     assert.equal(inline.href, undefined);
   });
@@ -241,8 +262,8 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       mapping!.map((m) => [m.value, m.variant.label, m.variant.href]),
       [
-        ["card", "Card", "/smallco/schemas/Card"],
-        ["bank_account", "BankAccount", "/smallco/schemas/BankAccount"],
+        ["card", "Card", "/smallco/schemas/Card/"],
+        ["bank_account", "BankAccount", "/smallco/schemas/BankAccount/"],
       ],
     );
     const card = mapping!.find((m) => m.value === "card")!.variant;
@@ -265,9 +286,9 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       p.bodyUnion!.mapping!.map((m) => [m.value, m.variant.label, m.variant.href]),
       [
-        ["fraudulent", "DisputeFraud", "/smallco/schemas/DisputeFraud"],
-        ["duplicate", "DisputeDuplicate", "/smallco/schemas/DisputeDuplicate"],
-        ["product_not_received", "DisputeNotReceived", "/smallco/schemas/DisputeNotReceived"],
+        ["fraudulent", "DisputeFraud", "/smallco/schemas/DisputeFraud/"],
+        ["duplicate", "DisputeDuplicate", "/smallco/schemas/DisputeDuplicate/"],
+        ["product_not_received", "DisputeNotReceived", "/smallco/schemas/DisputeNotReceived/"],
       ],
     );
     const fraud = p.bodyUnion!.mapping!.find((m) => m.value === "fraudulent")!.variant;

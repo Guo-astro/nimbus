@@ -125,8 +125,11 @@ export interface LinkPolicy {
   format: "directory" | "file" | "preserve";
 }
 
-// Astro's defaults until the integration or the runtime config bridge sets it.
-let linkPolicy: LinkPolicy = { trailingSlash: "ignore", format: "directory" };
+// On globalThis: the integration, Vite, and the content layer load separate
+// copies of this module in one process, and all of them build links.
+const LINK_POLICY_KEY = Symbol.for("@cloudflare/nimbus-docs/link-policy");
+const ASTRO_DEFAULT_POLICY: LinkPolicy = { trailingSlash: "ignore", format: "directory" };
+type PolicyHost = { [LINK_POLICY_KEY]?: LinkPolicy };
 
 /**
  * Follow Astro's URL shape in generated document hrefs. Set from Astro's config
@@ -134,7 +137,11 @@ let linkPolicy: LinkPolicy = { trailingSlash: "ignore", format: "directory" };
  * rendering), so every generated link matches the canonical URL.
  */
 export function setLinkPolicy(policy: LinkPolicy): void {
-  linkPolicy = policy;
+  (globalThis as PolicyHost)[LINK_POLICY_KEY] = policy;
+}
+
+function linkPolicy(): LinkPolicy {
+  return (globalThis as PolicyHost)[LINK_POLICY_KEY] ?? ASTRO_DEFAULT_POLICY;
 }
 
 // Mirrors Astro's internal `shouldAppendForwardSlash(trailingSlash, build.format)`.
@@ -170,10 +177,19 @@ export function toBrowserHref(href: string): string {
   // Anything that isn't an absolute site path: don't touch it.
   if (!href.startsWith("/")) return href;
 
+  if (hasFileExtension(splitSuffix(href)[0])) return href;
+  return toDocumentHref(href);
+}
+
+/**
+ * `toBrowserHref` for a path known to be a page, such as an API route, even
+ * when its last segment looks like a file (`/api/reports.list`).
+ */
+export function toDocumentHref(href: string): string {
+  if (isAbsoluteUrl(href) || !href.startsWith("/")) return href;
   const [pathname, suffix] = splitSuffix(href);
   if (pathname === "/") return href;
-  if (hasFileExtension(pathname)) return href;
-  if (!appendsSlash(linkPolicy)) {
+  if (!appendsSlash(linkPolicy())) {
     let end = pathname.length;
     while (end > 1 && pathname[end - 1] === "/") end--;
     return `${pathname.slice(0, end)}${suffix}`;

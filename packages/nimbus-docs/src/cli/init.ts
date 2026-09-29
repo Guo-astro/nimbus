@@ -9,6 +9,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
 
 import * as p from "@clack/prompts";
+import { valid } from "semver";
 
 import { assertInsideSrc } from "./component.js";
 import { invocation } from "./pm.js";
@@ -156,6 +157,21 @@ export async function reconstructComponents(
   return { components, stats };
 }
 
+/**
+ * The reviewed upgrade baseline from an existing nimbus.json, kept through
+ * `--force` so rebuilding provenance doesn't reopen every upgrade review.
+ * Read on its own because `--force` exists for files that don't parse.
+ */
+function reviewedBaseline(cwd: string): string | null {
+  try {
+    const raw = JSON.parse(readFileSync(join(cwd, NIMBUS_JSON), "utf8")) as { lastReviewedNimbusVersion?: unknown };
+    const version = raw.lastReviewedNimbusVersion;
+    return typeof version === "string" && valid(version) === version ? version : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface InitFlags {
   force?: boolean;
   root?: string;
@@ -207,7 +223,7 @@ export async function initCommand(flags: InitFlags): Promise<void> {
     // create-nimbus-docs version + templates tag aren't recoverable from the
     // repo alone; the upgrade commands read `reconstructed` to know starter provenance is partial.
     version: null,
-    lastReviewedNimbusVersion: null,
+    lastReviewedNimbusVersion: reviewedBaseline(cwd),
     templatesTag: null,
     variant: null,
     registry: registrySource(),

@@ -305,3 +305,39 @@ test("partial + buildable with gaps → Buildable + coverage line", () => {
   assert.match(out, /2 correctness checks not evaluated yet: opt-in authoring rules, types/);
   assert.match(out, /Types\s+○ not evaluated/);
 });
+
+// A preview's missing baseline needs input, not a build: telling the user to
+// build and check again would loop forever.
+test("partial + buildable with a gap that needs input → names what it needs, not a build", () => {
+  const baselineNote = {
+    code: "nimbus/upgrade-baseline-missing",
+    reason: "This preview has no reviewed Nimbus release. Run `npx nimbus-docs migrate --from <version>`.",
+    requiresInput: true,
+  };
+  const render = (typesEvaluated: boolean) =>
+    formatCheckPretty(
+      result({
+        status: "partial",
+        readiness: "buildable",
+        summary: { errors: 0, warnings: 0, notes: 1, fixable: 0, durationMs: 400 },
+        scopes: [
+          scope({}),
+          scope({ scope: "structure" }),
+          scope({ scope: "migrations", notes: [baselineNote] }),
+          typesEvaluated
+            ? scope({ scope: "types" })
+            : scope({ scope: "types", evaluated: false, status: "not_evaluated", reason: ".astro/types.d.ts missing" }),
+        ],
+      }),
+      OPTS,
+    );
+
+  const built = render(true);
+  assert.match(built, /1 correctness check not evaluated yet: migrations/);
+  assert.match(built, /→ This preview has no reviewed Nimbus release\. Run `npx nimbus-docs migrate --from <version>`\./);
+  assert.doesNotMatch(built, /run a build/);
+
+  const unbuilt = render(false);
+  assert.match(unbuilt, /→ run a build, then `nimbus-docs check` again/);
+  assert.match(unbuilt, /→ This preview has no reviewed Nimbus release/);
+});

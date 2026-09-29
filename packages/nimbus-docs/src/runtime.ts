@@ -1367,7 +1367,7 @@ function rejectRemovedPartialHeadingOptions(helper: string, argumentCount: numbe
   if (argumentCount <= 1) return;
   throw new Error(
     `${helper}(Astro, options) was removed in Nimbus 0.13. ` +
-      "Run `nimbus-docs migrate` to move partialHeadings.resolvePartialId to the integration's markdown.partialResolver option.",
+      "Run `npx @cloudflare/nimbus-docs migrate` to move partialHeadings.resolvePartialId to the integration's markdown.partialResolver option.",
   );
 }
 

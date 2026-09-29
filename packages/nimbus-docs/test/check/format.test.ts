@@ -148,9 +148,28 @@ test("after a non-interactive --fix, the footer says the prompts need a terminal
       findings: [placeholder],
       scopes: [scope({ status: "failed", findings: [placeholder] })],
     }),
-    { ...OPTS, needsTerminal: true },
+    { ...OPTS, skippedFixes: "needs-terminal" },
   );
-  assert.match(out, /run `nimbus-docs check --fix` in a terminal/);
+  assert.match(out, /Some fixes need a terminal: run `nimbus-docs check --fix` in one/);
+  assert.equal(out.match(/check --fix/g)?.length, 1);
+});
+
+test("--quiet drops the skipped-fix hint when only a hidden warning needs it", () => {
+  const warning: CheckFinding = {
+    code: "nimbus/site-placeholder",
+    scope: "env",
+    severity: "warn",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const run = (quiet: boolean) =>
+    formatCheckPretty(
+      result({ status: "passed", readiness: "buildable", findings: [warning], scopes: [scope({ findings: [warning] })] }),
+      { ...OPTS, quiet, skippedFixes: "needs-terminal" },
+    );
+  assert.match(run(false), /Some fixes need a terminal/);
+  assert.doesNotMatch(run(true), /Some fixes need a terminal/);
 });
 
 test("passed full run → Ready", () => {

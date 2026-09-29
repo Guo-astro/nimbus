@@ -19,7 +19,7 @@ import {
 } from "../_internal/upgrades.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 import { NIMBUS_JSON, readNimbusJson } from "./nimbus-json.js";
-import { invocation } from "./pm.js";
+import { invocation, pinnedInvocation } from "./pm.js";
 
 export interface MigrateOptions {
   cwd?: string;
@@ -700,7 +700,12 @@ function completionCommand(
   const from = baseline.source === "argument" && baseline.fromVersion
     ? ` --from ${baseline.fromVersion}`
     : "";
-  return invocation(`migrate${cwd}${srcDir}${from} --yes`, options.projectRoot);
+  const sub = `migrate${cwd}${srcDir}${from} --yes`;
+  // With --cwd the command runs from here, where the project's install isn't on
+  // the path, so it pins the version the project has (and this CLI runs).
+  return options.cwd
+    ? pinnedInvocation(sub, runningNimbusVersion())
+    : invocation(sub, options.projectRoot);
 }
 
 function shellQuote(value: string): string {

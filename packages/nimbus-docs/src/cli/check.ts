@@ -95,7 +95,11 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
           skipped.has("needs-yes") && !skipped.has("needs-terminal") ? "check --fix --yes" : "check --fix",
           cwd,
         ),
-        needsTerminal: skipped.has("needs-terminal"),
+        skippedFixes: skipped.has("needs-terminal")
+          ? "needs-terminal"
+          : skipped.has("needs-yes")
+            ? "needs-yes"
+            : undefined,
       }),
     );
   }

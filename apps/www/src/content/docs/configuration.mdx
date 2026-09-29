@@ -152,6 +152,12 @@ Cloudflare deployments also require a server-compatible `wrangler.jsonc`. Run `p
 
 See [Server adapters](/cli#server-adapters) for installer behavior and safety checks.
 
+## Links and trailing slashes
+
+Nimbus reads Astro's [`trailingSlash`](https://docs.astro.build/en/reference/configuration-reference/#trailingslash) and [`build.format`](https://docs.astro.build/en/reference/configuration-reference/#buildformat) and gives every page URL it generates the shape Astro serves: sidebar and breadcrumb links, previous and next links, sidebar `link` values, canonical URLs, the sitemap, and `llms.txt`. With the defaults (`trailingSlash: "ignore"` and `build.format: "directory"`), page URLs end in a slash, such as `/guides/`. With `trailingSlash: "never"`, or `build.format: "file"` under the default `"ignore"`, they don't, such as `/guides`.
+
+Links you write in Markdown and MDX keep the path you wrote; Nimbus only adds Astro's `base`. Write them in the shape your site serves, such as `[Guides](/guides/)` with the defaults. With `trailingSlash: "always"` or `"never"`, `astro dev` returns 404 for the other shape, and many hosts redirect it or return 404 too. The `nimbus/internal-link` rule checks that a link reaches a page, not its trailing slash.
+
 ## Integration options
 
 The second argument to `nimbus()` controls build behavior:

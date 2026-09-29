@@ -187,10 +187,15 @@ interface PreviewProvenance {
   templates: "bundled";
 }
 
+/** Whether dependencies are installed, so the caller knows what's left to run. */
+export interface ScaffoldResult {
+  install: "done" | "skipped" | "failed";
+}
+
 export async function scaffold(
   options: ScaffoldOptions,
   internals: ScaffoldInternals = {},
-) {
+): Promise<ScaffoldResult> {
   const { dir, packageManager, git, skipInstall } = options;
   const cwd = internals.cwd ?? process.cwd();
 
@@ -325,7 +330,7 @@ export async function scaffold(
   // 4. Install
   if (skipInstall) {
     p.log.step("Skipped dependency installation.");
-    return;
+    return { install: "skipped" };
   }
 
   startProgress(`Installing dependencies via ${packageManager}…`);
@@ -334,11 +339,12 @@ export async function scaffold(
     const [bin = packageManager, ...args] = cmd.split(" ");
     await runCommand(bin, args, target);
     stopProgress("Dependencies installed.");
-  } catch {
+    return { install: "done" };
+  } catch (err) {
     stopProgress("Failed to install dependencies.");
-    p.log.warn(
-      `Could not install dependencies. Run \`${packageManager} install\` manually in ${dir}.`,
-    );
+    const output = (err as Error).message;
+    if (output) p.log.message(output);
+    return { install: "failed" };
   }
 }
 
@@ -581,14 +587,29 @@ function normalizePackageManagerFiles(
   }
 }
 
+// Output stays hidden unless the command fails (bun reports progress on
+// stderr); the error then carries the last lines, which name the cause.
+// Only the tail is kept, so a long install can't grow the buffer unbounded.
+const OUTPUT_TAIL_CHARS = 64 * 1024;
+const OUTPUT_TAIL_LINES = 40;
+
 function runCommand(bin: string, args: string[], cwd: string): Promise<void> {
   return new Promise((resolveP, rejectP) => {
     const child = spawn(bin, args, {
       cwd,
-      stdio: ["ignore", "ignore", "inherit"],
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    let output = "";
+    const collect = (chunk: string) => {
+      output = (output + chunk).slice(-OUTPUT_TAIL_CHARS);
+    };
+    // Decoding per stream keeps a character split across chunks intact.
+    child.stdout.setEncoding("utf8").on("data", collect);
+    child.stderr.setEncoding("utf8").on("data", collect);
     child.on("close", (code) =>
-      code === 0 ? resolveP() : rejectP(new Error(`exit ${code}`)),
+      code === 0
+        ? resolveP()
+        : rejectP(new Error(output.trimEnd().split("\n").slice(-OUTPUT_TAIL_LINES).join("\n") || `${bin} exited with code ${code}`)),
     );
     child.on("error", rejectP);
   });

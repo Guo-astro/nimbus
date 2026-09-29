@@ -7,7 +7,7 @@ Make generated links, the sitemap, and Markdown output follow the site config.
 **Behavior changes**
 
 - Under the default `trailingSlash: "ignore"`, `api.ref` citation links now end in `/`, like sidebar links and the canonical URL, in pages, per-page `.md` files, and `llms-full.txt`.
-- With `trailingSlash: "ignore"` and `build.format: "file"` or `"preserve"`, generated links no longer end in `/`, so they reach the pages Astro builds. The canonical URL is unchanged and still ends in `.html`.
+- With `trailingSlash: "ignore"` and `build.format: "file"` or `"preserve"`, generated links no longer end in `/`, so they reach the pages Astro builds.
 
 **Links, sitemap, and routes**
 

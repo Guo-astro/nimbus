@@ -70,15 +70,39 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
       : { ...base, output: "static", deploy: opts.deploy ?? "cloudflare" };
   }
 
-  // Interactive mode
+  // Interactive mode. Without a terminal no prompt can run, so name every
+  // unanswered question and its flag at once rather than one per run.
+  if (!process.stdin.isTTY) {
+    const unanswered = [
+      opts.dir === undefined && `Where should we create your project? Pass a directory argument.`,
+      opts.content === undefined && `Starter content? Pass --content starter|empty.`,
+      opts.packageManager === undefined && `Which package manager? Pass --package-manager npm|pnpm|yarn|bun.`,
+      opts.git === undefined && `Initialize a git repository? Pass --git or --no-git.`,
+      opts.adapter === undefined &&
+        opts.deploy === undefined &&
+        `Output mode? Pass --deploy cloudflare|other (static) or --adapter cloudflare (server).`,
+    ].filter((line): line is string => typeof line === "string");
+    if (unanswered.length > 0) {
+      p.log.error(
+        `No terminal to ask ${unanswered.length === 1 ? "this question" : "these questions"}. ` +
+          `Answer with flags, or pass --yes to accept the defaults:\n` +
+          unanswered.map((line) => `  - ${line}`).join("\n"),
+      );
+      process.exit(1);
+    }
+  }
+
   const dir =
     opts.dir ??
-    (await ask("Where should we create your project?", "a directory argument", () =>
+    (await ask(() =>
       p.text({
         message: "Where should we create your project?",
-        placeholder: "./my-docs",
+        placeholder: "my-docs",
+        // Enter accepts the placeholder. clack validates before applying the
+        // default, so an empty answer has to pass.
+        defaultValue: "my-docs",
         validate: (value) => {
-          if (!value) return "Directory is required";
+          if (!value) return undefined;
           // Reject absolute paths early — `path.resolve(cwd, "/foo")`
           // ignores cwd and lands at the filesystem root, which then
           // fails with EROFS on macOS/Linux. Prompt the user to drop
@@ -93,7 +117,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const content =
     opts.content ??
-    ((await ask("Starter content?", "--content starter|empty", () =>
+    ((await ask(() =>
       p.select({
         message: "Starter content?",
         options: [
@@ -109,7 +133,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const packageManager =
     opts.packageManager ??
-    ((await ask("Which package manager?", "--package-manager npm|pnpm|yarn|bun", () =>
+    ((await ask(() =>
       p.select({
         message: "Which package manager?",
         options: [
@@ -124,7 +148,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const git =
     opts.git ??
-    (await ask("Initialize a git repository?", "--git or --no-git", () =>
+    (await ask(() =>
       p.confirm({
         message: "Initialize a git repository?",
         initialValue: true,
@@ -144,7 +168,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   if (opts.adapter) return { ...base, output: "server", adapter: opts.adapter };
   if (opts.deploy) return { ...base, output: "static", deploy: opts.deploy };
 
-  const output = (await ask("Output mode?", "--deploy cloudflare|other (static) or --adapter cloudflare (server)", () =>
+  const output = (await ask(() =>
     p.select({
       message: "Output mode?",
       options: [
@@ -156,7 +180,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   )) as OutputMode;
 
   if (output === "server") {
-    const adapter = (await ask("Which adapter?", "--adapter cloudflare", () =>
+    const adapter = (await ask(() =>
       p.select({
         message: "Which adapter?",
         options: INTERACTIVE_ADAPTER_OPTIONS,
@@ -166,7 +190,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
     return { ...base, output: "server", adapter };
   }
 
-  const deploy = (await ask("Deploy target?", "--deploy cloudflare|other", () =>
+  const deploy = (await ask(() =>
     p.select({
       message: "Deploy target?",
       options: [
@@ -179,16 +203,8 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   return { ...base, output: "static", deploy };
 }
 
-/**
- * Show one prompt. Without a terminal there is no one to answer it, so exit
- * with the flags that skip it instead of crashing inside the prompt library.
- * A cancelled prompt exits cleanly.
- */
-async function ask<T>(question: string, answer: string, prompt: () => Promise<T | symbol>): Promise<T> {
-  if (!process.stdin.isTTY) {
-    p.log.error(`No terminal to ask "${question}" Pass ${answer} to answer it, or --yes to accept the defaults.`);
-    process.exit(1);
-  }
+/** Show one prompt; a cancelled prompt exits cleanly. */
+async function ask<T>(prompt: () => Promise<T | symbol>): Promise<T> {
   const value = await prompt();
   if (p.isCancel(value)) {
     p.cancel("Cancelled.");

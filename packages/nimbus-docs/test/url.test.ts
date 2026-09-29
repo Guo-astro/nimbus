@@ -14,6 +14,7 @@ import {
   toBrowserHref,
   toRouteKey,
   withBase,
+  withoutHtmlExtension,
 } from "../src/_internal/url.js";
 
 test("withBase prefixes logical internal paths exactly once", () => {
@@ -188,4 +189,30 @@ test("toDocumentHref shapes a page path even when it looks like a file", (t) => 
   assert.equal(toDocumentHref("/api/reports.list"), "/api/reports.list/");
   setLinkPolicy({ trailingSlash: "never", format: "directory" });
   assert.equal(toDocumentHref("/api/reports.list/"), "/api/reports.list");
+});
+
+test("withBase gives the site root under a base the same trailing slash as every page", (t) => {
+  t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+  for (const [trailingSlash, format, expected] of [
+    ["never", "directory", "/docs"],
+    ["ignore", "file", "/docs"],
+    ["always", "directory", "/docs/"],
+    ["ignore", "directory", "/docs/"],
+  ] as const) {
+    setLinkPolicy({ trailingSlash, format });
+    assert.equal(withBase("/", "/docs"), expected, `${trailingSlash} + ${format}`);
+    assert.equal(withBase("/", "/docs/"), expected, `${trailingSlash} + ${format}, slashed base`);
+    assert.equal(withBase("/#top", "/docs"), `${expected}#top`);
+    assert.equal(withBase("/", "/"), "/");
+    assert.equal(withBase("/guides", "/docs"), "/docs/guides");
+  }
+});
+
+test("withoutHtmlExtension maps build.format: \"file\" page paths to their routes", () => {
+  assert.equal(withoutHtmlExtension("/welcome.html"), "/welcome");
+  assert.equal(withoutHtmlExtension("/guides/advanced/deep.html"), "/guides/advanced/deep");
+  assert.equal(withoutHtmlExtension("/guides/index.html"), "/guides");
+  assert.equal(withoutHtmlExtension("/index.html"), "/");
+  assert.equal(withoutHtmlExtension("/welcome"), "/welcome");
+  assert.equal(withoutHtmlExtension("/"), "/");
 });

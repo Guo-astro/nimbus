@@ -175,3 +175,39 @@ test("a fence opened on a list-item line stays inside the item", () => {
   assert.ok(out.includes(["- ```yaml", "  paths:", "    /a: {}", "  ```"].join("\n")), out);
   assert.ok(out.includes("  Then build."), out);
 });
+
+describe("renderEntryAsMarkdown: fences inside list items", () => {
+  test("a fence in a nested list item stays in the item, and so does the prose after it", () => {
+    assert.equal(
+      mdx("- Outer\n  - Inner:\n\n    ```sh\n    run\n    ```\n\n    Prose after.\n"),
+      "- Outer\n  - Inner:\n\n    ```sh\n    run\n    ```\n\n    Prose after.",
+    );
+  });
+
+  test("a fence in an ordered item doesn't split the list", () => {
+    assert.equal(
+      mdx("1. First:\n\n   ```sh\n   run\n   ```\n\n   More.\n2. Second\n"),
+      "1. First:\n\n   ```sh\n   run\n   ```\n\n   More.\n2. Second",
+    );
+  });
+
+  // 4+ columns past the item's content, or tab-indented, the fence would read
+  // as indented code; it moves to the item's content column instead.
+  test("an over-indented fence in a list item moves to the item's content column", () => {
+    assert.equal(
+      mdx("- Step:\n\n      ```sh\n      x\n      ```\n\n  After.\n"),
+      "- Step:\n\n  ```sh\n  x\n  ```\n\n  After.",
+    );
+  });
+
+  test("a tab-indented fence in a list item moves to the item's content column", () => {
+    assert.equal(mdx("- Step:\n\n\t```sh\n\tx\n\t```\n"), "- Step:\n\n  ```sh\n  x\n  ```");
+  });
+
+  test("a fence indented only by component markup still moves to column 0", () => {
+    assert.equal(
+      mdx('<Tabs>\n  <TabItem label="A">\n    ```sh\n    a\n    ```\n  </TabItem>\n</Tabs>\n'),
+      "### A\n\n```sh\na\n```",
+    );
+  });
+});

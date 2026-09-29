@@ -1,16 +1,24 @@
 /**
  * The **env** category: is the machine + project set up to build a correct site
  * at all? Node floor · config locatable · `site` not a placeholder · pagefind
- * when search is on · wrangler on a Cloudflare scaffold. Build-free: filesystem
+ * when search is on · wrangler on a Cloudflare scaffold · installed Astro
+ * adapters inside the range Nimbus supports. Build-free: filesystem
  * + `process.versions` + the statically-parsed config only. env's core always
  * runs, so it's always `evaluated`; a config we can't read statically becomes a
  * `config-not-evaluated` note (not a silent skip), which drives `readiness:
  * unknown`.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
+import { satisfies } from "semver";
+
+import { ADAPTER_IDS, ADAPTER_RECIPES } from "../_internal/adapters.js";
 import { readBuildEnv } from "../_internal/dotenv.js";
 import { deriveFootprint, type FeatureRecipe } from "../_internal/footprint.js";
 import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
+import { addCommand, detectPackageManager, quoteForDisplay } from "../cli/pm.js";
 import type { CheckFinding, Note, ScopeReport } from "./finding.js";
 import { lineOf, relFile } from "./loc.js";
 import {
@@ -41,6 +49,7 @@ export function checkEnv(cwd: string, parsed: ConfigParseResult): ScopeReport {
   if (hasPackageJson(cwd)) {
     checkPagefind(cwd, findings, parsed);
     checkWrangler(cwd, findings);
+    checkAdapterVersions(cwd, findings);
     const features = deriveFootprint(readDependencyNames(cwd));
     findings.push(
       ...checkFeatureEnvKeys(features, readBuildEnv(cwd)),
@@ -220,6 +229,49 @@ function checkWrangler(cwd: string, findings: CheckFinding[]): void {
       suggestion: "install wrangler as a devDependency",
     },
   });
+}
+
+// `add adapter-*` leaves an adapter that's already installed at its version,
+// so a site can keep one Nimbus doesn't support; the failure (a crash on the
+// first cold `astro dev`, a broken server build) surfaces far from its cause.
+// Not fixable: `--fix` must not change a dependency version on its own.
+function checkAdapterVersions(cwd: string, findings: CheckFinding[]): void {
+  const declared = readDependencyNames(cwd);
+  for (const id of ADAPTER_IDS) {
+    const { pkg, installSpec } = ADAPTER_RECIPES[id];
+    if (!declared.has(pkg)) continue;
+    const installed = readInstalledVersion(cwd, pkg);
+    const range = installSpec.slice(pkg.length + 1);
+    if (!installed || satisfies(installed, range)) continue;
+    const { bin, args } = addCommand(detectPackageManager(cwd), [installSpec]);
+    findings.push({
+      scope: "env",
+      code: "nimbus/adapter-version",
+      severity: "warn",
+      file: "package.json",
+      message:
+        `${pkg}@${installed} is installed, but Nimbus supports ${range}; \`astro dev\` and server builds can fail. ` +
+        `Install a supported version: \`${[bin, ...args].map(quoteForDisplay).join(" ")}\`.`,
+      fixable: false,
+    });
+  }
+}
+
+// Nearest install wins, as in Node resolution: a monorepo may hoist the
+// adapter to the workspace root.
+function readInstalledVersion(cwd: string, pkg: string): string | null {
+  for (let dir = cwd; ; dir = path.dirname(dir)) {
+    const manifest = path.join(dir, "node_modules", pkg, "package.json");
+    if (fs.existsSync(manifest)) {
+      try {
+        const { version } = JSON.parse(fs.readFileSync(manifest, "utf8")) as { version?: unknown };
+        return typeof version === "string" ? version : null;
+      } catch {
+        return null;
+      }
+    }
+    if (path.dirname(dir) === dir) return null;
+  }
 }
 
 function compareSemver(a: string, b: string): number {

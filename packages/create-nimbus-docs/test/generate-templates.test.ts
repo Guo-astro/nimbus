@@ -15,6 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { generateTemplates, variantNames } from "../scripts/copy-template.mjs";
+import { STARTER_MANIFEST } from "../../nimbus-starter-source/starter.manifest.mjs";
 import { STARTER_ROUTE_INVENTORY } from "../../nimbus-docs/src/_internal/route-ownership.js";
 
 function routeEntrypoints(root: string): string[] {
@@ -66,10 +67,20 @@ test("every generated variant ships the adapter marker and implicit build defaul
         `${path.basename(dir)} must carry the reviewed baseline of its pinned framework`,
       );
 
+      const excluded = new Set(
+        (STARTER_MANIFEST.templates[path.basename(dir)]?.excludePaths ?? []).map((file) => file.replace(/^src\//, "")),
+      );
       assert.deepEqual(
         routeEntrypoints(dir),
-        STARTER_ROUTE_INVENTORY.map((route) => route.entrypoint).sort(),
+        STARTER_ROUTE_INVENTORY.map((route) => route.entrypoint).filter((entrypoint) => !excluded.has(entrypoint)).sort(),
         `${path.basename(dir)} has an unclassified or missing route entrypoint`,
+      );
+      // One source per URL: a landing page and a docs index both claim `/`.
+      const docsIndex = ["index.mdx", "index.md"].some((file) => fs.existsSync(path.join(dir, "src/content/docs", file)));
+      assert.equal(
+        docsIndex && fs.existsSync(path.join(dir, "src/pages/index.astro")),
+        false,
+        `${path.basename(dir)} ships two home routes`,
       );
       assert.deepEqual(
         STARTER_ROUTE_INVENTORY.filter(

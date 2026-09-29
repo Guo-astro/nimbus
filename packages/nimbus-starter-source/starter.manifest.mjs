@@ -18,6 +18,8 @@
  * @typedef {Object} TemplateVariant
  * @property {string} contentDir Path under packages/nimbus-starter-source/
  *   whose contents replace src/content/docs/ for that variant.
+ * @property {string[]} [excludePaths] Starter files (relative to the starter
+ *   root) the variant doesn't ship, e.g. a page its content replaces.
  *
  * @typedef {Object} StarterManifest
  * @property {string[]} registryOnlyComponents UI slugs present in the
@@ -97,6 +99,9 @@ export const STARTER_MANIFEST = {
     },
     "template-empty": {
       contentDir: "templates/empty/content/docs/",
+      // The empty variant's home is its docs index.mdx; the landing page
+      // would shadow it at `/` and links to pages the variant doesn't have.
+      excludePaths: ["src/pages/index.astro"],
     },
   },
 };

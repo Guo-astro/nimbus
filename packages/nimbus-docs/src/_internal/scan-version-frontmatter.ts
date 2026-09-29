@@ -18,6 +18,7 @@ import path from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
+import { canonicalSlug } from "./astro-slug.js";
 import { walkFiles } from "./fs-walk.js";
 import type { ResolvedVersions } from "../types.js";
 import type { VersionEntryInput } from "./version-alternates.js";
@@ -61,7 +62,7 @@ export async function scanVersionFrontmatter(
       if (front === null) continue;
       if (parseBoolField(front, "draft") === true) continue;
 
-      const previousSlug = parsePreviousSlugField(front);
+      const previousSlug = withoutIndexSuffix(parsePreviousSlugField(front));
       // Astro's glob loader uses a frontmatter `slug` as the entry ID.
       const id = parseSlugField(front) ?? idFromPath(dir, file);
       out.push({ collection, id, previousSlug });
@@ -120,6 +121,15 @@ function parseBoolField(yaml: string, field: string): boolean | undefined {
   const m = yaml.match(re);
   if (!m) return undefined;
   return m[1] === "true";
+}
+
+/**
+ * A file's frontmatter `slug`, which Astro's glob loader uses as the entry
+ * ID in place of the path.
+ */
+export function frontmatterSlug(source: string): string | undefined {
+  const front = extractFrontmatter(source);
+  return front === null ? undefined : parseSlugField(front);
 }
 
 /** The top-level `slug` field, read as YAML like Astro does (comments, quotes). */
@@ -218,22 +228,33 @@ function unquote(s: string): string {
   return s;
 }
 
+// Entry IDs never end in `/index` (Astro drops it), so a `previousSlug`
+// written as the old file path, `guides/index`, names the ID `guides`.
+function withoutIndexSuffix<T extends string | string[] | undefined>(value: T): T {
+  const strip = (slug: string) => slug.replace(/\/index$/, "");
+  if (value === undefined) return value;
+  return (Array.isArray(value) ? value.map(strip) : strip(value)) as T;
+}
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
- * Compute the Astro entry id (the slug) from a file's absolute path,
- * relative to the collection directory.
+ * Compute the Astro entry id from a file's absolute path, relative to the
+ * collection directory, as Astro's glob loader does: each segment slugified
+ * (which drops dots and lowercases) and a nested `/index` dropped.
  *
  * Examples:
  *   - <dir>/index.mdx           → "index"
  *   - <dir>/foo.mdx             → "foo"
  *   - <dir>/guides/setup.mdx    → "guides/setup"
+ *   - <dir>/guides/index.mdx    → "guides"
+ *   - <dir>/1.2.3/Setup.mdx     → "123/setup"
  */
 function idFromPath(collectionDir: string, filePath: string): string {
   const rel = path.relative(collectionDir, filePath);
   const noExt = rel.replace(/\.(mdx|md)$/, "");
   // Normalise path separators for cross-platform stability.
-  return noExt.split(path.sep).join("/");
+  return canonicalSlug(noExt.split(path.sep).join("/")) || "index";
 }

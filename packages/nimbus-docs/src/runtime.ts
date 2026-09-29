@@ -44,7 +44,7 @@ import {
 } from "./_internal/sidebar.js";
 import { entryRouteKey } from "./_internal/astro-slug.js";
 import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
-import { stripBase, toDocumentHref, withBase } from "./_internal/url.js";
+import { stripBase, toDocumentHref, withBase, withoutHtmlExtension } from "./_internal/url.js";
 import {
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
@@ -632,6 +632,7 @@ export async function getSidebar(
   currentSlug: string,
   options?: { collection?: string; transform?: SidebarTransform },
 ): Promise<SidebarItem[]> {
+  currentSlug = withoutHtmlExtension(currentSlug);
   const config = await loadNimbusConfig();
   const structural = await buildStructuralTree(options?.collection);
 
@@ -690,6 +691,7 @@ export async function getSidebarSections(
 ): Promise<SidebarSection[]> {
   // Read-only over the frozen structural tree — no per-page clone. Active
   // state is computed from `currentSlug` inside `deriveSidebarSections`.
+  currentSlug = withoutHtmlExtension(currentSlug);
   const tree = await buildStructuralTree(options?.collection);
   return deriveSidebarSections(tree, currentSlug);
 }
@@ -853,6 +855,7 @@ export async function getPrevNext(
     sidebarTree?: SidebarItem[];
   },
 ): Promise<PrevNext> {
+  currentSlug = withoutHtmlExtension(currentSlug);
   const tree = options?.sidebarTree ?? (await getSidebar(currentSlug));
   // Build the set of valid internal route keys (slashless) from indexed
   // entries so object-form `prev: { link: "/x" }` overrides fail loudly
@@ -888,6 +891,7 @@ export async function getBreadcrumbs(
   currentSlug: string,
   options?: { collection?: string } & BreadcrumbOptions,
 ): Promise<Breadcrumb[]> {
+  currentSlug = withoutHtmlExtension(currentSlug);
   // `findActivePath` matches by href, so the un-marked tree suffices (no clone).
   const tree = await buildStructuralTree(options?.collection);
   const path = findActivePath(tree, currentSlug);
@@ -931,7 +935,7 @@ export async function getSectionTitle(
   currentSlug: string,
   resolve: SectionTitleResolver,
 ): Promise<SectionTitle | undefined> {
-  const segs = currentSlug.split("/").filter(Boolean);
+  const segs = withoutHtmlExtension(currentSlug).split("/").filter(Boolean);
   const sectionSlug = segs[0];
   if (!sectionSlug) return undefined;
   return resolve({ sectionSlug, module: segs[1], indexEntryId: undefined });
@@ -1189,10 +1193,10 @@ async function resolveProseRoute<C extends string>(
  *   export const prerender = true;
  *   export const getStaticPaths = getDocsStaticPaths;
  *
- * The entry's `id` is used verbatim as the slug. So `docs/index.mdx` →
- * `/index`, `docs/guides/setup.mdx` → `/guides/setup`. If you want a docs
- * entry at the root URL, name it appropriately and decide whether to use
- * a static `pages/index.astro` or let the catch-all handle root.
+ * The entry's `id` is the slug, with a trailing `index` dropped. So
+ * `docs/index.mdx` → `/`, `docs/guides/index.mdx` → `/guides`, and
+ * `docs/guides/setup.mdx` → `/guides/setup`. A static `pages/index.astro`
+ * also claims `/`, so a site keeps one or the other.
  */
 export const getDocsStaticPaths: GetStaticPaths = async () => {
   // Docs-specific helper: always reads the `docs` collection. Other

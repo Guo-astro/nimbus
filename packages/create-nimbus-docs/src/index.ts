@@ -18,7 +18,7 @@
 
 import * as p from "@clack/prompts";
 import mri from "mri";
-import { scaffold, ScaffoldError } from "./scaffold.js";
+import { scaffold, ScaffoldError, type ScaffoldResult } from "./scaffold.js";
 import {
   getPromptResponses,
   ADAPTER_IDS,
@@ -44,18 +44,64 @@ process.on("uncaughtException", (err) => die(err.message));
 declare const __APP_VERSION__: string;
 declare const __MIN_NODE_VERSION__: string;
 
-const args = mri(process.argv.slice(2), {
-  boolean: ["yes", "help", "version", "skip-install", "git"],
-  string: ["package-manager", "deploy", "adapter", "content", "template-dir"],
-  alias: { y: "yes", h: "help", v: "version" },
+const BOOLEAN_FLAGS = ["yes", "help", "version", "skip-install", "git"];
+const STRING_FLAGS = ["package-manager", "deploy", "adapter", "content", "template-dir"];
+const SHORT_FLAGS: Record<string, string> = { y: "yes", h: "help", v: "version" };
+const argv = process.argv.slice(2);
+// npm needs `--` before the arguments, and pnpm passes a leading one through
+// (`pnpm dlx … -- my-docs --yes`); after it mri reads every flag as a name.
+if (argv[0] === "--") argv.shift();
+
+// mri accepts any flag, so a typo or a flag from another tool would be
+// silently ignored and scaffold something else. Refuse it instead.
+const booleanValues = new Map<string, Set<boolean>>();
+const record = (name: string, on: boolean) => booleanValues.set(name, (booleanValues.get(name) ?? new Set()).add(on));
+for (let i = 0; i < argv.length; i++) {
+  const token = argv[i]!;
+  if (token === "--") break;
+  if (!token.startsWith("-") || token === "-") continue;
+  const long = token.startsWith("--");
+  const [name = "", value] = token.slice(long ? 2 : 1).split(/=(.*)/s);
+  const bare = name.replace(/^no-/, "");
+  const known = long
+    ? BOOLEAN_FLAGS.includes(bare) || STRING_FLAGS.includes(name)
+    : [...name].every((char) => char in SHORT_FLAGS);
+  if (!known) {
+    die(
+      `Unknown flag ${long ? "--" : "-"}${name}. Valid flags: ` +
+        [...STRING_FLAGS, ...BOOLEAN_FLAGS, "no-git"].map((flag) => `--${flag}`).join(", ") +
+        `, and -y, -h, -v. Run create-nimbus-docs --help for details.`,
+    );
+  }
+  if (long && BOOLEAN_FLAGS.includes(bare)) {
+    // Like mri, read a following `true` or `false` as the flag's value.
+    const next = argv[i + 1];
+    const explicit = value ?? (name === bare && (next === "true" || next === "false") ? argv[++i] : undefined);
+    record(bare, (explicit !== "false") !== (name !== bare));
+  } else if (!long) {
+    for (const char of name) record(SHORT_FLAGS[char]!, true);
+  }
+}
+for (const [name, values] of booleanValues) {
+  if (values.size > 1) die(`--${name} and --no-${name} contradict each other. Pass one.`);
+}
+
+const args = mri(argv, {
+  boolean: BOOLEAN_FLAGS,
+  string: STRING_FLAGS,
+  alias: SHORT_FLAGS,
 });
+
+if (args._.length > 1) {
+  die(`Unexpected argument ${JSON.stringify(String(args._[1]))}. Pass one directory, then flags.`);
+}
 
 if (args.help) {
   console.log(`
   Usage: create-nimbus-docs [dir] [flags]
 
   Arguments:
-    dir                    Project directory (default: prompted)
+    dir                    Project directory (default: prompted, my-docs)
 
   Flags:
     --deploy <target>      cloudflare | other (default: cloudflare) — static output
@@ -63,7 +109,7 @@ if (args.help) {
     --content <mode>       starter | empty   (default: starter)
     --yes, -y              Use defaults for everything
     --skip-install         Skip dependency install
-    --package-manager <pm> npm | pnpm | yarn | bun
+    --package-manager <pm> npm | pnpm | yarn | bun (default: the one running this)
     --git, --no-git        Initialize git, or skip it
     --template-dir <path>  Scaffold from a local template directory (no network)
     --help, -h
@@ -110,14 +156,15 @@ if (packageManager !== undefined && !PACKAGE_MANAGERS.includes(packageManager as
   die(`Unknown package manager "${packageManager}". Expected one of: ${PACKAGE_MANAGERS.join(", ")}.`);
 }
 
-// `--adapter` selects server output, which owns its target; a `--deploy`
-// alongside it has no lane to apply to and is ignored.
+// `--deploy` picks a static site's target and `--adapter` makes a server
+// site, so together they ask for two different sites.
 if (adapter !== undefined && deploy !== undefined) {
-  p.log.warn(`--deploy is ignored with --adapter (server output uses the adapter's target).`);
+  die(`--deploy and --adapter can't be combined: --deploy sets a static site's target, --adapter makes a server site. Pass one.`);
 }
 
 const responses = await getPromptResponses({
-  dir: args._[0],
+  // mri turns a numeric positional after a boolean flag (`--yes 2026`) into a number.
+  dir: args._[0] === undefined ? undefined : String(args._[0]),
   yes: args.yes,
   skipInstall: args["skip-install"],
   deploy: deploy as "cloudflare" | "other" | undefined,
@@ -127,20 +174,33 @@ const responses = await getPromptResponses({
   git: args.git,
 });
 
+let result: ScaffoldResult;
 try {
-  await scaffold({ ...responses, templateDir: args["template-dir"] });
+  result = await scaffold({ ...responses, templateDir: args["template-dir"] });
 } catch (err) {
   if (err instanceof ScaffoldError) die(err.message);
   // Unexpected failure — surface a one-liner, not a stack trace.
   die(`Something went wrong while scaffolding: ${(err as Error).message}`);
 }
 
+const { packageManager: pm } = responses;
+const nextSteps = [
+  `cd ${shellArg(responses.dir)}`,
+  ...(result.install === "done" ? [] : [`${pm} install`]),
+  `${pm === "yarn" ? "yarn" : `${pm} run`} dev`,
+].map((step) => `    ${step}`);
+
+if (result.install === "failed") {
+  // The project is usable once installed, so keep it and say how; the exit
+  // code tells CI the site isn't ready.
+  p.log.error(`Created the project in ${responses.dir}, but installing dependencies failed. To finish:\n\n${nextSteps.join("\n")}`);
+  process.exit(1);
+}
+
 p.outro(`
   Done. Next steps:
 
-    cd ${shellArg(responses.dir)}
-    ${responses.skipInstall ? `${responses.packageManager} install` : ""}
-    ${responses.packageManager === "yarn" ? "yarn" : `${responses.packageManager} run`} dev
+${nextSteps.join("\n")}
 `);
 
 function shellArg(value: string): string {

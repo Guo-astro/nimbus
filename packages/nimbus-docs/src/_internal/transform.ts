@@ -93,7 +93,8 @@ function protectCode(markdown: string): {
         (_match, index: string, offset: number, whole: string) => {
           const chunk = protectedChunks[Number(index)] ?? "";
           const before = whole.slice(whole.lastIndexOf("\n", offset) + 1, offset);
-          if (!CONTAINER_PREFIX.test(before)) return chunk;
+          // A fence in a list item sits behind plain indentation.
+          if (!CONTAINER_PREFIX.test(before) && !/^[ \t]+$/.test(before)) return chunk;
           // Later lines keep the quote markers; a list marker becomes indentation.
           const continuation = before.replace(LIST_MARKER, (marker) => " ".repeat(marker.length));
           const blank = continuation.trimEnd();
@@ -336,9 +337,52 @@ export function renderEntryAsMarkdown(
     .replace(/^[ \t]+(- (?:\*\*|\[))/gm, "$1")
     .replace(/^[ \t]+(\d+\. \*\*)/gm, "$1")
     .replace(/^[ \t]+(### )/gm, "$1")
-    .replace(/^[ \t]+(```|@@NIMBUS_MD_FENCE_)/gm, "$1")
-    .replace(/^[ \t]+$/gm, "")
+    .replace(/^[ \t]+$/gm, "");
+  markdown = dedentComponentFences(markdown)
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return protectedCode.restore(markdown);
+}
+
+const LIST_ITEM = /^([ \t]*)([-*+]|\d{1,9}[.)])([ \t]+)/;
+
+/** Width of leading whitespace, with tabs expanded to the next multiple of 4. */
+function columns(whitespace: string): number {
+  let width = 0;
+  for (const char of whitespace) width = char === "\t" ? width + 4 - (width % 4) : width + 1;
+  return width;
+}
+
+/** The column a list item's content starts at, per CommonMark. */
+function contentColumn(item: RegExpExecArray): number {
+  const markerEnd = columns(item[1]!) + item[2]!.length;
+  const gap = columns(item[1]! + " ".repeat(item[2]!.length) + item[3]!) - markerEnd;
+  return gap > 4 ? markerEnd + 1 : markerEnd + gap;
+}
+
+/**
+ * Place each fence where the Markdown reader expects it. A fence inside a
+ * list item moves to the item's content column: at column 0 it would end the
+ * list, and 4 or more columns past it the backticks would read as indented
+ * code. Any other fence is indented only by component markup (`<Tabs>`,
+ * `<Steps>`) and moves to column 0.
+ */
+function dedentComponentFences(markdown: string): string {
+  const lines = markdown.split("\n");
+  return lines
+    .map((line, index) => {
+      const fence = /^([ \t]+)(```|@@NIMBUS_MD_FENCE_)/.exec(line);
+      if (!fence) return line;
+      const indent = columns(fence[1]!);
+      for (let i = index - 1; i >= 0; i--) {
+        const previous = lines[i]!;
+        if (!previous.trim()) continue;
+        if (columns(/^[ \t]*/.exec(previous)![0]) >= indent) continue;
+        const item = LIST_ITEM.exec(previous);
+        const column = item ? contentColumn(item) : -1;
+        return column >= 0 && column <= indent ? " ".repeat(column) + line.trimStart() : line.trimStart();
+      }
+      return line.trimStart();
+    })
+    .join("\n");
 }

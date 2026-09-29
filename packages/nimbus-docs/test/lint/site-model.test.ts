@@ -379,3 +379,23 @@ test("enumerateEntriesByBase walks each collection at its configured base, tags 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a frontmatter slug decides the entry's route, so it collides with the page already there", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-slug-"));
+  try {
+    fs.mkdirSync(path.join(root, "docs", "1.2.3"), { recursive: true });
+    fs.writeFileSync(path.join(root, "docs/a.mdx"), "---\ntitle: A\nslug: b\n---\n");
+    fs.writeFileSync(path.join(root, "docs/b.mdx"), "---\ntitle: B\n---\n");
+    fs.writeFileSync(path.join(root, "docs/1.2.3/notes.mdx"), '---\ntitle: Notes\nslug: "1.2.3/notes"\n---\n');
+    // Frontmatter longer than the first read still has its slug found.
+    fs.writeFileSync(path.join(root, "docs/long.mdx"), `---\ndescription: "${"x".repeat(5000)}"\nslug: far\n---\n`);
+
+    const entries = enumerateEntriesByBase(root, new Map([["docs", "docs"]]));
+    const urls = entries.map((e) => contentEntryUrl(e)).sort();
+    assert.deepEqual(urls, ["/1.2.3/notes", "/b", "/b", "/far"]);
+    const dups = findDuplicateRoutes(entries.map((e) => ({ url: contentEntryUrl(e), source: e.relPath })));
+    assert.deepEqual(dups.map((d) => [d.url, [...d.sources].sort()]), [["/b", ["docs/a.mdx", "docs/b.mdx"]]]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

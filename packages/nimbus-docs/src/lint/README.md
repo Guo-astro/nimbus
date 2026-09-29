@@ -142,12 +142,15 @@ The rule lives in the integration rather than the standalone CLI because
 its inputs (filesystem layout + `versions` config + `content.config.ts`)
 are framework-side. The CLI doesn't need to re-do it.
 
-**Known limitations** (false negatives only — never false positives):
+**Known limitations:**
 
-- `data.slug` frontmatter overrides aren't honored. An entry with a
-  custom `data.slug` could collide with another URL and the check would
-  miss it. Reading frontmatter from every entry pre-build adds noticeable
-  I/O; deferred.
+- Only `.mdx` entries are read, so `.md` pages, with or without a
+  `slug`, aren't checked for collisions. A frontmatter `slug` replaces
+  the path, as in Astro's glob loader; reading it costs one bounded read
+  of each entry's frontmatter pre-build.
+- A hand-rolled collection whose custom `generateId` ignores `slug` can
+  get a false collision from an entry's `slug`, which fails the build.
+  Remove the `slug` or make `generateId` honor it.
 - Dynamic page routes (`pages/blog/[id].astro`) are skipped — their
   emitted URLs come from `getStaticPaths`. A collision between a
   dynamic page route and a content entry can still happen (Astro's
@@ -167,9 +170,9 @@ match what Astro actually serves, each runs through `canonicalEntryUrl`
 in `_internal/astro-slug.ts`, which mirrors Astro's content-layer
 normalization (`github-slugger` per segment + trailing-`/index` strip).
 
-`data.slug` frontmatter overrides and custom `generateId` loaders aren't
-honored by this mirror, so projects using either must supply route-aware
-values at the public helper boundary.
+Custom `generateId` loaders aren't honored by this mirror. The duplicate
+check reads a frontmatter `slug` itself (`enumerateEntries*`); other
+callers holding a final `entry.id` use `entryRouteKey`.
 
 `github-slugger` is bundled into `dist/` via tsdown's `noExternal`, so
 this doesn't add a transitive dep for consumers.

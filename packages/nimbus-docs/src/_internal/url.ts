@@ -48,6 +48,9 @@ export function withBase(path: string, base: string): string {
   const prefix = base.slice(0, end);
   const [pathname, suffix] = splitSuffix(path);
   const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  // The site root under a base is a page like any other: without trailing
+  // slashes Astro serves `/docs`, not `/docs/`.
+  if (normalized === "/" && prefix && !appendsSlash(linkPolicy())) return `${prefix}${suffix}`;
   return `${prefix}${normalized}${suffix}`;
 }
 
@@ -117,6 +120,16 @@ export function toRouteKey(href: string): string {
   const decoded = safeDecode(pathname);
   if (decoded.length <= 1) return decoded || "/";
   return decoded.endsWith("/") ? decoded.slice(0, -1) : decoded;
+}
+
+/**
+ * A page path as Nimbus's routes know it. Under `build.format: "file"`,
+ * `Astro.url.pathname` ends in `.html` (`/guides/setup.html`, `/index.html`)
+ * while every route, link, and sidebar href has none. Entry IDs can't end in
+ * `.html` (Astro's slugger drops the dot), so this never strips a real slug.
+ */
+export function withoutHtmlExtension(path: string): string {
+  return path.replace(/(?:\/index)?\.html$/, "") || "/";
 }
 
 /** The Astro config that decides a document URL's trailing slash. */

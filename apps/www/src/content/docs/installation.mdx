@@ -23,13 +23,13 @@ The scaffolder asks:
 
 <Steps>
   <Step title="Directory">
-    Where to create the project. Pass it as the first argument, such as `my-docs`.
+    Where to create the project; press Enter for `my-docs`. Pass it as the first argument, such as `my-docs`.
   </Step>
   <Step title="Starter content">
     **Getting started guide + example pages**, or **Empty**, just the shell for your own content. Flag: `--content starter|empty`.
   </Step>
   <Step title="Package manager">
-    npm, pnpm, yarn, or bun. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
+    npm, pnpm, yarn, or bun; the default is the one that runs the scaffolder. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
   </Step>
   <Step title="Git">
     Whether to initialize a repository. Flag: `--git` or `--no-git`.
@@ -42,7 +42,9 @@ The scaffolder asks:
   </Step>
 </Steps>
 
-Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, pass `--yes` or a flag for every question. Pass `--help` to list every flag.
+Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, pass `--yes` or a flag for every question; otherwise the scaffolder exits with the list of unanswered questions and their flags. Unknown flags, and flags that contradict each other, stop the scaffolder before it writes anything. Pass `--help` to list every flag.
+
+If installing dependencies fails, the scaffolder keeps the project, prints the commands that finish the setup, and exits with status 1. To scaffold from a local template directory instead of downloading one, such as when working on templates offline, pass `--template-dir <path>`.
 
 With npm, put `--` before the arguments, or npm keeps the flags for itself:
 
@@ -63,9 +65,16 @@ npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
     - styles/
       - globals.css
     - components.ts
+  - AGENT.md
+  - CLAUDE.md
   - astro.config.ts
+  - nimbus.json
   - package.json
+  - pnpm-workspace.yaml
+  - wrangler.jsonc
 </FileTree>
+
+`AGENT.md` is the guide for coding agents working in the project, and `CLAUDE.md` points to it. `nimbus.json` records the last Nimbus version whose upgrade steps the site has reviewed; keep it committed. `pnpm-workspace.yaml` ships only with pnpm, for its dependency build-script settings, and Yarn sites get `.yarnrc.yml` instead. `wrangler.jsonc` ships only when you deploy to Cloudflare.
 
 The `nimbus-docs` npm package ships the invisible plumbing (integration, data helpers, schemas). Everything visible — components under `src/components/`, MDX content under `src/content/docs/`, routes under `src/pages/`, design tokens in `src/styles/globals.css`, and the MDX globals registry at `src/components.ts` — copies into your repo and is yours to edit.
 
@@ -82,5 +91,5 @@ Then open the printed URL.
 Static scaffolds emit `dist/` for any static host. Cloudflare server scaffolds request-render canonical content collection routes and include the appropriate `wrangler.jsonc` and a `deploy` script.
 
 <Aside type="tip">
-  After scaffolding, run `nimbus-docs add <slug>` to install components from the registry. See [Adding components](/adding-components) for the workflow.
+  After scaffolding, run `npx @cloudflare/nimbus-docs add <slug>` to install components from the registry. See [Adding components](/adding-components) for the workflow.
 </Aside>

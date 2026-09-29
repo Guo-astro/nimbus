@@ -224,6 +224,17 @@ function copyStarterTo(targetDir) {
   if (existsSync(strayManifest)) rmSync(strayManifest);
 }
 
+/** Remove the starter files a variant declares it doesn't ship. */
+function applyExcludedPaths(targetDir, variantKey) {
+  for (const path of STARTER_MANIFEST.templates[variantKey].excludePaths ?? []) {
+    const target = join(targetDir, path);
+    if (!existsSync(target)) {
+      throw new Error(`[copy-template] manifest variant "${variantKey}" excludes missing path ${path}`);
+    }
+    rmSync(target, { recursive: true });
+  }
+}
+
 /**
  * Apply a per-template content/docs/ override declared in the manifest.
  * `contentDir` is a path relative to the starter source. When it points
@@ -270,6 +281,7 @@ export function generateTemplates(outDir = DEFAULT_OUT_DIR) {
     const targetDir = join(outDir, variant);
     copyStarterTo(targetDir);
     applyContentOverride(targetDir, variant);
+    applyExcludedPaths(targetDir, variant);
     renameTemplatePackage(targetDir);
     stripRegistryOnlyDeps(targetDir);
     pinNimbusDocsVersion(targetDir);

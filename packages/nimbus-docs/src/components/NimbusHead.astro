@@ -147,10 +147,14 @@ const llmsIndexUrl =
       : withBase(llmsIndexPath, baseUrl)
     : null;
 
+// Under `build.format: "file"` the pathname ends in `.html`; links and the
+// sitemap don't, so neither does the canonical. Same rule as the internal
+// `withoutHtmlExtension` (`_internal/url.ts`), which isn't public.
+const pagePath = Astro.url.pathname.replace(/(?:\/index)?\.html$/, "") || "/";
 const canonical = Astro.site
   ? versionCanonicalPath
     ? new URL(withBase(versionCanonicalPath, baseUrl), Astro.site).href
-    : new URL(Astro.url.pathname, Astro.site).href
+    : new URL(pagePath, Astro.site).href
   : null;
 const resolvedMarkdownUrl =
   markdownUrl
@@ -164,7 +168,7 @@ const resolvedDescription = description ?? config.description;
 const lang = config.locale ?? "en";
 
 const routeKey = (path: string) => path.replace(/\/+$/, "") || "/";
-const isHomePage = routeKey(Astro.url.pathname) === routeKey(withBase("/", baseUrl));
+const isHomePage = routeKey(pagePath) === routeKey(withBase("/", baseUrl));
 const ogType = isHomePage ? "website" : "article";
 
 // Favicon precedence: svg > ico > png. The first file that exists wins;

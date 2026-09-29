@@ -215,7 +215,14 @@ function partialHeadline(
     const out = [paint(COLORS.green, `  ✓ Buildable — checked env + structure in ${secs}s`)];
     if (gapLine) {
       out.push(gapLine);
-      out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
+      // A build can't close a gap that waits on input (a preview's missing
+      // upgrade baseline); its scope line above says what it needs.
+      const buildHelps = result.scopes.some(
+        (s) => s.status === "not_evaluated" || s.notes.some((n) => !n.requiresInput),
+      );
+      if (buildHelps) {
+        out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
+      }
     }
     return out;
   }

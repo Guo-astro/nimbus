@@ -101,3 +101,37 @@ test("scopes gate which categories run", async () => {
     cleanup(dir);
   }
 });
+
+test("an installed adapter outside the supported range warns with the install command", async () => {
+  const adapterProject = (declared: boolean, installed: string | null) => {
+    const dir = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
+    if (declared) {
+      fs.writeFileSync(path.join(dir, "package.json"), `{ "name": "fixture", "dependencies": { "@astrojs/cloudflare": "^14.1.0" } }`);
+    }
+    fs.writeFileSync(path.join(dir, "package-lock.json"), "{}");
+    if (installed) {
+      const pkgDir = path.join(dir, "node_modules", "@astrojs", "cloudflare");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ name: "@astrojs/cloudflare", version: installed }));
+    }
+    return dir;
+  };
+  const adapterFinding = async (dir: string) => {
+    try {
+      const r = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+      return r.findings.find((f) => f.code === "nimbus/adapter-version");
+    } finally {
+      cleanup(dir);
+    }
+  };
+
+  const finding = await adapterFinding(adapterProject(true, "14.1.2"));
+  assert.equal(finding?.severity, "warn");
+  assert.equal(finding?.fixable, false);
+  assert.match(finding?.message ?? "", /@astrojs\/cloudflare@14\.1\.2 is installed, but Nimbus supports >=14\.3\.0 <14\.4\.0/);
+  assert.match(finding?.message ?? "", /`npm install '@astrojs\/cloudflare@>=14\.3\.0 <14\.4\.0'`/);
+
+  assert.equal(await adapterFinding(adapterProject(true, "14.3.2")), undefined);
+  assert.equal(await adapterFinding(adapterProject(true, null)), undefined);
+  assert.equal(await adapterFinding(adapterProject(false, "14.1.2")), undefined);
+});

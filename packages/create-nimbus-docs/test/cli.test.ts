@@ -9,6 +9,7 @@ import { test } from "node:test";
 const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
   engines: { node: string };
+  preferUnplugged?: boolean;
 };
 // Build-time constants the bundler inlines into the CLI.
 const DEFINES = `data:text/javascript,globalThis.__MIN_NODE_VERSION__=${JSON.stringify(PKG.engines.node.replace(/^>=/, ""))};globalThis.__APP_VERSION__=${JSON.stringify(PKG.version)};`;
@@ -174,4 +175,10 @@ test("a numeric directory after a boolean flag, and --git false with --no-git, s
       rmSync(cwd, { recursive: true, force: true });
     }
   }
+});
+
+// Yarn 2+ keeps packages in zip archives, which the scaffolder can't copy a
+// preview's bundled templates out of; `preferUnplugged` makes Yarn extract it.
+test("the package asks Yarn to extract it, so `yarn dlx` can read bundled templates", () => {
+  assert.equal(PKG.preferUnplugged, true);
 });

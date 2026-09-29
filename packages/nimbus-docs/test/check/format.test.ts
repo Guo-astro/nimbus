@@ -334,10 +334,9 @@ test("partial + buildable with a gap that needs input → names what it needs, n
 
   const built = render(true);
   assert.match(built, /1 correctness check not evaluated yet: migrations/);
-  assert.match(built, /→ This preview has no reviewed Nimbus release\. Run `npx nimbus-docs migrate --from <version>`\./);
+  assert.equal(built.split("This preview has no reviewed Nimbus release").length - 1, 1, "the note prints once, on its scope line");
   assert.doesNotMatch(built, /run a build/);
 
   const unbuilt = render(false);
   assert.match(unbuilt, /→ run a build, then `nimbus-docs check` again/);
-  assert.match(unbuilt, /→ This preview has no reviewed Nimbus release/);
 });

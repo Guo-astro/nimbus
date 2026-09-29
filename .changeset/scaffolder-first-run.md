@@ -11,6 +11,7 @@
 
 **First run**
 
+- `yarn dlx` with Yarn 2+ can scaffold from a PR preview. Yarn now extracts the package instead of keeping it in a zip, where the preview's bundled templates couldn't be read.
 - Pressing Enter at the directory prompt uses `my-docs`, as shown. Before, it failed with "Directory is required".
 - bun's install output no longer shows in the scaffolder's output, and "Next steps" no longer has an empty line where the install command would be. An install's own output shows only when it fails.
 - The empty starter ships one home page, `src/content/docs/index.mdx`, so its first `nimbus-docs check` no longer warns about a duplicate route at `/`. Before, a landing page shadowed it and linked to pages the empty starter doesn't have.

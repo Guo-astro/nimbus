@@ -216,15 +216,13 @@ function partialHeadline(
     if (gapLine) {
       out.push(gapLine);
       // A build can't close a gap that waits on input (a preview's missing
-      // upgrade baseline), so say what each of those needs instead.
-      const inputNotes = result.scopes.flatMap((s) => s.notes).filter((n) => n.requiresInput);
+      // upgrade baseline); its scope line above says what it needs.
       const buildHelps = result.scopes.some(
         (s) => s.status === "not_evaluated" || s.notes.some((n) => !n.requiresInput),
       );
       if (buildHelps) {
         out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
       }
-      for (const note of inputNotes) out.push(paint(COLORS.dim, `    → ${note.reason}`));
     }
     return out;
   }

@@ -10,8 +10,8 @@
 **`check` and `init`**
 
 - `check` warns when an installed Astro adapter is outside the range Nimbus supports, such as `@astrojs/cloudflare` 14.1, with the command that installs a supported version. It doesn't change the version itself.
-- On a PR preview, `check` names what the missing upgrade baseline needs instead of repeating "run a build, then check again".
-- `init --force` keeps the recorded `lastReviewedNimbusVersion`, so rebuilding `nimbus.json` no longer brings back the "no reviewed upgrade baseline" build failure.
+- On a PR preview, `check` says which release to pass to `migrate --from` once you install a release, instead of repeating "run a build, then check again".
+- `init --force` rebuilds only the component and install records. It keeps the rest of a valid `nimbus.json`: the reviewed baseline, the starter version and variant, a preview's record, and the server-output opt-in. Before, it reset them, which brought back the "no reviewed upgrade baseline" build failure.
 
 **`build.format: "file"` and `base`**
 

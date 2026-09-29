@@ -2,7 +2,7 @@
 
 > `CLAUDE.md` delegates here. Keep project instructions canonical in this file.
 
-Astro-based docs. The `nimbus-docs` package handles content schemas, sidebar/TOC, MDX→markdown, build hooks, and the `nimbus-docs` CLI. Run it as `npx @cloudflare/nimbus-docs <command>`: after installing dependencies, npx uses the project's installed version (before, it fetches the latest release, which may be newer than the site's), and the scoped name keeps it from fetching the unrelated `nimbus-docs` package when nothing is installed. Everything in `src/` is yours to edit.
+Astro-based docs. The `nimbus-docs` package handles content schemas, sidebar/TOC, MDX→markdown, build hooks, and the `nimbus-docs` CLI. Install dependencies first, then run it as `npx @cloudflare/nimbus-docs <command>`: npx uses the project's installed version. Before an install, npx fetches the latest release instead, which may differ from the site's version and give different results. The scoped name keeps npx from fetching the unrelated `nimbus-docs` package. Everything in `src/` is yours to edit.
 
 ## File layout
 
@@ -22,7 +22,12 @@ src/
 │   ├── [...slug].astro
 │   ├── [...slug]/index.md.ts   # Markdown version of every page, all collections
 │   ├── [...slug]/index.mdx.ts  # authored source of every page, all collections
+│   ├── [section]/llms.txt.ts   # per-section llms.txt
+│   ├── 404.astro
+│   ├── index.astro              # home page (the empty starter uses content/docs/index.mdx)
 │   ├── llms.txt.ts
+│   ├── llms-full.txt.ts
+│   ├── nimbus-api/coordinates.json.ts  # API citation manifest
 │   ├── og.png.ts                # site-level OG card
 │   ├── og/
 │   │   ├── _og-card-config.ts   # shared OG theme tokens (underscore = not a route)

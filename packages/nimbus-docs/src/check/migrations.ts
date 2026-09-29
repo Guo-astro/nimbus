@@ -78,7 +78,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
         ? [{
             code: "nimbus/upgrade-baseline-missing",
             reason: baseline.source === "preview"
-              ? `This preview has no reviewed Nimbus release, so upgrade reviews aren't checked. After moving to a release, run \`${command.display} --from <version>\` with the release the preview was based on.`
+              ? `This preview has no reviewed Nimbus release, so upgrade reviews aren't checked. Once you install a release, run \`${command.display} --from <version>\` with the last release the site used before the preview; for a site created from the preview, the latest release on the day you created it.`
               : `Nimbus cannot determine the previously reviewed version. Run \`${command.display} --from <version>\`.`,
             requiresInput: true,
           }]

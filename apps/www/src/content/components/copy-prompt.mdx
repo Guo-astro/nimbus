@@ -1,0 +1,19 @@
+---
+title: CopyPrompt
+tagline: "One-line prompt with a Copy prompt button, for readers to paste into an AI coding agent."
+props:
+  - name: text
+    type: string
+    required: true
+    description: The prompt to display and copy. It truncates to one line on screen, but the full text is copied.
+---
+import Showcase from "@/components/showcase/Showcase.astro";
+import { CopyPrompt } from "@/components/ui/copy-prompt";
+
+## Preview
+
+<Showcase code={`<CopyPrompt text="Read https://nimbus-docs.com/llms.txt then help me set up a docs site with Nimbus." />`}>
+  <div class="w-full text-left">
+    <CopyPrompt text="Read https://nimbus-docs.com/llms.txt then help me set up a docs site with Nimbus." />
+  </div>
+</Showcase>

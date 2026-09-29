@@ -54,6 +54,7 @@ export const STARTER_MANIFEST = {
     "api-layout",
     "api-sidebar",
     "code-group",
+    "copy-prompt",
     "embed",
     "file-tree",
     "frame",

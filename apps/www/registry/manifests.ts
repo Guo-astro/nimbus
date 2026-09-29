@@ -155,6 +155,13 @@ export const MANIFESTS = {
     registryDependencies: ["cn"],
   },
 
+  "copy-prompt": {
+    type: "registry:ui",
+    title: "CopyPrompt",
+    description: "One-line prompt with a Copy prompt button, for pasting into an AI coding agent.",
+    registryDependencies: ["button", "cn"],
+  },
+
   dialog: {
     type: "registry:ui",
     title: "Dialog",

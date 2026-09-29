@@ -62,6 +62,7 @@ async function runConfigSetup(opts: {
       srcDir: dirUrl(opts.srcDir),
       cacheDir: dirUrl(path.join(opts.root, ".cache")),
       base: "",
+      build: { format: "directory" },
       markdown: opts.shikiConfig ? { shikiConfig: opts.shikiConfig } : undefined,
     },
     logger,

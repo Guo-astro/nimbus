@@ -1,5 +1,5 @@
 import { entryRouteUrl } from "./astro-slug.js";
-import { toBrowserHref } from "./url.js";
+import { toDocumentHref } from "./url.js";
 
 /**
  * Site-relative URLs (no base path) for one content entry, derived from the
@@ -23,7 +23,7 @@ export function pageUrls(
   const route = entryRouteUrl(prefix, entry.id);
   const page = route === "/" ? "" : route;
   return {
-    url: toBrowserHref(route),
+    url: toDocumentHref(route),
     markdownUrl: `${page}/index.md`,
     sourceUrl:
       typeof entry.body === "string" && entry.body.length > 0

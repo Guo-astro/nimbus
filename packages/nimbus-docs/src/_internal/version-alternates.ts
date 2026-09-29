@@ -25,7 +25,7 @@
 import type { ResolvedVersions } from "../types.js";
 import { entryRouteUrl } from "./astro-slug.js";
 import { PRIMARY_COLLECTION } from "./collection-mount.js";
-import { toBrowserHref } from "./url.js";
+import { toDocumentHref } from "./url.js";
 
 /**
  * Minimum-viable entry shape the table needs. Matches what
@@ -240,10 +240,8 @@ export function buildVersionAlternates(
  *
  * Returns a list of `{ from, to }` redirect pairs ready for Astro's
  * `redirects` config. `from` is the URL the reader hit; `to` is the
- * current-version sibling. Both are absolute paths in the trailing-slash
- * browser-href form Astro serves under `build.format: "directory"`.
- * Astro's default `trailingSlash: "ignore"` matches incoming requests in
- * either form, so a reader landing on `/v1/foo` still resolves.
+ * current-version sibling. Both are absolute paths in the browser-href form
+ * that follows Astro's `trailingSlash`.
  */
 export function computeMissingPageRedirects(
   versions: ResolvedVersions | null,
@@ -324,5 +322,5 @@ function collectionToVersion(
  */
 function pageUrl(versions: ResolvedVersions, version: string, slug: string): string {
   const prefix = version === versions.current ? "" : `/${version}`;
-  return toBrowserHref(entryRouteUrl(prefix, slug));
+  return toDocumentHref(entryRouteUrl(prefix, slug));
 }

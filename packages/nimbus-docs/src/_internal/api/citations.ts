@@ -22,6 +22,8 @@
  */
 
 import { suggest } from "../levenshtein.js";
+import { fencedBlocks, INLINE_CODE } from "../code-regions.js";
+import { toDocumentHref } from "../url.js";
 
 /** The one prefix that marks a link target as a coordinate citation. */
 export const CITATION_SENTINEL = "api.ref:";
@@ -137,9 +139,13 @@ export function isSafeCitationPath(value: string): boolean {
   return true;
 }
 
-/** Resolve a parsed citation against a citation index. `undefined` when unknown. */
+/**
+ * Resolve a parsed citation against a citation index, shaped like every other
+ * generated page link (Astro's `trailingSlash`). `undefined` when unknown.
+ */
 export function resolveCitation(parsed: ParsedCitation, citationIndex: CitationIndex): string | undefined {
-  return citationIndex.get(citationKey(parsed.collection, parsed.version, parsed.coordinate));
+  const url = citationIndex.get(citationKey(parsed.collection, parsed.version, parsed.coordinate));
+  return url === undefined ? undefined : toDocumentHref(url);
 }
 
 export interface ResolveCitationsResult {
@@ -250,8 +256,15 @@ function protectCode(source: string): { code: string; restore: (value: string) =
   const chunks: string[] = [];
   const PREFIX = "\x00NIMBUS_CITE_CODE_";
   const SUFFIX = "\x00";
-  let code = source.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, store);
-  code = code.replace(/`[^`\n]+`/g, store);
+  const lines = source.split("\n");
+  const out: string[] = [];
+  let next = 0;
+  for (const { open, close } of fencedBlocks(lines)) {
+    out.push(...lines.slice(next, open), store(lines.slice(open, close + 1).join("\n")));
+    next = close + 1;
+  }
+  out.push(...lines.slice(next));
+  const code = out.join("\n").replace(INLINE_CODE, store);
   function store(match: string): string {
     const index = chunks.length;
     chunks.push(match);

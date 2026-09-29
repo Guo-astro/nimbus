@@ -20,7 +20,7 @@
  */
 
 import type { ApiSpec } from "../../types.js";
-import { toBrowserHref } from "../url.js";
+import { toDocumentHref } from "../url.js";
 import type {
   VersionAlternatesTable,
   VersionPageRef,
@@ -81,7 +81,7 @@ export async function buildApiVersionAlternates(
           collection: target.versionKey,
           version: target.version!,
           slug: coordinate,
-          url: toBrowserHref(path),
+          url: toDocumentHref(path),
         };
         const bucket = byCoordinate.get(coordinate);
         if (bucket) bucket.push(ref);

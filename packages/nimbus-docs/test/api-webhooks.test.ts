@@ -72,7 +72,7 @@ describe("a webhook assembles the full request/response contract", () => {
     const page = hook();
     assert.equal(page.kind, "operation");
     assert.equal(page.isWebhook, true);
-    assert.equal(page.href, "/hooks/webhooks/orderCreated");
+    assert.equal(page.href, "/hooks/webhooks/orderCreated/");
   });
 
   test("its parameters are minted (not the old empty shell)", () => {

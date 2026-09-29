@@ -44,7 +44,7 @@ import {
 } from "./_internal/sidebar.js";
 import { entryRouteKey } from "./_internal/astro-slug.js";
 import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
-import { stripBase, toBrowserHref, withBase } from "./_internal/url.js";
+import { stripBase, toDocumentHref, withBase } from "./_internal/url.js";
 import {
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
@@ -164,6 +164,8 @@ export async function getEntryMarkdown(
 ): Promise<string> {
   const { loadCitationIndex } =
     await import("./_internal/api/load-citation-index.js");
+  // Loading the config sets the link policy, so citations get Astro's URL shape.
+  await loadNimbusConfig();
   return renderEntryAsMarkdown(entry, {
     ...options,
     citationIndex: await loadCitationIndex(),
@@ -1609,7 +1611,7 @@ export async function getApiVersions(
     status: t.status,
     hidden: t.hidden,
     // Trailing-slashed; a bare `/family/v2` would 307-redirect under directory builds.
-    url: toBrowserHref(t.mountPath),
+    url: toDocumentHref(t.mountPath),
   }));
 }
 

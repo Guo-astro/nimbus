@@ -53,6 +53,7 @@ import {
   type JsonValue,
 } from "./api-view-types.js";
 import { renderMarkdown } from "../../markdown/render.js";
+import { toDocumentHref } from "../url.js";
 
 export * from "./api-view-types.js";
 
@@ -97,7 +98,12 @@ class ModelView {
     return this.apiFacts?.securitySchemes?.[name];
   }
 
+  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`. */
   href(coordinate: Coordinate): string {
+    return toDocumentHref(this.routePath(coordinate));
+  }
+
+  private routePath(coordinate: Coordinate): string {
     const slug = this.model.pages.slugs.get(coordinate);
     const base = this.model.mountPath ?? `/${this.model.collection}`;
     if (slug === undefined || slug === "") return base;
@@ -111,7 +117,7 @@ class ModelView {
   }
 
   markdownHref(coordinate: Coordinate): string {
-    return `${this.href(coordinate)}/index.md`;
+    return `${this.routePath(coordinate)}/index.md`;
   }
 }
 
@@ -790,8 +796,7 @@ function projectNavBase(model: DocsModel): ApiNavItem[] {
     // Nav-only grouping nodes (x-tagGroups categories) carry no page, so they
     // get no href — the row renders as a disclosure header, not a link.
     if (view.hasPage(nav.coordinate)) {
-      const href = view.href(nav.coordinate);
-      item.href = href.endsWith("/") ? href : `${href}/`;
+      item.href = view.href(nav.coordinate);
     }
     if (node?.facts.kind === "operation") {
       const method = protocolString(node.facts.protocol, "method");

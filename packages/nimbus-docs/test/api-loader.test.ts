@@ -330,16 +330,17 @@ describe("apiCollection loader — output-aware index", () => {
 
   test("thin API Markdown uses page props, not the highlighted HTML projection", async () => {
     // `runtime.ts` reads this global once at module load, and resolves
-    // `virtual:nimbus/config` lazily, so both are stubbed before importing it.
+    // `virtual:nimbus/config` and `astro:config/client` lazily, so all are
+    // stubbed before importing it.
+    const stubs: Record<string, string> = {
+      "virtual:nimbus/config": `export const apiCollections = ["api"];`,
+      "astro:config/client": `export const trailingSlash = "ignore"; export const build = { format: "directory" };`,
+    };
     const hooks = registerHooks({
       resolve(specifier, context, nextResolve) {
-        if (specifier !== "virtual:nimbus/config") {
-          return nextResolve(specifier, context);
-        }
-        return {
-          url: `data:text/javascript,export const apiCollections = ["api"];`,
-          shortCircuit: true,
-        };
+        const stub = stubs[specifier];
+        if (stub === undefined) return nextResolve(specifier, context);
+        return { url: `data:text/javascript,${stub}`, shortCircuit: true };
       },
     });
     const thinGlobal = globalThis as { __NIMBUS_THIN_API_ENTRIES__?: boolean };
@@ -443,7 +444,7 @@ describe("canonical routing — one URL per page, no duplicate or /index alias",
   test("the root's Markdown version lives at <root>/index.md without minting an HTML /index route", () => {
     const root = getApiPageSlugs(smallco).find((s) => s.slug === "")!;
     const props = getApiPageProps(smallco, root.coordinate);
-    assert.equal(props.markdownHref, `${props.href}/index.md`);
+    assert.equal(props.markdownHref, `${props.href}index.md`);
   });
 });
 

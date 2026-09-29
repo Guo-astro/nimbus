@@ -19,7 +19,13 @@
 import * as p from "@clack/prompts";
 import mri from "mri";
 import { scaffold, ScaffoldError } from "./scaffold.js";
-import { getPromptResponses, ADAPTER_IDS, type AdapterId } from "./prompts.js";
+import {
+  getPromptResponses,
+  ADAPTER_IDS,
+  type AdapterId,
+  type ContentMode,
+  type PackageManager,
+} from "./prompts.js";
 
 /** Print a one-line message and exit nonzero — never leak a raw stack. */
 function die(message: string): never {
@@ -92,6 +98,18 @@ const adapter = args.adapter as string | undefined;
 if (adapter !== undefined && !ADAPTER_IDS.includes(adapter as AdapterId)) {
   die(`Unknown adapter "${adapter}". Expected one of: ${ADAPTER_IDS.join(", ")}.`);
 }
+const CONTENT_MODES = ["starter", "empty"] as const;
+const content = args.content as string | undefined;
+if (content !== undefined && !CONTENT_MODES.includes(content as ContentMode)) {
+  die(`Unknown content "${content}". Expected one of: ${CONTENT_MODES.join(", ")}.`);
+}
+
+const PACKAGE_MANAGERS = ["npm", "pnpm", "yarn", "bun"] as const;
+const packageManager = args["package-manager"] as string | undefined;
+if (packageManager !== undefined && !PACKAGE_MANAGERS.includes(packageManager as PackageManager)) {
+  die(`Unknown package manager "${packageManager}". Expected one of: ${PACKAGE_MANAGERS.join(", ")}.`);
+}
+
 // `--adapter` selects server output, which owns its target; a `--deploy`
 // alongside it has no lane to apply to and is ignored.
 if (adapter !== undefined && deploy !== undefined) {
@@ -104,13 +122,8 @@ const responses = await getPromptResponses({
   skipInstall: args["skip-install"],
   deploy: deploy as "cloudflare" | "other" | undefined,
   adapter: adapter as AdapterId | undefined,
-  content: args.content as "starter" | "empty" | undefined,
-  packageManager: args["package-manager"] as
-    | "npm"
-    | "pnpm"
-    | "yarn"
-    | "bun"
-    | undefined,
+  content: content as ContentMode | undefined,
+  packageManager: packageManager as PackageManager | undefined,
   git: args.git,
 });
 

@@ -144,7 +144,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   if (opts.adapter) return { ...base, output: "server", adapter: opts.adapter };
   if (opts.deploy) return { ...base, output: "static", deploy: opts.deploy };
 
-  const output = (await ask("Output mode?", "--deploy or --adapter", () =>
+  const output = (await ask("Output mode?", "--deploy cloudflare|other (static) or --adapter cloudflare (server)", () =>
     p.select({
       message: "Output mode?",
       options: [

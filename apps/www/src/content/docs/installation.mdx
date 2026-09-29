@@ -23,7 +23,7 @@ The scaffolder asks:
 
 <Steps>
   <Step title="Directory">
-    Where to create the project.
+    Where to create the project. Pass it as the first argument, such as `my-docs`.
   </Step>
   <Step title="Starter content">
     **Getting started guide + example pages**, or **Empty**, just the shell for your own content. Flag: `--content starter|empty`.
@@ -35,7 +35,7 @@ The scaffolder asks:
     Whether to initialize a repository. Flag: `--git` or `--no-git`.
   </Step>
   <Step title="Output mode">
-    **Static** prerenders every content collection route and deploys anywhere. **Server** renders those routes on request. You can override individual collections later.
+    **Static** prerenders every content collection route and deploys anywhere. **Server** renders those routes on request. You can override individual collections later. Flag: `--deploy` chooses static, `--adapter` chooses server.
   </Step>
   <Step title="Deploy target or adapter">
     Static output asks for a deploy target: Cloudflare or another static host (flag: `--deploy cloudflare|other`). Server output offers Cloudflare; the `--adapter` flag also accepts `vercel`, `netlify`, and `node`.
@@ -43,6 +43,12 @@ The scaffolder asks:
 </Steps>
 
 Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, pass `--yes` or a flag for every question. Pass `--help` to list every flag.
+
+With npm, put `--` before the arguments, or npm keeps the flags for itself:
+
+```sh
+npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
+```
 
 ## What lands in your repo
 

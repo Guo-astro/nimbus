@@ -125,7 +125,7 @@ const EXCLUDED_TEMPLATE_ENTRIES = new Set([
 const PACKAGE_MANAGER_FILES = {
   npm: ["package-lock.json"],
   pnpm: ["pnpm-lock.yaml", "pnpm-workspace.yaml"],
-  yarn: ["yarn.lock"],
+  yarn: ["yarn.lock", ".yarnrc.yml"],
   bun: ["bun.lock", "bun.lockb"],
 } as const;
 
@@ -567,6 +567,10 @@ function normalizePackageManagerFiles(
       rmSync(join(dir, file), { force: true });
     }
   }
+  // Yarn 2+ defaults to Plug'n'Play, which Astro's Vite plugins can't resolve
+  // peers under. Yarn 1 ignores the file.
+  const yarnrc = join(dir, ".yarnrc.yml");
+  if (packageManager === "yarn" && !existsSync(yarnrc)) writeFileSync(yarnrc, "nodeLinker: node-modules\n");
 
   const dotGitignorePath = join(dir, ".gitignore");
   const shippedGitignorePath = join(dir, "gitignore");

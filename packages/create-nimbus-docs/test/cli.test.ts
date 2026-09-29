@@ -51,3 +51,28 @@ test("without a terminal, flags that answer every prompt need no --yes", () => {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("unknown --content and --package-manager values are rejected before scaffolding", () => {
+  for (const [flag, value, expected] of [
+    ["--content", "Starter", /Unknown content "Starter"\. Expected one of: starter, empty\./],
+    ["--package-manager", "pnmp", /Unknown package manager "pnmp"\. Expected one of: npm, pnpm, yarn, bun\./],
+  ] as const) {
+    const { cwd, output, status } = scaffoldWithoutTerminal(["site", "--yes", "--skip-install", flag, value]);
+    try {
+      assert.equal(status, 1, output);
+      assert.match(output, expected);
+      assert.equal(existsSync(join(cwd, "site")), false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test("without a terminal, the output-mode question names both answers", () => {
+  const { cwd, output } = scaffoldWithoutTerminal(["site", "--content", "empty", "--package-manager", "npm", "--no-git"]);
+  try {
+    assert.match(output, /Pass --deploy cloudflare\|other \(static\) or --adapter cloudflare \(server\) to answer it/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});

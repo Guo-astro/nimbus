@@ -44,7 +44,7 @@ import {
 } from "./_internal/sidebar.js";
 import { entryRouteKey } from "./_internal/astro-slug.js";
 import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
-import { stripBase, toBrowserHref, withBase } from "./_internal/url.js";
+import { stripBase, toDocumentHref, withBase } from "./_internal/url.js";
 import {
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
@@ -1611,7 +1611,7 @@ export async function getApiVersions(
     status: t.status,
     hidden: t.hidden,
     // Trailing-slashed; a bare `/family/v2` would 307-redirect under directory builds.
-    url: toBrowserHref(t.mountPath),
+    url: toDocumentHref(t.mountPath),
   }));
 }
 

@@ -1,6 +1,6 @@
 import type { Breadcrumb, PrevNext, PrevNextOverrides, SidebarItem } from "../types.js";
 import { findActivePath, flattenSidebar } from "./sidebar.js";
-import { safeDecode, toBrowserHref, toRouteKey } from "./url.js";
+import { safeDecode, toBrowserHref, toDocumentHref, toRouteKey } from "./url.js";
 
 export type { Breadcrumb, PrevNext, PrevNextOverrides };
 
@@ -108,7 +108,7 @@ export function breadcrumbsFromUrl(slug: string, homeLabel = "Home"): Breadcrumb
   for (const part of parts) {
     path += `/${part}`;
     const label = safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    crumbs.push({ label, href: toBrowserHref(path) });
+    crumbs.push({ label, href: toDocumentHref(path) });
   }
 
   return crumbs;

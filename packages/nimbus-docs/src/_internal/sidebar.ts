@@ -25,7 +25,7 @@ import type {
 } from "../types.js";
 import { entryRouteUrl } from "./astro-slug.js";
 import { runtimeWarn } from "./runtime-warn.js";
-import { isAbsoluteUrl, toBrowserHref, toRouteKey } from "./url.js";
+import { isAbsoluteUrl, toBrowserHref, toDocumentHref, toRouteKey } from "./url.js";
 
 /** Minimal shape needed from content entries */
 interface CollectionEntry {
@@ -134,13 +134,13 @@ function buildEntryIndex(entries: CollectionEntry[]) {
 /**
  * Compose a final href for an entry. `hrefPrefix` is the collection mount
  * path (e.g. `/api`). `entryId` is a final `entry.id`, so it uses
- * `entryRouteUrl` (no re-slug — see astro-slug.ts), then `toBrowserHref`
+ * `entryRouteUrl` (no re-slug — see astro-slug.ts), then `toDocumentHref`
  * for the trailing-slash form static hosts serve directly.
  */
 function joinHref(hrefPrefix: string, entryId: string): string {
   // Drop a trailing slash on the prefix to avoid `/api//foo`.
   const prefix = hrefPrefix.replace(/\/$/, "");
-  return toBrowserHref(entryRouteUrl(prefix, entryId));
+  return toDocumentHref(entryRouteUrl(prefix, entryId));
 }
 
 function createLink(
@@ -556,7 +556,7 @@ function resolveConfigItems(
           // first-link behavior (see comment on `groupPrefix` above).
           if (!isPrimary && prefix !== "") {
             groupPrefix = prefix;
-            autoRouteKey = toBrowserHref(prefix);
+            autoRouteKey = toDocumentHref(prefix);
           }
         }
       } else {
@@ -624,12 +624,12 @@ function resolveConfigItems(
       if (segment !== undefined) {
         group.segment = segment;
         // Boundary key (see `_routeKey`); normalize `ai` / `/ai` → `/ai/`.
-        group._routeKey = toBrowserHref(
+        group._routeKey = toDocumentHref(
           segment.startsWith("/") ? segment : `/${segment}`,
         );
       }
       if (landing !== undefined) {
-        group.indexHref = toBrowserHref(landing);
+        group.indexHref = toDocumentHref(landing);
         group.indexIsCurrent =
           toRouteKey(currentPath) === toRouteKey(landing) || undefined;
       }
@@ -1034,9 +1034,9 @@ export function deriveSidebarSections(
       {
         label: item.label,
         // `_prefix` is the collection's mount path (e.g. `/components`).
-        // Run through `toBrowserHref` so section tabs link directly to
+        // Run through `toDocumentHref` so section tabs link directly to
         // the trailing-slash URL static hosts serve.
-        href: toBrowserHref(item._prefix),
+        href: toDocumentHref(item._prefix),
         // Active when the current path lives anywhere in this section.
         // Computed from the path (not baked `isCurrent`) so this works on
         // the frozen, unmarked tree; `subtreeContainsPath` carries the

@@ -507,6 +507,43 @@ if (LANE === "node") {
   ok("final Astro content IDs block custom route collisions");
 }
 
+if (LANE === "static") {
+  // Non-default URL shapes, last because they change dist/'s layout. With a
+  // base and `build.format: "file"` (no trailing slashes), Astro's pathnames
+  // end in `.html` but no link or canonical may; with `trailingSlash:
+  // "always"`, every page link needs the slash.
+  const { JSDOM } = createRequire(join(ROOT, "packages", "nimbus-docs", "package.json"))("jsdom");
+  const configPath = join(site, "astro.config.ts");
+  const config = readFileSync(configPath, "utf8");
+  const buildWith = (options) => {
+    writeFileSync(configPath, config.replace('output: "static",', `output: "static",\n  ${options}`));
+    run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  };
+  const read = (file) => new JSDOM(readFileSync(join(site, "dist", file), "utf8")).window.document;
+  const hrefs = (document, selector) => [...document.querySelectorAll(selector)].map((node) => node.getAttribute("href"));
+
+  buildWith(`base: "/docs", trailingSlash: "never", build: { format: "file" },`);
+  const home = read("index.html");
+  assert.deepEqual(hrefs(home, 'link[rel="canonical"]'), ["https://example.com/docs"]);
+  assert.equal(home.querySelector('meta[property="og:type"]')?.getAttribute("content"), "website");
+  const page = read("getting-started.html");
+  assert.deepEqual(hrefs(page, 'link[rel="canonical"]'), ["https://example.com/docs/getting-started"]);
+  assert.equal(page.querySelector('meta[property="og:url"]')?.getAttribute("content"), "https://example.com/docs/getting-started");
+  assert.ok(hrefs(page, 'a[aria-current="page"]').includes("/docs/getting-started"), "the sidebar marks the current page");
+  assert.deepEqual(hrefs(page, 'nav[aria-label="Pagination"] a'), ["/docs/welcome", "/docs/components"]);
+  const breadcrumb = page.querySelector('nav[aria-label="Breadcrumb"]');
+  assert.ok(breadcrumb, "the page has breadcrumbs");
+  assert.doesNotMatch(breadcrumb.textContent, /\.html/i);
+  assert.equal(hrefs(breadcrumb, "a")[0], "/docs", "the Home crumb matches the home canonical");
+  assert.equal(hrefs(page, "header a")[0], "/docs", "the header Home link matches the home canonical");
+
+  buildWith(`base: "/docs", trailingSlash: "always",`);
+  const slashedHome = read("index.html");
+  assert.deepEqual(hrefs(slashedHome, "main a"), ["/docs/welcome/", "/docs/getting-started/", "/docs/components/"]);
+  assert.equal(hrefs(slashedHome, "header a")[0], "/docs/");
+  ok("a base with build.format: \"file\" or trailingSlash: \"always\" keeps links, nav, and canonicals on real routes");
+}
+
 const installed = JSON.parse(
   readFileSync(join(site, "node_modules", NIMBUS_NAME, "package.json"), "utf8"),
 );

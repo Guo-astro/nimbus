@@ -1,5 +1,80 @@
 # @cloudflare/nimbus-docs
 
+## 0.15.1
+
+### Patch Changes
+
+- [#177](https://github.com/cloudflare/nimbus/pull/177) [`adb8efe`](https://github.com/cloudflare/nimbus/commit/adb8efe86094b0a8b7f00df1805edc3e2a8b04d5) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Add the `copy-prompt` registry component. Run `nimbus-docs add copy-prompt` to install `CopyPrompt`, a one-line prompt with a **Copy prompt** button for readers to paste into an AI coding agent. New sites don't include it by default.
+
+- [#171](https://github.com/cloudflare/nimbus/pull/171) [`41376dd`](https://github.com/cloudflare/nimbus/commit/41376dd5bf85355170ee2591b70beca6d7a3d228) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Fix upgrade checks and CLI guidance.
+
+  **Behavior changes**
+
+  - `nimbus-docs check` warns about the placeholder `site` instead of exiting `1`, matching the build. A CI job that relied on `check` failing for an unset `site` needs its own check.
+  - `migrate --dry-run` and `migrate --json` report `passed` and exit `0` when no migrations or required reviews remain and a baseline is recorded, including when no entries fall between the recorded and installed versions.
+
+  **Upgrades**
+
+  - Sites upgrading from before 0.13.0 with a custom loader on a collection Nimbus indexes now see the 0.13.0 `withNimbusMarkdown()` requirement in `migrate` and `outdated`.
+  - `outdated --json` adds `summary.requiredPackageApis`, the required subset of `summary.packageApis`, and a `warnings` array. It warns when the compared starter needs a newer package than the project has, which also blocks `diff --apply`.
+  - `outdated` and `migrate` use the same terms: migrations and upgrade reviews. `migrate` prints each outcome once, and declining its record prompt says how to record the baseline later.
+
+  **CLI**
+
+  - Upgrade and migrate hints, and the build errors that point at `migrate` or `init`, print a runnable command instead of a raw Node path or a bare `nimbus-docs`. pnpm and Yarn projects that declare the package get the local bin, such as `pnpm nimbus-docs migrate`. With `--cwd`, the command runs from the current directory and pins the project's Nimbus version, such as `npx @cloudflare/nimbus-docs@0.15.1 migrate --cwd 'site' --yes`.
+  - After `check --fix` without a terminal, the hint says what the remaining fixes need: a terminal for prompts, or `--yes` for installs.
+  - `check` lists what it skipped when the `api` config or the rendering policy isn't a plain literal, or when `src/content.config.ts` is missing.
+  - `lint --help` lists the lint rules and the `--color` and `--no-color` flags.
+  - `add` suggests registering only the component you asked for in `src/components.ts`, not its dependencies.
+
+  **Cloudflare**
+
+  - `add adapter-cloudflare` installs `@astrojs/cloudflare` 14.3, which fixes a crash on the first `astro dev` with a cold cache ("Dev server process exited before becoming ready"). Existing sites can upgrade with `pnpm add @astrojs/cloudflare@~14.3.0`.
+  - `add adapter-cloudflare` names the policy it adds: `rendering: { default: "request" }`, which renders every collection on request. To render only API pages on request, set that policy before running the installer, which keeps an existing policy.
+
+- [#178](https://github.com/cloudflare/nimbus/pull/178) [`fd53431`](https://github.com/cloudflare/nimbus/commit/fd5343134338ddd632a36febce6a7a14772f8ea0) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - **Behavior changes**
+
+  - The duplicate-route check uses a page's frontmatter `slug`, so `a.mdx` with `slug: b` next to `b.mdx` now fails the build, as other duplicate routes do. Before, the collision went unreported and Astro served one of the two pages.
+  - `withBase("/", base)` returns the base without a trailing slash, such as `/docs`, when page URLs have none: under `trailingSlash: "never"`, or `build.format: "file"` with `"ignore"`. Code that appends to the result or compares it with `/docs/` needs updating.
+
+  **`check` and `init`**
+
+  - `check` warns when an installed Astro adapter is outside the range Nimbus supports, such as `@astrojs/cloudflare` 14.1, with the command that installs a supported version. It doesn't change the version itself.
+  - On a PR preview, `check` says which release to pass to `migrate --from` once you install a release, instead of repeating "run a build, then check again".
+  - `init --force` rebuilds only the component and install records. It keeps the rest of a valid `nimbus.json`: the reviewed baseline, the starter version and variant, a preview's record, and the server-output opt-in. Before, it reset them, which brought back the "no reviewed upgrade baseline" build failure.
+
+  **`build.format: "file"` and `base`**
+
+  - With `build.format: "file"`, canonical URLs and `og:url` no longer end in `.html`, pages get previous and next links, the sidebar marks the current page, and breadcrumbs show page titles instead of "Welcome.Html".
+  - With a `base` and no trailing slashes, the home link, "Home" breadcrumb, and 404 page link to `/docs`, matching the home page's canonical URL, instead of `/docs/`.
+
+  **Routes and Markdown**
+
+  - In per-page `.md` files and `llms-full.txt`, a code block in a nested list item stays in the item, so the text after it no longer turns into code, and a code block in a numbered item no longer splits the list.
+  - The version switcher and missing-page redirects find pages in folders with dots, such as `1.2.3/`, without a `slug`, and section index pages such as `guides/index.mdx`. A `previousSlug` written as a file path, such as `guides/index`, names the section's page.
+
+- [#172](https://github.com/cloudflare/nimbus/pull/172) [`6637381`](https://github.com/cloudflare/nimbus/commit/6637381ee43a39672fadc040dbe33aecf637393d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Make generated links, the sitemap, and Markdown output follow the site config.
+
+  **Behavior changes**
+
+  - Under the default `trailingSlash: "ignore"`, `api.ref` citation links now end in `/`, like sidebar links and the canonical URL, in pages, per-page `.md` files, and `llms-full.txt`.
+  - With `trailingSlash: "ignore"` and `build.format: "file"` or `"preserve"`, generated links no longer end in `/`, so they reach the pages Astro builds.
+
+  **Links, sitemap, and routes**
+
+  - Sidebar, navigation, breadcrumb, pagination, and citation links, and the API reference's sidebar, breadcrumbs, and type links, follow Astro's `trailingSlash` and `build.format`. Under `"never"` they drop the slash, and API links no longer 404 under `"always"` or `"never"`. With the default `build.format`, they match the canonical URL.
+  - `noindex: true` pages are left out of the sitemap on sites without `base`, as they already were with `base`.
+  - The docs schema accepts Astro's `slug` frontmatter field, so a page in a `1.2.3/` folder can keep its dots: `slug: 1.2.3/setup` serves it at `/1.2.3/setup/`. The version switcher and missing-page redirects use the `slug` too.
+  - API pages no longer return 500 ("missing prepared page data") in `astro dev` after the Astro config switches to server output while the dev server is running, for example after `add adapter-cloudflare`.
+
+  **Generated Markdown**
+
+  - Per-page `.md` files and `llms-full.txt` keep the indentation of code blocks in MDX pages, so YAML and Python keep their meaning. Code inside `<Aside>` gets the `> ` prefix on every line.
+  - A citation inside a longer fence, such as a ```` fence that shows a ``example, stays literal, as does one in a fence opened on a list-item line (`-``yaml`). That fence also stays inside its list item in the Markdown output.
+  - `<PackageManagers>` Markdown includes the package for every `type` and matches the HTML commands. `type="dlx" pkg="@cloudflare/nimbus-docs" args="list"` now renders `npx @cloudflare/nimbus-docs list` instead of `npx list`.
+
+- [#170](https://github.com/cloudflare/nimbus/pull/170) [`ae346f0`](https://github.com/cloudflare/nimbus/commit/ae346f060e98db1320352703998fbdfd10eb8dcb) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Prerelease versions, such as the PR previews published to pkg.pr.new, select the upgrade entries of the release they preview. Two prereleases of the same release no longer count as newer than each other, so recording one and installing another doesn't fail the build.
+
 ## 0.15.0
 
 ### Minor Changes

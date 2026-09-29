@@ -1,5 +1,40 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.7.8
+
+### Patch Changes
+
+- [#176](https://github.com/cloudflare/nimbus/pull/176) [`3b3d33f`](https://github.com/cloudflare/nimbus/commit/3b3d33fd2c1bcc0c07e707af678c074e12132a25) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - New Cloudflare server sites install `@astrojs/cloudflare` 14.3, which fixes a crash on the first `astro dev` with a cold cache ("Dev server process exited before becoming ready").
+
+- [#177](https://github.com/cloudflare/nimbus/pull/177) [`adb8efe`](https://github.com/cloudflare/nimbus/commit/adb8efe86094b0a8b7f00df1805edc3e2a8b04d5) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Add the `copy-prompt` registry component. Run `nimbus-docs add copy-prompt` to install `CopyPrompt`, a one-line prompt with a **Copy prompt** button for readers to paste into an AI coding agent. New sites don't include it by default.
+
+- [#173](https://github.com/cloudflare/nimbus/pull/173) [`60d0af3`](https://github.com/cloudflare/nimbus/commit/60d0af3e7b9e178549aea2314b1aae0f5656b28d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Templates used without the scaffolder include `nimbus.json` with the reviewed Nimbus version, so their builds no longer fail with "Nimbus has no reviewed upgrade baseline".
+  - npm, yarn, and bun sites no longer include `pnpm-workspace.yaml`.
+  - Yarn sites get a `.yarnrc.yml` with `nodeLinker: node-modules`. Before, Yarn 2+ installed in Plug'n'Play mode, and the site failed to build or start the dev server.
+  - Unknown `--content` and `--package-manager` values are rejected with the valid choices. Before, a typo such as `--package-manager pnmp` scaffolded a site with no install and still printed "Done".
+  - Without a terminal, the scaffolder lists every question it can't ask, each with the flag that answers it, and suggests `--yes`, instead of failing with `uv_tty_init returned EINVAL`. Flags that answer every question, including `--git` or `--no-git`, work without `--yes`.
+  - The starter's `AGENT.md` points at the `Icon` component the starter uses, `@cloudflare/nimbus-docs/components/Icon.astro`, instead of `astro-icon`, and at `@cloudflare/nimbus-docs/content` for the docs schema. Its commands use `npx @cloudflare/nimbus-docs`, which runs the project's installed version with any package manager.
+  - The starter's Getting Started page shows the create command.
+
+- [#178](https://github.com/cloudflare/nimbus/pull/178) [`7d606e3`](https://github.com/cloudflare/nimbus/commit/7d606e3237907d632c525c61f20b4747405cafe2) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - **Behavior changes**
+
+  - A failed dependency install exits `1`. The scaffolder keeps the project and prints the commands that finish the setup. Before, it printed "Done" and exited `0`, so CI treated the site as ready.
+  - Unknown flags, such as `--output server`, stop the scaffolder with the list of valid flags. Before, they were ignored and the site was scaffolded without them.
+  - `--git` with `--no-git`, and `--deploy` with `--adapter`, stop the scaffolder. Before, `--no-git` won and `--deploy` was ignored with a warning.
+  - A second directory argument stops the scaffolder. A leading `--`, as pnpm passes it through, is accepted, so `pnpm dlx … -- my-docs --yes` no longer ignores `--yes`.
+
+  **First run**
+
+  - `yarn dlx` with Yarn 2+ can scaffold from a PR preview. Yarn now extracts the package instead of keeping it in a zip, where the preview's bundled templates couldn't be read.
+  - Pressing Enter at the directory prompt uses `my-docs`, as shown. Before, it failed with "Directory is required".
+  - bun's install output no longer shows in the scaffolder's output, and "Next steps" no longer has an empty line where the install command would be. An install's own output shows only when it fails.
+  - The empty starter ships one home page, `src/content/docs/index.mdx`, so its first `nimbus-docs check` no longer warns about a duplicate route at `/`. Before, a landing page shadowed it and linked to pages the empty starter doesn't have.
+  - The starter's home page links to its pages through their entries, so the links follow `trailingSlash` and a card whose page you delete disappears instead of linking to a 404.
+  - The starter's `AGENT.md` says to set `site` before running `check` in a loop, and ends the loop when only fixes that need input remain, so an agent no longer loops on the placeholder `site`. It also says components can be imported in the `.mdx` file that uses them instead of registered.
+
+- Updated dependencies [[`adb8efe`](https://github.com/cloudflare/nimbus/commit/adb8efe86094b0a8b7f00df1805edc3e2a8b04d5), [`41376dd`](https://github.com/cloudflare/nimbus/commit/41376dd5bf85355170ee2591b70beca6d7a3d228), [`fd53431`](https://github.com/cloudflare/nimbus/commit/fd5343134338ddd632a36febce6a7a14772f8ea0), [`6637381`](https://github.com/cloudflare/nimbus/commit/6637381ee43a39672fadc040dbe33aecf637393d), [`ae346f0`](https://github.com/cloudflare/nimbus/commit/ae346f060e98db1320352703998fbdfd10eb8dcb)]:
+  - @cloudflare/nimbus-docs@0.15.1
+
 ## 0.7.7
 
 ### Patch Changes

@@ -13,11 +13,11 @@ A page is a `.md` or `.mdx` file under `src/content/docs/`. Its path on disk is 
 
 | File | URL |
 |---|---|
-| `src/content/docs/get-started.mdx` | `/get-started` |
-| `src/content/docs/guides/styling.mdx` | `/guides/styling` |
-| `src/content/docs/guides/index.mdx` | `/guides` |
+| `src/content/docs/get-started.mdx` | `/get-started/` |
+| `src/content/docs/guides/styling.mdx` | `/guides/styling/` |
+| `src/content/docs/guides/index.mdx` | `/guides/` |
 
-Slugs are lowercased and folder `index` files collapse to the directory URL. A directory's `index.mdx` becomes the landing page for that section.
+The URLs end in a slash with Astro's default `trailingSlash` and `build.format`; see [Links and trailing slashes](/configuration#links-and-trailing-slashes). Slugs are lowercased and folder `index` files collapse to the directory URL. A directory's `index.mdx` becomes the landing page for that section.
 
 <FileTree>
 - src/content/docs/
@@ -135,7 +135,7 @@ Nimbus rejects ambiguous or unsafe generated routes during the build. Common cau
 | `sourceUrl` | `/blog/welcome/index.mdx` | The page's authored source. `undefined` for entries without an authored body. |
 | `ogImageUrl` | `/og/blog/welcome.png` | The page's generated OG card. `/og/index.png` for the site root, `/og/blog.png` for the root of a collection mounted at `/blog`. |
 
-The URLs follow the entry ID. Astro's glob loader slugifies file paths, which drops dots: `src/content/docs/1.1.1.1/encryption.mdx` gets the ID `1111/encryption`. Dots are kept where Astro doesn't slugify: a version prefix (`/v1.2/guide/`), an API operation (`payment.succeeded`), or a `slug` frontmatter field, which Astro uses as the ID. To allow `slug`, add it with `schemaFields: { slug: z.string().optional() }`.
+The URLs follow the entry ID. Astro's glob loader slugifies file paths, which drops dots: `src/content/docs/1.1.1.1/encryption.mdx` gets the ID `1111/encryption`. Dots are kept where Astro doesn't slugify: a version prefix (`/v1.2/guide/`), an API operation (`payment.succeeded`), or a `slug` frontmatter field, which Astro uses as the ID. `docsCollection()` accepts `slug` without any schema change.
 
 Each URL is site-relative, without Astro's deployment base; the starter's layouts add the base when they emit it. The starter's page route uses the URLs directly:
 

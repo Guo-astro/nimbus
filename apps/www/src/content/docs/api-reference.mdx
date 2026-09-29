@@ -22,7 +22,7 @@ Run the API reference recipe from the project root inside your coding agent:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add api-reference" />
 
-Nimbus passes the recipe directly to detected coding agents. From a regular shell, add `--print` and pass the output to your coding agent. The recipe reviews its plan before changing files.
+Nimbus passes the recipe directly to detected coding agents. From a regular shell, add `--print` and pass the output to your coding agent. Without `--print` and outside a detected agent, the command changes no files and prints nothing on standard output, with or without a terminal: it writes instructions for piping the recipe to an agent to standard error. Scripts should pass `--print`. The recipe reviews its plan before changing files.
 
 The recipe tells the agent to inspect your project, ask for the specification path and collection name, and then:
 
@@ -246,6 +246,8 @@ Then run the Cloudflare adapter installer. It keeps an existing rendering policy
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare" />
 
+Astro then logs "getStaticPaths() ignored in dynamic page" for the request-rendered API route. The warning is expected; see [Mix build and request rendering](/configuration#mix-build-and-request-rendering).
+
 The recipe's API catch-all uses Nimbus runtime helpers to resolve either mode. Request rendering changes the canonical HTML pages only. Alternate Markdown versions, coordinate data, search records, sitemaps, and `llms.txt` indexes remain build products, and requests consume prepared content entries rather than parsing the OpenAPI document.
 
 #### Prepared code examples
@@ -311,6 +313,8 @@ apiReferences: [
 `collection` must match the collection key published by the remote manifest. `origin` is the absolute prefix prepended to site-relative manifest paths. Include the deployment base when the remote reference is hosted below one, for example `https://api.example.com/docs`.
 
 The remote collection then uses the same prose syntax: `api.ref:api:retrieveEvent`. Remote references provide citation targets only; they do not add the remote pages to local search or agent outputs.
+
+The manifest lists each page's path without a trailing slash, and it doesn't record the remote site's `trailingSlash`. With `origin`, citations use the path as listed, so on a remote site that serves `/api/retrieve-event/`, a citation links to `/api/retrieve-event`, which that site may redirect or answer with 404. Without `origin`, the paths stay site-relative and take this site's trailing-slash shape, which is right only when both sites use the same `trailingSlash` and `build.format`. Check a citation against the remote site before relying on it.
 
 Nimbus fetches HTTPS manifests during the build. An unavailable or malformed remote manifest produces warnings and its citations resolve to `#`; it does not stop the build. You can instead commit a manifest and use a project-relative path when builds must work offline. An unreadable local manifest, invalid JSON, or invalid top-level shape fails the build; malformed entries inside an otherwise valid manifest are warned and ignored.
 

@@ -231,11 +231,11 @@ describe("mountPath drives nested hrefs without moving coordinates", () => {
       mountPath: "/core/v1",
     });
 
-    assert.equal(getApiPageProps(def, "create").href, "/core/charges/create");
-    assert.equal(getApiPageProps(v1, "create").href, "/core/v1/charges/create");
+    assert.equal(getApiPageProps(def, "create").href, "/core/charges/create/");
+    assert.equal(getApiPageProps(v1, "create").href, "/core/v1/charges/create/");
     // Root nests too.
-    assert.equal(getApiPageProps(def, "core").href, "/core");
-    assert.equal(getApiPageProps(v1, "core").href, "/core/v1");
+    assert.equal(getApiPageProps(def, "core").href, "/core/");
+    assert.equal(getApiPageProps(v1, "core").href, "/core/v1/");
   });
 
   test("coordinates are byte-identical across mounts (M1 — enables cross-version linking)", async () => {

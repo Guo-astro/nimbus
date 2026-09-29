@@ -49,7 +49,9 @@ interface MarkdownEntry {
   filePath?: string;
 }
 
-const QUOTE_PREFIX = /^[ \t]*(?:>[ \t]*)+$/;
+// A fence's container before its token: `>` markers and list markers.
+const CONTAINER_PREFIX = /^(?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])[ \t]))+[ \t]*$/;
+const LIST_MARKER = /(?:[-*+]|\d{1,9}[.)])(?=[ \t])/g;
 
 function protectFences(
   markdown: string,
@@ -91,10 +93,12 @@ function protectCode(markdown: string): {
         (_match, index: string, offset: number, whole: string) => {
           const chunk = protectedChunks[Number(index)] ?? "";
           const before = whole.slice(whole.lastIndexOf("\n", offset) + 1, offset);
-          if (!QUOTE_PREFIX.test(before)) return chunk;
-          const blank = before.trimEnd();
+          if (!CONTAINER_PREFIX.test(before)) return chunk;
+          // Later lines keep the quote markers; a list marker becomes indentation.
+          const continuation = before.replace(LIST_MARKER, (marker) => " ".repeat(marker.length));
+          const blank = continuation.trimEnd();
           return chunk.replace(/\n([^\n\r]*)/g, (_line, text: string) =>
-            text ? `\n${before}${text}` : `\n${blank}`,
+            text ? `\n${continuation}${text}` : `\n${blank}`,
           );
         },
       );

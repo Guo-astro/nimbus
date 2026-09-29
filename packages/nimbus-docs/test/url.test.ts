@@ -9,6 +9,7 @@ import { test } from "node:test";
 
 import {
   setLinkPolicy,
+  toDocumentHref,
   stripBase,
   toBrowserHref,
   toRouteKey,
@@ -170,4 +171,21 @@ test("toBrowserHref adds a slash exactly when Astro does", (t) => {
   assert.equal(toBrowserHref("/cli/"), "/cli");
   policy("ignore", "preserve");
   assert.equal(toBrowserHref("/cli"), "/cli");
+});
+
+test("every copy of the module shares one link policy", async (t) => {
+  t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+  // A query string loads a second, separate instance, as Vite and the content layer do.
+  const copy = (await import(`../src/_internal/url.ts?copy=${Date.now()}`)) as typeof import("../src/_internal/url.js");
+  assert.notEqual(copy.toBrowserHref, toBrowserHref);
+  setLinkPolicy({ trailingSlash: "never", format: "directory" });
+  assert.equal(copy.toBrowserHref("/cli/"), "/cli");
+});
+
+test("toDocumentHref shapes a page path even when it looks like a file", (t) => {
+  t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+  assert.equal(toBrowserHref("/api/reports.list"), "/api/reports.list");
+  assert.equal(toDocumentHref("/api/reports.list"), "/api/reports.list/");
+  setLinkPolicy({ trailingSlash: "never", format: "directory" });
+  assert.equal(toDocumentHref("/api/reports.list/"), "/api/reports.list");
 });

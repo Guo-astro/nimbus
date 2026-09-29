@@ -3,11 +3,13 @@
  * passes that rewrite prose and must leave code alone. A line scanner rather
  * than a parser: it runs at request time, where the native parser isn't
  * available. It follows CommonMark for fences (backtick or tilde, a closing
- * fence at least as long as the opening one, fences indented in lists or
- * nested in `>` quotes); `code-regions.test.ts` checks it against the parser.
+ * fence at least as long as the opening one, fences in lists, on a list-item
+ * line, or nested in `>` quotes); `code-regions.test.ts` checks it against the
+ * parser.
  */
 
-const FENCE_OPEN = /^([ \t]*(?:>[ \t]*)*)(`{3,}|~{3,})([^\r]*)/;
+// The container prefix: indentation, `>` markers, and list markers (`-`, `1.`).
+const FENCE_OPEN = /^((?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])[ \t]))*[ \t]*)(`{3,}|~{3,})([^\r]*)/;
 
 export const INLINE_CODE = /`[^`\n]+`/g;
 
@@ -16,7 +18,7 @@ export interface FencedBlock {
   open: number;
   /** Line index of the closing fence. */
   close: number;
-  /** The container prefix before the opening fence: indentation and `>` markers. */
+  /** The container prefix before the opening fence: indentation, `>`, and list markers. */
   prefix: string;
 }
 
@@ -32,7 +34,7 @@ export function fencedBlocks(lines: readonly string[]): FencedBlock[] {
     if (!open || (fence[0] === "`" && info.includes("`"))) continue;
     // A closing fence may be indented up to three spaces within its container.
     const close = new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[ \\t]*\\r?$`);
-    const depth = quoteDepth(prefix);
+    const depth = prefix.split(">").length - 1;
     let end = i + 1;
     while (
       end < lines.length &&
@@ -53,8 +55,9 @@ function quoteDepth(line: string): number {
 }
 
 /**
- * Remove the opening fence's container prefix (indentation, `>` markers) from
- * a line inside the block, as CommonMark does for an indented fence.
+ * Remove the opening fence's container prefix from a line inside the block, as
+ * CommonMark does for an indented fence. A list marker's width counts as
+ * indentation, since the item's lines are indented under it.
  */
 export function stripPrefix(line: string, prefix: string): string {
   let i = 0;

@@ -25,7 +25,7 @@
 import type { ResolvedVersions } from "../types.js";
 import { entryRouteUrl } from "./astro-slug.js";
 import { PRIMARY_COLLECTION } from "./collection-mount.js";
-import { toBrowserHref } from "./url.js";
+import { toDocumentHref } from "./url.js";
 
 /**
  * Minimum-viable entry shape the table needs. Matches what
@@ -322,5 +322,5 @@ function collectionToVersion(
  */
 function pageUrl(versions: ResolvedVersions, version: string, slug: string): string {
   const prefix = version === versions.current ? "" : `/${version}`;
-  return toBrowserHref(entryRouteUrl(prefix, slug));
+  return toDocumentHref(entryRouteUrl(prefix, slug));
 }

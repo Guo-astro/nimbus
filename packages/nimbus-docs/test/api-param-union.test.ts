@@ -57,8 +57,8 @@ describe("a union parameter recovers named, linked variants", () => {
     assert.deepEqual(
       filterParam().union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/pu/schemas/ById"],
-        ["ByName", "/pu/schemas/ByName"],
+        ["ById", "/pu/schemas/ById/"],
+        ["ByName", "/pu/schemas/ByName/"],
       ],
     );
   });
@@ -104,8 +104,8 @@ components:
     assert.deepEqual(
       filter!.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/spu/schemas/ById"],
-        ["ByName", "/spu/schemas/ByName"],
+        ["ById", "/spu/schemas/ById/"],
+        ["ByName", "/spu/schemas/ByName/"],
       ],
     );
   });
@@ -154,8 +154,8 @@ components:
     assert.deepEqual(
       filter!.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/rpu/schemas/ById"],
-        ["ByName", "/rpu/schemas/ByName"],
+        ["ById", "/rpu/schemas/ById/"],
+        ["ByName", "/rpu/schemas/ByName/"],
       ],
     );
   });
@@ -163,8 +163,8 @@ components:
   test("the generated Markdown carries the union branch links", () => {
     const md = renderApiPageMarkdown(getApiPageProps(refModel, "search"));
     assert.match(md, /one of:/);
-    assert.match(md, /\[ById\]\(\/rpu\/schemas\/ById\)/);
-    assert.match(md, /\[ByName\]\(\/rpu\/schemas\/ByName\)/);
+    assert.match(md, /\[ById\]\(\/rpu\/schemas\/ById\/\)/);
+    assert.match(md, /\[ByName\]\(\/rpu\/schemas\/ByName\/\)/);
   });
 });
 
@@ -210,9 +210,9 @@ components:
   test("both bodies expose their branch links in the Markdown version", () => {
     const md = renderApiPageMarkdown(getApiPageProps(bodyModel, "pay"));
     assert.match(md, /## Request body/);
-    assert.match(md, /\[ByCard\]\(\/bpu\/schemas\/ByCard\)/);
-    assert.match(md, /\[ByBank\]\(\/bpu\/schemas\/ByBank\)/);
-    assert.match(md, /\[Accepted\]\(\/bpu\/schemas\/Accepted\)/);
-    assert.match(md, /\[Pending\]\(\/bpu\/schemas\/Pending\)/);
+    assert.match(md, /\[ByCard\]\(\/bpu\/schemas\/ByCard\/\)/);
+    assert.match(md, /\[ByBank\]\(\/bpu\/schemas\/ByBank\/\)/);
+    assert.match(md, /\[Accepted\]\(\/bpu\/schemas\/Accepted\/\)/);
+    assert.match(md, /\[Pending\]\(\/bpu\/schemas\/Pending\/\)/);
   });
 });

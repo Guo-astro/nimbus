@@ -84,8 +84,8 @@ describe("allOf folding accumulates properties and unions required", () => {
     assert.deepEqual(
       kind.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["Foo", "/allof/schemas/Foo"],
-        ["Bar", "/allof/schemas/Bar"],
+        ["Foo", "/allof/schemas/Foo/"],
+        ["Bar", "/allof/schemas/Bar/"],
       ],
     );
   });

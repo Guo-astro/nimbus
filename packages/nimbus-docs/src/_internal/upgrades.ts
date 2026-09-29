@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from "semver";
 
+import { invocation } from "../cli/pm.js";
 import rawManifest from "./upgrade-manifest.json";
 
 declare const __APP_VERSION__: string;
@@ -148,7 +149,7 @@ export function resolveUpgradeBaseline(options: {
           fromVersion,
           targetVersion,
           source: "argument",
-          error: baselineReadError(error),
+          error: baselineReadError(error, options.projectRoot),
         };
       }
     }
@@ -188,12 +189,12 @@ export function resolveUpgradeBaseline(options: {
     }
     return { fromVersion: value, targetVersion, source: "nimbus-json" };
   } catch (error) {
-    return { fromVersion: null, targetVersion, source: "nimbus-json", error: baselineReadError(error) };
+    return { fromVersion: null, targetVersion, source: "nimbus-json", error: baselineReadError(error, options.projectRoot) };
   }
 }
 
-function baselineReadError(error: unknown): string {
-  return `Could not read nimbus.json: ${errorMessage(error)}. Back up and repair the file. If its starter and registry provenance can be discarded, run \`nimbus-docs init --force\` from the affected project root to recreate it.`;
+function baselineReadError(error: unknown, projectRoot: string): string {
+  return `Could not read nimbus.json: ${errorMessage(error)}. Back up and repair the file. If its starter and registry provenance can be discarded, run \`${invocation("init --force", projectRoot)}\` from the project root to recreate it.`;
 }
 
 function hasPreviewNimbusDependency(projectRoot: string): boolean {

@@ -40,7 +40,7 @@ import { registerAgentEndpointAssetReader } from "./agent-endpoint-asset-reader.
 import {
   renderEntryAsMarkdown,
 } from "./transform.js";
-import { toBrowserHref, toRouteKey, withBase } from "./url.js";
+import { toDocumentHref, toRouteKey, withBase } from "./url.js";
 import type {
   GeneratedMarkdownComponentTransform,
   GeneratedMarkdownPartialResolver,
@@ -660,7 +660,7 @@ function preparedLlmsPage(
       entry.data.description.length > 0
         ? entry.data.description
         : undefined,
-    url: toBrowserHref(route),
+    url: toDocumentHref(route),
     markdownUrl: route === "/" ? "/index.md" : `${route}/index.md`,
     markdown,
   };

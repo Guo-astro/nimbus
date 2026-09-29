@@ -29,3 +29,37 @@ test("a frontmatter slug is the entry id, as in Astro's glob loader", async () =
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("without a slug, the entry id is the path slugified as Astro's glob loader does", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-scan-versions-"));
+  try {
+    for (const file of ["index.mdx", "1.2.3/x.mdx", "Guides/Getting Started.md", "guides/index.mdx"]) {
+      const abs = path.join(root, "src/content/docs-v1", file);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, "---\ntitle: Page\n---\n");
+    }
+    const entries = await scanVersionFrontmatter({
+      projectRoot: root,
+      versions: { others: ["v1"] } as unknown as ResolvedVersions,
+    });
+    assert.deepEqual(entries.map((entry) => entry.id).sort(), ["123/x", "guides", "guides/getting-started", "index"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a previousSlug written as an index file path names the section's entry id", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-scan-versions-"));
+  try {
+    const abs = path.join(root, "src/content/docs/setup.mdx");
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, "---\ntitle: Setup\npreviousSlug: [guides/index, install]\n---\n");
+    const entries = await scanVersionFrontmatter({
+      projectRoot: root,
+      versions: { others: [] } as unknown as ResolvedVersions,
+    });
+    assert.deepEqual(entries[0]?.previousSlug, ["guides", "install"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

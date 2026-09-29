@@ -17,9 +17,11 @@
  * a much smaller maintenance surface.
  */
 
+import fs from "node:fs";
 import path from "node:path";
 
-import { canonicalEntryUrl, canonicalSlug } from "../_internal/astro-slug.js";
+import { canonicalEntryUrl, canonicalSlug, entryRouteUrl } from "../_internal/astro-slug.js";
+import { frontmatterSlug } from "../_internal/scan-version-frontmatter.js";
 import { walkFilesSync } from "../_internal/fs-walk.js";
 import {
   collectionMountPrefix,
@@ -38,6 +40,32 @@ export interface ContentEntry {
   id: string;
   /** Path relative to the content root (`<collection>/<id>.mdx`), for display. */
   relPath: string;
+  /** Frontmatter `slug`: Astro's final entry ID, used instead of `id`. */
+  slug?: string;
+}
+
+// Runs on every dev start and `check`, so read only as far as the
+// frontmatter: the first block, and the whole file only when the frontmatter
+// runs past it.
+const FRONTMATTER_PROBE_BYTES = 4096;
+
+function readSlug(file: string): string | undefined {
+  try {
+    const fd = fs.openSync(file, "r");
+    let head: string;
+    try {
+      const buffer = Buffer.alloc(FRONTMATTER_PROBE_BYTES);
+      const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      head = buffer.toString("utf8", 0, read);
+      if (!head.startsWith("---")) return undefined;
+      if (read === buffer.length && !/\n---[ \t]*\r?(?:\n|$)/.test(head)) head = fs.readFileSync(file, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+    return frontmatterSlug(head);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -49,13 +77,15 @@ export interface ContentEntry {
  */
 export function enumerateEntries(contentRoot: string): ContentEntry[] {
   const out: ContentEntry[] = [];
-  for (const { rel } of walkFilesSync(contentRoot, { extensions: [".mdx"] })) {
+  for (const { abs, rel } of walkFilesSync(contentRoot, { extensions: [".mdx"] })) {
     const slash = rel.indexOf("/");
     if (slash === -1) continue; // loose top-level file, not under a collection
+    const slug = readSlug(abs);
     out.push({
       collection: rel.slice(0, slash),
       id: rel.slice(slash + 1).replace(/\.mdx$/, ""),
       relPath: rel,
+      ...(slug === undefined ? {} : { slug }),
     });
   }
   return out;
@@ -80,11 +110,13 @@ export function enumerateEntriesByBase(
   const out: ContentEntry[] = [];
   for (const [folder, key] of folderToKey) {
     const baseDir = path.join(contentRoot, folder);
-    for (const { rel } of walkFilesSync(baseDir, { extensions: [".mdx"] })) {
+    for (const { abs, rel } of walkFilesSync(baseDir, { extensions: [".mdx"] })) {
+      const slug = readSlug(abs);
       out.push({
         collection: key,
         id: rel.replace(/\.mdx$/, ""),
         relPath: `${folder}/${rel}`,
+        ...(slug === undefined ? {} : { slug }),
       });
     }
   }
@@ -136,8 +168,7 @@ export interface DuplicateGroup {
  *     Catches the page-vs-content collision (`pages/search.astro`
  *     shadowing `content/docs/search.mdx` at `/search`).
  *
- * Doesn't honor `data.slug` frontmatter overrides, so entries that use them
- * may produce false negatives.
+ * A frontmatter `slug` replaces the path, as in Astro's glob loader.
  */
 export function findDuplicateRoutes(
   owners: readonly RouteOwner[],
@@ -289,7 +320,7 @@ export function contentEntryUrl(
   versions?: VersionInfo | null,
 ): string {
   const prefix = collectionMountPrefix(entry.collection, versions);
-  return canonicalEntryUrl(prefix, entry.id);
+  return entry.slug === undefined ? canonicalEntryUrl(prefix, entry.id) : entryRouteUrl(prefix, entry.slug);
 }
 
 // ---------------------------------------------------------------------------

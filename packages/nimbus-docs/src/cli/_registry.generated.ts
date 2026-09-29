@@ -101,6 +101,12 @@ export const BUNDLED_INDEX: BundledIndex = {
       "title": "Collapsible",
       "description": "Headless show/hide primitive — building block for Accordion and Sidebar groups."
     },
+    "copy-prompt": {
+      "name": "copy-prompt",
+      "type": "registry:ui",
+      "title": "CopyPrompt",
+      "description": "One-line prompt with a Copy prompt button, for pasting into an AI coding agent."
+    },
     "dialog": {
       "name": "dialog",
       "type": "registry:ui",

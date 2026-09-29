@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Code } from "@/components/ui/code";
 import { CodeGroup } from "@/components/ui/code-group";
+import { CopyPrompt } from "@/components/ui/copy-prompt";
 import { Dialog, DialogContent, DialogClose } from "@/components/ui/dialog";
 import { Embed } from "@/components/ui/embed";
 import { FileTree } from "@/components/ui/file-tree";
@@ -198,6 +199,19 @@ const jsSample = `// inferred`;
       </div>
       <a href={componentHref("code-group")} class="nb-cmp-link">
         <span>CodeGroup</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
+    {/* CopyPrompt */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="w-full">
+          <CopyPrompt class="my-0" text="Read https://nimbus-docs.com/llms.txt then help me set up a docs site with Nimbus." />
+        </div>
+      </div>
+      <a href={componentHref("copy-prompt")} class="nb-cmp-link">
+        <span>CopyPrompt</span>
         <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
       </a>
     </div>

@@ -633,6 +633,17 @@ function refFor(view: ModelView, node: Node): ApiRef {
   return { label: labelFor(node), href: view.href(node.id) };
 }
 
+// Child sections a page can link to. A section without a page (an x-tagGroups
+// category) would otherwise link to the API root, so its own children stand in.
+function sectionRefs(view: ModelView, parent: Coordinate): ApiRef[] {
+  return view
+    .childrenOf(parent)
+    .filter((n) => n.kind === "section")
+    .flatMap((n) =>
+      view.hasPage(n.id) ? [refFor(view, n)] : sectionRefs(view, n.id),
+    );
+}
+
 function protocolString(
   protocol: Record<string, unknown>,
   key: string,
@@ -725,14 +736,13 @@ function projectPageWithView(
         kind: "section",
         operations,
       };
+      const sections = sectionRefs(view, node.id);
+      if (sections.length > 0) page.sections = sections;
       return page;
     }
     case "api": {
       const f = node.facts as ApiFacts;
-      const sections = view
-        .childrenOf(node.id)
-        .filter((n) => n.kind === "section")
-        .map((n) => refFor(view, n));
+      const sections = sectionRefs(view, node.id);
       const page: ApiRootPage = {
         ...base(view, node),
         kind: "api",

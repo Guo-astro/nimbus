@@ -270,7 +270,23 @@ export interface ApiSpec {
    * there is no implicit family/version merge.
    */
   routes?: ApiRoutePolicy;
+  /**
+   * How much of the API navigation each page includes. Applies to every
+   * version of a family.
+   *
+   * - `"full"` (default): every page includes the whole tree.
+   * - `"on-demand"`: a page includes the top-level items plus its own branch;
+   *   a collapsed group loads its contents when first opened.
+   * - `"links"`: like `"on-demand"`, but a collapsed group is a link to its
+   *   page, like a docs sidebar group with `hideChildren`.
+   *
+   * Use a bounded mode for large APIs, where the full tree dominates page size.
+   */
+  sidebar?: ApiSidebarMode;
 }
+
+/** How much of the API navigation each page includes. See {@link ApiSpec.sidebar}. */
+export type ApiSidebarMode = "full" | "on-demand" | "links";
 
 /** Maturity/deprecation status for one API version. */
 export type ApiVersionStatus = "ga" | "beta" | "deprecated";

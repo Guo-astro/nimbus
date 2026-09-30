@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 
 import { parseOpenApi } from "../_internal/api/parse.js";
 import type { DocsModel } from "../_internal/api/model.js";
+import { applyApiSidebarMode } from "../_internal/api/nav-bounds.js";
+import type { ApiSidebarMode } from "../types.js";
 import {
   projectNav,
   projectPageProps,
@@ -61,6 +63,9 @@ export type {
   JsonValue,
   SpecSource,
 } from "../_internal/api/view-model.js";
+export { boundApiNav } from "../_internal/api/nav-bounds.js";
+export type { BoundApiNavOptions } from "../_internal/api/nav-bounds.js";
+export type { ApiSidebarMode } from "../types.js";
 export { ApiBuildError } from "../_internal/api/coordinates.js";
 export type { Diagnostic } from "../_internal/api/coordinates.js";
 export { renderApiPageMarkdown } from "../_internal/api/markdown.js";
@@ -227,8 +232,22 @@ export function getApiPageProps(
   return projectPageProps(unwrap(model), coordinate);
 }
 
-export function getApiNav(model: ApiModel, activeCoordinate?: string): ApiNav {
-  return projectNav(unwrap(model), activeCoordinate);
+/**
+ * The API navigation, with `activeCoordinate` (when given) marked active and
+ * its ancestors expanded. `options.sidebar` applies a bounded `api[].sidebar`
+ * mode; the default `"full"` returns the whole tree.
+ */
+export function getApiNav(
+  model: ApiModel,
+  activeCoordinate?: string,
+  options: { sidebar?: ApiSidebarMode } = {},
+): ApiNav {
+  const docs = unwrap(model);
+  return applyApiSidebarMode(
+    projectNav(docs, activeCoordinate),
+    options.sidebar ?? "full",
+    docs.mountPath ?? `/${docs.collection}`,
+  );
 }
 
 export function getApiPageSlugs(

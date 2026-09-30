@@ -21,7 +21,13 @@
  * `mountPath` = `/family`).
  */
 
-import type { ApiRoutePolicy, ApiSpec, ApiVersionSpec, ApiVersionStatus } from "../../types.js";
+import type {
+  ApiRoutePolicy,
+  ApiSidebarMode,
+  ApiSpec,
+  ApiVersionSpec,
+  ApiVersionStatus,
+} from "../../types.js";
 import type { RoutePolicy } from "./route-policy.js";
 
 /** One fully-resolved render target — a single version of one API family. */
@@ -50,6 +56,8 @@ export interface ResolvedApiVersion {
   requireOperationId: boolean;
   /** Route convention for this target, or `undefined` for legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** How much navigation each page includes. Family-wide; default `"full"`. */
+  sidebar: ApiSidebarMode;
 }
 
 /** An `ApiRoutePolicy` is structurally the engine's `RoutePolicy`; narrow once here. */
@@ -98,6 +106,7 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         label: entry.label ?? family,
         requireOperationId: entry.requireOperationId ?? false,
         routes: asRoutePolicy(entry.routes),
+        sidebar: entry.sidebar ?? "full",
       },
     ];
   }
@@ -118,6 +127,7 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       label: v.label ?? v.version,
       requireOperationId: entry.requireOperationId ?? false,
       routes: asRoutePolicy(v.routes),
+      sidebar: entry.sidebar ?? "full",
     };
   });
 }

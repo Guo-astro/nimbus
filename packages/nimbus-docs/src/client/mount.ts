@@ -9,6 +9,8 @@
  *   2. View transitions — on `astro:before-swap`, runs every teardown so
  *      document/window listeners come down before the DOM is replaced.
  *   3. Re-mount — on `astro:page-load`, re-runs discovery against the new DOM.
+ *   4. Inserted markup — `remount()` re-runs discovery after a script adds
+ *      components to the page (for example a loaded navigation group).
  *
  * The init function receives the root element and returns a `destroy()`
  * function. The root element is the keying mechanism — calling mount again
@@ -23,6 +25,14 @@
  */
 
 type Init = (root: HTMLElement) => () => void;
+
+const REMOUNT_EVENT = "nimbus:remount";
+
+/** Mount components inside markup a script just inserted. Already-mounted
+ *  elements are skipped, so calling this is always safe. */
+export function remount(): void {
+  document.dispatchEvent(new Event(REMOUNT_EVENT));
+}
 
 export function mount(selector: string, init: Init): void {
   const instances = new Map<HTMLElement, () => void>();
@@ -49,4 +59,5 @@ export function mount(selector: string, init: Init): void {
 
   document.addEventListener("astro:before-swap", teardown);
   document.addEventListener("astro:page-load", setup);
+  document.addEventListener(REMOUNT_EVENT, setup);
 }

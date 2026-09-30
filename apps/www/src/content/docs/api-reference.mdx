@@ -229,6 +229,38 @@ The version marked `default: true` owns `/api`; other versions mount below their
 
 Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
 
+### Sidebar for large APIs
+
+By default, every API page includes the whole navigation tree. For a large API, that tree can be most of each page's size. Set `sidebar` on the `api` entry to include less:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    sidebar: "on-demand",
+  },
+],
+```
+
+| Value | What each page includes | A collapsed group |
+| --- | --- | --- |
+| `"full"` (default) | The whole tree. | Opens in place. |
+| `"on-demand"` | Top-level items, plus the current page's branch. | Opens in place and loads its contents the first time. |
+| `"links"` | Top-level items, plus the current page's branch. | Links to the group's page. |
+
+In both bounded modes, the current page's ancestors are open and show all their children, so its neighbors are one click away. Root, schema, and webhook pages show top-level items only. The setting applies to every version of a family.
+
+With `"on-demand"`, Nimbus builds one small HTML file per group under `/nimbus-api/nav/<collection>/` and renders it with your `src/components/ui/api-sidebar/ApiSidebarItem.astro`, so loaded rows match the rest of the sidebar. The sidebar starts loading a group when the pointer moves over it or it receives focus, and keeps loaded rows for the session, so a remembered group shows its rows on the next page without a request. Without JavaScript, a group's label still links to its page. Request-rendered collections serve the same files on request.
+
+In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session. Restored groups appear already open, without replaying their animation.
+
+With `"links"`, a group with no page of its own, such as an `x-tagGroups` category, shows its direct children instead.
+
+Every group page lists its operations and its subsections, and the API overview lists every top-level section, so all pages stay reachable in every mode.
+
+To apply the same rule to navigation you build yourself, call `boundApiNav(nav, { mode })` from `@cloudflare/nimbus-docs/api`, or pass `{ sidebar }` as the third argument of `getApiNav`.
+
 ### Build or request rendering
 
 API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:
@@ -293,6 +325,7 @@ For a collection named `api`, the reference integrates with these routes when th
 | `/api/llms.txt` | API-only `llms.txt` index. |
 | `/llms.txt` and `/llms-full.txt` | Site-wide page index and full Markdown documentation. |
 | `/nimbus-api/coordinates.json` | Public coordinate-to-URL manifest. |
+| `/nimbus-api/nav/api/<group>/` | Navigation group contents, with `sidebar: "on-demand"` only. |
 
 The API entries also join the existing Pagefind search, sitemap, and OG-image routes when those features are enabled in the project.
 

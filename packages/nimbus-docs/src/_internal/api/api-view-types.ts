@@ -285,12 +285,17 @@ export interface ApiDiscriminatorEntry {
 export interface ApiSectionPage extends ApiPageBase {
   kind: "section";
   operations: ApiRef[];
+  /** Subsections that have pages, in navigation order. Absent when none. A
+   *  subsection without a page is replaced by its own subsections. */
+  sections?: ApiRef[];
 }
 
 export interface ApiRootPage extends ApiPageBase {
   kind: "api";
   version?: string;
   servers: string[];
+  /** Top-level sections that have pages. An `x-tagGroups` category has no page,
+   *  so its member sections are listed in its place. */
   sections: ApiRef[];
 }
 
@@ -311,6 +316,13 @@ export interface ApiNavItem {
   deprecated?: boolean;
   active?: boolean;
   expanded?: boolean;
+  /** Set when this item has children that this nav leaves out (a bounded
+   *  `sidebar` mode). `children` is then empty. */
+  deferred?: boolean;
+  /** Where this group's children load from (`"on-demand"` mode only): set on
+   *  every group, so an open group's fragment can be cached for pages where it
+   *  is collapsed. Root-relative, without the site base, like `href`. */
+  childrenHref?: string;
   children: ApiNavItem[];
 }
 

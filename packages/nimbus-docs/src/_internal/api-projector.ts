@@ -12,11 +12,18 @@ type ConfiguredApiPagePropsProjector = (
   coordinate: string,
 ) => Promise<ApiPageProps>;
 
+type ConfiguredApiNavProjector = (
+  collection: string,
+  version: string | null,
+) => Promise<{ nav: ApiNav; mountPath: string }>;
+
 export interface ConfiguredApiProjectors {
   /** Complete HTML page: highlighted code plus active navigation. */
   page: ConfiguredApiPageProjector;
   /** Page props without code highlighting or navigation, for Markdown. */
   pageProps: ConfiguredApiPagePropsProjector;
+  /** The full, unactivated navigation, for `"on-demand"` fragments. */
+  nav: ConfiguredApiNavProjector;
 }
 
 interface ApiProjectorState {
@@ -64,4 +71,12 @@ export function projectConfiguredApiPageProps(
   coordinate: string,
 ): Promise<ApiPageProps> {
   return configuredProjectors().pageProps(collection, version, coordinate);
+}
+
+/** The full navigation of one configured API version, for nav fragments. */
+export function projectConfiguredApiNav(
+  collection: string,
+  version: string | null,
+): Promise<{ nav: ApiNav; mountPath: string }> {
+  return configuredProjectors().nav(collection, version);
 }

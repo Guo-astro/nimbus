@@ -31,7 +31,7 @@ import {
   definePartialsSchema,
   partialsSchema,
 } from "./schemas.js";
-import type { ApiRoutePolicy, ApiVersionSpec } from "./types.js";
+import type { ApiRoutePolicy, ApiSidebarMode, ApiVersionSpec } from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
@@ -263,6 +263,8 @@ export interface ApiCollectionOptions {
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */
   routes?: ApiRoutePolicy;
+  /** How much navigation each page includes. See `ApiSpec.sidebar`. */
+  sidebar?: ApiSidebarMode;
 }
 
 /**
@@ -321,6 +323,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
     versions: options.versions,
     requireOperationId: options.requireOperationId,
     routes: options.routes,
+    sidebar: options.sidebar,
   };
 
   const loader: Loader = {
@@ -346,6 +349,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         versions,
         requireOperationId,
         routes,
+        sidebar,
       } =
         explicit ??
         resolveRegisteredApiCollection(astroConfig.root, context.collection);
@@ -380,6 +384,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         versions,
         requireOperationId,
         routes,
+        sidebar,
       });
 
       // M4: a non-default version id must not collide with a top-level page
@@ -424,6 +429,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
               collection,
               target.version ?? null,
               model,
+              { sidebar: target.sidebar, mountPath: target.mountPath },
             );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; surface

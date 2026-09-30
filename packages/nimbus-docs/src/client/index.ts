@@ -11,7 +11,10 @@
  * the component's DOM contract.
  */
 
-export { mount } from "./mount";
+export { mount, remount } from "./mount";
+export { deferContent } from "./deferred-content";
+export { trackNavState } from "./nav-state";
+export type { DeferredContentOptions, DeferredContentInstance } from "./deferred-content";
 export { makeDisclosure } from "./disclosure";
 export type { DisclosureOptions, DisclosureInstance } from "./disclosure";
 export { initDisclosureGroup } from "./disclosure-group";

@@ -406,7 +406,10 @@ export function renderApiPageMarkdown(props: ApiPageProps, options?: { base?: st
     case "section": {
       if (props.description) out.push(safeBlock(props.description), "");
       if (props.operations.length > 0) renderRefs("Operations", props.operations, out, base);
-      else if (!props.description) out.push("_No operations._", "");
+      if (props.sections) renderRefs("Sections", props.sections, out, base);
+      if (props.operations.length === 0 && !props.sections && !props.description) {
+        out.push("_No operations._", "");
+      }
       break;
     }
     case "api": {

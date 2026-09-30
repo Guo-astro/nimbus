@@ -14,6 +14,7 @@ import {
 } from "../src/_internal/api/prepared.js";
 import {
   projectApiModelPage,
+  projectConfiguredApiNav,
   projectConfiguredApiPage,
   projectConfiguredApiPageProps,
 } from "../src/_internal/api-loader.js";
@@ -354,6 +355,9 @@ describe("apiCollection loader — output-aware index", () => {
         calls.push([collection, version, coordinate]);
         return getApiPageProps(smallco, coordinate);
       },
+      nav: () => {
+        throw new Error("Markdown must not request navigation");
+      },
     });
     try {
       const { renderIndexedEntryMarkdown } = await import("../src/runtime.js");
@@ -376,6 +380,7 @@ describe("apiCollection loader — output-aware index", () => {
       registerConfiguredApiProjector({
         page: projectConfiguredApiPage,
         pageProps: projectConfiguredApiPageProps,
+        nav: projectConfiguredApiNav,
       });
       delete thinGlobal.__NIMBUS_THIN_API_ENTRIES__;
       hooks.deregister();

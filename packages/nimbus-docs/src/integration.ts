@@ -193,6 +193,25 @@ const REQUEST_ROUTE_INVENTORY_ENTRYPOINT = new URL(
   import.meta.url,
 );
 
+// `sidebar: "on-demand"` fragments. The route ships in `src/components` (the
+// package's shipped `.astro` directory) and renders with the site's own
+// sidebar row, which the API reference recipe installs at this path.
+const API_NAV_FRAGMENT_ENTRYPOINT = new URL(
+  import.meta.url.endsWith(".ts")
+    ? "./components/ApiNavFragment.astro"
+    : "../src/components/ApiNavFragment.astro",
+  import.meta.url,
+);
+const API_SIDEBAR_ITEM_PATH = "components/ui/api-sidebar/ApiSidebarItem.astro";
+const API_SIDEBAR_ITEM_MODULE = "virtual:nimbus/api-sidebar-item";
+// The route's data helpers, resolved to this build's own runtime so the route
+// and the site's pages always share one runtime module (src in tests, dist
+// when installed).
+const API_NAV_FRAGMENT_RUNTIME_MODULE = "virtual:nimbus/api-nav-fragment-runtime";
+const API_NAV_FRAGMENT_RUNTIME = fileURLToPath(
+  new URL(`./runtime.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url),
+);
+
 /**
  * The first dev server's watcher per project root (real path, like the
  * prepared-Markdown and API registries). Astro's content layer keeps
@@ -436,6 +455,7 @@ export function nimbus(
   // what `base` Astro is using.
   let projectRootForBuild = "";
   let srcDirForBuild = "";
+  let apiSidebarItemForBuild: string | undefined;
   let astroBaseForBuild = "";
   // Captured at config:done / routes:resolved, consumed by the build:done
   // prerender-invariant reporter.
@@ -938,6 +958,40 @@ export function nimbus(
             rendering: mode,
           });
         }
+        apiSidebarItemForBuild = undefined;
+        const onDemandCollections = (config.api ?? [])
+          .filter((entry) => entry.sidebar === "on-demand")
+          .map((entry) => entry.collection);
+        if (onDemandCollections.length > 0) {
+          const sidebarItem = path.join(srcDir, API_SIDEBAR_ITEM_PATH);
+          if (!fs.existsSync(sidebarItem)) {
+            throw new Error(
+              `nimbus-docs: \`sidebar: "on-demand"\` (api collection${onDemandCollections.length === 1 ? "" : "s"} ` +
+                `${onDemandCollections.map((c) => `"${c}"`).join(", ")}) renders loaded groups with your ` +
+                `sidebar row component, expected at src/${API_SIDEBAR_ITEM_PATH}. ` +
+                `Restore it (\`nimbus-docs add api-reference\` installs it), or use \`sidebar: "links"\`.`,
+            );
+          }
+          apiSidebarItemForBuild = sidebarItem;
+          for (const collection of onDemandCollections) {
+            const mode = policy.collections[collection] ?? "build";
+            const pattern = `/nimbus-api/nav/${collection}/[...slug]`;
+            injectRoute({
+              pattern,
+              entrypoint: API_NAV_FRAGMENT_ENTRYPOINT,
+              prerender: mode === "build",
+            });
+            managedRoutesForBuild.push({
+              pattern,
+              entrypoint: normalizeRouteEntrypoint(
+                projectRoot,
+                API_NAV_FRAGMENT_ENTRYPOINT.href,
+              )!,
+              owner: "infrastructure",
+              rendering: mode,
+            });
+          }
+        }
         if (building) {
           injectRoute({
             pattern: REQUEST_ROUTE_INVENTORY_PATTERN,
@@ -1409,6 +1463,14 @@ export function nimbus(
                 },
               },
               virtualApiBuildConfigPlugin(config.api, projectRoot),
+              {
+                name: "nimbus-docs:api-sidebar-item",
+                resolveId(source) {
+                  if (source === API_SIDEBAR_ITEM_MODULE) return apiSidebarItemForBuild;
+                  if (source === API_NAV_FRAGMENT_RUNTIME_MODULE) return API_NAV_FRAGMENT_RUNTIME;
+                  return undefined;
+                },
+              },
               virtualLastUpdatedPlugin(lastUpdatedByPath),
               virtualConfigPlugin(config, {
                 indexedCollections,
@@ -1588,6 +1650,17 @@ export function nimbus(
             "  export const apiCollections: readonly string[];",
             "  /** Build-time defaults derived from Astro's public directory. */",
             "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string };",
+            "}",
+            "",
+          ].join("\n"),
+        });
+        injectTypes({
+          filename: "virtual-api-sidebar-item.d.ts",
+          content: [
+            'declare module "virtual:nimbus/api-sidebar-item" {',
+            "  /** The site's `ApiSidebarItem`, for `sidebar: \"on-demand\"` fragments. */",
+            "  const ApiSidebarItem: (props: { item: import(\"@cloudflare/nimbus-docs/api\").ApiNavItem }) => unknown;",
+            "  export default ApiSidebarItem;",
             "}",
             "",
           ].join("\n"),

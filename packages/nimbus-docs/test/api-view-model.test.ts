@@ -18,7 +18,10 @@ import {
   type ApiModel,
   type ApiNavItem,
   type ApiOperationPage,
+  type ApiRootPage,
   type ApiSchemaPage,
+  type ApiSectionPage,
+  renderApiPageMarkdown,
 } from "../src/api/index.js";
 import { coordinateAnchor } from "../src/_internal/api/view-model.js";
 import { setLinkPolicy } from "../src/_internal/url.js";
@@ -1119,6 +1122,21 @@ describe("nav hierarchy: x-tagGroups categories + tag.parent subresources", () =
     assert.equal(byLabel(category.children, "Members"), undefined);
     const accounts = byLabel(category.children, "Accounts")!;
     assert.ok(byLabel(accounts.children, "Members"));
+  });
+
+  test("a section page lists its subsections, so they stay reachable without the sidebar", () => {
+    const accounts = getApiPageProps(grouped, "tags.Accounts") as ApiSectionPage;
+    assert.deepEqual(accounts.sections, [{ label: "Members", href: "/grouped/tags/Members/" }]);
+    const members = getApiPageProps(grouped, "tags.Members") as ApiSectionPage;
+    assert.equal(members.sections, undefined, "a leaf section carries no empty list");
+    const md = renderApiPageMarkdown(accounts);
+    assert.match(md, /## Sections\n\n- \[Members\]\(\/grouped\/tags\/Members\/\)/);
+  });
+
+  test("the root lists a category's member sections, never a link to itself", () => {
+    const root = getApiPageProps(grouped, "grouped") as ApiRootPage;
+    assert.deepEqual(root.sections, [{ label: "Accounts", href: "/grouped/tags/Accounts/" }]);
+    assert.ok(root.sections.every((s) => s.href !== root.href));
   });
 
   test("an active subresource operation expands its whole ancestor chain", () => {

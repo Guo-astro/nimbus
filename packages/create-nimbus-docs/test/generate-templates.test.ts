@@ -107,3 +107,22 @@ test("every generated variant ships the adapter marker and implicit build defaul
     fs.rmSync(out, { recursive: true, force: true });
   }
 });
+
+// AGENT.md tells authors the frontmatter `title` is the page's H1, so the
+// starter's own pages must not add a second one.
+test("no generated page repeats its title as a body H1", () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-gen-h1-"));
+  try {
+    for (const dir of generateTemplates(out)) {
+      const docs = path.join(dir, "src", "content", "docs");
+      for (const file of fs.readdirSync(docs, { recursive: true }) as string[]) {
+        if (!/\.mdx?$/.test(file)) continue;
+        const body = fs.readFileSync(path.join(docs, file), "utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
+        const prose = body.replace(/^(```|~~~)[\s\S]*?^\1/gm, "");
+        assert.doesNotMatch(prose, /^# /m, `${path.basename(dir)}/${file} has a body H1`);
+      }
+    }
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});

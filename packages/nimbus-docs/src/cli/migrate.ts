@@ -156,7 +156,9 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
     }
   }
 
-  if (readOnly && !options.json && !options.diff) {
+  // `--diff` with nothing to diff would print nothing; say what `--dry-run` says.
+  const nothingToDiff = discovery.plans.length === 0 && reviews.length === 0;
+  if (readOnly && !options.json && (!options.diff || nothingToDiff)) {
     printHumanPlan(discovery.plans, reviews, baseline, { completionOptions, baselineNeedsRecording });
     process.exitCode = requiredWork(discovery.plans.length) ? 1 : 0;
     return;

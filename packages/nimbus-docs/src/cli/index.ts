@@ -165,7 +165,9 @@ const HELP = `
     Exit is 1 only when \`status\` is "failed" — \`partial\` and \`readiness\` never
     move it. A scope that can't be evaluated yet (pre-build) is a note under
     \`scopes[].notes[]\` — never a finding, never carrying a fix — so an agent's
-    fix loop terminates on:  status !== "failed" && summary.fixable === 0
+    fix loop stops when \`status\` isn't "failed" and no finding has a \`fix\`
+    without \`fix.requiresInput\` (\`summary.fixable\` also counts fixes that
+    need a value, such as a placeholder \`site\`, which only a person can give)
     Build-free readiness gate:   nimbus-docs check
     Full coverage (types+links): <your build> && nimbus-docs check
 `;

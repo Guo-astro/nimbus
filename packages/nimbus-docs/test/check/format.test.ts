@@ -148,10 +148,46 @@ test("after a non-interactive --fix, the footer says the prompts need a terminal
       findings: [placeholder],
       scopes: [scope({ status: "failed", findings: [placeholder] })],
     }),
-    { ...OPTS, skippedFixes: "needs-terminal" },
+    { ...OPTS, skippedFixes: ["needs-terminal"] },
   );
-  assert.match(out, /Some fixes need a terminal: run `nimbus-docs check --fix` in one/);
+  assert.match(out, /Some fixes ask for a value: edit it by hand, or run `nimbus-docs check --fix` in an interactive terminal/);
   assert.equal(out.match(/check --fix/g)?.length, 1);
+});
+
+test("when installs and a value were both skipped, the footer names --yes for the installs", () => {
+  const placeholder: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "warn",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const missing: CheckFinding = {
+    scope: "env",
+    code: "nimbus/pagefind-missing",
+    severity: "error",
+    message: "pagefind is not installed",
+    fixable: true,
+    fix: { kind: "install-dep", package: "pagefind" },
+  };
+  const skippedBoth = formatCheckPretty(
+    result({
+      status: "failed",
+      readiness: "blocked",
+      findings: [missing, placeholder],
+      scopes: [scope({ status: "failed", findings: [missing, placeholder] })],
+    }),
+    { ...OPTS, skippedFixes: ["needs-terminal", "needs-yes"] },
+  );
+  assert.match(skippedBoth, /Some fixes install packages: run `nimbus-docs check --fix --yes` to allow them/);
+  assert.match(skippedBoth, /Some fixes ask for a value/);
+  // Once the installs ran, only the value is left: no --yes line.
+  const onlyValue = formatCheckPretty(
+    result({ status: "passed", readiness: "buildable", findings: [placeholder], scopes: [scope({ findings: [placeholder] })] }),
+    { ...OPTS, skippedFixes: ["needs-terminal"] },
+  );
+  assert.doesNotMatch(onlyValue, /--yes/);
 });
 
 test("--quiet drops the skipped-fix hint when only a hidden warning needs it", () => {
@@ -166,10 +202,10 @@ test("--quiet drops the skipped-fix hint when only a hidden warning needs it", (
   const run = (quiet: boolean) =>
     formatCheckPretty(
       result({ status: "passed", readiness: "buildable", findings: [warning], scopes: [scope({ findings: [warning] })] }),
-      { ...OPTS, quiet, skippedFixes: "needs-terminal" },
+      { ...OPTS, quiet, skippedFixes: ["needs-terminal"] },
     );
-  assert.match(run(false), /Some fixes need a terminal/);
-  assert.doesNotMatch(run(true), /Some fixes need a terminal/);
+  assert.match(run(false), /Some fixes ask for a value/);
+  assert.doesNotMatch(run(true), /Some fixes ask for a value/);
 });
 
 test("passed full run → Ready", () => {

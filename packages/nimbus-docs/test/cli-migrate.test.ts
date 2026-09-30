@@ -80,6 +80,13 @@ function runWithManifest(cwd: string, args: string[], entries: UpgradeEntry[]) {
   return spawnSync(bin!, rest, { cwd, encoding: "utf8", env });
 }
 
+/** A project that has run its install: the running CLI is the installed one. */
+function installNimbus(root: string): void {
+  const dir = path.join(root, "node_modules", "@cloudflare", "nimbus-docs");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@cloudflare/nimbus-docs", version: CURRENT_VERSION }));
+}
+
 function makeCleanUpgradeProject(): string {
   const root = makeProject();
   fs.writeFileSync(
@@ -235,6 +242,7 @@ test("with --cwd, the printed command runs from where migrate was run", () => {
     JSON.stringify({ devDependencies: { "@cloudflare/nimbus-docs": "*" } }),
   );
   fs.writeFileSync(path.join(site, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+  installNimbus(site);
 
   const result = runWithManifest(outer, ["migrate", "--dry-run", "--cwd", "site"], [syntheticEntry("optional-one", "optional")]);
   assert.equal(result.status, 0, result.stderr);
@@ -464,6 +472,7 @@ test("diff exits nonzero while a clean baseline is still pending", () => {
     JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/@cloudflare/nimbus-docs@123" } }),
   );
   fs.writeFileSync(path.join(root, "nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: null, preview: { pr: "123" } }));
+  installNimbus(root);
   const preview = run(root, ["migrate", "--diff"]);
   assert.equal(preview.status, 0, preview.stderr);
 });
@@ -700,8 +709,12 @@ test("a baseline behind with no entries in range passes and says so", () => {
   assert.match(human.stdout, /No migrations or upgrade reviews between Nimbus 0\.14\.1 and /);
   assert.match(human.stdout, /nimbus-docs migrate --yes/);
 
-  const diff = runWithManifest(root, ["migrate", "--diff"], []);
-  assert.equal(diff.status, 0, diff.stderr);
+  // With nothing to diff, --diff reports the same result and next step.
+  for (const args of [["migrate", "--diff"], ["migrate", "--dry-run", "--diff"]]) {
+    const diff = runWithManifest(root, args, []);
+    assert.equal(diff.status, 0, diff.stderr);
+    assert.equal(diff.stdout, human.stdout, args.join(" "));
+  }
 
   const required = runWithManifest(root, ["migrate", "--dry-run"], [
     syntheticEntry("required-one", "review-required"),
@@ -715,9 +728,11 @@ test("an up-to-date project says so on a dry run", () => {
     path.join(root, "nimbus.json"),
     `${JSON.stringify({ lastReviewedNimbusVersion: CURRENT_VERSION }, null, 2)}\n`,
   );
-  const human = run(root, ["migrate", "--dry-run"]);
-  assert.equal(human.status, 0, human.stderr);
-  assert.match(human.stdout, new RegExp(`Nimbus ${CURRENT_VERSION.replaceAll(".", "\\.")} is up to date`));
+  for (const args of [["migrate", "--dry-run"], ["migrate", "--dry-run", "--diff"]]) {
+    const human = run(root, args);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, new RegExp(`Nimbus ${CURRENT_VERSION.replaceAll(".", "\\.")} is up to date`), args.join(" "));
+  }
 });
 
 test("declining the record prompt in a terminal says how to record it later", { skip: process.platform === "win32" }, (context) => {
@@ -754,6 +769,21 @@ test("an up-to-date project reports it once when migrate records nothing", () =>
   const result = runWithManifest(root, ["migrate", "--yes"], []);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.match(/is up to date/g)?.length, 1, result.stdout);
+});
+
+test("before dependencies are installed, migrate records nothing and says to install", () => {
+  const root = makeProject();
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "^0.15.0" } }),
+  );
+  fs.writeFileSync(path.join(root, "package-lock.json"), "{}");
+  const before = fs.readFileSync(path.join(root, "nimbus.json"), "utf8").replace(CURRENT_VERSION, "0.15.0");
+  fs.writeFileSync(path.join(root, "nimbus.json"), before);
+  const result = run(root, ["migrate", "--yes"]);
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stdout + result.stderr, /@cloudflare\/nimbus-docs is not installed in this project\. Install dependencies first with `npm install`/);
+  assert.equal(fs.readFileSync(path.join(root, "nimbus.json"), "utf8"), before);
 });
 
 function shellQuote(value: string): string {

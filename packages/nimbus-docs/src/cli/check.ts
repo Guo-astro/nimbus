@@ -91,15 +91,8 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
       formatCheckPretty(result, {
         color: shouldUseColor(flags.color),
         quiet: flags.quiet,
-        invocation: invocation(
-          skipped.has("needs-yes") && !skipped.has("needs-terminal") ? "check --fix --yes" : "check --fix",
-          cwd,
-        ),
-        skippedFixes: skipped.has("needs-terminal")
-          ? "needs-terminal"
-          : skipped.has("needs-yes")
-            ? "needs-yes"
-            : undefined,
+        invocation: invocation("check --fix", cwd),
+        skippedFixes: [...skipped],
       }),
     );
   }

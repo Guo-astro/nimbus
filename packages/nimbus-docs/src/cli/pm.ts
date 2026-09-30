@@ -107,7 +107,7 @@ export function shellArg(value: string): string {
 
 // pnpm and Yarn run a package's bin only for the workspace that declares it
 // (Yarn PnP has no node_modules at all), so check the nearest package.json.
-function declaresCli(cwd: string): boolean {
+export function declaresCli(cwd: string): boolean {
   for (let dir = cwd; ; dir = dirname(dir)) {
     const file = join(dir, "package.json");
     if (existsSync(file)) {
@@ -120,6 +120,11 @@ function declaresCli(cwd: string): boolean {
     }
     if (dirname(dir) === dir) return false;
   }
+}
+
+/** The project's plain install command, e.g. `pnpm install`. */
+export function installCommand(cwd = process.cwd()): string {
+  return getCommand(detectPackageManager(cwd), "install")!;
 }
 
 /**

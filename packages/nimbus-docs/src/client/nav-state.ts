@@ -152,7 +152,7 @@ export function restoreNavState(keys: typeof NAV_STATE_KEYS, scope?: Element): v
   const read = (key: string) => {
     try {
       return JSON.parse(sessionStorage.getItem(key) || "null");
-    } catch (_) {
+    } catch {
       return null;
     }
   };

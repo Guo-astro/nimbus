@@ -211,3 +211,138 @@ describe("renderEntryAsMarkdown: fences inside list items", () => {
     );
   });
 });
+
+describe("renderEntryAsMarkdown: lists inside components", () => {
+  test("a list item inside <Aside> keeps its code block and prose", () => {
+    assert.equal(
+      mdx('<Aside type="tip">\n  Before:\n\n  1. Install:\n\n     ```sh\n     npm i x\n     ```\n\n     Then run it.\n  2. Check.\n</Aside>\n'),
+      "> **Tip**\n>\n> Before:\n>\n> 1. Install:\n>\n>    ```sh\n>    npm i x\n>    ```\n>\n>    Then run it.\n> 2. Check.",
+    );
+  });
+
+  test("a list item inside <Step> keeps its prose", () => {
+    assert.equal(
+      mdx('<Steps>\n  <Step title="Configure">\n    Set:\n\n    - One\n\n      More about one.\n    - Two\n  </Step>\n</Steps>\n'),
+      "1. **Configure**\n\n   Set:\n\n   - One\n\n     More about one.\n   - Two",
+    );
+  });
+
+  test("a list item inside <TabItem> keeps its code block", () => {
+    assert.equal(
+      mdx('<Tabs>\n  <TabItem label="npm">\n    1. Run:\n\n       ```sh\n       npm i\n       ```\n  </TabItem>\n</Tabs>\n'),
+      "### npm\n\n1. Run:\n\n   ```sh\n   npm i\n   ```",
+    );
+  });
+
+  test("an <Aside> inside a list item stays in the item", () => {
+    assert.equal(
+      mdx("- Setup:\n\n  <Aside>\n    Careful.\n\n    Twice.\n  </Aside>\n- Next\n"),
+      "- Setup:\n\n  > **Note**\n  >\n  > Careful.\n  >\n  > Twice.\n- Next",
+    );
+  });
+});
+
+describe("renderEntryAsMarkdown: components without a renderer", () => {
+  test("nested wrappers unwrap fully, and a title leads its item", () => {
+    const out = mdx(
+      '<AccordionGroup>\n  <Accordion title="How do I deploy?">\n    Run `deploy`.\n  </Accordion>\n  <Accordion title="Can I preview?">\n    Yes.\n  </Accordion>\n</AccordionGroup>\n',
+    );
+    assert.doesNotMatch(out, /<\/?[A-Z]/);
+    assert.equal(out, "**How do I deploy?**\n\nRun `deploy`.\n\n**Can I preview?**\n\nYes.");
+  });
+
+  test("a wrapper without a title keeps just its children", () => {
+    assert.equal(mdx("<Frame>\n  <Popover>Hover me</Popover>\n</Frame>\n"), "Hover me");
+  });
+});
+
+test("a titled component inside a list item stays in the item", () => {
+  assert.equal(
+    mdx('- <Accordion title="Why?">Because.</Accordion>\n- Next\n'),
+    "- **Why?**\n\n  Because.\n- Next",
+  );
+});
+
+describe("renderEntryAsMarkdown: component placement", () => {
+  test("<Steps> right under an HTML wrapper keeps the blank line that ends the HTML block", () => {
+    assert.equal(
+      mdx('<div class="x">\n<Steps>\n  <Step title="Install">\n    Run it.\n  </Step>\n</Steps>\n</div>\n'),
+      '<div class="x">\n\n1. **Install**\n\n   Run it.\n\n</div>',
+    );
+  });
+
+  test("cards under an HTML wrapper stay a list", () => {
+    assert.equal(
+      mdx('<div>\n  <CardGrid>\n    <Card title="A">one</Card>\n    <Card title="B">two</Card>\n  </CardGrid>\n</div>\n'),
+      "<div>\n\n- **A** — one\n- **B** — two\n\n</div>",
+    );
+  });
+
+  test("<Steps> and <Tabs> under a nested list item sit at the item's content column", () => {
+    assert.equal(
+      mdx('- Setup\n  - Sub step:\n\n    <Steps>\n      <Step title="Install">\n        Run it.\n      </Step>\n    </Steps>\n'),
+      "- Setup\n  - Sub step:\n\n    1. **Install**\n\n       Run it.",
+    );
+    assert.equal(
+      mdx('1. Pick:\n   - One of:\n\n     <Tabs>\n       <TabItem label="npm">\n         npm i\n       </TabItem>\n     </Tabs>\n'),
+      "1. Pick:\n   - One of:\n\n     ### npm\n\n     npm i",
+    );
+  });
+
+  test("<Steps> inside a card starts on its own line within the card", () => {
+    assert.equal(
+      mdx('<Card title="Setup">\n  <Steps>\n    <Step title="Install">\n      Run it.\n    </Step>\n  </Steps>\n</Card>\n'),
+      "- **Setup** — \n\n  1. **Install**\n\n     Run it.",
+    );
+  });
+
+  test("a bold-led list item stays inside its step", () => {
+    assert.equal(
+      mdx('<Steps>\n  <Step title="Config">\n    Set:\n\n    - **site**: the URL\n\n      ```ts\n      site: "x"\n      ```\n  </Step>\n</Steps>\n'),
+      '1. **Config**\n\n   Set:\n\n   - **site**: the URL\n\n     ```ts\n     site: "x"\n     ```',
+    );
+  });
+
+  test("a nested bold-led list outside components keeps its nesting", () => {
+    assert.equal(mdx("- Genres:\n  - **Dated** — per release\n"), "- Genres:\n  - **Dated** — per release");
+  });
+
+  test("indentation outside a list item never becomes indented code", () => {
+    assert.equal(
+      mdx("<Aside>\nThis is important.\n\n    Keep this in mind.\n</Aside>\n"),
+      "> **Note**\n>\n> This is important.\n>\n> Keep this in mind.",
+    );
+  });
+
+  test("a component inside a blockquote isn't quoted twice", () => {
+    assert.equal(mdx('> <Accordion title="T">\n> body\n> </Accordion>\n'), "> **T**\n>\n> body");
+    assert.equal(mdx("> <Aside>\n> quoted\n> </Aside>\n"), "> > **Note**\n> >\n> > quoted");
+  });
+
+  test("a titled component mid-sentence keeps only its text", () => {
+    assert.equal(mdx('Click <Tooltip title="hint">here</Tooltip> to continue.\n'), "Click here to continue.");
+  });
+
+  test("only string titles show; an expression title falls back", () => {
+    assert.equal(mdx('<Aside title={"Heads up"}>\n  Body.\n</Aside>\n'), "> **Heads up**\n>\n> Body.");
+    assert.equal(mdx('<Aside title={t("warn")}>\n  Body.\n</Aside>\n'), "> **Note**\n>\n> Body.");
+  });
+
+  test("a trigger and its content become separate paragraphs", () => {
+    assert.equal(
+      mdx("<AccordionItem>\n  <AccordionTrigger>What is it?</AccordionTrigger>\n  <AccordionContent>A framework.</AccordionContent>\n</AccordionItem>\n"),
+      "What is it?\n\nA framework.",
+    );
+  });
+
+  test("an HTML line after a list in a component ends the list", () => {
+    assert.equal(
+      mdx("<Frame>\n  <div>\n\n  - one\n\n  </div>\n</Frame>\n"),
+      "<div>\n\n- one\n\n</div>",
+    );
+  });
+});
+
+test("a body that starts with blank lines still places indented components", () => {
+  assert.equal(mdx("\n\n  <Aside>\n    Hi.\n  </Aside>\n"), "> **Note**\n>\n> Hi.");
+});

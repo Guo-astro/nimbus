@@ -20,7 +20,7 @@ function fixture(installedCloudflareVersion: string | null): string {
     join(cwd, "package.json"),
     JSON.stringify({
       name: "docs",
-      dependencies: { astro: "^7", "@astrojs/cloudflare": ">=14.3.0 <14.4.0" },
+      dependencies: { astro: "^7", "@astrojs/cloudflare": "~14.3.0" },
     }),
   );
   if (installedCloudflareVersion) {
@@ -43,7 +43,7 @@ test("warns when a pre-installed adapter version is outside the recipe range", a
     assert.equal(outcome.status, "applied");
     if (outcome.status !== "applied") return;
     assert.ok(
-      outcome.warnings.some((w) => /@astrojs\/cloudflare@14\.1\.7.*expects.*>=14\.3\.0 <14\.4\.0/.test(w)),
+      outcome.warnings.some((w) => /@astrojs\/cloudflare@14\.1\.7.*expects.*~14\.3\.0/.test(w)),
       `expected an out-of-range warning; got: ${JSON.stringify(outcome.warnings)}`,
     );
   } finally {

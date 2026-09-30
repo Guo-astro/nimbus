@@ -92,7 +92,10 @@ export const MANAGERS: readonly Manager[] = ["npm", "yarn", "pnpm", "bun"];
  * unscoped package when it isn't installed.
  */
 function binName(pkg: string): string {
-  return pkg.replace(/^@[^/]+\//, "").replace(/@[^\s]*$/, "");
+  // String slicing, not a regex: CodeQL flags `/@[^\s]*$/` as polynomial.
+  const name = pkg.startsWith("@") ? pkg.slice(pkg.indexOf("/") + 1) : pkg;
+  const version = name.indexOf("@");
+  return version > 0 ? name.slice(0, version) : name;
 }
 
 export function getCommand(

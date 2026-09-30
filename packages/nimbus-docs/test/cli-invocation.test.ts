@@ -158,4 +158,5 @@ test("getCommand exec runs the installed CLI under every PM, matching invocation
     ["npx @cloudflare/nimbus-docs list", "yarn nimbus-docs list", "pnpm nimbus-docs list", "bunx @cloudflare/nimbus-docs list"],
   );
   assert.equal(getCommand("pnpm", "exec", "astro", { args: "check" }), "pnpm astro check");
+  assert.equal(getCommand("yarn", "exec", `${CLI_PACKAGE}@0.15.1`, { args: "list" }), "yarn nimbus-docs list");
 });

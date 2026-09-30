@@ -251,6 +251,17 @@ api: [
 
 In both bounded modes, the current page's ancestors are open and show all their children, so its neighbors are one click away. Root, schema, and webhook pages show top-level items only. The setting applies to every version of a family.
 
+Bounded pages still carry every top-level item, so an API with hundreds of flat tags stays heavy. Group its tags with `x-tagGroups` or a tag's `parent`, which Nimbus reads in any OpenAPI version. A tag's `x-displayName` sets the label readers see, while its `name` keeps deciding its coordinate and route:
+
+```yaml title="openapi.yaml"
+tags:
+  - name: workers
+    x-displayName: Workers
+  - name: workers.scripts
+    x-displayName: Scripts
+    parent: workers
+```
+
 With `"on-demand"`, Nimbus builds one small HTML file per group under `/nimbus-api/nav/<collection>/` and renders it with your `src/components/ui/api-sidebar/ApiSidebarItem.astro`, so loaded rows match the rest of the sidebar. The sidebar starts loading a group when the pointer moves over it or it receives focus, and keeps loaded rows for the session, so a remembered group shows its rows on the next page without a request. Without JavaScript, a group's label still links to its page. Request-rendered collections serve the same files on request.
 
 In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session. Restored groups appear already open, without replaying their animation.

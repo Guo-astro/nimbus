@@ -227,7 +227,7 @@ function descriptionOf(node: Node): string | undefined {
 function labelFor(node: Node): string {
   const f = node.facts;
   if (f.kind === "operation") return f.summary ?? node.id;
-  if (f.kind === "section") return f.name;
+  if (f.kind === "section") return f.displayName ?? f.name;
   if (f.kind === "schema") return f.name;
   if (f.kind === "api") return f.title ?? node.id;
   return node.id;

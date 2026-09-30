@@ -112,6 +112,8 @@ export interface SectionFacts {
   kind: "section";
   /** Tag summary (OAS 3.2 parent/kind hierarchy). */
   name: string;
+  /** Reader-facing label from the tag's `x-displayName`, when it differs from `name`. */
+  displayName?: string;
   description?: string;
 }
 

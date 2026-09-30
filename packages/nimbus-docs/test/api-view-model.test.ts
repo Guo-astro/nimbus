@@ -1051,6 +1051,50 @@ describe("nav: active + ancestor-expanded + verb chips", () => {
   });
 });
 
+describe("x-displayName labels a tag without changing its identity", () => {
+  const spec = {
+    openapi: "3.1.0",
+    info: { title: "Labels", version: "1" },
+    tags: [
+      { name: "workers", "x-displayName": "Workers" },
+      { name: "workers:scripts", "x-displayName": "Scripts", parent: "workers" },
+      { name: "plain" },
+    ],
+    paths: {
+      "/scripts": {
+        get: { operationId: "scriptsList", summary: "List scripts", tags: ["workers:scripts"], responses: { "200": { description: "ok" } } },
+      },
+      "/plain": {
+        get: { operationId: "plainGet", summary: "Get plain", tags: ["plain"], responses: { "200": { description: "ok" } } },
+      },
+    },
+  } as Record<string, never>;
+
+  let model: ApiModel;
+  before(async () => {
+    model = await buildApiModel({ collection: "labels", spec, label: "labels" });
+  });
+
+  test("nav, page title, breadcrumbs, and Markdown use the display name", () => {
+    const workers = getApiNav(model).items.find((i) => i.coordinate === "tags.workers")!;
+    assert.equal(workers.label, "Workers");
+    assert.equal(workers.children.find((c) => c.coordinate === "tags.workers:scripts")?.label, "Scripts");
+    const page = getApiPageProps(model, "tags.workers:scripts") as ApiSectionPage;
+    assert.equal(page.title, "Scripts");
+    assert.deepEqual(
+      getApiPageProps(model, "scriptsList").breadcrumbs.map((b) => b.label),
+      ["Labels", "Workers", "Scripts"],
+    );
+    assert.match(renderApiPageMarkdown(page), /^Path: Labels › Workers$/m);
+  });
+
+  test("the tag name still decides the coordinate and route; tags without one keep their name", () => {
+    const slugs = new Map(getApiPageSlugs(model).map((s) => [s.coordinate, s.slug]));
+    assert.equal(slugs.get("tags.workers"), "tags/workers");
+    assert.equal(getApiNav(model).items.find((i) => i.coordinate === "tags.plain")?.label, "plain");
+  });
+});
+
 describe("nav hierarchy: x-tagGroups categories + tag.parent subresources", () => {
   const groupedSpec = {
     openapi: "3.1.0",

@@ -1623,9 +1623,20 @@ async function resolveApiRoute(
  * Pair with `trackNavState` from `@cloudflare/nimbus-docs/client`, which
  * records the state. See `client/nav-state.ts` for the markup contract.
  */
+// JSON embedded in an inline <script>: escape what could close the element or
+// break the script (`<`, `>`, `/`, and the U+2028/U+2029 line separators).
+function inlineScriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003C")
+    .replace(/>/g, "\\u003E")
+    .replace(/\//g, "\\u002F")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 // `__name` is a no-op stand-in for the helper esbuild's keep-names mode (tsx,
 // Vite) inserts into function bodies; the serialized body must not depend on it.
-export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${JSON.stringify(NAV_STATE_KEYS)});})();`;
+export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson(NAV_STATE_KEYS)});})();`;
 
 // ---------------------------------------------------------------------------
 // `sidebar: "on-demand"` fragments. Nimbus injects one route per collection,

@@ -206,7 +206,7 @@ for (const request of [false, true]) {
         for (const group of groups) {
           const { status, body } = await site.get(`${BASE}${apiNavFragmentHref(mountPath, group.coordinate)}`);
           assert.equal(status, 200, group.coordinate);
-          assert.match(body, new RegExp(`data-row="${group.coordinate.replace(/[.]/g, "\\.")}"`));
+          assert.ok(body.includes(`data-row="${group.coordinate}"`), group.coordinate);
           for (const child of group.children) assert.ok(body.includes(`data-row="${child.coordinate}"`));
           assert.doesNotMatch(body, /<html|<head|<body/, "a fragment is a partial");
         }

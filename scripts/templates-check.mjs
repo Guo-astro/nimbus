@@ -541,7 +541,15 @@ if (LANE === "static") {
   const slashedHome = read("index.html");
   assert.deepEqual(hrefs(slashedHome, "main a"), ["/docs/welcome/", "/docs/getting-started/", "/docs/components/"]);
   assert.equal(hrefs(slashedHome, "header a")[0], "/docs/");
-  ok("a base with build.format: \"file\" or trailingSlash: \"always\" keeps links, nav, and canonicals on real routes");
+
+  // Both at once: `.html` pathnames, but every URL keeps the slash.
+  buildWith(`base: "/docs", trailingSlash: "always", build: { format: "file" },`);
+  assert.deepEqual(hrefs(read("index.html"), 'link[rel="canonical"]'), ["https://example.com/docs/"]);
+  const slashedPage = read("getting-started.html");
+  assert.deepEqual(hrefs(slashedPage, 'link[rel="canonical"]'), ["https://example.com/docs/getting-started/"]);
+  assert.equal(slashedPage.querySelector('meta[property="og:url"]')?.getAttribute("content"), "https://example.com/docs/getting-started/");
+  assert.ok(hrefs(slashedPage, 'a[aria-current="page"]').includes("/docs/getting-started/"), "the canonical matches the sidebar link");
+  ok("a base with build.format: \"file\", trailingSlash: \"always\", or both keeps links, nav, and canonicals on real routes");
 }
 
 const installed = JSON.parse(

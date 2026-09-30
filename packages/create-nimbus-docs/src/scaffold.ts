@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -300,6 +300,7 @@ export async function scaffold(
         deploy: options.deploy,
       });
     }
+    if (packageManager === "yarn") pinYarnBerry(target);
     writeNimbusJson(target, options, preview);
     stopProgress("Project configured.");
   } catch (err) {
@@ -577,6 +578,12 @@ function normalizePackageManagerFiles(
   // peers under. Yarn 1 ignores the file.
   const yarnrc = join(dir, ".yarnrc.yml");
   if (packageManager === "yarn" && !existsSync(yarnrc)) writeFileSync(yarnrc, "nodeLinker: node-modules\n");
+  // Yarn 2+ takes the nearest lockfile as the project root, so a site created
+  // inside another Yarn project would install as part of it and fail. An
+  // empty lockfile is Yarn's own way to mark a separate project; the first
+  // install fills it in.
+  const yarnLock = join(dir, "yarn.lock");
+  if (packageManager === "yarn" && !existsSync(yarnLock)) writeFileSync(yarnLock, "");
 
   const dotGitignorePath = join(dir, ".gitignore");
   const shippedGitignorePath = join(dir, "gitignore");
@@ -585,6 +592,37 @@ function normalizePackageManagerFiles(
   } else {
     rmSync(shippedGitignorePath, { force: true });
   }
+}
+
+/**
+ * Pin Yarn 2+ in `packageManager`. Without it, corepack runs Yarn 1 for a
+ * project that has no field, so the install (and every later `yarn`) silently
+ * becomes Yarn Classic. The version is the Yarn that ran the scaffolder
+ * (`yarn dlx`, `yarn create`), else the one `yarn` resolves to here; Yarn 1
+ * needs no pin.
+ */
+function pinYarnBerry(target: string): void {
+  const fromAgent = /^yarn\/(\S+)/.exec(process.env.npm_config_user_agent ?? "")?.[1];
+  const version =
+    fromAgent ??
+    spawnSync("yarn", ["--version"], { cwd: target, encoding: "utf8", env: installEnv(), timeout: 30_000 }).stdout?.trim();
+  if (!version || !/^\d+\.\d+\.\d+/.test(version) || Number(version.split(".")[0]) < 2) return;
+  const pkgPath = join(target, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
+  pkg.packageManager = `yarn@${version}`;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
+// `yarn dlx` runs the scaffolder under its own Plug'n'Play hooks. A child
+// install that inherits them resolves against the dlx sandbox, not the site.
+const PNP_HOOK = /(?:^|\s+)(?:--require|-r|--experimental-loader|--loader|--import)(?:\s+|=)(?:"[^"]*\.pnp\.[^"]*"|'[^']*\.pnp\.[^']*'|\S*\.pnp\.\S*)/g;
+
+function installEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nodeOptions = env.NODE_OPTIONS?.replace(PNP_HOOK, "").trim();
+  const next = { ...env };
+  if (nodeOptions) next.NODE_OPTIONS = nodeOptions;
+  else delete next.NODE_OPTIONS;
+  return next;
 }
 
 // Output stays hidden unless the command fails (bun reports progress on
@@ -597,6 +635,7 @@ function runCommand(bin: string, args: string[], cwd: string): Promise<void> {
   return new Promise((resolveP, rejectP) => {
     const child = spawn(bin, args, {
       cwd,
+      env: installEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";

@@ -7,7 +7,9 @@
  *
  * Usage: TEMPLATES_PM=npm|yarn|bun node scripts/templates-pm-check.mjs
  *
- * Yarn runs as `yarn@4` through corepack; bun must be on PATH.
+ * Yarn scaffolds as if `yarn@4` (through corepack) ran the scaffolder, then
+ * runs as plain `corepack yarn`, so the site's own `packageManager` pin picks
+ * the version. bun must be on PATH.
  */
 
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -26,7 +28,7 @@ const COMMANDS = {
   // `exec` runs the site's installed bin and never falls back to the registry,
   // whose unscoped `nimbus-docs` is an unrelated package.
   npm: { bin: "npm", prefix: [], run: ["run"], exec: ["exec", "--no", "--"] },
-  yarn: { bin: "corepack", prefix: ["yarn@4"], run: ["run"], exec: ["run"] },
+  yarn: { bin: "corepack", prefix: ["yarn"], run: ["run"], exec: ["run"] },
   bun: { bin: "bun", prefix: [], run: ["run"], exec: ["run"] },
 };
 const PM = process.env.TEMPLATES_PM;
@@ -92,21 +94,45 @@ const tgz = readdirSync(packDest).find((file) => file.endsWith(".tgz"));
 if (!tgz) fail(`no ${NIMBUS_NAME} tarball in ${packDest}`);
 const tarball = join(packDest, tgz);
 
+// The user agent the scaffolder sees when a package manager runs it. Asked
+// outside the repo, whose own `packageManager` makes corepack refuse Yarn.
+function userAgent() {
+  if (PM !== "yarn") return "";
+  const { status, stdout } = spawnCommandSync("corepack", ["yarn@4", "--version"], {
+    cwd: tmpdir(),
+    encoding: "utf8",
+    env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: "0" },
+  });
+  const version = stdout?.trim();
+  if (status !== 0 || !version) fail("`corepack yarn@4 --version` failed");
+  return `yarn/${version}`;
+}
+const USER_AGENT = userAgent();
+
 for (const content of ["starter", "empty"]) {
   const work = mkdtempSync(join(tmpdir(), `nimbus-templates-${PM}-`));
   cleanup.push(work);
+  // Scaffold inside an unrelated Yarn project, as in a monorepo checkout: the
+  // site must still install as a project of its own.
+  if (PM === "yarn") {
+    writeFileSync(join(work, "package.json"), JSON.stringify({ name: "outer", private: true, packageManager: USER_AGENT.replace("/", "@") }) + "\n");
+    writeFileSync(join(work, "yarn.lock"), "");
+  }
   // The scaffolder's own install would fetch the published framework, so
   // install after pointing the site at the tarball.
   run(
     "node",
     [SCAFFOLDER_BIN, "site", "--yes", "--skip-install", "--no-git", "--package-manager", PM, "--content", content, "--template-dir", GENERATED],
     work,
-    { npm_config_user_agent: "" },
+    { npm_config_user_agent: USER_AGENT },
   );
   const site = join(work, "site");
   const pkgPath = join(site, "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
   if (!pkg.dependencies?.[NIMBUS_NAME]) fail(`the ${content} site declares no ${NIMBUS_NAME} dependency`);
+  if (PM === "yarn" && !/^yarn@[2-9]/.test(pkg.packageManager ?? "")) {
+    fail(`the ${content} site doesn't pin Yarn 2+ (packageManager: ${pkg.packageManager}), so corepack would run Yarn 1`);
+  }
   pkg.dependencies[NIMBUS_NAME] = `file:${tarball}`;
   writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 

@@ -289,7 +289,7 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
   }
 });
 
-test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarnrc.yml", async () => {
+test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarnrc.yml and a yarn.lock", async () => {
   for (const packageManager of ["npm", "pnpm", "yarn", "bun"] as const) {
     const cwd = makeCwd();
     const tmpl = makeTemplate();
@@ -306,6 +306,8 @@ test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarn
       const yarnrc = path.join(cwd, "my-docs", ".yarnrc.yml");
       assert.equal(fs.existsSync(yarnrc), packageManager === "yarn", packageManager);
       if (packageManager === "yarn") assert.equal(fs.readFileSync(yarnrc, "utf8"), "nodeLinker: node-modules\n");
+      // The lockfile makes the site its own Yarn project, even inside another one.
+      assert.equal(fs.existsSync(path.join(cwd, "my-docs", "yarn.lock")), packageManager === "yarn", packageManager);
     } finally {
       cleanup(cwd, tmpl);
     }

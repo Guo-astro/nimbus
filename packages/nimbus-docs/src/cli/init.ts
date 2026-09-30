@@ -13,6 +13,7 @@ import { valid } from "semver";
 
 import { assertInsideSrc } from "./component.js";
 import { invocation } from "./pm.js";
+import { progress } from "./progress.js";
 import {
   NIMBUS_JSON,
   bytesHash,
@@ -227,7 +228,7 @@ export async function initCommand(flags: InitFlags): Promise<void> {
   }
 
   p.intro("nimbus-docs init"); // banner label, not a runnable hint
-  const spinner = p.spinner();
+  const spinner = progress();
   spinner.start("Reconstructing provenance from installed components");
 
   const { components, stats } = await reconstructComponents({

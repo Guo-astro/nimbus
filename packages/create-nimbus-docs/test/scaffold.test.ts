@@ -306,6 +306,13 @@ test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarn
       const yarnrc = path.join(cwd, "my-docs", ".yarnrc.yml");
       assert.equal(fs.existsSync(yarnrc), packageManager === "yarn", packageManager);
       if (packageManager === "yarn") assert.equal(fs.readFileSync(yarnrc, "utf8"), "nodeLinker: node-modules\n");
+      // No lockfile up front: inside a Yarn workspace, the site stays a member.
+      assert.equal(fs.existsSync(path.join(cwd, "my-docs", "yarn.lock")), false, packageManager);
+      assert.equal(
+        /^\.yarn\/install-state\.gz$/m.test(fs.readFileSync(path.join(cwd, "my-docs", ".gitignore"), "utf8")),
+        packageManager === "yarn",
+        packageManager,
+      );
     } finally {
       cleanup(cwd, tmpl);
     }

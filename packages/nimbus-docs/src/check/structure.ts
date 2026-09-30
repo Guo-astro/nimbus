@@ -246,11 +246,12 @@ async function checkRequestRendering(
   }
   if (!hasRequestRoute) return;
 
+  // Not `requiresBuild`: check never reads server output, so a build can't
+  // clear this note. It stays, and the build is the gate.
   notes.push({
     code: "nimbus/request-rendering-build-required",
     reason:
-      "`nimbus-docs check` cannot verify request-rendered output or adapter compatibility; use a production build as the authoritative gate",
-    requiresBuild: true,
+      "`nimbus-docs check` doesn't verify request-rendered pages, even after a build; a passing production build is the gate for them",
   });
 }
 

@@ -1,9 +1,18 @@
 import { discoverMigrations } from "../_internal/migrations.js";
-import { resolveUpgradeBaseline, selectUpgradeEntries } from "../_internal/upgrades.js";
+import { dependenciesMissing, resolveUpgradeBaseline, selectUpgradeEntries } from "../_internal/upgrades.js";
 import { selfCommand } from "../cli/pm.js";
 import type { ScopeReport } from "./finding.js";
 
 export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeReport {
+  // The env scope reports the missing install; there's no version to compare yet.
+  if (dependenciesMissing(cwd)) {
+    return {
+      scope: "migrations",
+      findings: [],
+      notes: [{ code: "nimbus/dependencies-missing", reason: "dependencies aren't installed yet" }],
+      evaluated: true,
+    };
+  }
   const baseline = resolveUpgradeBaseline({ projectRoot: cwd });
   const entries = baseline.fromVersion && !baseline.error
     ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion)

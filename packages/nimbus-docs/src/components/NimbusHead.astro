@@ -26,6 +26,7 @@
  * re-doing their head tags.
  */
 
+import { build, trailingSlash } from "astro:config/client";
 import { config, headDefaults } from "virtual:nimbus/config";
 import {
   getApiVersionAlternates,
@@ -147,10 +148,13 @@ const llmsIndexUrl =
       : withBase(llmsIndexPath, baseUrl)
     : null;
 
-// Under `build.format: "file"` the pathname ends in `.html`; links and the
-// sitemap don't, so neither does the canonical. Same rule as the internal
-// `withoutHtmlExtension` (`_internal/url.ts`), which isn't public.
-const pagePath = Astro.url.pathname.replace(/(?:\/index)?\.html$/, "") || "/";
+// The canonical has the page links' shape. Under `build.format: "file"` the
+// pathname ends in `.html`, which links and the sitemap drop; then Astro's
+// slash rule applies. Same rules as the internal `withoutHtmlExtension` and
+// `toDocumentHref` (`_internal/url.ts`), which aren't public.
+const appendsSlash = trailingSlash === "always" || (trailingSlash === "ignore" && build.format === "directory");
+const barePath = Astro.url.pathname.replace(/(?:\/index)?\.html$/, "").replace(/\/+$/, "");
+const pagePath = barePath === "" ? "/" : appendsSlash ? `${barePath}/` : barePath;
 const canonical = Astro.site
   ? versionCanonicalPath
     ? new URL(withBase(versionCanonicalPath, baseUrl), Astro.site).href

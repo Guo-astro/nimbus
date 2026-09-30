@@ -1509,9 +1509,11 @@ export function nimbus(
           throw new Error(`nimbus-docs: ${message}`);
         }
         if (migrationRoot) {
-          const baseline = resolveUpgradeBaseline({ projectRoot: migrationRoot });
+          const baseline = resolveUpgradeBaseline({ projectRoot: migrationRoot, runningFromProject: true });
           if (baseline.error) {
-            const message = `${baseline.error} Run \`${invocation("migrate", migrationRoot)}\` to repair the upgrade baseline.`;
+            const message = baseline.installFirst
+              ? baseline.error
+              : `${baseline.error} Run \`${invocation("migrate", migrationRoot)}\` to repair the upgrade baseline.`;
             logger?.error(message);
             throw new Error(`nimbus-docs: ${message}`);
           }

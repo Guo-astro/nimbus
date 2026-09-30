@@ -18,7 +18,8 @@ import { ADAPTER_IDS, ADAPTER_RECIPES } from "../_internal/adapters.js";
 import { readBuildEnv } from "../_internal/dotenv.js";
 import { deriveFootprint, type FeatureRecipe } from "../_internal/footprint.js";
 import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
-import { addCommand, detectPackageManager, quoteForDisplay } from "../cli/pm.js";
+import { dependenciesMissing } from "../_internal/upgrades.js";
+import { addCommand, detectPackageManager, installCommand, quoteForDisplay } from "../cli/pm.js";
 import type { CheckFinding, Note, ScopeReport } from "./finding.js";
 import { lineOf, relFile } from "./loc.js";
 import {
@@ -46,7 +47,17 @@ export function checkEnv(cwd: string, parsed: ConfigParseResult): ScopeReport {
   checkPackageJson(cwd, findings);
   checkConfigLocatable(findings, notes, parsed);
   checkSitePlaceholder(findings, parsed);
-  if (hasPackageJson(cwd)) {
+  // Before the first install every package looks missing; say that once
+  // instead of offering to install pagefind and wrangler one by one.
+  if (dependenciesMissing(cwd)) {
+    findings.push({
+      scope: "env",
+      code: "nimbus/dependencies-missing",
+      severity: "error",
+      message: `Dependencies aren't installed. Run \`${installCommand(cwd)}\`, then rerun check.`,
+      fixable: false,
+    });
+  } else if (hasPackageJson(cwd)) {
     checkPagefind(cwd, findings, parsed);
     checkWrangler(cwd, findings);
     checkAdapterVersions(cwd, findings);

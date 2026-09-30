@@ -117,7 +117,7 @@ const breadcrumbs = [
           </h2>
           {isBuiltin
             ? <Code code={`import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";`} lang="ts" raw />
-            : <PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args={`add ${slug}`} />
+            : <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
         }
       </section>
 

@@ -98,7 +98,7 @@ test("check --fix without a terminal names the skipped prompt even when only a w
     });
     assert.match(
       res.stdout,
-      /Some fixes need a terminal: run `npx @cloudflare\/nimbus-docs check --fix` in one/,
+      /Some fixes ask for a value: edit it by hand, or run `npx @cloudflare\/nimbus-docs check --fix` in an interactive terminal/,
       res.stdout + res.stderr,
     );
   } finally {

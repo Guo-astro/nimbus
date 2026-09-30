@@ -20,7 +20,7 @@ Start with an OpenAPI 3.x document stored in your repository. Convert Swagger 2.
 
 Run the API reference recipe from the project root inside your coding agent:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add api-reference" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-reference" />
 
 Nimbus passes the recipe directly to detected coding agents. From a regular shell, add `--print` and pass the output to your coding agent. Without `--print` and outside a detected agent, the command changes no files and prints nothing on standard output, with or without a terminal: it writes instructions for piping the recipe to an agent to standard error. Scripts should pass `--print`. The recipe reviews its plan before changing files.
 
@@ -244,7 +244,7 @@ rendering: {
 
 Then run the Cloudflare adapter installer. It keeps an existing rendering policy. Without one, it sets `rendering: { default: "request" }`, which renders every collection on request.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
 Astro then logs "getStaticPaths() ignored in dynamic page" for the request-rendered API route. The warning is expected; see [Mix build and request rendering](/configuration#mix-build-and-request-rendering).
 

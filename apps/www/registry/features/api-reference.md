@@ -104,7 +104,7 @@ Run the registry recipe — it copies four owned, editable components that rende
 the view-model, and installs the API engine's peer packages:
 
 ```sh
-pnpm exec nimbus-docs add api-layout   # or: npm / yarn
+npx @cloudflare/nimbus-docs add api-layout
 ```
 
 This lands `ApiLayout`, `ApiSidebar`, `ApiFieldRow`, and `ApiCodeRail` under
@@ -244,10 +244,17 @@ expanded flags and verb come pre-resolved on each `ApiNavItem`.
 Sidebar layout is taste-laden; ask before editing. If the user wants an "API"
 entry in the site sidebar, add a manual link to the `sidebar.items` array in
 the Nimbus config (the API collection isn't a docs tree, so `autogenerate`
-won't apply to it):
+won't apply to it). Setting `sidebar.items` replaces the sidebar Nimbus builds
+from the docs folders, so if the config has no `sidebar.items` yet, keep the
+docs tree with an `autogenerate` entry:
 
 ```ts
-{ label: "API", link: "/api" },
+sidebar: {
+  items: [
+    { autogenerate: { collection: "docs" } }, // omit if `items` already lists the docs
+    { label: "API", link: "/api" },
+  ],
+},
 ```
 
 ## 6. Verify

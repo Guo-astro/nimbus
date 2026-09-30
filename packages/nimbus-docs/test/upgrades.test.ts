@@ -219,6 +219,49 @@ test("resolveUpgradeBaseline prefers --from and validates persisted baselines", 
   }
 });
 
+test("a baseline ahead of the install says to install or upgrade, not to migrate", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-upgrades-ahead-"));
+  try {
+    fs.writeFileSync(path.join(root, "pnpm-lock.yaml"), "");
+    fs.writeFileSync(path.join(root, "nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: "0.14.0" }));
+    const baseline = resolveUpgradeBaseline({ projectRoot: root, targetVersion: "0.13.1" });
+    assert.equal(baseline.installFirst, true);
+    assert.equal(
+      baseline.error,
+      "nimbus.json was reviewed with Nimbus 0.14.0, newer than installed Nimbus 0.13.1. Install dependencies with `pnpm install` if the lockfile already has 0.14.0 (for example after pulling an upgrade), or upgrade with `pnpm add @cloudflare/nimbus-docs@0.14.0`.",
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a declared but uninstalled Nimbus has no version to record", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-upgrades-uninstalled-"));
+  try {
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ devDependencies: { "@cloudflare/nimbus-docs": "^0.15.0" } }));
+    fs.writeFileSync(path.join(root, "yarn.lock"), "");
+    const baseline = resolveUpgradeBaseline({ projectRoot: root });
+    assert.equal(baseline.installFirst, true);
+    assert.match(baseline.error ?? "", /not installed in this project\. Install dependencies first with `yarn install`/);
+    // The build runs the project's own Nimbus, so it has an install to read.
+    assert.equal(resolveUpgradeBaseline({ projectRoot: root, runningFromProject: true }).error, undefined);
+    // Yarn Plug'n'Play has no node_modules to read, and keeps `.pnp.cjs` at
+    // the workspace root.
+    const pkg = path.join(root, "packages", "docs");
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "^0.15.0" } }));
+    assert.equal(resolveUpgradeBaseline({ projectRoot: pkg }).installFirst, true);
+    fs.writeFileSync(path.join(root, ".pnp.cjs"), "");
+    assert.equal(resolveUpgradeBaseline({ projectRoot: pkg }).error, undefined);
+    // A package with its own yarn.lock is a separate project: the ancestor's
+    // install isn't its install.
+    fs.writeFileSync(path.join(pkg, "yarn.lock"), "");
+    assert.equal(resolveUpgradeBaseline({ projectRoot: pkg }).installFirst, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("malformed nimbus.json guidance names the file and recovery command", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-upgrades-malformed-"));
   try {

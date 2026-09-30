@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
 
 const PKG = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
@@ -73,6 +73,122 @@ test("after a successful install, next steps skip the install and hide its outpu
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+});
+
+/**
+ * A minimal template plus a fake `yarn` that reports `version` and records the
+ * NODE_OPTIONS its install ran with.
+ */
+function withTemplateAndYarn(
+  version: string,
+  run: (args: string[], env: NodeJS.ProcessEnv, seen: string) => void,
+  install = "exit 0",
+) {
+  const dir = mkdtempSync(join(tmpdir(), "nimbus-create-yarn-"));
+  const template = join(dir, "template");
+  const bin = join(dir, "bin");
+  const seen = join(dir, "node-options.txt");
+  mkdirSync(template);
+  mkdirSync(bin);
+  writeFileSync(join(template, "package.json"), `{ "name": "template", "version": "0.0.0" }`);
+  writeFileSync(join(template, "astro.config.ts"), `export default {\n  // nimbus:adapter\n};\n`);
+  writeFileSync(
+    join(bin, "yarn"),
+    `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "${version}"; exit 0; fi\nprintf '%s' "$NODE_OPTIONS" > "${seen}"\n${install}\n`,
+  );
+  chmodSync(join(bin, "yarn"), 0o755);
+  try {
+    run(
+      ["site", "--yes", "--no-git", "--package-manager", "yarn", "--template-dir", template],
+      { PATH: `${bin}:${process.env.PATH}`, npm_config_user_agent: "" },
+      seen,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function sitePackageManager(cwd: string): unknown {
+  return (JSON.parse(readFileSync(join(cwd, "site", "package.json"), "utf8")) as { packageManager?: unknown }).packageManager;
+}
+
+test("run from `yarn dlx`, the site pins that Yarn and installs without the dlx Plug'n'Play hooks", () => {
+  withTemplateAndYarn("1.22.22", (args, env, seen) => {
+    // Stand-ins for the dlx sandbox's hooks, which the scaffolder itself loads.
+    const sandbox = mkdtempSync(join(tmpdir(), "nimbus dlx "));
+    writeFileSync(join(sandbox, ".pnp.cjs"), "");
+    writeFileSync(join(sandbox, ".pnp.loader.mjs"), "");
+    const { cwd, output, status } = scaffoldWithoutTerminal(args, {
+      ...env,
+      npm_config_user_agent: "yarn/4.12.0 npm/? node/v24.0.0 darwin arm64",
+      NODE_OPTIONS: `--require "${join(sandbox, ".pnp.cjs")}" --experimental-loader "${pathToFileURL(join(sandbox, ".pnp.loader.mjs")).href}" --max-old-space-size=4096`,
+    });
+    rmSync(sandbox, { recursive: true, force: true });
+    try {
+      assert.equal(status, 0, output);
+      assert.equal(sitePackageManager(cwd), "yarn@4.12.0");
+      assert.equal(readFileSync(seen, "utf8"), "--max-old-space-size=4096");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+// Inside a project whose `packageManager` names another manager, corepack
+// refuses to run Yarn at all; the install then fails with corepack's message.
+test("with --package-manager yarn, the site pins the Yarn 2+ that `yarn` runs, and never Yarn 1", () => {
+  for (const [version, pinned] of [["4.9.1", "yarn@4.9.1"], ["1.22.22", undefined]] as const) {
+    withTemplateAndYarn(version, (args, env) => {
+      const { cwd, output, status } = scaffoldWithoutTerminal(args, env);
+      try {
+        assert.equal(status, 0, output);
+        assert.equal(sitePackageManager(cwd), pinned, version);
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+// What Yarn 2+ prints for a directory under another Yarn project that doesn't
+// list it as a workspace; it passes once the directory has its own yarn.lock.
+const OUTSIDE_PROJECT = `if [ ! -f yarn.lock ]; then echo "Usage Error: The nearest package directory (/x/site) doesn't seem to be part of the project declared in /x." >&2; exit 1; fi\nexit 0`;
+
+test("inside an unrelated Yarn project, the site gets its own yarn.lock and installs", () => {
+  withTemplateAndYarn("4.12.0", (args, env) => {
+    const { cwd, output, status } = scaffoldWithoutTerminal(args, env);
+    try {
+      assert.equal(status, 0, output);
+      assert.equal(readFileSync(join(cwd, "site", "yarn.lock"), "utf8"), "");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, OUTSIDE_PROJECT);
+});
+
+test("a site Yarn installs as it is (such as a workspace member) gets no yarn.lock of its own", () => {
+  withTemplateAndYarn("4.12.0", (args, env) => {
+    const { cwd, output, status } = scaffoldWithoutTerminal(args, env);
+    try {
+      assert.equal(status, 0, output);
+      assert.equal(existsSync(join(cwd, "site", "yarn.lock")), false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("a Yarn install held back by the release-day age gate says why", () => {
+  withTemplateAndYarn("4.18.1", (args, env) => {
+    const { cwd, output, status } = scaffoldWithoutTerminal(args, env);
+    try {
+      assert.equal(status, 1, output);
+      assert.match(output, /YN0016/);
+      assert.match(output, /Yarn doesn't install packages published in the last day \(its npmMinimalAgeGate setting\)/);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, `echo 'YN0016: @cloudflare/nimbus-docs@npm:0.15.2: All versions satisfying "^0.15.2" are quarantined'; exit 1`);
 });
 
 test("without a terminal, every unanswered question and its flag is named in one error", () => {

@@ -3,12 +3,15 @@
  *
  * Detection order, strongest signal first:
  *   1. a lockfile in the user's cwd (nearest, most explicit),
- *   2. `npm_config_user_agent` — how the user actually invoked the CLI
- *      (authoritative; never shadowed by a distant ancestor lockfile),
- *   3. a lockfile in an ancestor directory — a package inside a monorepo
+ *   2. the project's own declaration in cwd: `package.json` `packageManager`,
+ *      then a manager's config file (`pnpm-workspace.yaml`, `.yarnrc.yml`),
+ *      so a site not installed yet isn't read as npm because `npx` ran us,
+ *   3. `npm_config_user_agent` — how the user actually invoked the CLI
+ *      (never shadowed by a distant ancestor lockfile),
+ *   4. a lockfile in an ancestor directory — a package inside a monorepo
  *      whose lockfile lives at the workspace root, invoked without a PM
  *      user-agent (e.g. bare `node`/CI),
- *   4. `npm`.
+ *   5. `npm`.
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -34,7 +37,7 @@ const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
 ];
 
 export function detectPackageManager(cwd: string): PackageManager {
-  const inCwd = lockfileManager(cwd);
+  const inCwd = lockfileManager(cwd) ?? declaredManager(cwd);
   if (inCwd) return inCwd;
 
   const ua = process.env.npm_config_user_agent ?? "";
@@ -53,6 +56,26 @@ export function detectPackageManager(cwd: string): PackageManager {
     if (pm) return pm;
   }
   return "npm";
+}
+
+const MANAGER_FILES: ReadonlyArray<readonly [string, PackageManager]> = [
+  ["pnpm-workspace.yaml", "pnpm"],
+  [".yarnrc.yml", "yarn"],
+];
+
+function declaredManager(dir: string): PackageManager | null {
+  try {
+    const field = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { packageManager?: unknown })
+      .packageManager;
+    const name = typeof field === "string" ? field.split("@")[0] : "";
+    if (name === "npm" || name === "pnpm" || name === "yarn" || name === "bun") return name;
+  } catch {
+    // No readable package.json: fall through to config files.
+  }
+  for (const [file, pm] of MANAGER_FILES) {
+    if (existsSync(join(dir, file))) return pm;
+  }
+  return null;
 }
 
 function lockfileManager(dir: string): PackageManager | null {
@@ -107,7 +130,7 @@ export function shellArg(value: string): string {
 
 // pnpm and Yarn run a package's bin only for the workspace that declares it
 // (Yarn PnP has no node_modules at all), so check the nearest package.json.
-function declaresCli(cwd: string): boolean {
+export function declaresCli(cwd: string): boolean {
   for (let dir = cwd; ; dir = dirname(dir)) {
     const file = join(dir, "package.json");
     if (existsSync(file)) {
@@ -120,6 +143,11 @@ function declaresCli(cwd: string): boolean {
     }
     if (dirname(dir) === dir) return false;
   }
+}
+
+/** The project's plain install command, e.g. `pnpm install`. */
+export function installCommand(cwd = process.cwd()): string {
+  return getCommand(detectPackageManager(cwd), "install")!;
 }
 
 /**

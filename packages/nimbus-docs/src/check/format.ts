@@ -24,8 +24,11 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
-  /** Fixes `--fix` skipped: prompts need a terminal, installs need `--yes`. */
-  skippedFixes?: "needs-terminal" | "needs-yes";
+  /**
+   * Fixes `--fix` skipped: prompts for a value need a terminal, installs need
+   * `--yes`. `invocation` is then the `check --fix` command to build on.
+   */
+  skippedFixes?: ReadonlyArray<"needs-terminal" | "needs-yes">;
 }
 
 const SCOPE_LABELS: Record<CheckScope, string> = {
@@ -89,18 +92,23 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
 
   lines.push("");
   lines.push(...renderHeadline(result, opts, paint));
-  const hint = skippedFixHint(result, opts);
-  if (hint) lines.push(paint(COLORS.yellow, hint));
+  for (const hint of skippedFixHints(result, opts)) lines.push(paint(COLORS.yellow, hint));
   lines.push("");
   return lines.join("\n");
 }
 
-function skippedFixHint(result: CheckResult, opts: PrettyOptions): string | undefined {
+function skippedFixHints(result: CheckResult, opts: PrettyOptions): string[] {
   // With --quiet, a skipped fix for a hidden warning isn't worth a line.
-  if (!result.findings.some((f) => f.fixable && (!opts.quiet || f.severity === "error"))) return undefined;
-  if (opts.skippedFixes === "needs-terminal") return `  → Some fixes need a terminal: run \`${opts.invocation}\` in one`;
-  if (opts.skippedFixes === "needs-yes") return `  → Some fixes need consent: run \`${opts.invocation}\``;
-  return undefined;
+  const shown = result.findings.filter((f) => f.fixable && (!opts.quiet || f.severity === "error"));
+  const skipped = opts.skippedFixes ?? [];
+  const hints: string[] = [];
+  if (skipped.includes("needs-yes") && shown.some((f) => !f.fix?.requiresInput)) {
+    hints.push(`  → Some fixes install packages: run \`${opts.invocation} --yes\` to allow them`);
+  }
+  if (skipped.includes("needs-terminal") && shown.some((f) => f.fix?.requiresInput)) {
+    hints.push(`  → Some fixes ask for a value: edit it by hand, or run \`${opts.invocation}\` in an interactive terminal`);
+  }
+  return hints;
 }
 
 function renderScope(
@@ -285,7 +293,9 @@ function problemHeadline(
   // `blocked` is verified non-buildable; `unknown` is unverified — don't claim either.
   const lead = result.readiness === "blocked" ? "Not buildable — " : "";
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
-  if (autoFixable + needsInput > 0 && !opts.skippedFixes) head += ` → run \`${opts.invocation}\``;
+  // Before an install, the next step is the install its finding names; `--fix` can't do it.
+  const installFirst = visible.some((f) => f.code === "nimbus/dependencies-missing");
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length && !installFirst) head += ` → run \`${opts.invocation}\``;
   return [paint(COLORS.red, head), checkedIn];
 }
 

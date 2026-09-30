@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -300,6 +300,7 @@ export async function scaffold(
         deploy: options.deploy,
       });
     }
+    if (packageManager === "yarn") pinYarnBerry(target);
     writeNimbusJson(target, options, preview);
     stopProgress("Project configured.");
   } catch (err) {
@@ -335,9 +336,7 @@ export async function scaffold(
 
   startProgress(`Installing dependencies via ${packageManager}…`);
   try {
-    const cmd = packageManager === "yarn" ? "yarn" : `${packageManager} install`;
-    const [bin = packageManager, ...args] = cmd.split(" ");
-    await runCommand(bin, args, target);
+    await installDependencies(packageManager, target);
     stopProgress("Dependencies installed.");
     return { install: "done" };
   } catch (err) {
@@ -585,6 +584,68 @@ function normalizePackageManagerFiles(
   } else {
     rmSync(shippedGitignorePath, { force: true });
   }
+  // Yarn 2+ rewrites this on every install; Yarn says not to commit it.
+  if (packageManager === "yarn" && existsSync(dotGitignorePath)) {
+    const ignore = readFileSync(dotGitignorePath, "utf8");
+    if (!/^\.yarn\/install-state\.gz$/m.test(ignore)) {
+      writeFileSync(dotGitignorePath, `${ignore}${ignore.endsWith("\n") ? "" : "\n"}.yarn/install-state.gz\n`);
+    }
+  }
+}
+
+// Yarn 2+ takes the nearest lockfile as the project root. Inside another Yarn
+// project that doesn't list the site as a workspace, it refuses to install and
+// says to add an empty yarn.lock; a workspace member installs as it is.
+const YARN_OUTSIDE_PROJECT = /doesn't seem to be part of the project declared in/;
+// Yarn 4 holds back versions published within `npmMinimalAgeGate` (a day).
+const YARN_QUARANTINED = /YN0016/;
+
+async function installDependencies(packageManager: ScaffoldOptions["packageManager"], target: string): Promise<void> {
+  if (packageManager !== "yarn") return runCommand(packageManager, ["install"], target);
+  try {
+    await runCommand("yarn", [], target);
+  } catch (err) {
+    const output = (err as Error).message;
+    if (YARN_QUARANTINED.test(output)) {
+      throw new Error(
+        `${output}\nYarn doesn't install packages published in the last day (its npmMinimalAgeGate setting). Retry later, or lower that setting for this project.`,
+      );
+    }
+    if (!YARN_OUTSIDE_PROJECT.test(output) || existsSync(join(target, "yarn.lock"))) throw err;
+    writeFileSync(join(target, "yarn.lock"), "");
+    await runCommand("yarn", [], target);
+  }
+}
+
+/**
+ * Pin Yarn 2+ in `packageManager`. Without it, corepack runs Yarn 1 for a
+ * project that has no field, so the install (and every later `yarn`) silently
+ * becomes Yarn Classic. The version is the Yarn that ran the scaffolder
+ * (`yarn dlx`, `yarn create`), else the one `yarn` resolves to here; Yarn 1
+ * needs no pin.
+ */
+function pinYarnBerry(target: string): void {
+  const fromAgent = /^yarn\/(\S+)/.exec(process.env.npm_config_user_agent ?? "")?.[1];
+  const version =
+    fromAgent ??
+    spawnSync("yarn", ["--version"], { cwd: target, encoding: "utf8", env: installEnv(), timeout: 30_000 }).stdout?.trim();
+  if (!version || !/^\d+\.\d+\.\d+/.test(version) || Number(version.split(".")[0]) < 2) return;
+  const pkgPath = join(target, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
+  pkg.packageManager = `yarn@${version}`;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
+// `yarn dlx` runs the scaffolder under its own Plug'n'Play hooks. A child
+// install that inherits them resolves against the dlx sandbox, not the site.
+const PNP_HOOK = /(?:^|\s+)(?:--require|-r|--experimental-loader|--loader|--import)(?:\s+|=)(?:"[^"]*\.pnp\.[^"]*"|'[^']*\.pnp\.[^']*'|\S*\.pnp\.\S*)/g;
+
+function installEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const nodeOptions = env.NODE_OPTIONS?.replace(PNP_HOOK, "").trim();
+  const next = { ...env };
+  if (nodeOptions) next.NODE_OPTIONS = nodeOptions;
+  else delete next.NODE_OPTIONS;
+  return next;
 }
 
 // Output stays hidden unless the command fails (bun reports progress on
@@ -597,6 +658,7 @@ function runCommand(bin: string, args: string[], cwd: string): Promise<void> {
   return new Promise((resolveP, rejectP) => {
     const child = spawn(bin, args, {
       cwd,
+      env: installEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let output = "";

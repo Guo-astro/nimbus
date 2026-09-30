@@ -160,11 +160,12 @@ test("request rendering requires a production build before readiness is known", 
     assert.equal(j.readiness, "unknown");
     assert.equal(j.status, "partial");
     const structure = j.scopes.find((s) => s.scope === "structure");
-    assert.ok(
-      structure?.notes.some(
-        (n) => n.code === "nimbus/request-rendering-build-required",
-      ),
-    );
+    const note = structure?.notes.find(
+      (n) => n.code === "nimbus/request-rendering-build-required",
+    ) as { requiresBuild?: boolean } | undefined;
+    assert.ok(note);
+    // A build never clears it, so it mustn't send an agent to build and recheck.
+    assert.equal(note.requiresBuild, undefined);
   } finally {
     cleanup(dir);
   }
@@ -291,5 +292,37 @@ test("pretty headline: Buildable when partial, Couldn't fully verify when unknow
   } finally {
     cleanup(buildable);
     cleanup(unknown);
+  }
+});
+
+// A fresh clone or `--skip-install` scaffold: every package looks missing.
+test("before the first install, check says to install instead of listing each package", async () => {
+  const dir = project(`{ site: "https://example.com", title: "X" }`, (d) => {
+    fs.writeFileSync(
+      path.join(d, "package.json"),
+      JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "^0.15.0", pagefind: "^1.0.0" }, devDependencies: { wrangler: "^4.0.0" } }),
+    );
+    fs.writeFileSync(path.join(d, "pnpm-lock.yaml"), "");
+    fs.writeFileSync(path.join(d, "wrangler.jsonc"), "{}");
+    fs.writeFileSync(path.join(d, "nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: "0.15.0" }));
+    // The starter's tsconfig extends a package that isn't installed yet.
+    fs.writeFileSync(path.join(d, "tsconfig.json"), JSON.stringify({ extends: "astro/tsconfigs/strict" }));
+  });
+  try {
+    const r = await runChecks(dir, { ...ENV_ONLY, migrations: true, types: true });
+    const j = jsonOf(r);
+    // Only the install, plus the placeholder `site` warning a fresh site keeps.
+    assert.deepEqual(
+      j.findings.map((f) => f.code),
+      ["nimbus/dependencies-missing", "nimbus/site-placeholder"],
+    );
+    // Not "typescript isn't installed" or a tsconfig error: it's all one cause.
+    const types = r.scopes.find((s) => s.scope === "types");
+    assert.match(types?.notes[0]?.reason ?? "", /dependencies aren't installed/);
+    const pretty = formatCheckPretty(r, { color: false, invocation: "pnpm nimbus-docs check --fix" });
+    assert.match(pretty, /Dependencies aren't installed\. Run `pnpm install`, then rerun check\./);
+    assert.doesNotMatch(pretty, /→ run `pnpm nimbus-docs check --fix`/);
+  } finally {
+    cleanup(dir);
   }
 });

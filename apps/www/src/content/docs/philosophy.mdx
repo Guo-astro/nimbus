@@ -101,7 +101,7 @@ These formats are defaults, not add-ons. The cost of being a dead end on the age
 
 Adding Nimbus default components or features is done with `nimbus-docs add`. It works differently depending on what you're adding. Components and utilities copy as files — `registry:ui` and `registry:lib` slugs resolve their dependencies and land in your repo. Features hand off as prompts — a `registry:feature` slug is a markdown recipe the coding agent in your environment reads, adapts to your project, and applies.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add 404-page" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add 404-page" />
 
 The split between the two modes is the one question that matters: which kind of change actually wants a coding agent in the loop, and which is better as a file copy.
 
@@ -145,8 +145,8 @@ The precondition is the first principle on this page. When every file lives in y
 
 That's why features arrive as recipes rather than code you wire up by hand. `nimbus-docs add` detects when it's running inside a coding agent and pipes it a structured recipe — discover the project, confirm a plan, execute, then *verify the build still passes* and check whether the feature was already installed before touching a file. Installation stops being a copy-paste chore and becomes a conversation your agent owns from start to finish.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add new-version" comment="inside a coding agent, the recipe pipes straight in" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add new-version --print | claude" comment="from a human shell, hand it to the agent of your choice" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add new-version" comment="inside a coding agent, the recipe pipes straight in" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add new-version --print | claude" comment="from a human shell, hand it to the agent of your choice" />
 
 ## Provenance is a primitive
 

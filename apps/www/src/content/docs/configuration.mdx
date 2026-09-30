@@ -114,13 +114,13 @@ Request-rendered routes are still added to the sitemap and Pagefind search index
 
 Cloudflare is currently the supported provider for request-rendered Nimbus collection routes. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
 The installer wires `@astrojs/cloudflare` and sets Astro to server output. It creates `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static configuration. Customized Wrangler files and alternate JSON or TOML configurations are preserved with manual guidance.
 
 When the active Nimbus config has no rendering policy, the installer adds `rendering: { default: "request" }`. Existing policies are preserved. If an imported or ambiguous Nimbus config cannot be edited safely, the installer completes the adapter setup and prints instructions for generating a coding-agent recipe. Generate that recipe with:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare --print" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print" />
 
 Pass the printed recipe to your coding agent to finish the project-specific configuration.
 

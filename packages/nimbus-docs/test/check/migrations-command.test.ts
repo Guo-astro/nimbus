@@ -42,6 +42,12 @@ test("on a preview, the baseline note says which release to pass, not a guessed 
     path.join(dir, "nimbus.json"),
     JSON.stringify({ lastReviewedNimbusVersion: null, preview: { pr: "178", templates: "bundled" } }),
   );
+  // An installed preview reports its own version, which is what's running.
+  fs.mkdirSync(path.join(dir, "node_modules", "@cloudflare", "nimbus-docs"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "node_modules", "@cloudflare", "nimbus-docs", "package.json"),
+    JSON.stringify({ name: "@cloudflare/nimbus-docs", version: runningNimbusVersion() }),
+  );
 
   const note = checkMigrations(dir).notes.find((n) => n.code === "nimbus/upgrade-baseline-missing");
   assert.ok(note);

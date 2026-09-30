@@ -336,9 +336,7 @@ export async function scaffold(
 
   startProgress(`Installing dependencies via ${packageManager}…`);
   try {
-    const cmd = packageManager === "yarn" ? "yarn" : `${packageManager} install`;
-    const [bin = packageManager, ...args] = cmd.split(" ");
-    await runCommand(bin, args, target);
+    await installDependencies(packageManager, target);
     stopProgress("Dependencies installed.");
     return { install: "done" };
   } catch (err) {
@@ -578,12 +576,6 @@ function normalizePackageManagerFiles(
   // peers under. Yarn 1 ignores the file.
   const yarnrc = join(dir, ".yarnrc.yml");
   if (packageManager === "yarn" && !existsSync(yarnrc)) writeFileSync(yarnrc, "nodeLinker: node-modules\n");
-  // Yarn 2+ takes the nearest lockfile as the project root, so a site created
-  // inside another Yarn project would install as part of it and fail. An
-  // empty lockfile is Yarn's own way to mark a separate project; the first
-  // install fills it in.
-  const yarnLock = join(dir, "yarn.lock");
-  if (packageManager === "yarn" && !existsSync(yarnLock)) writeFileSync(yarnLock, "");
 
   const dotGitignorePath = join(dir, ".gitignore");
   const shippedGitignorePath = join(dir, "gitignore");
@@ -591,6 +583,37 @@ function normalizePackageManagerFiles(
     renameSync(shippedGitignorePath, dotGitignorePath);
   } else {
     rmSync(shippedGitignorePath, { force: true });
+  }
+  // Yarn 2+ rewrites this on every install; Yarn says not to commit it.
+  if (packageManager === "yarn" && existsSync(dotGitignorePath)) {
+    const ignore = readFileSync(dotGitignorePath, "utf8");
+    if (!/^\.yarn\/install-state\.gz$/m.test(ignore)) {
+      writeFileSync(dotGitignorePath, `${ignore}${ignore.endsWith("\n") ? "" : "\n"}.yarn/install-state.gz\n`);
+    }
+  }
+}
+
+// Yarn 2+ takes the nearest lockfile as the project root. Inside another Yarn
+// project that doesn't list the site as a workspace, it refuses to install and
+// says to add an empty yarn.lock; a workspace member installs as it is.
+const YARN_OUTSIDE_PROJECT = /doesn't seem to be part of the project declared in/;
+// Yarn 4 holds back versions published within `npmMinimalAgeGate` (a day).
+const YARN_QUARANTINED = /YN0016/;
+
+async function installDependencies(packageManager: ScaffoldOptions["packageManager"], target: string): Promise<void> {
+  if (packageManager !== "yarn") return runCommand(packageManager, ["install"], target);
+  try {
+    await runCommand("yarn", [], target);
+  } catch (err) {
+    const output = (err as Error).message;
+    if (YARN_QUARANTINED.test(output)) {
+      throw new Error(
+        `${output}\nYarn doesn't install packages published in the last day (its npmMinimalAgeGate setting). Retry later, or lower that setting for this project.`,
+      );
+    }
+    if (!YARN_OUTSIDE_PROJECT.test(output) || existsSync(join(target, "yarn.lock"))) throw err;
+    writeFileSync(join(target, "yarn.lock"), "");
+    await runCommand("yarn", [], target);
   }
 }
 

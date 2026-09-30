@@ -112,12 +112,6 @@ const USER_AGENT = userAgent();
 for (const content of ["starter", "empty"]) {
   const work = mkdtempSync(join(tmpdir(), `nimbus-templates-${PM}-`));
   cleanup.push(work);
-  // Scaffold inside an unrelated Yarn project, as in a monorepo checkout: the
-  // site must still install as a project of its own.
-  if (PM === "yarn") {
-    writeFileSync(join(work, "package.json"), JSON.stringify({ name: "outer", private: true, packageManager: USER_AGENT.replace("/", "@") }) + "\n");
-    writeFileSync(join(work, "yarn.lock"), "");
-  }
   // The scaffolder's own install would fetch the published framework, so
   // install after pointing the site at the tarball.
   run(

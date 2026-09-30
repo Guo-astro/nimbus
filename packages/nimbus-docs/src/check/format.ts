@@ -293,7 +293,9 @@ function problemHeadline(
   // `blocked` is verified non-buildable; `unknown` is unverified — don't claim either.
   const lead = result.readiness === "blocked" ? "Not buildable — " : "";
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
-  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length) head += ` → run \`${opts.invocation}\``;
+  // Before an install, the next step is the install its finding names; `--fix` can't do it.
+  const installFirst = visible.some((f) => f.code === "nimbus/dependencies-missing");
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length && !installFirst) head += ` → run \`${opts.invocation}\``;
   return [paint(COLORS.red, head), checkedIn];
 }
 

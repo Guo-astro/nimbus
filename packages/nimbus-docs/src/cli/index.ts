@@ -167,7 +167,8 @@ const HELP = `
     \`scopes[].notes[]\` — never a finding, never carrying a fix — so an agent's
     fix loop stops when \`status\` isn't "failed" and no finding has a \`fix\`
     without \`fix.requiresInput\` (\`summary.fixable\` also counts fixes that
-    need a value, such as a placeholder \`site\`, which only a person can give)
+    need a value, such as a placeholder \`site\`, which only a person can give).
+    An error with no \`fix\` also ends the loop: do what its message says.
     Build-free readiness gate:   nimbus-docs check
     Full coverage (types+links): <your build> && nimbus-docs check
 `;

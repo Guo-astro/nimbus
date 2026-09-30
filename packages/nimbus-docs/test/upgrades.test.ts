@@ -228,7 +228,7 @@ test("a baseline ahead of the install says to install or upgrade, not to migrate
     assert.equal(baseline.installFirst, true);
     assert.equal(
       baseline.error,
-      "nimbus.json was reviewed with Nimbus 0.14.0, newer than installed Nimbus 0.13.1. Install dependencies with `pnpm install` if package.json already allows 0.14.0, or upgrade with `pnpm add @cloudflare/nimbus-docs@0.14.0`.",
+      "nimbus.json was reviewed with Nimbus 0.14.0, newer than installed Nimbus 0.13.1. Install dependencies with `pnpm install` if the lockfile already has 0.14.0 (for example after pulling an upgrade), or upgrade with `pnpm add @cloudflare/nimbus-docs@0.14.0`.",
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

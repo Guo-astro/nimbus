@@ -6,14 +6,18 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
+import { STARTER_MANIFEST } from "../../nimbus-starter-source/starter.manifest.mjs";
 import {
   classifyStarter,
+  diffCommand,
   gatherOutdated,
+  STARTER_ROOT_FILES,
+  type TemplateSource,
   labelWithVersions,
   registryDrift,
   selectStarterApplyTarget,
 } from "../src/cli/upgrade.js";
-import { bytesHash } from "../src/cli/nimbus-json.js";
+import { bytesHash, readNimbusJson } from "../src/cli/nimbus-json.js";
 import type { NimbusJson } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
 
@@ -39,12 +43,12 @@ test("classifyStarter buckets clean / hand-merge / deleted / local, skips unchan
     "src/components/ui/applied/P.astro": "P2", // changed upstream
   };
   const disk: Record<string, string | null> = {
-    "components/ui/a/A.astro": "A1", // == base → clean
-    "components/ui/b/B.astro": "Bedited", // != base → hand-merge
-    "layouts/L.astro": null, // removed → deleted
-    "content/docs/x.mdx": "Xedited", // != base, upstream unchanged → local
-    "components/ui/same/S.astro": "S1", // unchanged everywhere → skip
-    "components/ui/applied/P.astro": "P2", // == upstream (you ran --apply) → resolved, skip
+    "src/components/ui/a/A.astro": "A1", // == base → clean
+    "src/components/ui/b/B.astro": "Bedited", // != base → hand-merge
+    "src/layouts/L.astro": null, // removed → deleted
+    "src/content/docs/x.mdx": "Xedited", // != base, upstream unchanged → local
+    "src/components/ui/same/S.astro": "S1", // unchanged everywhere → skip
+    "src/components/ui/applied/P.astro": "P2", // == upstream (you ran --apply) → resolved, skip
   };
 
   const findings = classifyStarter({
@@ -52,7 +56,7 @@ test("classifyStarter buckets clean / hand-merge / deleted / local, skips unchan
     baseFiles: Object.keys(base),
     readBase: (t) => base[t] ?? null,
     readUpstream: (t) => upstream[t] ?? null,
-    readDisk: (rest) => disk[rest] ?? null,
+    readDisk: (file) => disk[file] ?? null,
   });
 
   const by = Object.fromEntries(findings.map((f) => [f.treeFile, f]));
@@ -106,9 +110,9 @@ test("classifyStarter discovers safe upstream additions and removals", () => {
   const base = { "src/old.ts": "old", "src/changed.ts": "before" };
   const upstream = { "src/new.ts": "new", "src/changed.ts": "after" };
   const disk: Record<string, string | null> = {
-    "old.ts": "old",
-    "new.ts": null,
-    "changed.ts": "before",
+    "src/old.ts": "old",
+    "src/new.ts": null,
+    "src/changed.ts": "before",
   };
   const findings = classifyStarter({
     srcRoot: "src",
@@ -205,5 +209,189 @@ test("outdated warns when the compared starter needs a newer package", async () 
     assert.deepEqual(await warnings(), []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the CLI tracks the root files the starter manifest declares", () => {
+  assert.deepEqual([...STARTER_ROOT_FILES].sort(), [...STARTER_MANIFEST.trackedRootFiles].sort());
+});
+
+// End to end over three fixture tags: the site was scaffolded from v1, and
+// upstream moves on to v2, then v3.
+function starterFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-starter-e2e-"));
+  const trees: Record<string, Record<string, string>> = {
+    "templates-v0.1.0": {
+      "AGENT.md": "# Agents\nold guidance\n",
+      "package.json": '{ "name": "starter" }\n',
+      "tsconfig.json": "{}\n",
+      "src/pages/index.astro": "<h1>one</h1>\n",
+    },
+    "templates-v0.2.0": {
+      "AGENT.md": "# Agents\nnew guidance\n",
+      "package.json": '{ "name": "starter", "private": true }\n',
+      "tsconfig.json": "{}\n",
+      "src/pages/index.astro": "<h1>two</h1>\n",
+    },
+    "templates-v0.3.0": {
+      "AGENT.md": "# Agents\nnew guidance\n",
+      "package.json": '{ "name": "starter", "private": true }\n',
+      "tsconfig.json": "{}\n",
+      "src/pages/index.astro": "<h1>three</h1>\n",
+    },
+  };
+  const write = (dir: string, files: Record<string, string>) => {
+    for (const [file, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), content);
+    }
+  };
+  for (const [tag, files] of Object.entries(trees)) write(path.join(root, tag), files);
+  const project = path.join(root, "site");
+  write(project, {
+    ...trees["templates-v0.1.0"],
+    // The scaffolder rewrites package.json on every site.
+    "package.json": '{ "name": "my-docs", "dependencies": {} }\n',
+    "nimbus.json": JSON.stringify({ templatesTag: "templates-v0.1.0", variant: "starter", components: [] }),
+  });
+  let latest = "templates-v0.2.0";
+  const source: TemplateSource = {
+    resolve: async (tag) => ({ dir: path.join(root, tag), cleanup: () => {} }),
+    latestTag: async () => latest,
+  };
+  return {
+    project,
+    source,
+    release: (tag: string) => {
+      latest = tag;
+    },
+    cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
+  };
+}
+
+async function runDiff(
+  file: string | undefined,
+  flags: Parameters<typeof diffCommand>[1],
+  options: Parameters<typeof diffCommand>[2],
+): Promise<{ stdout: string; exitCode: number }> {
+  const write = process.stdout.write.bind(process.stdout);
+  let stdout = "";
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  process.exitCode = 0;
+  try {
+    await diffCommand(file, { color: false, ...flags }, options);
+  } finally {
+    process.stdout.write = write;
+  }
+  const exitCode = Number(process.exitCode ?? 0);
+  process.exitCode = 0;
+  return { stdout, exitCode };
+}
+
+test("diff reports upstream changes to tracked root files, never package.json", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    const outdated = await gatherOutdated(project, { json: true }, source);
+    const starter = Object.fromEntries(outdated.starter.map((item) => [item.file, item.status]));
+    assert.equal(starter["AGENT.md"], "clean");
+    assert.equal(starter["src/pages/index.astro"], "clean");
+    assert.equal(starter["package.json"], undefined);
+    assert.equal(starter["tsconfig.json"], undefined);
+
+    const agent = await runDiff("AGENT.md", {}, { cwd: project, source });
+    assert.equal(agent.exitCode, 0);
+    assert.match(agent.stdout, /upstream \(clean to pull\) · AGENT\.md/);
+    assert.match(agent.stdout, /\+new guidance/);
+
+    const pkg = await runDiff("package.json", {}, { cwd: project, source });
+    assert.equal(pkg.exitCode, 1);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("a file taken with diff --apply stays clean through the next upstream change", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    const applied = await runDiff("src/pages/index.astro", { apply: true }, { cwd: project, source });
+    assert.equal(applied.exitCode, 0);
+    assert.equal(fs.readFileSync(path.join(project, "src/pages/index.astro"), "utf8"), "<h1>two</h1>\n");
+    const record = readNimbusJson(project);
+    assert.equal(record?.templatesTag, "templates-v0.1.0");
+    assert.deepEqual(record?.templatesTagByFile, { "src/pages/index.astro": "templates-v0.2.0" });
+
+    assert.equal((await runDiff("AGENT.md", { apply: true }, { cwd: project, source })).exitCode, 0);
+    assert.equal(fs.readFileSync(path.join(project, "AGENT.md"), "utf8"), "# Agents\nnew guidance\n");
+
+    // Upstream changes the page again; the site has no local edits against v2.
+    fixture.release("templates-v0.3.0");
+    const outdated = await gatherOutdated(project, { json: true }, source);
+    const starter = Object.fromEntries(outdated.starter.map((item) => [item.file, item.status]));
+    assert.deepEqual(starter, { "src/pages/index.astro": "clean" });
+
+    assert.equal((await runDiff("src/pages/index.astro", { apply: true }, { cwd: project, source })).exitCode, 0);
+    assert.equal(fs.readFileSync(path.join(project, "src/pages/index.astro"), "utf8"), "<h1>three</h1>\n");
+    assert.deepEqual(readNimbusJson(project)?.templatesTagByFile, {
+      "AGENT.md": "templates-v0.2.0",
+      "src/pages/index.astro": "templates-v0.3.0",
+    });
+
+    // A local edit on top of the applied version is still the site's own.
+    fs.writeFileSync(path.join(project, "src/pages/index.astro"), "<h1>mine</h1>\n");
+    const local = await gatherOutdated(project, { json: true }, source);
+    assert.deepEqual(local.starter.map((item) => [item.file, item.status]), [["src/pages/index.astro", "local"]]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("--to is ignored with --template-dir, so a typo is never fetched or recorded", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    const strict: TemplateSource = {
+      resolve: async (tag) => {
+        if (tag === "templates-v0-typo") throw new Error(`no ${tag}`);
+        return source.resolve(tag);
+      },
+      latestTag: source.latestTag,
+    };
+    const outdated = await gatherOutdated(project, { json: true, templateDir: "unused", to: "templates-v0-typo" }, strict);
+    assert.deepEqual(outdated.errors.filter((error) => error.scope === "starter"), []);
+    await runDiff("AGENT.md", { apply: true, templateDir: "unused", to: "templates-v0-typo" }, { cwd: project, source: strict });
+    assert.equal(readNimbusJson(project)?.templatesTagByFile, undefined);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("an applied tag is written beside templatesTag", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    await runDiff("src/pages/index.astro", { apply: true }, { cwd: project, source });
+    const keys = Object.keys(JSON.parse(fs.readFileSync(path.join(project, "nimbus.json"), "utf8")));
+    assert.equal(keys[keys.indexOf("templatesTag") + 1], "templatesTagByFile");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("a file upstream added that the site already has is labelled as such", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    fs.writeFileSync(path.join((await source.resolve("templates-v0.2.0")).dir, "CLAUDE.md"), "See AGENT.md.\n");
+    fs.writeFileSync(path.join(project, "CLAUDE.md"), "My own notes.\n");
+    const shown = await runDiff("CLAUDE.md", {}, { cwd: project, source });
+    assert.match(shown.stdout, /upstream added a file you already have — hand-merge · CLAUDE\.md/);
+    assert.doesNotMatch(shown.stdout, /diverge from the recorded tag/);
+  } finally {
+    fixture.cleanup();
   }
 });

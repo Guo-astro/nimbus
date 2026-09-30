@@ -161,6 +161,7 @@ interface KeptProvenance {
   version: string | null;
   lastReviewedNimbusVersion: string | null;
   templatesTag: string | null;
+  templatesTagByFile?: Record<string, string>;
   variant: string | null;
   preview?: Record<string, unknown>;
   serverOutput?: { adapter: string; [key: string]: unknown };
@@ -187,10 +188,14 @@ function keptProvenance(cwd: string): KeptProvenance {
   const baseline = raw.lastReviewedNimbusVersion;
   const preview = object(raw.preview);
   const serverOutput = object(raw.serverOutput);
+  const byFile = Object.entries(object(raw.templatesTagByFile) ?? {}).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+  );
   return {
     version: typeof raw.version === "string" && valid(raw.version) === raw.version ? raw.version : null,
     lastReviewedNimbusVersion: typeof baseline === "string" && valid(baseline) === baseline ? baseline : null,
     templatesTag: text(raw.templatesTag),
+    ...(byFile.length > 0 ? { templatesTagByFile: Object.fromEntries(byFile) } : {}),
     variant: text(raw.variant),
     ...(preview ? { preview } : {}),
     ...(serverOutput && typeof serverOutput.adapter === "string"

@@ -49,6 +49,10 @@ const nimbusJsonSchema = z
     version: z.string().nullable().optional(),
     lastReviewedNimbusVersion: z.string().nullable().optional(),
     templatesTag: z.string().nullable().optional(),
+    // Starter files taken with `diff --apply`, keyed by template-tree path
+    // (`src/pages/index.astro`, `AGENT.md`): the tag each was taken from, which
+    // later diffs use as that file's base instead of `templatesTag`.
+    templatesTagByFile: z.record(z.string(), z.string()).optional(),
     variant: z.string().nullable().optional(),
     registry: z.string().optional(),
     // `init` sets this when it rebuilt a record it couldn't fully recover.

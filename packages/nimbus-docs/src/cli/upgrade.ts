@@ -21,7 +21,14 @@ import {
   resolveTemplateTree,
   type FetchedTree,
 } from "./_templates.js";
-import { bytesHash, readNimbusJson, resolveWriteRoot, type InstalledComponent, type NimbusJson } from "./nimbus-json.js";
+import {
+  bytesHash,
+  readNimbusJson,
+  resolveWriteRoot,
+  writeNimbusJson,
+  type InstalledComponent,
+  type NimbusJson,
+} from "./nimbus-json.js";
 import { invocation, selfCommand, type SelfCommand, updateCommand } from "./pm.js";
 import { fetchComponent, type ComponentItem } from "./resolver.js";
 import { writeFileAtomic } from "./fs-atomic.js";
@@ -70,13 +77,39 @@ export type StarterStatus = "clean" | "added" | "removed" | "hand-merge" | "dele
 export interface StarterFinding {
   file: string; // project-relative display path, e.g. src/components/ui/dialog/Dialog.astro
   treeFile: string; // tree-relative, e.g. src/components/ui/dialog/Dialog.astro
-  surface: string; // components | layouts | pages | styles | content | config
+  surface: string; // components | layouts | pages | styles | content | config | root
   status: StarterStatus;
 }
 
+// Root files every site keeps in the starter's shape, so they join the
+// three-way diff. Mirrors `trackedRootFiles` in the starter manifest (a test
+// keeps the two equal). Package-manager files and files the scaffolder rewrites
+// (package.json, wrangler.jsonc, nimbus.json, …) differ on every site, so they
+// never enter the diff; their changes ship as review-required upgrade entries.
+export const STARTER_ROOT_FILES: readonly string[] = ["AGENT.md", "CLAUDE.md", "tsconfig.json"];
+
+const isRootFile = (treeFile: string): boolean => !treeFile.startsWith("src/");
 const restOf = (treeFile: string): string => treeFile.replace(/^src\//, "");
-export const isContent = (treeFile: string): boolean => restOf(treeFile).startsWith("content/");
-const surfaceOf = (rest: string): string => (rest.includes("/") ? rest.split("/")[0]! : "config");
+export const isContent = (treeFile: string): boolean => !isRootFile(treeFile) && restOf(treeFile).startsWith("content/");
+const surfaceOf = (treeFile: string): string => {
+  if (isRootFile(treeFile)) return "root";
+  const rest = restOf(treeFile);
+  return rest.includes("/") ? rest.split("/")[0]! : "config";
+};
+
+/** Project-relative path of a tree file: `src/…` under the install root, root
+ * files beside it (the install root's parent, `.` for the default `src`). */
+export function starterProjectPath(srcRoot: string, treeFile: string): string {
+  return isRootFile(treeFile)
+    ? posix.join(posix.dirname(srcRoot), treeFile)
+    : posix.join(srcRoot, restOf(treeFile));
+}
+
+/** Every tracked starter file in a template tree: `src/**` plus the root files. */
+export function listStarterFiles(dir: string): string[] {
+  const root = STARTER_ROOT_FILES.filter((file) => existsSync(join(dir, file)));
+  return [...root, ...listTreeFiles(dir, "src")].sort();
+}
 
 export function classifyStarter(opts: {
   srcRoot: string;
@@ -84,16 +117,19 @@ export function classifyStarter(opts: {
   upstreamFiles?: string[];
   readBase: (treeFile: string) => string | null;
   readUpstream: (treeFile: string) => string | null;
-  readDisk: (rest: string) => string | null;
+  readDisk: (file: string) => string | null;
 }): StarterFinding[] {
   const out: StarterFinding[] = [];
   const treeFiles = [...new Set([...opts.baseFiles, ...(opts.upstreamFiles ?? opts.baseFiles)])].sort();
   for (const treeFile of treeFiles) {
-    const rest = restOf(treeFile);
+    const file = starterProjectPath(opts.srcRoot, treeFile);
     const base = opts.readBase(treeFile);
     const upstream = opts.readUpstream(treeFile);
-    const disk = opts.readDisk(rest);
+    const disk = opts.readDisk(file);
     if (disk === upstream) continue;
+    // A file taken with --apply from a tag that doesn't have it (a removal)
+    // and still absent upstream: nothing to compare.
+    if (base === null && upstream === null) continue;
 
     let status: StarterStatus;
     if (base === null && upstream !== null) {
@@ -105,7 +141,7 @@ export function classifyStarter(opts: {
     } else {
       status = disk === null ? "deleted" : disk === base ? "clean" : "hand-merge";
     }
-    out.push({ file: posix.join(opts.srcRoot, rest), treeFile, surface: surfaceOf(rest), status });
+    out.push({ file, treeFile, surface: surfaceOf(treeFile), status });
   }
   return out;
 }
@@ -170,16 +206,38 @@ interface StarterCompatibility {
   message: string;
 }
 
+/** Where template trees come from: the tagged templates branch, or a local
+ * checkout with `--template-dir`. Injectable so tests can serve several tags. */
+export interface TemplateSource {
+  resolve: (tag: string) => Promise<FetchedTree>;
+  latestTag: () => Promise<string>;
+}
+
+function templateSource(nimbus: NimbusJson, flags: UpgradeFlags): TemplateSource {
+  return {
+    resolve: (tag) => resolveTemplateTree({ variant: nimbus.variant, tag, templateDir: flags.templateDir }),
+    latestTag: latestTemplatesTag,
+  };
+}
+
 interface Gathered {
   srcRoot: string;
-  baseDir: string;
+  upstreamTag: string;
   upstreamDir: string;
+  /** The tag a file is compared from: its own `diff --apply` tag, else `templatesTag`. */
+  baseTag: (treeFile: string) => string;
+  readBase: (treeFile: string) => string | null;
   findings: StarterFinding[];
   compatibility: StarterCompatibility | null;
   cleanup: () => void;
 }
 
-async function gatherStarter(cwd: string, nimbus: NimbusJson, flags: UpgradeFlags): Promise<Gathered> {
+async function gatherStarter(
+  cwd: string,
+  nimbus: NimbusJson,
+  flags: UpgradeFlags,
+  source: TemplateSource = templateSource(nimbus, flags),
+): Promise<Gathered> {
   const srcRoot = resolveWriteRoot(nimbus);
   const unsafeRoot = validateApplyPath(cwd, path.resolve(cwd, srcRoot));
   if (unsafeRoot) throw new Error(`Unsafe starter root: ${unsafeRoot}.`);
@@ -189,48 +247,57 @@ async function gatherStarter(cwd: string, nimbus: NimbusJson, flags: UpgradeFlag
   }
   // Offline (`--template-dir`) has only one local tree, so upstream == base and
   // only *local* drift surfaces. Online, upstream = latest (or --to).
-  const upstreamTag = flags.to ?? (flags.templateDir ? recorded : await latestTemplatesTag());
+  const upstreamTag = flags.templateDir ? recorded : (flags.to ?? (await source.latestTag()));
+  const perFile = nimbus.templatesTagByFile ?? {};
+  const baseTag = (treeFile: string): string => perFile[treeFile] ?? recorded;
 
-  const base = await resolveTemplateTree({ variant: nimbus.variant, tag: recorded, templateDir: flags.templateDir });
-  let upstream: FetchedTree;
-  try {
-    upstream = await resolveTemplateTree({ variant: nimbus.variant, tag: upstreamTag, templateDir: flags.templateDir });
-  } catch (err) {
-    base.cleanup();
-    throw err;
-  }
-
+  // One tree per distinct tag: the recorded one, upstream, and every tag a
+  // file was applied from.
+  const trees = new Map<string, FetchedTree>();
+  const cleanup = () => {
+    for (const tree of trees.values()) tree.cleanup();
+  };
   let findings: StarterFinding[];
+  let upstreamDir: string;
   try {
+    for (const tag of new Set([recorded, upstreamTag, ...Object.values(perFile)])) {
+      trees.set(tag, await source.resolve(tag));
+    }
+    const dirOf = (tag: string): string => trees.get(tag)!.dir;
+    upstreamDir = dirOf(upstreamTag);
+    const baseFiles = new Set<string>();
+    for (const tag of new Set([recorded, ...Object.values(perFile)])) {
+      for (const treeFile of listStarterFiles(dirOf(tag))) {
+        if (baseTag(treeFile) === tag) baseFiles.add(treeFile);
+      }
+    }
     findings = classifyStarter({
       srcRoot,
-      baseFiles: listTreeFiles(base.dir, "src"),
-      upstreamFiles: listTreeFiles(upstream.dir, "src"),
-      readBase: (t) => readTreeFile(base.dir, t),
-      readUpstream: (t) => readTreeFile(upstream.dir, t),
-      readDisk: (rest) => {
-        const abs = join(cwd, srcRoot, rest);
+      baseFiles: [...baseFiles],
+      upstreamFiles: listStarterFiles(upstreamDir),
+      readBase: (t) => readTreeFile(dirOf(baseTag(t)), t),
+      readUpstream: (t) => readTreeFile(upstreamDir, t),
+      readDisk: (file) => {
+        const abs = join(cwd, file);
         const unsafe = validateApplyPath(cwd, abs);
-        if (unsafe) throw new Error(`Unsafe starter path ${rest}: ${unsafe}.`);
+        if (unsafe) throw new Error(`Unsafe starter path ${file}: ${unsafe}.`);
         return existsSync(abs) ? readFileSync(abs, "utf8") : null;
       },
     });
   } catch (err) {
-    base.cleanup();
-    upstream.cleanup();
+    cleanup();
     throw err;
   }
 
   return {
     srcRoot,
-    baseDir: base.dir,
-    upstreamDir: upstream.dir,
+    upstreamTag,
+    upstreamDir,
+    baseTag,
+    readBase: (t) => readTreeFile(trees.get(baseTag(t))!.dir, t),
     findings,
-    compatibility: starterCompatibility(upstream.dir, upstreamTag, cwd),
-    cleanup: () => {
-      base.cleanup();
-      upstream.cleanup();
-    },
+    compatibility: starterCompatibility(upstreamDir, upstreamTag, cwd),
+    cleanup,
   };
 }
 
@@ -262,7 +329,11 @@ export async function outdatedCommand(flags: UpgradeFlags): Promise<void> {
   process.exitCode = result.status === "partial" || result.status === "failed" ? 1 : 0;
 }
 
-export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Promise<OutdatedResult> {
+export async function gatherOutdated(
+  cwd: string,
+  flags: UpgradeFlags = {},
+  source?: TemplateSource,
+): Promise<OutdatedResult> {
   const errors: OutdatedResult["errors"] = [];
   const packageApis: OutdatedResult["packageApis"] = [];
   const starter: OutdatedResult["starter"] = [];
@@ -358,7 +429,7 @@ export async function gatherOutdated(cwd: string, flags: UpgradeFlags = {}): Pro
   } else if (!fatal && nimbus) {
     let gathered: Gathered | null = null;
     try {
-      gathered = await gatherStarter(cwd, nimbus, flags);
+      gathered = await gatherStarter(cwd, nimbus, flags, source);
       const shown = (finding: StarterFinding) => flags.all || !isContent(finding.treeFile);
       hiddenContent = gathered.findings.filter((finding) => isContent(finding.treeFile) && !flags.all).length;
       const { compatibility } = gathered;
@@ -531,8 +602,12 @@ function errorMessage(error: unknown): string {
 
 // ── `nimbus-docs diff [file]` ──────────────────────────────────────────────
 
-export async function diffCommand(file: string | undefined, flags: UpgradeFlags): Promise<void> {
-  const cwd = process.cwd();
+export async function diffCommand(
+  file: string | undefined,
+  flags: UpgradeFlags,
+  options: { cwd?: string; source?: TemplateSource } = {},
+): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
   const nimbus = requireRecord(cwd);
   if (!nimbus.templatesTag) {
     p.log.error(
@@ -542,7 +617,7 @@ export async function diffCommand(file: string | undefined, flags: UpgradeFlags)
     process.exit(1);
   }
 
-  const g = await gatherStarter(cwd, nimbus, flags);
+  const g = await gatherStarter(cwd, nimbus, flags, options.source);
   try {
     if (g.compatibility) {
       p.log.warn(g.compatibility.message);
@@ -571,9 +646,9 @@ export async function diffCommand(file: string | undefined, flags: UpgradeFlags)
     const color = flags.color ?? process.stdout.isTTY;
     const chunks: string[] = [];
     for (const f of targets) {
-      const base = readTreeFile(g.baseDir, f.treeFile);
+      const base = g.readBase(f.treeFile);
       const upstream = readTreeFile(g.upstreamDir, f.treeFile);
-      const disk = readDisk(cwd, g.srcRoot, f);
+      const disk = readDisk(cwd, f);
       let label: string;
       let left: string;
       let right: string;
@@ -594,7 +669,12 @@ export async function diffCommand(file: string | undefined, flags: UpgradeFlags)
         left = base ?? "";
         right = upstream ?? "";
       } else if (f.status === "hand-merge") {
-        label = "you and upstream both diverge from the recorded tag — hand-merge";
+        label =
+          base === null
+            ? "upstream added a file you already have — hand-merge"
+            : upstream === null
+              ? "upstream removed a file you've edited — hand-merge"
+              : "you and upstream both diverge from the recorded tag — hand-merge";
         left = disk ?? "";
         right = upstream ?? "";
       } else {
@@ -651,7 +731,7 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     process.exitCode = 1;
     return;
   }
-  const base = readTreeFile(g.baseDir, target.treeFile);
+  const base = g.readBase(target.treeFile);
   const upstream = readTreeFile(g.upstreamDir, target.treeFile);
   const disk = existsSync(abs) ? readFileSync(abs, "utf8") : null;
   if (target.status === "added") {
@@ -677,7 +757,30 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     }
     writeFileAtomic(abs, upstream);
   }
+  recordAppliedTag(cwd, target.treeFile, g.upstreamTag);
   p.log.success(`Applied upstream ${target.file}. Review with \`git diff\`.`);
+}
+
+// The applied file now matches `tag`, so later diffs compare it from there;
+// without this, the next upstream change reads as a hand-merge.
+function recordAppliedTag(cwd: string, treeFile: string, tag: string): void {
+  const nimbus = readNimbusJson(cwd);
+  if (!nimbus) return;
+  const byFile = { ...nimbus.templatesTagByFile };
+  if (tag === nimbus.templatesTag) delete byFile[treeFile];
+  else byFile[treeFile] = tag;
+  // Beside templatesTag, where every later read and rewrite puts it.
+  const next: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(nimbus)) {
+    if (key === "templatesTagByFile") continue;
+    next[key] = value;
+    if (key === "templatesTag" && Object.keys(byFile).length > 0) next.templatesTagByFile = sortKeys(byFile);
+  }
+  writeNimbusJson(cwd, next as NimbusJson);
+}
+
+function sortKeys(record: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function validateApplyPath(cwd: string, target: string): string | null {
@@ -719,8 +822,8 @@ function requireRecord(cwd: string): NimbusJson {
   return nimbus;
 }
 
-function readDisk(cwd: string, srcRoot: string, f: StarterFinding): string | null {
-  const abs = join(cwd, srcRoot, restOf(f.treeFile));
+function readDisk(cwd: string, f: StarterFinding): string | null {
+  const abs = join(cwd, f.file);
   const unsafe = validateApplyPath(cwd, abs);
   if (unsafe) throw new Error(`Unsafe starter path ${f.file}: ${unsafe}.`);
   return existsSync(abs) ? readFileSync(abs, "utf8") : null;

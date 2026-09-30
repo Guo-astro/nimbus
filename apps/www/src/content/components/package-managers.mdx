@@ -33,9 +33,27 @@ import { PackageManagers } from "@/components/ui/package-managers";
 
 ## Examples
 
+### exec: the project's installed CLI
+
+Use type="exec" for a command that runs inside a project. pnpm and Yarn run the installed bin, so they get the bin name; npm and bun keep the scoped package name, which uses the local install.
+
+<Example code={`<PackageManagers
+  pkg="@cloudflare/nimbus-docs"
+  type="exec"
+  args="list"
+/>`} contentClass="w-full">
+  <div class="w-full">
+    <PackageManagers
+      pkg="@cloudflare/nimbus-docs"
+      type="exec"
+      args="list"
+    />
+  </div>
+</Example>
+
 ### dlx with args
 
-Use type="dlx" to invoke a CLI without installing — useful for scaffolders.
+Use type="dlx" to invoke a CLI without installing — useful for scaffolders. Yarn's `dlx` runs in an isolated workspace, so it can't run a CLI that needs the project's own packages.
 
 <Example code={`<PackageManagers
   pkg="create-astro@latest"

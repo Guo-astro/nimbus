@@ -84,6 +84,17 @@ const commands: Record<
 
 export const MANAGERS: readonly Manager[] = ["npm", "yarn", "pnpm", "bun"];
 
+/**
+ * `pnpm <x>` and `yarn <x>` run an installed bin, never a package, so `exec`
+ * names the bin a scoped package gets by default: `@cloudflare/nimbus-docs`
+ * → `nimbus-docs`. `npx` and `bunx` take the package and prefer a local
+ * install, and the scoped name keeps them from fetching an unrelated
+ * unscoped package when it isn't installed.
+ */
+function binName(pkg: string): string {
+  return pkg.replace(/^@[^/]+\//, "").replace(/@[^\s]*$/, "");
+}
+
 export function getCommand(
   mgr: Manager,
   type: CommandType,
@@ -98,7 +109,9 @@ export function getCommand(
     const processedPkg =
       type === "create" && mgr === "yarn"
         ? pkg.replace(/@(?![^@]*\/)[^\s]*$/, "")
-        : pkg;
+        : type === "exec" && (mgr === "pnpm" || mgr === "yarn")
+          ? binName(pkg)
+          : pkg;
     cmd += ` ${processedPkg}`;
   }
   if (args) {

@@ -70,8 +70,8 @@ Inspect the repo to learn its conventions:
 
 **Required components.** The feed uses `<Badge>` (tag pills) and the
 paginated route uses `<Pagination>`. If either is missing under
-`src/components/ui/`, run `pnpm exec nimbus-docs add badge` and/or
-`pnpm exec nimbus-docs add pagination` before continuing.
+`src/components/ui/`, run `npx @cloudflare/nimbus-docs add badge` and/or
+`npx @cloudflare/nimbus-docs add pagination` before continuing.
 
 ## 2. Prompt the user
 

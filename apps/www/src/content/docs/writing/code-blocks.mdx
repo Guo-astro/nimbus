@@ -46,11 +46,12 @@ Common shorthand fences are mapped so they don't fall through to plaintext: `cur
 `<PackageManagers>` renders one command across npm, pnpm, yarn, and bun. It's in the default registry, so no import is needed:
 
 ```mdx
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add badge" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge" />
 ```
 
 - `type="create"` → `npm create …`
 - `type="run"` → `npm run …`
-- `type="dlx"` → `npx` / `pnpm dlx` / etc.
+- `type="exec"` → the project's installed CLI: `npx @cloudflare/nimbus-docs` / `pnpm nimbus-docs` / `yarn nimbus-docs` / `bunx @cloudflare/nimbus-docs`
+- `type="dlx"` → download and run without installing: `npx` / `pnpm dlx` / `yarn dlx` / `bunx`
 
 For multiple languages of the same example, install the `code-group` component from the registry — see [Adding components](/adding-components).

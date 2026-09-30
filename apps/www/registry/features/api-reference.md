@@ -104,7 +104,7 @@ Run the registry recipe — it copies four owned, editable components that rende
 the view-model, and installs the API engine's peer packages:
 
 ```sh
-pnpm exec nimbus-docs add api-layout   # or: npm / yarn
+npx @cloudflare/nimbus-docs add api-layout
 ```
 
 This lands `ApiLayout`, `ApiSidebar`, `ApiFieldRow`, and `ApiCodeRail` under

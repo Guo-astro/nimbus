@@ -151,3 +151,11 @@ test("getCommand dlx never inserts a stray `--` for any PM", () => {
     assert.ok(!BARE_BIN.test(cmd), `${mgr}: ${cmd}`);
   }
 });
+
+test("getCommand exec runs the installed CLI under every PM, matching invocation()", () => {
+  assert.deepEqual(
+    MANAGERS.map((mgr) => getCommand(mgr, "exec", CLI_PACKAGE, { args: "list" })),
+    ["npx @cloudflare/nimbus-docs list", "yarn nimbus-docs list", "pnpm nimbus-docs list", "bunx @cloudflare/nimbus-docs list"],
+  );
+  assert.equal(getCommand("pnpm", "exec", "astro", { args: "check" }), "pnpm astro check");
+});

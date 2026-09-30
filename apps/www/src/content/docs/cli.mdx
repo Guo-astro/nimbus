@@ -11,13 +11,13 @@ The `nimbus-docs` CLI lists what's in the registry, installs it, records what yo
 
 Lists every installable component, utility, and feature.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="list" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list" />
 
 Filter by type:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="list --type ui" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="list --type lib" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="list --type feature" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type ui" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type lib" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type feature" />
 
 Running `nimbus-docs add` with no slug shows the same list.
 
@@ -29,7 +29,7 @@ Registry entries use two install modes based on their type. Special `adapter-<id
 
 For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copies files into your repo, and installs any npm packages they need.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add badge" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge" />
 
 <Steps>
   <Step title="Resolve dependencies">
@@ -45,7 +45,7 @@ For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copie
 
 If a component is already installed, `add` keeps your copy — it never clobbers files you own. Pass `--overwrite` to replace them with the registry version (the upgrade path); review the change with `git diff`:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add badge --overwrite" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 
 For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files."
 
@@ -55,12 +55,12 @@ Once installed, the component lives in your repo. Edit freely — there's no ups
 
 For `registry:feature` slugs, there's nothing to copy. The recipe is a markdown prompt the agent reads, adapts to your project, and applies.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add 404-page" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add 404-page" />
 
 If the CLI detects a coding agent in the environment, it prints the recipe to stdout for the agent to consume. Otherwise it prints pipe instructions you can run yourself:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add 404-page --print | claude" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add 404-page --print | codex" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add 404-page --print | claude" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add 404-page --print | codex" />
 
 Use `--print` to force the markdown output, skipping detection.
 
@@ -68,7 +68,7 @@ Use `--print` to force the markdown output, skipping detection.
 
 For `adapter-cloudflare`, `adapter-vercel`, `adapter-netlify`, and `adapter-node`, the CLI installs the Astro adapter and rewrites the marked `output` block in `astro.config`. It refuses to replace a different adapter or a non-literal `output` value.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
 `adapter-cloudflare` adds request rendering when the Nimbus config has no explicit rendering policy. Existing policies are preserved; imported or ambiguous configurations receive a coding-agent handoff instead of a speculative rewrite. The command creates a server-compatible `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static config; custom JSONC and alternate JSON/TOML configs stay untouched.
 
@@ -89,7 +89,7 @@ export default defineConfig({
 
 When the command runs inside a detected coding agent, it emits a versioned recipe so the agent can safely adapt project-owned or split configuration. From a regular shell, use `--print` to request that recipe explicitly:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add adapter-cloudflare --print | claude" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print | claude" />
 
 Always run the project’s production build afterward. See [Rendering policy](/configuration#rendering-policy) for per-collection build/request overrides.
 
@@ -99,7 +99,7 @@ The equivalent long form is `nimbus-docs add server-output --adapter <cloudflare
 
 Writes a [`nimbus.json`](/project-structure) for a project that lacks one — a repo scaffolded before the record existed, an existing Astro site adopting Nimbus, or a deleted record. Fresh scaffolds already have one, so `init` is the on-ramp for everything else.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="init" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="init" />
 
 It scans your installed components, matches each against the registry, and writes what it can recover — marking, never guessing:
 
@@ -109,8 +109,8 @@ It scans your installed components, matches each against the registry, and write
 
 The starter version, `templates-v*` tag, and previously reviewed Nimbus version can't be recovered from the repo alone, so they're left blank (and flagged `reconstructed`). Use `migrate --from <version>` to establish the upgrade range.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="init --root packages/docs" comment="scan a nested package (monorepo)" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="init --force" comment="rebuild an existing record" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="init --root packages/docs" comment="scan a nested package (monorepo)" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="init --force" comment="rebuild an existing record" />
 
 ## Keeping up to date
 
@@ -152,7 +152,7 @@ Repeat `--from` only when the project has no recorded baseline. A clean rerun in
 
 The read-only "am I behind?" overview across package APIs, starter files, and registry components:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="outdated" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="outdated" />
 
 - **Package APIs** — points pending source migrations and version-selected reviews to `migrate`.
 - **Registry components** — compares each recorded content hash against the current registry and classifies the recorded local footprint. Registry updates remain review-only because overwrite can also affect dependencies.
@@ -164,12 +164,12 @@ Pass `--json` for deterministic agent-readable findings. `summary.packageApis` c
 
 Read-only detail for starter files — what you changed, and what changed upstream:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="diff" comment="every changed starter file" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="diff src/components/ui/aside/Aside.astro" comment="one file" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff" comment="every changed starter file" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro" comment="one file" />
 
 Each file is one of: **clean to pull** (upstream changed, you didn't), **added/removed upstream**, **hand-merge** (you both changed it), or **your changes** (you edited it, upstream didn't). For clean updates, additions, and removals, you can let the CLI apply one reviewed change:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="diff src/components/ui/aside/Aside.astro --apply" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro --apply" />
 
 `--apply` is explicit and per-file, rejects symlink/path escapes, and rechecks the clean preimage or absence before writing — it never merges. Review with `git diff` afterward. Pass `--to <templates-vX.Y.Z>` to target a specific tag, or `--template-dir <path>` to compare offline against a local checkout.
 
@@ -199,7 +199,7 @@ Checks that couldn't run are listed as `notes` on their scope rather than as fin
 
 Walks `src/content/`, runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="lint" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 
 Flags — combine with `lint`:
 
@@ -214,5 +214,5 @@ Severity overrides live with the integration (`nimbus(config, { rules })`); in-f
 
 ## Help and version
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="--help" />
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="--version" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="--help" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="--version" />

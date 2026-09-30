@@ -459,7 +459,7 @@ step — the component is already installed.
 Otherwise, install it via the registry CLI:
 
 ```sh
-pnpm exec nimbus-docs add version-switcher --yes
+npx @cloudflare/nimbus-docs add version-switcher --yes
 ```
 
 That command copies three files into the user's project:
@@ -488,7 +488,7 @@ recover in this priority order:**
    ```sh
    # Terminal 2
    export NIMBUS_REGISTRY_URL=http://localhost:8901
-   pnpm exec nimbus-docs add version-switcher --yes
+   npx @cloudflare/nimbus-docs add version-switcher --yes
    ```
 
 2. **You're a fresh user and the live registry is down or stale.**

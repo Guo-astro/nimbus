@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 
 import { parseOpenApi } from "../_internal/api/parse.js";
 import type { DocsModel } from "../_internal/api/model.js";
-import { applyApiSidebarMode } from "../_internal/api/nav-bounds.js";
+import { apiNavRevision, applyApiSidebarMode } from "../_internal/api/nav-bounds.js";
 import type { ApiSidebarMode } from "../types.js";
 import {
   projectNav,
@@ -243,10 +243,12 @@ export function getApiNav(
   options: { sidebar?: ApiSidebarMode } = {},
 ): ApiNav {
   const docs = unwrap(model);
+  const sidebar = options.sidebar ?? "full";
   return applyApiSidebarMode(
     projectNav(docs, activeCoordinate),
-    options.sidebar ?? "full",
+    sidebar,
     docs.mountPath ?? `/${docs.collection}`,
+    sidebar === "on-demand" ? apiNavRevision(projectNav(docs)) : undefined,
   );
 }
 

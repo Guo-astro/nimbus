@@ -80,33 +80,37 @@ export function trackNavState(root: HTMLElement): () => void {
   if (!key) return () => {};
   const scroller = root.dataset.nbNavScroller ?? "default";
 
-  const saveOpen = () => {
-    const open: string[] = [];
-    root.querySelectorAll<HTMLElement>("[data-nb-nav-group]").forEach((group) => {
-      const trigger = group.querySelector("[data-nb-collapsible-trigger]");
-      if (trigger?.getAttribute("data-nb-state") === "open") {
-        open.push(group.dataset.nbNavGroup!);
-      }
-    });
-    updateState(key, { open });
-  };
-  // A hidden copy (the other breakpoint's sidebar) has no scroll to keep.
-  const saveScroll = () => {
-    if (root.clientHeight > 0) updateState(key, { scroll: { [scroller]: root.scrollTop } });
-  };
+  // Each change is applied to the saved set on its own (open adds the group,
+  // close removes it), never as a snapshot of this copy. A copy that is out
+  // of date (the other breakpoint's sidebar) then cannot erase what the
+  // reader did in the copy they were using.
+  const storageKey = NAV_STATE_KEYS.state + key;
+  const openGroups = () => new Set(readJson<NavState>(storageKey)?.open ?? []);
+  // Groups open as the page mounts (its trail, plus what was just restored)
+  // count as open: both copies agree at this point, so adding them is safe.
+  const initial = openGroups();
+  root.querySelectorAll<HTMLElement>("[data-nb-nav-group]").forEach((group) => {
+    const trigger = group.querySelector("[data-nb-collapsible-trigger]");
+    if (trigger?.getAttribute("data-nb-state") === "open") initial.add(group.dataset.nbNavGroup!);
+  });
+  updateState(key, { open: [...initial] });
 
-  // Only a change the reader makes is saved, so an untouched copy never
-  // overwrites what the reader did in the other one.
   const observer = new MutationObserver((records) => {
-    if (
-      records.some(
-        (r) =>
-          r.oldValue !== (r.target as Element).getAttribute("data-nb-state") &&
-          (r.target as Element).hasAttribute("data-nb-collapsible-trigger"),
-      )
-    ) {
-      saveOpen();
+    const changes = new Map<string, boolean>();
+    for (const record of records) {
+      const trigger = record.target as Element;
+      const state = trigger.getAttribute("data-nb-state");
+      if (record.oldValue === state || !trigger.hasAttribute("data-nb-collapsible-trigger")) continue;
+      const id = trigger.closest<HTMLElement>("[data-nb-nav-group]")?.dataset.nbNavGroup;
+      if (id) changes.set(id, state === "open");
     }
+    if (changes.size === 0) return;
+    const open = openGroups();
+    for (const [id, isOpen] of changes) {
+      if (isOpen) open.add(id);
+      else open.delete(id);
+    }
+    updateState(key, { open: [...open] });
   });
   observer.observe(root, {
     subtree: true,
@@ -114,6 +118,11 @@ export function trackNavState(root: HTMLElement): () => void {
     attributeOldValue: true,
     attributeFilter: ["data-nb-state"],
   });
+
+  // A hidden copy (the other breakpoint's sidebar) has no scroll to keep.
+  const saveScroll = () => {
+    if (root.clientHeight > 0) updateState(key, { scroll: { [scroller]: root.scrollTop } });
+  };
 
   let frame = 0;
   const onScroll = () => {

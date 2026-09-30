@@ -9,10 +9,11 @@
  *   - on the active trail (items flagged `active`/`expanded`), every child;
  *   - everything else collapsed: `deferred: true` with no children.
  *
- * In `"links"` mode a group with no page of its own (an `x-tagGroups`
- * category) has nothing to link to, so it keeps its children, each bounded.
- * In `"on-demand"` mode every collapsed group is deferred, and every group
- * (open or not) carries the URL its children load from.
+ * A group with no page of its own (an `x-tagGroups` category) keeps its
+ * children, each bounded, in both modes: it has no page to link to, so
+ * without JavaScript it would otherwise lead nowhere. In `"on-demand"` mode
+ * every other collapsed group is deferred with the URL its children load
+ * from, and other groups on the active trail carry that URL too, for caching.
  *
  * The rule reads only the nav's flags, never a model, so it applies equally to
  * `getApiNav`, the static projection, request rendering from the prepared nav,
@@ -45,8 +46,26 @@ export function applyApiSidebarMode(
   nav: ApiNav,
   mode: ApiSidebarMode,
   mountPath: string,
+  revision?: string,
 ): ApiNav {
-  return boundApiNav(nav, configuredOptions(mode, mountPath));
+  return boundApiNav(nav, configuredOptions(mode, mountPath, revision));
+}
+
+// Keyed on `items`: projections rebuild the `ApiNav` wrapper but share the tree.
+const revisions = new WeakMap<ApiNavItem[], string>();
+
+/**
+ * A hash of the full, unactivated nav. It versions every fragment URL, so a
+ * tab still holding rows from an earlier deployment never reuses them: any
+ * change to the tree changes every URL, which misses every cache.
+ */
+export function apiNavRevision(nav: ApiNav): string {
+  let revision = revisions.get(nav.items);
+  if (revision === undefined) {
+    revision = fnv1a(JSON.stringify(nav.items));
+    revisions.set(nav.items, revision);
+  }
+  return revision;
 }
 
 /**
@@ -62,7 +81,7 @@ export function apiNavFragment(
   const children = apiNavGroupChildren(
     nav,
     coordinate,
-    configuredOptions("on-demand", mountPath),
+    configuredOptions("on-demand", mountPath, apiNavRevision(nav)),
   );
   if (!children) return undefined;
   const group = offTrail(findItem(nav.items, coordinate)!);
@@ -87,10 +106,14 @@ export function apiNavFragmentIndex(nav: ApiNav): Map<string, string> {
   return index;
 }
 
-function configuredOptions(mode: ApiSidebarMode, mountPath: string): BoundApiNavOptions {
+function configuredOptions(
+  mode: ApiSidebarMode,
+  mountPath: string,
+  revision: string | undefined,
+): BoundApiNavOptions {
   return {
     mode,
-    childrenHref: (item) => apiNavFragmentHref(mountPath, item.coordinate),
+    childrenHref: (item) => apiNavFragmentHref(mountPath, item.coordinate, revision),
   };
 }
 
@@ -127,10 +150,12 @@ export const API_NAV_FRAGMENT_PREFIX = "/nimbus-api/nav";
 /**
  * The fragment URL for one group of the API mounted at `mountPath`. The last
  * segment is a readable slug plus a hash of the exact coordinate, so it stays
- * URL-safe for any tag name and stable while the coordinate is.
+ * URL-safe for any tag name. `revision` (see `apiNavRevision`) becomes a `v`
+ * query parameter that the route ignores and caches key on.
  */
-export function apiNavFragmentHref(mountPath: string, coordinate: string): string {
-  return toDocumentHref(`${API_NAV_FRAGMENT_PREFIX}${mountPath}/${apiNavGroupKey(coordinate)}`);
+export function apiNavFragmentHref(mountPath: string, coordinate: string, revision?: string): string {
+  const href = toDocumentHref(`${API_NAV_FRAGMENT_PREFIX}${mountPath}/${apiNavGroupKey(coordinate)}`);
+  return revision ? `${href}?v=${revision}` : href;
 }
 
 export function apiNavGroupKey(coordinate: string): string {
@@ -150,11 +175,12 @@ function boundItem(item: ApiNavItem, options: BoundApiNavOptions): ApiNavItem {
   if (item.children.length === 0) return item;
   const onTrail = item.active || item.expanded;
   const pageless = item.href === undefined;
-  if (onTrail || (options.mode === "links" && pageless)) {
+  if (onTrail || pageless) {
     const open: ApiNavItem = { ...item, children: boundItems(item.children, options) };
-    // An open group still names its fragment, so the sidebar can cache it
-    // and show the group at once on pages where it is collapsed.
-    if (options.mode === "on-demand") {
+    // A trail group still names its fragment, so the sidebar can cache it
+    // and show the group at once on pages where it is collapsed. A page-less
+    // group is never collapsed that way, so it needs none.
+    if (options.mode === "on-demand" && onTrail && !pageless) {
       const href = options.childrenHref?.(item);
       if (href) open.childrenHref = href;
     }

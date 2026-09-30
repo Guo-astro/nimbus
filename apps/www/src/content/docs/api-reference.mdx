@@ -262,11 +262,13 @@ tags:
     parent: workers
 ```
 
-With `"on-demand"`, Nimbus builds one small HTML file per group under `/nimbus-api/nav/<collection>/` and renders it with your `src/components/ui/api-sidebar/ApiSidebarItem.astro`, so loaded rows match the rest of the sidebar. The sidebar starts loading a group when the pointer moves over it or it receives focus, and keeps loaded rows for the session, so a remembered group shows its rows on the next page without a request. Without JavaScript, a group's label still links to its page. Request-rendered collections serve the same files on request.
+With `"on-demand"`, Nimbus builds one small HTML file per group under `/nimbus-api/nav/<collection>/` and renders it with your `src/components/ui/api-sidebar/ApiSidebarItem.astro`, so loaded rows match the rest of the sidebar. The sidebar starts loading a group when the pointer moves over it or it receives focus, and keeps loaded rows for the session, so a remembered group shows its rows on the next page without a request. Group file URLs carry a version of the navigation tree, so after a deployment an open tab loads the new rows instead of reusing old ones. The group files stay out of the sitemap and the search index. Without JavaScript, a group's label still links to its page. Request-rendered collections serve the same files on request.
 
 In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session. Restored groups appear already open, without replaying their animation.
 
-With `"links"`, a group with no page of its own, such as an `x-tagGroups` category, shows its direct children instead.
+In both bounded modes, a group with no page of its own, such as an `x-tagGroups` category, shows its direct children instead, so every group stays reachable without JavaScript.
+
+Set `sidebar` on the `api` entry in the Nimbus config, which also decides whether Nimbus builds the group files. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config.
 
 Every group page lists its operations and its subsections, and the API overview lists every top-level section, so all pages stay reachable in every mode.
 

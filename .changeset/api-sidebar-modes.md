@@ -3,7 +3,7 @@
 "@cloudflare/create-nimbus-docs": patch
 ---
 
-Add `sidebar` to `api` entries, so large API references stop putting the whole navigation tree in every page. `"full"` (the default) keeps today's behavior. `"on-demand"` includes top-level items plus the current page's branch, and loads a collapsed group's contents when it's first opened, from a small HTML file per group that Nimbus builds under `/nimbus-api/nav/<collection>/` and renders with the site's own `ApiSidebarItem`. `"links"` includes the same items and makes each collapsed group a link to its page.
+Add `sidebar` to `api` entries, so large API references stop putting the whole navigation tree in every page. `"full"` (the default) keeps today's behavior. `"on-demand"` includes top-level items plus the current page's branch, and loads a collapsed group's contents when it's first opened, from a small HTML file per group that Nimbus builds under `/nimbus-api/nav/<collection>/` and renders with the site's own `ApiSidebarItem`. `"links"` includes the same items and makes each collapsed group a link to its page. In both bounded modes, a group with no page of its own, such as an `x-tagGroups` category, keeps its direct children in the page. The mode is read from the `api` entry in the Nimbus config, including for sites that pass their entry to `apiCollection({ … })`. Group files are versioned by the navigation tree, and are left out of the sitemap and search index.
 
 ```ts
 api: [{ collection: "api", spec: "./src/api/openapi.yaml", sidebar: "on-demand" }],

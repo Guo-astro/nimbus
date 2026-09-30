@@ -1,4 +1,5 @@
 import type { ApiNav, ApiNavItem, ApiPageProps } from "./api-view-types.js";
+import { apiNavRevision } from "./nav-bounds.js";
 
 export const preparedApiVersion = 2;
 
@@ -6,6 +7,8 @@ export interface PreparedApiNav {
   version: typeof preparedApiVersion;
   nav: ApiNav;
   paths: Record<string, string[]>;
+  /** `apiNavRevision(nav)`, computed once. Absent in navs prepared before it existed. */
+  revision?: string;
 }
 
 export interface PreparedApiPage {
@@ -23,7 +26,7 @@ export function prepareApiNav(nav: ApiNav): PreparedApiNav {
     for (const child of item.children) visit(child, path);
   };
   for (const item of nav.items) visit(item, []);
-  return { version: preparedApiVersion, nav, paths };
+  return { version: preparedApiVersion, nav, paths, revision: apiNavRevision(nav) };
 }
 
 export function activatePreparedApiNav(

@@ -76,6 +76,7 @@ import {
 } from "./_internal/validate-mdx-content.js";
 import { validateNimbusConfig } from "./_internal/validate.js";
 import { makeHiddenSitemapFilter } from "./_internal/hidden-sitemap.js";
+import { API_NAV_FRAGMENT_PREFIX } from "./_internal/api/nav-bounds.js";
 import { virtualConfigPlugin } from "./_internal/virtual-config.js";
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
@@ -975,7 +976,7 @@ export function nimbus(
           apiSidebarItemForBuild = sidebarItem;
           for (const collection of onDemandCollections) {
             const mode = policy.collections[collection] ?? "build";
-            const pattern = `/nimbus-api/nav/${collection}/[...slug]`;
+            const pattern = `${API_NAV_FRAGMENT_PREFIX}/${collection}/[...slug]`;
             injectRoute({
               pattern,
               entrypoint: API_NAV_FRAGMENT_ENTRYPOINT,
@@ -1219,6 +1220,7 @@ export function nimbus(
               const { pathname } = new URL(url, config.site);
               return (
                 !isRequestRouteInventoryPath(pathname, astroConfig.base) &&
+                !isApiNavFragmentPath(pathname, astroConfig.base) &&
                 !sitemapExcludedPaths.has(canonicalizePathname(safeDecode(pathname)))
               );
             },
@@ -2160,6 +2162,13 @@ function materializeRouteTruthFromPages(
 
 function isConcreteRoutePattern(pattern: string): boolean {
   return !pattern.includes("[");
+}
+
+/** Whether `pathname` is an `on-demand` sidebar fragment: markup, not a page. */
+function isApiNavFragmentPath(pathname: string, base: string): boolean {
+  const normalizedBase = canonicalizePathname(base);
+  const prefix = `${normalizedBase === "/" ? "" : normalizedBase}${API_NAV_FRAGMENT_PREFIX}/`;
+  return canonicalizePathname(pathname).startsWith(prefix);
 }
 
 function isRequestRouteInventoryPath(pathname: string, base: string): boolean {

@@ -19,7 +19,8 @@
  *
  * The disclosure itself stays in charge of open/closed state and ARIA; this
  * module only fills the content. If a load fails, the group can be opened
- * again to retry, and `fallbackHref` (the group's own page) is followed.
+ * again to retry, and `fallbackHref` (the group's own page) is followed when
+ * the reader opened it.
  */
 
 import { remount } from "./mount";
@@ -84,14 +85,21 @@ export function deferContent(opts: DeferredContentOptions): DeferredContentInsta
     ? "loaded"
     : "idle";
   const isOpen = () => trigger.getAttribute("data-nb-state") === "open";
+  // Set by `destroy()`: a fetch that settles after navigation must not touch
+  // the page that replaced this one, least of all redirect it.
+  let destroyed = false;
 
-  async function load(): Promise<void> {
+  // `follow`: on failure, go to `fallbackHref`. Only when the reader opened
+  // the group; a group restored open as the page loads never redirects it.
+  async function load(follow = true): Promise<void> {
     if (state !== "idle") return;
     state = "loading";
     content.setAttribute("aria-busy", "true");
     try {
       const template = document.createElement("template");
-      template.innerHTML = await fetchFragment(src);
+      const html = await fetchFragment(src);
+      if (destroyed) return;
+      template.innerHTML = html;
       // Inserted scripts never run; the page already has the ones it needs.
       template.content.querySelectorAll("script").forEach((script) => script.remove());
       const source = template.content.querySelector(select);
@@ -104,7 +112,7 @@ export function deferContent(opts: DeferredContentOptions): DeferredContentInsta
       remount();
     } catch {
       state = "idle";
-      if (fallbackHref && isOpen()) window.location.assign(fallbackHref);
+      if (follow && !destroyed && fallbackHref && isOpen()) window.location.assign(fallbackHref);
     } finally {
       content.removeAttribute("aria-busy");
     }
@@ -112,13 +120,7 @@ export function deferContent(opts: DeferredContentOptions): DeferredContentInsta
 
   const prefetch = () => void fetchFragment(src).catch(() => {});
   const observer = new MutationObserver(() => {
-    let idle = 0;
-  if (opts.loaded) {
-    const warm = () => void fetchFragment(src).catch(() => {});
-    idle = window.requestIdleCallback
-      ? window.requestIdleCallback(warm, { timeout: 5000 })
-      : window.setTimeout(warm, 2000);
-  } else if (isOpen()) void load();
+    if (isOpen()) void load();
   });
   observer.observe(trigger, { attributes: true, attributeFilter: ["data-nb-state"] });
   trigger.addEventListener("pointerenter", prefetch);
@@ -131,11 +133,12 @@ export function deferContent(opts: DeferredContentOptions): DeferredContentInsta
     idle = window.requestIdleCallback
       ? window.requestIdleCallback(warm, { timeout: 5000 })
       : window.setTimeout(warm, 2000);
-  } else if (isOpen()) void load();
+  } else if (isOpen()) void load(false);
 
   return {
-    load,
+    load: () => load(),
     destroy() {
+      destroyed = true;
       if (window.cancelIdleCallback) window.cancelIdleCallback(idle);
       else window.clearTimeout(idle);
       observer.disconnect();

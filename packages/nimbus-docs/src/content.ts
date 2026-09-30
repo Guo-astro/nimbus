@@ -31,10 +31,11 @@ import {
   definePartialsSchema,
   partialsSchema,
 } from "./schemas.js";
-import type { ApiRoutePolicy, ApiSidebarMode, ApiVersionSpec } from "./types.js";
+import type { ApiRoutePolicy, ApiVersionSpec } from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
+  getRegisteredApiCollections,
   resolveRegisteredApiCollection,
 } from "./_internal/api-collection-registry.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
@@ -263,8 +264,6 @@ export interface ApiCollectionOptions {
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */
   routes?: ApiRoutePolicy;
-  /** How much navigation each page includes. See `ApiSpec.sidebar`. */
-  sidebar?: ApiSidebarMode;
 }
 
 /**
@@ -323,7 +322,6 @@ export function apiCollection(options?: ApiCollectionOptions): {
     versions: options.versions,
     requireOperationId: options.requireOperationId,
     routes: options.routes,
-    sidebar: options.sidebar,
   };
 
   const loader: Loader = {
@@ -342,17 +340,19 @@ export function apiCollection(options?: ApiCollectionOptions): {
       // Without explicit options, read the Nimbus config's `api` entry named
       // after this collection key. The read happens per load, so a dev refresh
       // after an astro.config edit sees the edited entry.
-      const {
-        collection,
-        spec,
-        label,
-        versions,
-        requireOperationId,
-        routes,
-        sidebar,
-      } =
-        explicit ??
-        resolveRegisteredApiCollection(astroConfig.root, context.collection);
+      const registered = explicit
+        ? undefined
+        : resolveRegisteredApiCollection(astroConfig.root, context.collection);
+      const { collection, spec, label, versions, requireOperationId, routes } =
+        explicit ?? registered!;
+      // The sidebar mode always comes from the Nimbus config's `api` entry,
+      // which also decides whether the fragment routes it needs are injected.
+      const sidebar = (
+        registered ??
+        getRegisteredApiCollections(astroConfig.root)?.find(
+          (entry) => entry.collection === collection,
+        )
+      )?.sidebar;
       noteApiCollectionLoad(astroConfig.root, context.collection, collection);
 
       const {

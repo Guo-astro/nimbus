@@ -135,7 +135,7 @@ export const collections = {
           api: [api],
           ...(request ? { rendering: { default: "build", collections: { api: "request" } } } : {}),
         },
-        { admonitions: false, sitemap: false, validateMdx: false },
+        { admonitions: false, sitemap: !request, validateMdx: false },
       ),
     ],
   });
@@ -188,6 +188,17 @@ for (const request of [false, true]) {
       site = await buildSite(request);
     });
 
+    if (!request) {
+      test("fragments stay out of the sitemap and search indexes", async () => {
+        const sitemap = await readFile(path.join(site.root, "dist", "sitemap-0.xml"), "utf8");
+        assert.match(sitemap, /\/docs\/api\//, "API pages are listed");
+        assert.doesNotMatch(sitemap, /nimbus-api/);
+        const group = apiNavGroups(expected[0]!.full)[0]!;
+        const { body } = await site.get(`${BASE}${apiNavFragmentHref("/api", group.coordinate)}`);
+        assert.match(body, /data-pagefind-ignore="all"/);
+      });
+    }
+
     test("every group of every version has a fragment rendered by the site's row", async () => {
       for (const { mountPath, full } of expected) {
         const groups = apiNavGroups(full);
@@ -208,7 +219,7 @@ for (const request of [false, true]) {
       const nav = navOf(body);
       for (const item of nav.items) {
         assert.equal(item.deferred, true, item.coordinate);
-        assert.equal(item.childrenHref, apiNavFragmentHref("/api", item.coordinate));
+        assert.ok(item.childrenHref?.startsWith(`${apiNavFragmentHref("/api", item.coordinate)}?v=`));
       }
     });
 

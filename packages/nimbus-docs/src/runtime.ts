@@ -1578,7 +1578,7 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
-        const [{ applyApiSidebarMode }, { resolveApiVersion }, config] =
+        const [{ applyApiSidebarMode, apiNavRevision }, { resolveApiVersion }, config] =
           await Promise.all([
             import("./_internal/api/nav-bounds.js"),
             import("./_internal/api/resolve-versions.js"),
@@ -1589,7 +1589,12 @@ async function resolveApiRoute(
         return {
           page: prepared.page,
           nav: target
-            ? applyApiSidebarMode(nav, target.sidebar, target.mountPath)
+            ? applyApiSidebarMode(
+                nav,
+                target.sidebar,
+                target.mountPath,
+                preparedNav.revision ?? apiNavRevision(preparedNav.nav),
+              )
             : nav,
         };
       },

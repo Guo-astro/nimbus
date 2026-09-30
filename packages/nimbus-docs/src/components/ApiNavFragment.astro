@@ -19,4 +19,7 @@ const fragment = await getApiNavFragment(Astro);
 if (fragment instanceof Response) return fragment;
 ---
 
-<ApiSidebarItem item={fragment.item} />
+<!-- Not a page: kept out of search indexes (the sitemap skips the route too). -->
+<div data-pagefind-ignore="all">
+  <ApiSidebarItem item={fragment.item} />
+</div>

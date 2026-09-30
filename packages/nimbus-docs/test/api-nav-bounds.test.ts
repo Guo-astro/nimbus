@@ -15,11 +15,13 @@ import {
 import {
   apiNavFragmentHref,
   apiNavGroupChildren,
+  apiNavRevision,
   apiNavGroupKey,
   apiNavGroups,
   applyApiSidebarMode,
 } from "../src/_internal/api/nav-bounds.js";
 import { projectConfiguredApiPage } from "../src/_internal/api-loader.js";
+import { registerApiCollections } from "../src/_internal/api-collection-registry.js";
 import { validateNimbusConfig } from "../src/_internal/validate.js";
 import {
   boundApiNav,
@@ -27,6 +29,7 @@ import {
   getApiNav,
   getApiPageSlugs,
   type ApiModel,
+  type ApiNav,
   type ApiNavItem,
   type ApiSidebarMode,
 } from "../src/api/index.js";
@@ -100,14 +103,25 @@ describe("sidebar: full", () => {
 });
 
 describe("sidebar: on-demand", () => {
-  test("a root page shows only top-level items, all deferred", () => {
+  test("a root page shows top-level items; page-less categories keep their direct children", () => {
     const nav = getApiNav(model, undefined, { sidebar: "on-demand" });
     assert.deepEqual(
       nav.items.map((item) => [item.label, item.deferred, item.children.length]),
       [
         ["Loose", true, 0],
-        ["Compute & Storage", true, 0],
-        ["Networking", true, 0],
+        ["Compute & Storage", undefined, 2],
+        ["Networking", undefined, 1],
+      ],
+    );
+    // Without JavaScript a page-less group has nothing to link to, so its
+    // children are in the page; each child is itself collapsed.
+    const compute = byLabel(nav.items, "Compute & Storage");
+    assert.equal(compute.childrenHref, undefined, "nothing to load");
+    assert.deepEqual(
+      compute.children.map((c) => [c.label, c.deferred, Boolean(c.childrenHref)]),
+      [
+        ["Workers", true, true],
+        ["KV", true, true],
       ],
     );
   });
@@ -125,15 +139,18 @@ describe("sidebar: on-demand", () => {
     const scripts = byLabel(workers.children, "Scripts");
     assert.equal(byLabel(scripts.children, "Upload a script").active, true);
     assert.equal(byLabel(compute.children, "KV").deferred, true);
-    assert.equal(byLabel(nav.items, "Networking").deferred, true);
+    const networking = byLabel(nav.items, "Networking");
+    assert.equal(networking.deferred, undefined, "page-less: never deferred");
+    assert.equal(byLabel(networking.children, "DNS").deferred, true);
   });
 
   test("open groups on the trail still name their fragment, for caching", () => {
     const nav = getApiNav(model, "scriptsPut", { sidebar: "on-demand" });
     const compute = byLabel(nav.items, "Compute & Storage");
-    assert.equal(compute.childrenHref, apiNavFragmentHref("/bounded", compute.coordinate));
+    const revision = apiNavRevision(getApiNav(model));
+    assert.equal(compute.childrenHref, undefined, "page-less: never collapsed into a fragment");
     const workers = byLabel(compute.children, "Workers");
-    assert.equal(workers.childrenHref, apiNavFragmentHref("/bounded", workers.coordinate));
+    assert.equal(workers.childrenHref, apiNavFragmentHref("/bounded", workers.coordinate, revision));
   });
 
   test("a tag page shows its own children, each collapsed", () => {
@@ -143,15 +160,27 @@ describe("sidebar: on-demand", () => {
     assert.equal(byLabel(workers.children, "Scripts").deferred, true);
   });
 
-  test("every deferred group, page-less or not, has a fragment URL", () => {
+  test("every deferred group has a fragment URL", () => {
     const nav = getApiNav(model, undefined, { sidebar: "on-demand" });
-    for (const item of nav.items) {
+    const deferred = flatten(nav.items).filter((item) => item.deferred);
+    assert.equal(deferred.length, 4);
+    for (const item of deferred) {
       assert.equal(
         item.childrenHref,
-        apiNavFragmentHref("/bounded", item.coordinate),
+        apiNavFragmentHref("/bounded", item.coordinate, apiNavRevision(getApiNav(model))),
       );
-      assert.match(item.childrenHref!, /^\/nimbus-api\/nav\/bounded\/[a-z0-9-]+\/$/);
+      assert.match(item.childrenHref!, /^\/nimbus-api\/nav\/bounded\/[a-z0-9-]+\/\?v=[0-9a-f]{8}$/);
     }
+  });
+
+  test("fragment URLs share one version per tree, which changes with the tree", async () => {
+    const version = (nav: ApiNav) => new URL(nav.items[0]!.childrenHref!, "https://x").searchParams.get("v");
+    const first = version(getApiNav(model, "scriptsPut", { sidebar: "on-demand" }));
+    assert.ok(first);
+    assert.equal(version(getApiNav(model, "tags.Networking", { sidebar: "on-demand" })), first);
+    const renamed = JSON.parse(JSON.stringify(spec).replace("Upload a script", "Upload a Worker"));
+    const changed = await buildApiModel({ collection: "bounded", spec: renamed });
+    assert.notEqual(version(getApiNav(changed, "scriptsPut", { sidebar: "on-demand" })), first);
   });
 });
 
@@ -238,7 +267,7 @@ describe("bounded pages stay reachable and consistent", () => {
       for (const coordinate of coordinates()) {
         if (!coordinate) continue;
         assert.deepEqual(
-          applyApiSidebarMode(activatePreparedApiNav(prepared, coordinate), mode, "/bounded"),
+          applyApiSidebarMode(activatePreparedApiNav(prepared, coordinate), mode, "/bounded", prepared.revision),
           getApiNav(model, coordinate, { sidebar: mode }),
           `${mode} ${coordinate}`,
         );
@@ -246,9 +275,8 @@ describe("bounded pages stay reachable and consistent", () => {
     }
   });
 
-  test("the static projection applies the configured mode", async () => {
+  const loadInto = async (loader: ReturnType<typeof apiCollection>["loader"]) => {
     const store = new Map<string, unknown>();
-    const { loader } = apiCollection({ collection: "bounded", spec, sidebar: "on-demand" });
     await loader.load({
       collection: "bounded",
       store: {
@@ -270,11 +298,29 @@ describe("bounded pages stay reachable and consistent", () => {
       generateDigest: (v: unknown) => JSON.stringify(v).length.toString(36),
       watcher: undefined,
     } as never);
+  };
+
+  test("the static projection applies the configured mode", async () => {
+    registerApiCollections(pathToFileURL(ROOT), [{ collection: "bounded", spec, sidebar: "on-demand" }]);
+    await loadInto(apiCollection().loader);
     for (const coordinate of coordinates()) {
       if (!coordinate) continue;
       const { nav } = await projectConfiguredApiPage("bounded", null, coordinate);
       assert.deepEqual(nav, getApiNav(model, coordinate, { sidebar: "on-demand" }));
     }
+  });
+
+  test("explicit loader options take the mode from the config, which owns the fragment routes", async () => {
+    // A mode on the loader alone would bound pages whose fragment routes were never injected.
+    registerApiCollections(pathToFileURL(ROOT), [{ collection: "bounded", spec, sidebar: "links" }]);
+    await loadInto(apiCollection({ collection: "bounded", spec }).loader);
+    const { nav } = await projectConfiguredApiPage("bounded", null, "scriptsPut");
+    assert.deepEqual(nav, getApiNav(model, "scriptsPut", { sidebar: "links" }));
+
+    registerApiCollections(pathToFileURL(ROOT), []);
+    await loadInto(apiCollection({ collection: "bounded", spec }).loader);
+    const unconfigured = await projectConfiguredApiPage("bounded", null, "scriptsPut");
+    assert.deepEqual(unconfigured.nav, getApiNav(model, "scriptsPut"), "no config entry: full");
   });
 });
 

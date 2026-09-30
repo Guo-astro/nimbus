@@ -87,9 +87,10 @@ function projectedNav(
   coordinate: string,
   bounds?: ApiNavBounds,
 ): ApiNav {
-  const nav = activatePreparedApiNav(preparedNavOf(model), coordinate);
+  const prepared = preparedNavOf(model);
+  const nav = activatePreparedApiNav(prepared, coordinate);
   return bounds
-    ? applyApiSidebarMode(nav, bounds.sidebar, bounds.mountPath)
+    ? applyApiSidebarMode(nav, bounds.sidebar, bounds.mountPath, prepared.revision)
     : nav;
 }
 

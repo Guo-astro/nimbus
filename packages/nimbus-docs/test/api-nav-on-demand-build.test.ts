@@ -328,5 +328,14 @@ test("the build id changes with what rows are made from, and only then", async (
   );
 
   await writeFile(path.join(src, "components/ui/Row.astro"), "<li class='x'>row</li>");
-  assert.notEqual(await id(), first, "component markup");
+  const restyled = await id();
+  assert.notEqual(restyled, first, "component markup");
+
+  // Components build their classes with helpers such as src/lib/cn.ts.
+  await mkdir(path.join(src, "lib"), { recursive: true });
+  await writeFile(path.join(src, "lib/cn.ts"), "export const cn = (...c) => c.join(' ');");
+  const withHelper = await id();
+  assert.notEqual(withHelper, restyled, "helper added");
+  await writeFile(path.join(src, "lib/cn.ts"), "export const cn = (...c) => c.filter(Boolean).join(' ');");
+  assert.notEqual(await id(), withHelper, "helper edited");
 });

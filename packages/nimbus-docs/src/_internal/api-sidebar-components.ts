@@ -19,9 +19,10 @@ export interface NavBuildInput {
  * Identifies what a build's sidebar rows are made from, so the sidebar's
  * session cache drops rows cached from an older deployment. Rows come from
  * each API's navigation (labels, links, methods, structure), the site's
- * components, and Nimbus itself. Spec edits that leave the navigation alone,
- * such as descriptions, schemas, or examples, keep the id, so they change
- * only the pages they appear on.
+ * components and the helpers they use (`src/lib`, such as `cn`), and Nimbus
+ * itself. Spec edits that leave the navigation alone, such as descriptions,
+ * schemas, or examples, keep the id, so they change only the pages they
+ * appear on.
  */
 export function navBuildId(
   navs: readonly NavBuildInput[],
@@ -35,13 +36,14 @@ export function navBuildId(
   for (const { nav, sidebar, mountPath } of navs) {
     add(JSON.stringify({ sidebar, mountPath, nav }));
   }
-  const components = path.join(srcDir, "components");
-  const files = [...walkFilesSync(components, { onReadError: "lenient" })].sort((a, b) =>
-    a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0,
-  );
-  for (const file of files) {
-    add(file.rel);
-    add(fs.readFileSync(file.abs));
+  for (const dir of ["components", "lib"]) {
+    const files = [...walkFilesSync(path.join(srcDir, dir), { onReadError: "lenient" })].sort((a, b) =>
+      a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0,
+    );
+    for (const file of files) {
+      add(`${dir}/${file.rel}`);
+      add(fs.readFileSync(file.abs));
+    }
   }
   return hash.digest("hex").slice(0, 16);
 }

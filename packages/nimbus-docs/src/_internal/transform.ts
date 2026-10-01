@@ -137,6 +137,7 @@ function textAttrs(raw = ""): Record<string, string> {
 
 const indentOf = (line: string): number => columns(/^[ \t]*/.exec(line)![0]);
 const JSX_TAG_LINE = /^[ \t]*<\/?[A-Za-z]/;
+const HTML_TAG_LINE = /^[ \t]*<\/?[a-z]/;
 
 /**
  * Where Markdown puts a line indented `indent` columns, given the lines above
@@ -190,8 +191,10 @@ function cleanChildren(children: string): string {
   const columnsAt: number[] = [];
   const out = lines.map((line, index) => {
     const text = line.replace(/^[ \t]*/, "");
-    // A tag line's indentation is JSX nesting: in Markdown it's an HTML block.
-    columnsAt[index] = text && !JSX_TAG_LINE.test(line)
+    // An HTML tag line stays in the output as an HTML block, which its JSX
+    // nesting indentation would push into the list above. A component tag line
+    // keeps its place: the component renders there later.
+    columnsAt[index] = text && !HTML_TAG_LINE.test(line)
       ? markdownColumn((k) => lines[index - k], indentOf(line), LIST_ITEM.test(line), (k) => columnsAt[index - k]!)
       : 0;
     return text ? " ".repeat(columnsAt[index]!) + text : "";
@@ -381,24 +384,26 @@ function applyDefaultComponentTransforms(markdown: string): string {
   out = replaceComponent(out, /<Steps\b[^>]*>([\s\S]*?)<\/Steps>/, true, ([children]) => {
     let index = 0;
     return cleanChildren(children!).replace(
-      /^<Step\b([^>]*)>([\s\S]*?)<\/Step>/gm,
-      (_stepMatch, rawAttrs: string, stepChildren: string) => {
+      /<Step\b([^>]*)>([\s\S]*?)<\/Step>/g,
+      (_stepMatch, rawAttrs: string, stepChildren: string, offset: number, whole: string) => {
         index += 1;
+        const newLine = offset > 0 && whole[offset - 1] !== "\n" ? "\n" : "";
         const marker = `${index}. `;
         const title = asTitle(textAttrs(rawAttrs).title, `Step ${index}`);
         const body = cleanChildren(stepChildren).replace(/\n(?=[^\n])/g, `\n${" ".repeat(marker.length)}`);
-        return `${marker}**${title}**${body ? `\n\n${" ".repeat(marker.length)}${body}` : ""}`;
+        return `${newLine}${marker}**${title}**${body ? `\n\n${" ".repeat(marker.length)}${body}` : ""}`;
       },
     );
   });
 
   out = replaceComponent(out, /<Tabs\b[^>]*>([\s\S]*?)<\/Tabs>/, true, ([children]) =>
     cleanChildren(children!).replace(
-      /^<TabItem\b([^>]*)>([\s\S]*?)<\/TabItem>/gm,
-      (_tabMatch, rawAttrs: string, tabChildren: string) => {
+      /<TabItem\b([^>]*)>([\s\S]*?)<\/TabItem>/g,
+      (_tabMatch, rawAttrs: string, tabChildren: string, offset: number, whole: string) => {
         const label = asTitle(textAttrs(rawAttrs).label, "Option");
         const body = cleanChildren(tabChildren);
-        return `### ${label}${body ? `\n\n${body}` : ""}`;
+        const newBlock = offset > 0 && whole[offset - 1] !== "\n" ? "\n\n" : "";
+        return `${newBlock}### ${label}${body ? `\n\n${body}` : ""}`;
       },
     ),
   );
@@ -406,19 +411,13 @@ function applyDefaultComponentTransforms(markdown: string): string {
   // Components without a renderer keep their children rather than leaking JSX
   // into the markdown. Repeat until none are left: unwrapping `<AccordionGroup>`
   // exposes its `<Accordion>` tags. One on a line of its own is a block, so
-  // consecutive items don't run into one paragraph, and its `title` is usually
-  // the item's heading (`<Accordion title="How do I deploy?">`), so it leads as a
-  // bold line. Mid-sentence, only the children remain.
-  const wrapper = /<([A-Z][A-Za-z0-9]*)\b([^>]*)>([\s\S]*?)<\/\1>/;
+  // consecutive ones (`<AccordionTrigger>`, `<AccordionContent>`) don't run into
+  // one paragraph. Attributes are dropped: a `title` is often only a tooltip.
+  const wrapper = /<([A-Z][A-Za-z0-9]*)\b[^>]*>([\s\S]*?)<\/\1>/;
   const isBlock = (site: TagSite) => site.ownsLine && site.endsLine;
   for (let previous = ""; previous !== out; ) {
     previous = out;
-    out = replaceComponent(out, wrapper, isBlock, ([, rawAttrs, children], site) => {
-      const body = cleanChildren(children!);
-      const title = textAttrs(rawAttrs).title?.trim();
-      if (!title || !isBlock(site)) return body;
-      return `**${title}**${body ? `\n\n${body}` : ""}`;
-    });
+    out = replaceComponent(out, wrapper, isBlock, ([, children]) => cleanChildren(children!));
   }
   out = out.replace(/<([A-Z][A-Za-z0-9]*)\b[^>]*\/>/g, "");
 
@@ -505,7 +504,9 @@ export function renderEntryAsMarkdown(
   markdown = applyDefaultComponentTransforms(markdown);
 
   // Normalize layout before restoring code so code blocks stay byte-identical.
-  markdown = markdown.replace(/^[ \t]+$/gm, "");
+  markdown = markdown
+    .replace(/^[ \t]+$/gm, "")
+    .replace(/^([ \t]*(?:>[ \t]*)+)\n(?:\1\n)+/gm, "$1\n");
   markdown = dedentComponentFences(markdown)
     .replace(/\n{3,}/g, "\n\n")
     .trim();

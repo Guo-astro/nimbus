@@ -243,12 +243,16 @@ describe("renderEntryAsMarkdown: lists inside components", () => {
 });
 
 describe("renderEntryAsMarkdown: components without a renderer", () => {
-  test("nested wrappers unwrap fully, and a title leads its item", () => {
+  test("nested wrappers unwrap fully, one paragraph per block", () => {
     const out = mdx(
-      '<AccordionGroup>\n  <Accordion title="How do I deploy?">\n    Run `deploy`.\n  </Accordion>\n  <Accordion title="Can I preview?">\n    Yes.\n  </Accordion>\n</AccordionGroup>\n',
+      "<AccordionGroup>\n  <Accordion>\n    <AccordionTrigger>How do I deploy?</AccordionTrigger>\n    <AccordionContent>Run `deploy`.</AccordionContent>\n  </Accordion>\n  <Accordion>\n    <AccordionTrigger>Can I preview?</AccordionTrigger>\n    <AccordionContent>Yes.</AccordionContent>\n  </Accordion>\n</AccordionGroup>\n",
     );
     assert.doesNotMatch(out, /<\/?[A-Z]/);
-    assert.equal(out, "**How do I deploy?**\n\nRun `deploy`.\n\n**Can I preview?**\n\nYes.");
+    assert.equal(out, "How do I deploy?\n\nRun `deploy`.\n\nCan I preview?\n\nYes.");
+  });
+
+  test("attributes of a component without a renderer are dropped", () => {
+    assert.equal(mdx('<Tip title="Hover text">\n  Body.\n</Tip>\n'), "Body.");
   });
 
   test("a wrapper without a title keeps just its children", () => {
@@ -256,11 +260,8 @@ describe("renderEntryAsMarkdown: components without a renderer", () => {
   });
 });
 
-test("a titled component inside a list item stays in the item", () => {
-  assert.equal(
-    mdx('- <Accordion title="Why?">Because.</Accordion>\n- Next\n'),
-    "- **Why?**\n\n  Because.\n- Next",
-  );
+test("a component without a renderer inside a list item stays in the item", () => {
+  assert.equal(mdx("- <Frame>Because.\n  More.</Frame>\n- Next\n"), "- Because.\n  More.\n- Next");
 });
 
 describe("renderEntryAsMarkdown: component placement", () => {
@@ -315,7 +316,7 @@ describe("renderEntryAsMarkdown: component placement", () => {
   });
 
   test("a component inside a blockquote isn't quoted twice", () => {
-    assert.equal(mdx('> <Accordion title="T">\n> body\n> </Accordion>\n'), "> **T**\n>\n> body");
+    assert.equal(mdx("> <Frame>\n> body\n> </Frame>\n"), "> body");
     assert.equal(mdx("> <Aside>\n> quoted\n> </Aside>\n"), "> > **Note**\n> >\n> > quoted");
   });
 
@@ -345,4 +346,24 @@ describe("renderEntryAsMarkdown: component placement", () => {
 
 test("a body that starts with blank lines still places indented components", () => {
   assert.equal(mdx("\n\n  <Aside>\n    Hi.\n  </Aside>\n"), "> **Note**\n>\n> Hi.");
+});
+
+test("<Steps> and <Tabs> in a list item inside <Aside> stay in the item", () => {
+  assert.equal(
+    mdx(
+      '<Aside title="Outer">\n\n- Configure:\n\n  <Steps>\n    <Step title="Install">\n\n    Run install.\n\n    </Step>\n  </Steps>\n\n- Choose:\n\n  <Tabs>\n    <TabItem label="First">\n\n    Pick it.\n\n    </TabItem>\n  </Tabs>\n\n- Last.\n\n</Aside>\n',
+    ),
+    "> **Outer**\n>\n> - Configure:\n>\n>   1. **Install**\n>\n>      Run install.\n>\n> - Choose:\n>\n>   ### First\n>\n>   Pick it.\n>\n> - Last.",
+  );
+});
+
+test("tab items and steps written on one line each keep their label", () => {
+  assert.equal(
+    mdx('<Tabs><TabItem label="A">One.</TabItem><TabItem label="B">Two.</TabItem></Tabs>\n'),
+    "### A\n\nOne.\n\n### B\n\nTwo.",
+  );
+  assert.equal(
+    mdx('<Steps><Step title="A">One.</Step><Step title="B">Two.</Step></Steps>\n'),
+    "1. **A**\n\n   One.\n2. **B**\n\n   Two.",
+  );
 });

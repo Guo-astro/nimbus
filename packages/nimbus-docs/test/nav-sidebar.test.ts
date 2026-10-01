@@ -243,6 +243,63 @@ describe("initNavSidebar", () => {
     }
   });
 
+  test("never inserts rows a redirect brought from another site", async () => {
+    const offsite = async (url: string) => {
+      const response = await html(group("tags.A", { open: true, rows: "<ul><li>Off-site</li></ul>" }));
+      return Object.defineProperties(response, { redirected: { value: true }, url: { value: url } });
+    };
+    respond = () => offsite("https://evil.test/api/a/");
+    let root = page("/api/redirected-off/");
+    let stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "", "rows not inserted");
+    assert.equal(sessionStorage.getItem(NAV_STATE_KEYS.rows), null, "nor cached");
+    assert.equal(navigations.length, 1, "the reader goes to the group's page instead");
+    stop();
+
+    // A same-site redirect (a trailing slash, a moved page) still loads.
+    respond = () => offsite("https://example.test/api/moved/");
+    root = page("/api/redirected-here/");
+    stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "Off-site");
+    stop();
+  });
+
+  test("a copy shown after mounting restores its scroll, not its groups", async () => {
+    const g = globalThis as any;
+    const priorObserver = g.ResizeObserver;
+    let resized!: () => void;
+    g.ResizeObserver = class {
+      constructor(callback: () => void) {
+        resized = callback;
+      }
+      observe() {}
+      disconnect() {}
+    };
+    try {
+      const root = page("/api/shown-later/");
+      let height = 0;
+      Object.defineProperty(root, "clientHeight", { get: () => height });
+      const stop = initNavSidebar(root);
+      // Meanwhile the reader opened tags.A in the other copy.
+      sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
+      height = 400;
+      resized();
+      await settle();
+      // Opening it here would bypass this copy's mounted disclosure, whose own
+      // state would then disagree with the markup.
+      assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "closed");
+      assert.deepEqual(fetches, [], "and nothing loads as if the reader opened it");
+      assert.equal(navigations.length, 0);
+      stop();
+    } finally {
+      g.ResizeObserver = priorObserver;
+    }
+  });
+
   test("a deploy mid-session: no old pages from memory, no rows cached across builds", async () => {
     respond = () => html(group("tags.A", { open: true, rows: "<ul><li>Old build</li></ul>" }), "old");
     let root = page("/api/deploy/", "old");

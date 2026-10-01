@@ -117,6 +117,10 @@ function fetchPage(src: string, build: string): Promise<Document> {
   const get = async (cache: RequestCache) => {
     const response = await fetch(src, { credentials: "same-origin", cache });
     if (!response.ok) throw new Error(`${response.status} ${src}`);
+    // Rows are markup: a redirect must not take them from another site.
+    if (response.redirected && !pageUrl(response.url)) {
+      throw new Error(`${src} redirected off-site`);
+    }
     return new DOMParser().parseFromString(await response.text(), "text/html");
   };
   // A page from another build came from a cache (browser or edge) that missed
@@ -283,14 +287,15 @@ export function initNavSidebar(root: HTMLElement): () => void {
   root.addEventListener("click", onClick);
 
   // A container restored while hidden (the closed mobile drawer) gets its
-  // scroll when it is first shown.
+  // scroll when it is first shown. Only its scroll: its disclosures have
+  // mounted, and own their state from here on.
   let visible = root.clientHeight > 0;
   const resize =
     typeof ResizeObserver === "undefined"
       ? undefined
       : new ResizeObserver(() => {
           const nowVisible = root.clientHeight > 0;
-          if (nowVisible && !visible) restoreNavState(NAV_STATE_KEYS, root);
+          if (nowVisible && !visible) restoreNavState(NAV_STATE_KEYS, root, true);
           visible = nowVisible;
         });
   resize?.observe(root);
@@ -312,12 +317,17 @@ export function initNavSidebar(root: HTMLElement): () => void {
 /**
  * Restore every `[data-nb-nav-state]` container not yet restored, or only
  * the groups inside `scope` (rows a script just inserted). A `scope` that is
- * a container itself is restored in full, scroll included.
+ * a container itself is restored in full, scroll included; with `scrollOnly`,
+ * only its scroll (a container whose disclosures have already mounted).
  *
  * Self-contained: it is serialized into an inline script, so it may reference
  * nothing outside its own body.
  */
-export function restoreNavState(keys: typeof NAV_STATE_KEYS, scope?: Element): void {
+export function restoreNavState(
+  keys: typeof NAV_STATE_KEYS,
+  scope?: Element,
+  scrollOnly = false,
+): void {
   const read = (key: string) => {
     try {
       return JSON.parse(sessionStorage.getItem(key) || "null");
@@ -385,7 +395,7 @@ export function restoreNavState(keys: typeof NAV_STATE_KEYS, scope?: Element): v
     const open = new Set<string>(Array.isArray(state.open) ? state.open : []);
     const seen = new Set<Element>();
     // Filling a group can reveal remembered groups inside it; repeat until stable.
-    for (let changed = open.size > 0; changed; ) {
+    for (let changed = !scrollOnly && open.size > 0; changed; ) {
       changed = false;
       within.querySelectorAll("[data-nb-nav-group]").forEach((group) => {
         if (seen.has(group)) return;

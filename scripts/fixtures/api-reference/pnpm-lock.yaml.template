@@ -3567,6 +3567,9 @@ snapshots:
       hast-util-sanitize: 5.0.2
       hast-util-to-html: 9.0.5
       jsonc-parser: 3.3.1
+      mdast-util-gfm: 3.1.0
+      mdast-util-mdx: 3.0.0
+      mdast-util-to-markdown: 2.1.2
       mri: 1.2.0
       picomatch: 4.0.7
       remark-lint-emphasis-marker: 4.0.1
@@ -4887,8 +4890,7 @@ snapshots:
 
   escalade@3.2.0: {}
 
-  escape-string-regexp@5.0.0:
-    optional: true
+  escape-string-regexp@5.0.0: {}
 
   estree-util-attach-comments@3.0.0:
     dependencies:
@@ -5358,8 +5360,7 @@ snapshots:
   markdown-extensions@2.0.0:
     optional: true
 
-  markdown-table@3.0.4:
-    optional: true
+  markdown-table@3.0.4: {}
 
   math-intrinsics@1.1.0: {}
 
@@ -5376,7 +5377,6 @@ snapshots:
       escape-string-regexp: 5.0.0
       unist-util-is: 6.0.1
       unist-util-visit-parents: 6.0.2
-    optional: true
 
   mdast-util-from-markdown@2.0.3:
     dependencies:
@@ -5402,7 +5402,6 @@ snapshots:
       devlop: 1.1.0
       mdast-util-find-and-replace: 3.0.2
       micromark-util-character: 2.1.1
-    optional: true
 
   mdast-util-gfm-footnote@2.1.0:
     dependencies:
@@ -5413,7 +5412,6 @@ snapshots:
       micromark-util-normalize-identifier: 2.0.1
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   mdast-util-gfm-strikethrough@2.0.0:
     dependencies:
@@ -5422,7 +5420,6 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   mdast-util-gfm-table@2.0.0:
     dependencies:
@@ -5433,7 +5430,6 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   mdast-util-gfm-task-list-item@2.0.0:
     dependencies:
@@ -5443,7 +5439,6 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   mdast-util-gfm@3.1.0:
     dependencies:
@@ -5456,7 +5451,6 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
     transitivePeerDependencies:
       - supports-color
-    optional: true
 
   mdast-util-mdx-expression@2.0.1:
     dependencies:

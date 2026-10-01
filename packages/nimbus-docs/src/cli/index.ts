@@ -58,6 +58,8 @@ import {
   registrySource,
   resolveComponentTree,
 } from "./resolver.js";
+import { unknownFlagError } from "./flags.js";
+import { progress } from "./progress.js";
 import { diffCommand, outdatedCommand } from "./upgrade.js";
 
 // Load the CLI-only registry override without importing feature/build variables
@@ -199,6 +201,12 @@ async function main(): Promise<void> {
   }
 
   const [command, slug] = args._;
+
+  const flagError = unknownFlagError(command, process.argv.slice(2));
+  if (flagError) {
+    p.log.error(`${flagError} See \`${invocation("--help")}\`.`);
+    process.exit(1);
+  }
 
   if (command === "check") {
     await checkCommand({
@@ -418,7 +426,7 @@ async function addCommand(
   p.intro(`nimbus-docs add ${slug}`);
   p.log.info(`${entry.title} — ${entry.description}`);
 
-  const spinner = p.spinner();
+  const spinner = progress();
   spinner.start("Resolving dependencies");
   let items;
   try {
@@ -521,7 +529,7 @@ async function runAdapterInstall(
   const cwd = process.cwd();
   p.intro(`nimbus-docs add ${label}`);
 
-  const spinner = p.spinner();
+  const spinner = progress();
   const outcome = await installAdapter(adapter, {
     cwd,
     installDeps: async (deps, at) => {

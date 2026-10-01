@@ -103,12 +103,12 @@ test("scopes gate which categories run", async () => {
 });
 
 test("an installed adapter outside the supported range warns with the install command", async () => {
-  const adapterProject = (declared: boolean, installed: string | null) => {
+  const adapterProject = (declared: boolean, installed: string | null, lockfile = "package-lock.json") => {
     const dir = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
     if (declared) {
       fs.writeFileSync(path.join(dir, "package.json"), `{ "name": "fixture", "dependencies": { "@astrojs/cloudflare": "^14.1.0" } }`);
     }
-    fs.writeFileSync(path.join(dir, "package-lock.json"), "{}");
+    fs.writeFileSync(path.join(dir, lockfile), lockfile.endsWith(".json") ? "{}" : "");
     if (installed) {
       const pkgDir = path.join(dir, "node_modules", "@astrojs", "cloudflare");
       fs.mkdirSync(pkgDir, { recursive: true });
@@ -128,8 +128,11 @@ test("an installed adapter outside the supported range warns with the install co
   const finding = await adapterFinding(adapterProject(true, "14.1.2"));
   assert.equal(finding?.severity, "warn");
   assert.equal(finding?.fixable, false);
-  assert.match(finding?.message ?? "", /@astrojs\/cloudflare@14\.1\.2 is installed, but Nimbus supports >=14\.3\.0 <14\.4\.0/);
-  assert.match(finding?.message ?? "", /`npm install '@astrojs\/cloudflare@>=14\.3\.0 <14\.4\.0'`/);
+  assert.match(finding?.message ?? "", /@astrojs\/cloudflare@14\.1\.2 is installed, but Nimbus supports ~14\.3\.0/);
+  assert.match(finding?.message ?? "", /`npm install @astrojs\/cloudflare@~14\.3\.0`/);
+  // pnpm saves a tilde as a tilde; it rewrote the old `>=14.3.0 <14.4.0` spec to `^14.3.x`.
+  const pnpm = await adapterFinding(adapterProject(true, "14.1.2", "pnpm-lock.yaml"));
+  assert.match(pnpm?.message ?? "", /`pnpm add (--ignore-workspace-root-check )?@astrojs\/cloudflare@~14\.3\.0`/);
 
   assert.equal(await adapterFinding(adapterProject(true, "14.3.2")), undefined);
   assert.equal(await adapterFinding(adapterProject(true, null)), undefined);

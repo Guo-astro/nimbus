@@ -170,9 +170,9 @@ export function updateCommand(cwd = process.cwd()): string {
  *   yarn add     <deps...>
  *   bun  add     <deps...>
  */
-// Quote a token for copy-paste into a POSIX shell. Adapter specs like
-// `@astrojs/cloudflare@>=14.3.0 <14.4.0` carry a space and `<`/`>` redirections;
-// a clean package spec is returned unchanged.
+// Quote a token for copy-paste into a POSIX shell. A range spec like
+// `pkg@>=1.2.0 <1.3.0` carries a space and `<`/`>` redirections; a clean
+// package spec is returned unchanged.
 export function quoteForDisplay(token: string): string {
   if (/^[A-Za-z0-9@._/:^~+-]+$/.test(token)) return token;
   return `'${token.replace(/'/g, `'\\''`)}'`;

@@ -96,9 +96,9 @@ export const ADAPTER_RECIPES: Record<AdapterId, AdapterRecipe> = {
     id: "cloudflare",
     pkg: "@astrojs/cloudflare",
     // 14.3.0 pre-bundles astro/app/manifest, so a cold `astro dev` no longer
-    // re-optimizes mid-startup and crashes the workerd runner. Space in the spec →
-    // must be one argv element, never a shell string.
-    installSpec: "@astrojs/cloudflare@>=14.3.0 <14.4.0",
+    // re-optimizes mid-startup and crashes the workerd runner. A tilde, not
+    // `>=14.3.0 <14.4.0`: pnpm saves that range as `^14.3.x`, which lets 14.4 in.
+    installSpec: "@astrojs/cloudflare@~14.3.0",
     extraDeps: [],
     importName: "cloudflare",
     importStatement: 'import cloudflare from "@astrojs/cloudflare";',

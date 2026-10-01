@@ -259,6 +259,16 @@ function applyContentOverride(targetDir, variantKey) {
   cpSync(overrideSrc, dest, { recursive: true });
 }
 
+/** Upgrades diff the tracked root files, so a variant without one would read
+ * as upstream removing it. */
+function assertTrackedRootFiles(targetDir, variantKey) {
+  for (const file of STARTER_MANIFEST.trackedRootFiles) {
+    if (!existsSync(join(targetDir, file))) {
+      throw new Error(`[copy-template] variant "${variantKey}" is missing tracked root file ${file}`);
+    }
+  }
+}
+
 /** The variant directory names, sourced from the manifest (order preserved). */
 export function variantNames() {
   return Object.keys(STARTER_MANIFEST.templates);
@@ -287,6 +297,7 @@ export function generateTemplates(outDir = DEFAULT_OUT_DIR) {
     pinNimbusDocsVersion(targetDir);
     writeReviewedBaseline(targetDir);
     writeBuildScriptsConfig(targetDir);
+    assertTrackedRootFiles(targetDir, variant);
     generated.push(targetDir);
     console.log(`[copy-template] generated ${variant}/ → ${relative(REPO_ROOT, targetDir) || targetDir}`);
   }

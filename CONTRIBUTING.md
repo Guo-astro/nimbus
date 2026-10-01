@@ -72,6 +72,15 @@ pnpm typecheck           # typecheck the whole workspace
 pnpm -r test             # every package's tests, incl. the registry tier-invariant guard
 ```
 
+Working on the docs site (`apps/www`):
+
+```sh
+pnpm --filter "@nimbus/www..." build   # build www plus the workspace packages it depends on
+pnpm --filter @nimbus/www run deploy   # deploy; its predeploy rebuilds nimbus-docs first
+```
+
+A bare `pnpm --filter @nimbus/www build` doesn't rebuild `nimbus-docs`, so after a version bump it fails with a stale-version error until the package is rebuilt.
+
 `CLAUDE.md` / `AGENT.md` carry the deeper architecture notes — you don't need them to run the repo.
 
 ### Preview releases

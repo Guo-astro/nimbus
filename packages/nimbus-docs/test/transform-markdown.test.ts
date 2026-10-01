@@ -395,3 +395,48 @@ describe("renderEntryAsMarkdown: nesting the reviewers found", () => {
     );
   });
 });
+
+describe("renderEntryAsMarkdown: the parsed-tree review", () => {
+  test("<Steps> around a Markdown list keeps the list and its start", () => {
+    assert.equal(
+      mdx("<Steps start={3}>\n1. Install.\n\n   ```sh\n   npm install\n   ```\n\n   Then this.\n2. Deploy.\n</Steps>\n"),
+      "3. Install.\n\n   ```sh\n   npm install\n   ```\n\n   Then this.\n4. Deploy.",
+    );
+  });
+
+  test("components in table cells keep their title and link", () => {
+    assert.equal(
+      mdx('| A | B |\n| --- | --- |\n| <Aside title="Watch">Cell warning</Aside> | x |\n| <LinkCard title="Guide" href="https://example.com/guide" /> | y |\n'),
+      "| A | B |\n| - | - |\n| **Watch** Cell warning | x |\n| [Guide](https://example.com/guide) | y |",
+    );
+  });
+
+  test("an <Aside> alone in a one-line HTML wrapper stays a callout", () => {
+    assert.equal(
+      mdx('<div><Aside type="danger" title="Do not delete">Keep backups.</Aside></div>\n'),
+      "<div>\n\n> **Do not delete**\n>\n> Keep backups.\n\n</div>",
+    );
+  });
+
+  test("an HTML wrapper without blank lines keeps its heading and list", () => {
+    assert.equal(
+      mdx("<div>\n## Heading\n- one\n- two\n</div>\n"),
+      "<div>\n\n## Heading\n\n- one\n- two\n\n</div>",
+    );
+  });
+
+  test("an HTML wrapper Markdown reads the same is kept as written", () => {
+    assert.equal(mdx('<ul>\n  <li><strong>a</strong></li>\n</ul>\n'), '<ul>\n  <li><strong>a</strong></li>\n</ul>');
+  });
+
+  test("import and export lines are dropped; a string expression becomes its text", () => {
+    assert.equal(
+      mdx('import { Badge } from "./badge";\nexport const name = "x";\n\nHello{" "}world. Value: {name}.\n'),
+      "Hello world. Value: {name}.",
+    );
+  });
+
+  test("spaces left inside emphasis by a removed component move outside it", () => {
+    assert.equal(mdx("**<Badge> bold </Badge>** and _<Badge> italic </Badge>_ end.\n"), "**bold** and *italic* end.");
+  });
+});

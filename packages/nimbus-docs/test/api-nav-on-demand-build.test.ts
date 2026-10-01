@@ -301,16 +301,32 @@ test("the build id changes with what rows are made from, and only then", async (
   roots.push(dir);
   const src = path.join(dir, "src");
   await mkdir(path.join(src, "components/ui"), { recursive: true });
-  await writeFile(path.join(dir, "openapi.json"), JSON.stringify(GROUPED));
   await writeFile(path.join(src, "components/ui/Row.astro"), "<li>row</li>");
-  const api = [{ collection: "api", spec: "./openapi.json", sidebar: "on-demand" as const }];
-  const id = () => navBuildId(api, dir, src, "/");
-  const first = id();
-  assert.equal(id(), first, "deterministic");
-  assert.notEqual(navBuildId(api, dir, src, "/docs/"), first, "base");
+  const navOfSpec = async (spec: object) =>
+    getApiNav(await buildApiModel({ collection: "api", spec: JSON.stringify(spec), mountPath: "/api" }));
+  const id = async (spec: object = GROUPED, base = "/") =>
+    navBuildId([{ nav: await navOfSpec(spec), sidebar: "on-demand", mountPath: "/api" }], src, base);
+  const first = await id();
+  assert.equal(await id(), first, "deterministic");
+  assert.notEqual(await id(GROUPED, "/docs/"), first, "base");
+
+  const withPath = (pathKey: string, operation: object) => ({
+    ...GROUPED,
+    paths: { ...GROUPED.paths, [pathKey]: operation },
+  });
+  const workers = GROUPED.paths["/workers"].get;
+  const described = withPath("/workers", {
+    get: { ...workers, description: "Edited.", responses: { "200": { description: "edited" } } },
+  });
+  assert.equal(await id(described), first, "a description edit leaves the rows alone");
+  assert.notEqual(await id(withPath("/workers", { get: { ...workers, summary: "Renamed" } })), first, "label");
+  assert.notEqual(await id(withPath("/workers", { get: { ...workers, deprecated: true } })), first, "deprecated flag");
+  assert.notEqual(
+    await id(withPath("/scripts", { post: { operationId: "scriptsCreate", tags: ["Workers"], responses: ok } })),
+    first,
+    "new operation",
+  );
+
   await writeFile(path.join(src, "components/ui/Row.astro"), "<li class='x'>row</li>");
-  const edited = id();
-  assert.notEqual(edited, first, "component markup");
-  await writeFile(path.join(dir, "openapi.json"), JSON.stringify({ ...GROUPED, tags: [] }));
-  assert.notEqual(id(), edited, "spec contents");
+  assert.notEqual(await id(), first, "component markup");
 });

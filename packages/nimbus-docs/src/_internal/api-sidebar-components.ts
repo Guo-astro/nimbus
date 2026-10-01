@@ -2,21 +2,29 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { ApiSpec } from "../types.js";
-import { resolveApiFamily } from "./api/resolve-versions.js";
+import type { ApiSidebarMode } from "../types.js";
+import type { ApiNav } from "./api/api-view-types.js";
 import { invocation } from "../cli/pm.js";
 import { walkFilesSync } from "./fs-walk.js";
 import { runningNimbusVersion } from "./upgrades.js";
 
+/** One API version's navigation and how its sidebar is bounded. */
+export interface NavBuildInput {
+  nav: ApiNav;
+  sidebar: ApiSidebarMode;
+  mountPath: string;
+}
+
 /**
  * Identifies what a build's sidebar rows are made from, so the sidebar's
  * session cache drops rows cached from an older deployment. Rows come from
- * the API specs, the site's components, and Nimbus itself; an identical
- * input yields an identical id, so unchanged sites build byte-identical pages.
+ * each API's navigation (labels, links, methods, structure), the site's
+ * components, and Nimbus itself. Spec edits that leave the navigation alone,
+ * such as descriptions, schemas, or examples, keep the id, so they change
+ * only the pages they appear on.
  */
 export function navBuildId(
-  api: readonly ApiSpec[],
-  projectRoot: string,
+  navs: readonly NavBuildInput[],
   srcDir: string,
   base: string,
 ): string {
@@ -24,14 +32,8 @@ export function navBuildId(
   const add = (value: string | Buffer) => hash.update(value).update("\0");
   add(runningNimbusVersion());
   add(base);
-  add(JSON.stringify(api));
-  for (const target of api.flatMap(resolveApiFamily)) {
-    if (typeof target.spec !== "string") continue;
-    try {
-      add(fs.readFileSync(path.resolve(projectRoot, target.spec)));
-    } catch {
-      add(target.spec);
-    }
+  for (const { nav, sidebar, mountPath } of navs) {
+    add(JSON.stringify({ sidebar, mountPath, nav }));
   }
   const components = path.join(srcDir, "components");
   const files = [...walkFilesSync(components, { onReadError: "lenient" })].sort((a, b) =>

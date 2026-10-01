@@ -21,7 +21,7 @@ import {
 import { registerConfiguredApiProjector } from "./api-projector.js";
 import { applyApiSidebarMode } from "./api/nav-bounds.js";
 import { resolveSpecSource } from "./api/resolve-spec.js";
-import { resolveApiVersion } from "./api/resolve-versions.js";
+import { resolveApiFamily, resolveApiVersion } from "./api/resolve-versions.js";
 import type { ApiSidebarMode, ApiSpec } from "../types.js";
 
 export {
@@ -262,6 +262,23 @@ export async function projectConfiguredApiPage(
     coordinate,
     configuredBounds.get(configuredModelKey(collection, version)),
   );
+}
+
+/**
+ * Every configured API version's full navigation and sidebar bounds: what
+ * sidebar rows are made from. Reuses the models the content loader built.
+ */
+export async function configuredApiNavs(): Promise<
+  Array<{ nav: ApiNav } & ApiNavBounds>
+> {
+  const navs: Array<{ nav: ApiNav } & ApiNavBounds> = [];
+  for (const entry of configuredApi) {
+    for (const target of resolveApiFamily(entry)) {
+      const model = await configuredApiModel(entry.collection, target.version);
+      navs.push({ nav: getApiNav(model), sidebar: target.sidebar, mountPath: target.mountPath });
+    }
+  }
+  return navs;
 }
 
 /** Page props without highlighted code or navigation, for Markdown output. */

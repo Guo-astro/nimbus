@@ -458,6 +458,8 @@ export function nimbus(
   let sitemapBareRootUrl: string | null = null;
   let sitemapHasResolvedRootPage = false;
   let building = false;
+  // What `astro:build:setup` hashes into the sidebar's build id.
+  let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
   let indexedCollectionsForBuild: string[] = [];
   let apiCollectionsForBuild: string[] = [];
@@ -493,10 +495,7 @@ export function nimbus(
         // content/assets stay root-relative via their collection bases.
         const srcDir = fileURLToPath(astroConfig.srcDir);
         const projectRoot = fileURLToPath(astroConfig.root);
-        // Versions the sidebar's session cache; dev never caches rows.
-        const buildIdForBuild = building
-          ? navBuildId(config.api ?? [], projectRoot, srcDir, astroConfig.base)
-          : "";
+        navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
         beginPreparedMarkdownSession(astroConfig.root);
         registerApiCollections(
@@ -1363,7 +1362,6 @@ export function nimbus(
           // by Sätteri's native AST pass in the configured processor.
           vite: {
             define: {
-              __NIMBUS_BUILD_ID__: JSON.stringify(buildIdForBuild),
               __NIMBUS_THIN_API_ENTRIES__: JSON.stringify(
                 astroConfig.output === "static",
               ),
@@ -1786,6 +1784,16 @@ export function nimbus(
             projectRootForBuild,
           );
         }
+      },
+      // Content sync has built the API models by now, so the sidebar's build id
+      // can hash their navigation rather than whole specs. Dev never caches
+      // rows, so it gets no id.
+      "astro:build:setup": async ({ updateConfig }) => {
+        const navs = navBuildInputs.hasApi
+          ? await (await import("./_internal/api-loader.js")).configuredApiNavs()
+          : [];
+        const id = navBuildId(navs, navBuildInputs.srcDir, navBuildInputs.base);
+        updateConfig({ define: { __NIMBUS_BUILD_ID__: JSON.stringify(id) } });
       },
       "astro:routes:resolved": ({ routes }) => {
         markdownRoutes.update(

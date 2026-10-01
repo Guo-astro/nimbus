@@ -79,6 +79,8 @@ interface Context {
   base: string;
   /** The body being rendered: node offsets index into it. */
   source: string;
+  /** Inside `<Tabs>`: each `<TabsTrigger value>`'s label, for its `<TabsContent>`. */
+  tabLabels?: Map<string, string>;
 }
 
 interface Parsers {
@@ -254,10 +256,8 @@ function asBlocks(nodes: MdNode[]): MdNode[] {
 /** A block element's children, rendered, as blocks. One that is only a block
  * component (`<div><Aside>…</Aside></div>` on one line) holds that component. */
 function blockChildren(node: JsxElement, ctx: Context): MdNode[] {
-  const only = soleChild(node.children);
-  if (only && isJsx(only) && only.name !== null && BLOCK_COMPONENTS.has(only.name)) {
-    return renderElement({ ...only, type: "mdxJsxFlowElement" }, ctx);
-  }
+  const components = onlyBlockComponents(node.children);
+  if (components) return renderAsBlocks(components, ctx);
   return asBlocks(transformChildren(node.children, ctx));
 }
 
@@ -269,22 +269,27 @@ function transformNode(node: MdNode, ctx: Context): MdNode[] {
     if (literal) return [text(literal[2]!)];
   }
   if (!node.children) return [node];
-  // A paragraph that is only a block component (`<div><Aside>…</Aside></div>`
-  // on one line) is that component.
-  const only = node.type === "paragraph" ? soleChild(node.children) : undefined;
-  if (only && isJsx(only) && only.name !== null && BLOCK_COMPONENTS.has(only.name)) {
-    return renderElement({ ...only, type: "mdxJsxFlowElement" }, ctx);
-  }
+  // A paragraph made only of block components (`<Aside>…</Aside><Aside>…</Aside>`
+  // on one line) is those components.
+  const components = node.type === "paragraph" ? onlyBlockComponents(node.children) : undefined;
+  if (components) return renderAsBlocks(components, ctx);
   const children = hoistEdgeSpaces(transformChildren(node.children, ctx));
   return [{ ...node, children: TEXT_BLOCKS.has(node.type) ? trimEdges(children) : children }];
 }
 
-const BLOCK_COMPONENTS = new Set(["Aside", "Card", "CardGrid", "LinkCard", "PackageManagers", "Steps", "Tabs"]);
+const BLOCK_COMPONENTS = new Set([
+  "Aside", "Card", "CardGrid", "LinkCard", "PackageManagers", "Steps", "Tabs", "TabItem", "TabsList", "TabsContent",
+]);
 
-function soleChild(children: MdNode[]): MdNode | undefined {
+/** `children` when, whitespace aside, they are all block components. */
+function onlyBlockComponents(children: MdNode[]): JsxElement[] | undefined {
   const meaningful = children.filter((child) => child.type !== "text" || String(child.value).trim());
-  return meaningful.length === 1 ? meaningful[0] : undefined;
+  const blocks = meaningful.every((child) => isJsx(child) && child.name !== null && BLOCK_COMPONENTS.has(child.name));
+  return meaningful.length > 0 && blocks ? (meaningful as JsxElement[]) : undefined;
 }
+
+const renderAsBlocks = (components: JsxElement[], ctx: Context): MdNode[] =>
+  joinCardLists(components.flatMap((component) => renderElement({ ...component, type: "mdxJsxFlowElement" }, ctx)));
 
 const SPACED = new Set(["strong", "emphasis", "delete", "link"]);
 
@@ -339,9 +344,6 @@ function trimEdges(children: MdNode[]): MdNode[] {
   return out.filter((node) => node.type !== "text" || node.value !== "");
 }
 
-const elementsNamed = (nodes: MdNode[], name: string): JsxElement[] =>
-  nodes.filter((node): node is JsxElement => isJsx(node) && node.name === name);
-
 function renderElement(node: JsxElement, ctx: Context): MdNode[] {
   const inline = node.type === "mdxJsxTextElement";
   const children = () => (inline ? transformChildren(node.children, ctx) : blockChildren(node, ctx));
@@ -355,7 +357,7 @@ function renderElement(node: JsxElement, ctx: Context): MdNode[] {
       children: serialize(children()),
       base: ctx.base,
     });
-    return rendered ? [{ type: "html", value: rendered }] : [];
+    return rendered ? renderedOutput(rendered, node, ctx) : [];
   }
 
   // HTML elements stay as written, with their content rendered as Markdown.
@@ -375,40 +377,90 @@ function renderElement(node: JsxElement, ctx: Context): MdNode[] {
       return children();
     case "LinkCard":
       return [cardList([paragraph(linkCardText(node))])];
-    case "Steps": {
-      const start = Number(attributesOf(node).start);
-      const steps = elementsNamed(node.children, "Step");
-      if (steps.length === 0) {
-        // The usual form wraps a Markdown ordered list; `start` offsets its count.
-        const blocks = children();
-        const list = blocks.find((block) => block.type === "list" && block.ordered);
-        if (list && Number.isInteger(start) && start > 0) list.start = start;
-        return blocks;
-      }
-      return [
-        {
-          type: "list",
-          ordered: true,
-          start: Number.isInteger(start) && start > 0 ? start : 1,
-          spread: false,
-          children: steps.map((step, index) => {
-            const body = blockChildren(step, ctx);
-            const title = textAttribute(step, "title") ?? `Step ${index + 1}`;
-            return { type: "listItem", spread: body.length > 0, children: [paragraph([strong(title)]), ...body] };
-          }),
-        },
-      ];
+    case "Steps":
+      return steps(node, ctx);
+    case "Tabs": {
+      const tabLabels = new Map<string, string>();
+      walk(node, (child) => {
+        const value = isJsx(child) && child.name === "TabsTrigger" ? textAttribute(child, "value") : undefined;
+        if (value) tabLabels.set(value, plainText(child).trim() || value);
+      });
+      return blockChildren(node, { ...ctx, tabLabels });
     }
-    case "Tabs":
-      return elementsNamed(node.children, "TabItem").flatMap((tab) => [
-        { type: "heading", depth: 3, children: [text(textAttribute(tab, "label") ?? "Option")] },
-        ...blockChildren(tab, ctx),
-      ]);
+    case "TabItem":
+      return [tabHeading(textAttribute(node, "label") ?? "Option"), ...children()];
+    case "TabsList":
+      // Its triggers are the labels, which head each `<TabsContent>`.
+      return [];
+    case "TabsContent": {
+      const value = textAttribute(node, "value");
+      return [tabHeading((value && ctx.tabLabels?.get(value)) ?? value ?? "Option"), ...children()];
+    }
     default:
       // A component without a Markdown form keeps its content. Its attributes
       // are dropped: a `title` is often only a tooltip.
       return children();
   }
+}
+
+/**
+ * A custom renderer's output is Markdown that may use other components
+ * (`<Aside>…</Aside>`): render it too. The renderer's own name is left out, so
+ * output that repeats it can't recurse.
+ */
+function renderedOutput(rendered: string, node: JsxElement, ctx: Context): MdNode[] {
+  let tree: MdNode;
+  try {
+    tree = satteri().mdxToMdast(rendered);
+  } catch {
+    return [{ type: "html", value: rendered }];
+  }
+  const { [node.name!]: _self, ...componentMap } = ctx.componentMap;
+  const nodes = transformChildren(tree.children ?? [], { ...ctx, componentMap, source: rendered });
+  if (node.type !== "mdxJsxTextElement") return nodes;
+  // Inline, only one paragraph's content fits.
+  return nodes.length === 1 && nodes[0]!.type === "paragraph" ? nodes[0]!.children ?? [] : [{ type: "html", value: rendered }];
+}
+
+const plainText = (node: MdNode): string =>
+  node.type === "text" ? String(node.value) : (node.children ?? []).map(plainText).join("");
+
+const tabHeading = (label: string): MdNode => ({ type: "heading", depth: 3, children: [text(label)] });
+
+/**
+ * `<Steps>` in order: its `<Step>`s become an ordered list, numbered from
+ * `start` and continuing across anything between them; other content (an
+ * introduction, a Markdown ordered list it wraps) stays where it is.
+ */
+function steps(node: JsxElement, ctx: Context): MdNode[] {
+  const startAttribute = Number(attributesOf(node).start);
+  const start = Number.isInteger(startAttribute) && startAttribute > 0 ? startAttribute : undefined;
+  if (!node.children.some((child) => isJsx(child) && child.name === "Step")) {
+    // The usual form wraps a Markdown ordered list; `start` offsets its count.
+    const blocks = blockChildren(node, ctx);
+    const list = blocks.find((block) => block.type === "list" && block.ordered);
+    if (list && start !== undefined) list.start = start;
+    return blocks;
+  }
+  const out: MdNode[] = [];
+  let list: MdNode | undefined;
+  let count = 0;
+  for (const child of node.children) {
+    if (isJsx(child) && child.name === "Step") {
+      count += 1;
+      if (!list) {
+        list = { type: "list", ordered: true, start: (start ?? 1) + count - 1, spread: false, children: [] };
+        out.push(list);
+      }
+      const body = blockChildren(child, ctx);
+      const title = textAttribute(child, "title") ?? `Step ${count}`;
+      list.children!.push({ type: "listItem", spread: body.length > 0, children: [paragraph([strong(title)]), ...body] });
+    } else if (child.type !== "text" || String(child.value).trim()) {
+      list = undefined;
+      out.push(...transformNode(child, ctx));
+    }
+  }
+  return asBlocks(out);
 }
 
 function asideTitle(node: JsxElement): string {
@@ -457,7 +509,11 @@ function dedent(source: string): string {
   return [first, ...rest.map((line) => line.slice(common))].join("\n");
 }
 
-const STRUCTURE = new Set(["heading", "list", "blockquote", "code", "table", "thematicBreak"]);
+// Markdown syntax raw HTML would show literally: blocks, and inline marks.
+const STRUCTURE = new Set([
+  "heading", "list", "blockquote", "code", "table", "thematicBreak",
+  "strong", "emphasis", "delete", "link", "image", "inlineCode",
+]);
 const structureIn = (node: MdNode): number =>
   (STRUCTURE.has(node.type) ? 1 : 0) + (node.children ?? []).reduce((sum, child) => sum + structureIn(child), 0);
 
@@ -589,7 +645,13 @@ export function renderEntryAsMarkdown(
     if (!containsComponent(block, ctx) && !containsLiteralExpression(block) && keep) continue;
     const rendered = serialize(transformNode(block, ctx));
     // A block that renders to nothing takes one of its blank-line gaps with it.
-    out += rendered ? markdown.slice(cursor, start) + rendered : markdown.slice(cursor, start).trimEnd();
+    // A rebuilt top-level block starts its line: indentation before it (a
+    // fence MDX reads past) would leave its first line indented.
+    let gap = markdown.slice(cursor, start).replace(/(^|\n)[ \t]+$/, "$1");
+    // Two blocks on one source line (`<Aside>…</Aside><Aside>…</Aside>`) still
+    // need a blank line between them.
+    if (rendered && /[^\n]$/.test(out + gap)) gap += "\n\n";
+    out += rendered ? gap + rendered : gap.trimEnd();
     cursor = end;
   }
   out += markdown.slice(cursor);

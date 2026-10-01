@@ -440,3 +440,52 @@ describe("renderEntryAsMarkdown: the parsed-tree review", () => {
     assert.equal(mdx("**<Badge> bold </Badge>** and _<Badge> italic </Badge>_ end.\n"), "**bold** and *italic* end.");
   });
 });
+
+describe("renderEntryAsMarkdown: the second parsed-tree review", () => {
+  test("an indented fence MDX reads as a fence starts its line", () => {
+    assert.equal(mdx("Before.\n\n    ```sh\n    echo hello\n    ```\n\nAfter.\n"), "Before.\n\n```sh\necho hello\n```\n\nAfter.");
+  });
+
+  test("manual tabs take their labels from the triggers", () => {
+    assert.equal(
+      mdx('<Tabs><TabsList><TabsTrigger value="a">A</TabsTrigger></TabsList><TabsContent value="a">Install it.</TabsContent></Tabs>\n'),
+      "### A\n\nInstall it.",
+    );
+  });
+
+  test("content around tab items, and a wrapper around them, is kept", () => {
+    assert.equal(
+      mdx('<Tabs>\n\nIntro.\n\n<div>\n<TabItem label="One">First.</TabItem>\n</div>\n\nSee [more](/more).\n\n</Tabs>\n'),
+      "Intro.\n\n<div>\n\n### One\n\nFirst.\n\n</div>\n\nSee [more](/more).",
+    );
+  });
+
+  test("content around steps is kept, and numbering continues past it", () => {
+    assert.equal(
+      mdx('<Steps>\n\nBack up first.\n\n<Step title="Install">Run install.</Step>\n\nRestart afterward.\n\n</Steps>\n'),
+      "Back up first.\n\n1. **Install**\n\n   Run install.\n\nRestart afterward.",
+    );
+    assert.equal(
+      mdx('<Steps>\n<Step title="A">a</Step>\n\nNote.\n\n<Step title="B">b</Step>\n</Steps>\n'),
+      "1. **A**\n\n   a\n\nNote.\n\n2. **B**\n\n   b",
+    );
+  });
+
+  test("inline Markdown inside a one-line HTML element stays Markdown", () => {
+    assert.equal(mdx("<div>Some **bold** and a [link](/x).</div>\n"), "<div>\n\nSome **bold** and a [link](/x).\n\n</div>");
+  });
+
+  test("two callouts on one line stay two callouts", () => {
+    assert.equal(
+      mdx('<Aside title="A">One.</Aside><Aside title="B">Two.</Aside>\n'),
+      "> **A**\n>\n> One.\n\n> **B**\n>\n> Two.",
+    );
+  });
+
+  test("a custom renderer's output is rendered too, without recursing into itself", () => {
+    const render = (componentMap: Record<string, (ctx: { children: string }) => string>, body: string) =>
+      renderEntryAsMarkdown({ body, filePath: "page.mdx" }, { componentMap });
+    assert.equal(render({ MyTip: ({ children }) => `<Aside>${children}</Aside>` }, "<MyTip>Read this.</MyTip>\n"), "> **Note**\n>\n> Read this.");
+    assert.equal(render({ Loop: ({ children }) => `<Loop>${children}</Loop>` }, "<Loop>x</Loop>\n"), "x");
+  });
+});

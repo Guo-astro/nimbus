@@ -20,6 +20,7 @@ import {
   type CitationIndex,
 } from "./api/citations.js";
 import { getTabs, isCommandType } from "../lib/pkgm.js";
+import { runtimeWarn } from "./runtime-warn.js";
 
 export interface MarkdownComponentRenderContext {
   name: string;
@@ -404,20 +405,31 @@ function renderElement(node: JsxElement, ctx: Context): MdNode[] {
 }
 
 /**
- * A custom renderer's output is Markdown that may use other components
- * (`<Aside>…</Aside>`): render it too. The renderer's own name is left out, so
- * output that repeats it can't recurse.
+ * A custom renderer's output goes in as written: the site chose it. Output
+ * that uses another component (`<Aside>…</Aside>`, a fragment, a name in
+ * `componentMap`) is rendered again so those convert too; the renderer's own
+ * name is left out then, so output that repeats it can't recurse. Whether it
+ * does is read from the parsed output, so a tag in a code sample doesn't count.
+ * In a table cell or a sentence only one line without `|` fits as written;
+ * anything else is rendered so the cell or sentence holds together.
  */
 function renderedOutput(rendered: string, node: JsxElement, ctx: Context): MdNode[] {
-  let tree: MdNode;
+  const inline = node.type === "mdxJsxTextElement";
+  const { [node.name!]: _self, ...componentMap } = ctx.componentMap;
+  const inner: Context = { ...ctx, componentMap, source: rendered };
+  let tree: MdNode | undefined;
   try {
     tree = satteri().mdxToMdast(rendered);
   } catch {
-    return [{ type: "html", value: rendered }];
+    // Not MDX (`Array<T>`, a stray `<`): nothing in it to convert.
   }
-  const { [node.name!]: _self, ...componentMap } = ctx.componentMap;
-  const nodes = transformChildren(tree.children ?? [], { ...ctx, componentMap, source: rendered });
-  if (node.type !== "mdxJsxTextElement") return nodes;
+  const fitsAsWritten = !inline || !/[\n|]/.test(rendered);
+  if (!tree || !containsComponent(tree, inner)) {
+    if (fitsAsWritten) return [{ type: "html", value: rendered }];
+    if (!tree) return [text(rendered.replace(/\s*\n\s*/g, " "))];
+  }
+  const nodes = transformChildren(tree.children ?? [], inner);
+  if (!inline) return nodes;
   // Inline, only one paragraph's content fits.
   return nodes.length === 1 && nodes[0]!.type === "paragraph" ? nodes[0]!.children ?? [] : [{ type: "html", value: rendered }];
 }
@@ -607,7 +619,19 @@ export function renderEntryAsMarkdown(
   if (!isMdx) return markdown.trim();
 
   const { mdxToMdast, markdownToMdast } = satteri();
-  const tree = mdxToMdast(markdown);
+  let tree: MdNode;
+  try {
+    tree = mdxToMdast(markdown);
+  } catch (error) {
+    // A page the site's own Markdown processor accepts can still be one
+    // Sätteri can't parse: keep its text rather than fail the build.
+    runtimeWarn(
+      `Generated Markdown for ${entry.filePath ?? "a page"} keeps its MDX as written: it couldn't be parsed (${
+        error instanceof Error ? error.message : String(error)
+      }).`,
+    );
+    return markdown.trim();
+  }
   walk(tree, (node) => {
     if (isJsx(node) && node.name === "Render") {
       throw new Error(

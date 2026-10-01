@@ -489,3 +489,50 @@ describe("renderEntryAsMarkdown: the second parsed-tree review", () => {
     assert.equal(render({ Loop: ({ children }) => `<Loop>${children}</Loop>` }, "<Loop>x</Loop>\n"), "x");
   });
 });
+
+describe("renderEntryAsMarkdown: site renderers and parse failures", () => {
+  const render = (body: string, componentMap?: Record<string, (ctx: { children: string }) => string>) =>
+    renderEntryAsMarkdown({ body, filePath: "page.mdx" }, componentMap ? { componentMap } : {});
+
+  test("a renderer's plain Markdown goes in exactly as written", () => {
+    assert.equal(render("<MyList>x</MyList>\n", { MyList: () => "* one\n* two\n\n| a |\n|:-|\n| b |" }), "* one\n* two\n\n| a |\n|:-|\n| b |");
+  });
+
+  test("a renderer's output that uses a component still converts", () => {
+    assert.equal(render("<MyTip>Read this.</MyTip>\n", { MyTip: ({ children }) => `<Aside>${children}</Aside>` }), "> **Note**\n>\n> Read this.");
+  });
+
+  test("a renderer's code samples and non-MDX text go in as written", () => {
+    assert.equal(render("<X/>\n", { X: () => 'Use {"literal"} with `<Note/>`' }), 'Use {"literal"} with `<Note/>`');
+    assert.equal(render("<X/>\n", { X: () => "~~~tsx\n<Note/>\n~~~" }), "~~~tsx\n<Note/>\n~~~");
+    assert.equal(render("<X/>\n", { X: () => "Array<T>" }), "Array<T>");
+  });
+
+  test("output that uses a lowercase mapped name or a fragment still converts", () => {
+    assert.equal(render("<X/>\n", { X: () => "<foo>x</foo>", foo: () => "lower rendered" }), "lower rendered");
+    assert.equal(render("<X/>\n", { X: () => "<>x</>" }), "x");
+  });
+
+  test("in a table cell, multi-line or piped output keeps the row whole", () => {
+    const table = "| a | b |\n|---|---|\n| <X/> | next |\n";
+    assert.equal(render(table, { X: () => "one\ntwo" }), "| a | b |\n| - | - |\n| one&#xA;two | next |");
+    assert.equal(render(table, { X: () => "a | b" }), "| a | b |\n| - | - |\n| a \\| b | next |");
+  });
+
+  test("multi-line output for a list item stays in the item", () => {
+    assert.equal(render("- Item:\n\n  <X/>\n- Next\n", { X: () => "line one\nline two" }), "- Item:\n\n  line one\n  line two\n- Next");
+  });
+
+  test("a body Sätteri can't parse keeps its text, with a warning", () => {
+    const warn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message: string) => void warnings.push(message);
+    try {
+      assert.equal(render("Intro.\n\n<div>\nnever closed\n"), "Intro.\n\n<div>\nnever closed");
+    } finally {
+      console.warn = warn;
+    }
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /\[nimbus\] Generated Markdown for page\.mdx keeps its MDX as written: it couldn't be parsed/);
+  });
+});

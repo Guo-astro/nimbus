@@ -431,6 +431,11 @@ async function publish({ dryRun, haltAfter }) {
 
   if (syncResult) await dispatchSmoke(syncResult.tag);
   log("publish: done.");
+  // `nimbus-docs add` installs from the live registry, which only changes when
+  // apps/www is deployed. Until then it serves the previous release's
+  // components. See CONTRIBUTING.md, "Releases".
+  const notice = "Deploy apps/www now (pnpm --filter @nimbus/www run deploy) so the component registry matches this release.";
+  console.log(process.env.GITHUB_ACTIONS ? `::notice title=Deploy the docs site::${notice}` : `[release] ${notice}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -267,17 +267,19 @@ tags:
 
 In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open, without replaying their animation. Rows loaded on one page show on the next before it paints; a new deployment starts over, so readers never see rows from an older build.
 
-Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config.
+Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config, and the build warns if the two disagree.
 
 Every group page lists its operations and its subsections, and the API overview lists every top-level section, so all pages stay reachable in every mode.
 
 #### Upgrading an existing site
 
-`"on-demand"` needs the API sidebar and layout components from Nimbus 0.16 or later. With older copies, the build fails and names the outdated files. To update them, run:
+`"on-demand"` needs API sidebar and layout components from the same release as your `@cloudflare/nimbus-docs`. With older copies, the build fails and names the outdated files. To update them, run:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
 
 For each component that differs from your copy, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
+
+Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 
 ### Build or request rendering
 

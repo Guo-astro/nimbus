@@ -943,7 +943,7 @@ export function nimbus(
             rendering: mode,
           });
         }
-        const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir);
+        const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw new Error(outdatedSidebar);
         if (building) {
           injectRoute({

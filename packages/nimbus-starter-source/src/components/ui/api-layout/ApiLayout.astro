@@ -12,7 +12,7 @@ import { ApiCodeRail } from "@/components/ui/api-code-rail";
 import { Banner } from "@/components/ui/banner";
 import ApiBody from "./ApiBody.astro";
 import { cn } from "@/lib/cn";
-import { getApiVersionAlternates, getVersionStatus, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
+import { getApiVersionAlternates, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiNav, ApiPageProps } from "@cloudflare/nimbus-docs/api";
 
 interface Props {
@@ -72,6 +72,7 @@ if (versionStatus?.isHidden) {
   <div
     data-mobile-sidebar-panel
     data-nb-nav-state={navKey}
+    data-nb-nav-build={navBuildId}
     data-nb-nav-scroller="mobile"
     class="h-full w-(--nb-sidebar-width) max-w-[85vw] -translate-x-full overflow-y-auto overscroll-contain border-r border-border bg-card transition-transform duration-250 ease-out group-data-[state=open]:translate-x-0 motion-reduce:transition-none"
   >
@@ -97,6 +98,7 @@ if (versionStatus?.isHidden) {
       excluded from the page transition so it never fades or replays. */}
   <aside
     data-nb-nav-state={navKey}
+    data-nb-nav-build={navBuildId}
     data-nb-nav-scroller="desktop"
     transition:name="nb-api-sidebar"
     transition:animate="none"

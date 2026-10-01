@@ -15,7 +15,10 @@
  *
  * Markup contract:
  *   - `data-nb-nav-state="<key>"` + `data-nb-nav-scroller="<name>"` on each
- *     scrolling sidebar container (copies with one key share open groups);
+ *     scrolling sidebar container (copies with one key share open groups),
+ *     with `data-nb-nav-build={navBuildId}` (from the runtime) naming the
+ *     build that rendered it. Rows cached by another build are never shown;
+ *     without it, rows are not cached;
  *   - `data-nb-nav-group="<id>"` on each collapsible group root;
  *   - `data-nb-nav-src="<url>"` on a group whose rows were left out of this
  *     page; removed once they are filled in. Its panel is empty apart from
@@ -29,8 +32,7 @@ export const NAV_STATE_KEYS = {
   rows: "nimbus:nav-rows",
 } as const;
 
-/** Set on a container once restored; its value is the build id (`""` in dev). */
-const RESTORED = "data-nb-nav-restored";
+const BUILD = "data-nb-nav-build";
 const GROUP = "data-nb-nav-group";
 const SRC = "data-nb-nav-src";
 const TRIGGER = "[data-nb-collapsible-trigger]";
@@ -54,13 +56,6 @@ interface RowsCache {
   rows: Record<string, string>;
 }
 
-export interface NavRestoreConfig {
-  state: string;
-  rows: string;
-  /** Identifies the build that rendered the page. Cached rows from another
-   *  build are ignored. Empty disables the cache (dev). */
-  build: string;
-}
 
 function readJson<T>(key: string): T | null {
   try {
@@ -93,6 +88,9 @@ function cacheRows(build: string, key: string, html: string): void {
   writeJson(NAV_STATE_KEYS.rows, { build, rows } satisfies RowsCache);
 }
 
+// Fetched pages, kept in memory across view transitions. Keyed by the build
+// of the page asking, so a deploy mid-session never serves the old build's
+// pages from memory.
 const pages = new Map<string, Promise<Document>>();
 
 /** `src` as a same-origin page URL, or `undefined`: rows (markup) and the
@@ -108,20 +106,28 @@ function pageUrl(src: string | null): string | undefined {
   }
 }
 
-function fetchPage(src: string): Promise<Document> {
-  let pending = pages.get(src);
+function fetchPage(src: string, build: string): Promise<Document> {
+  const key = `${build} ${src}`;
+  let pending = pages.get(key);
   if (pending) {
-    pages.delete(src);
-    pages.set(src, pending);
+    pages.delete(key);
+    pages.set(key, pending);
     return pending;
   }
-  pending = fetch(src, { credentials: "same-origin" }).then(async (response) => {
+  const get = async (cache: RequestCache) => {
+    const response = await fetch(src, { credentials: "same-origin", cache });
     if (!response.ok) throw new Error(`${response.status} ${src}`);
     return new DOMParser().parseFromString(await response.text(), "text/html");
-  });
-  pages.set(src, pending);
+  };
+  // A page from another build came from a cache (browser or edge) that missed
+  // a deploy: ask the server once more, bypassing caches.
+  const buildOf = (doc: Document) => doc.querySelector(`[${BUILD}]`)?.getAttribute(BUILD);
+  pending = get("default").then((doc) =>
+    build && buildOf(doc) && buildOf(doc) !== build ? get("reload") : doc,
+  );
+  pages.set(key, pending);
   pending.catch(() => {
-    if (pages.get(src) === pending) pages.delete(src);
+    if (pages.get(key) === pending) pages.delete(key);
   });
   for (const oldest of pages.keys()) {
     if (pages.size <= PAGE_CACHE_SIZE) break;
@@ -153,7 +159,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
   const key = root.dataset.nbNavState;
   if (!key) return () => {};
   const scroller = root.dataset.nbNavScroller ?? "default";
-  const build = root.getAttribute(RESTORED) ?? "";
+  const build = root.getAttribute(BUILD) ?? "";
   const storageKey = NAV_STATE_KEYS.state + key;
   let destroyed = false;
 
@@ -170,7 +176,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
   const panelOf = (group: Element) => group.querySelector<HTMLElement>(CONTENT);
   const prefetch = (group: Element) => {
     const url = pageUrl(group.getAttribute(SRC));
-    if (url) void fetchPage(url).catch(() => {});
+    if (url) void fetchPage(url, build).catch(() => {});
   };
 
   // `follow`: if the rows cannot load, go to the page that lists them. Only
@@ -183,15 +189,20 @@ export function initNavSidebar(root: HTMLElement): () => void {
     if (!src || !url || !id || !panel || panel.hasAttribute("aria-busy")) return;
     panel.setAttribute("aria-busy", "true");
     try {
-      const rows = rowsIn(await fetchPage(url), id);
+      const source = await fetchPage(url, build);
+      const rows = rowsIn(source, id);
       if (destroyed || !panel.isConnected) return;
       if (!rows) throw new Error(`${src} does not list ${id}`);
       if (!group.hasAttribute(SRC)) return;
       panel.replaceChildren(rows);
       group.removeAttribute(SRC);
-      cacheRows(build, rowsKey(src, id), panel.innerHTML);
+      // Cache only rows from this page's own build (an edge or browser cache
+      // can still serve a page from another one).
+      if (source.querySelector(`[${BUILD}]`)?.getAttribute(BUILD) === build) {
+        cacheRows(build, rowsKey(src, id), panel.innerHTML);
+      }
       // Reopen remembered groups inside the new rows before they mount.
-      restoreNavState({ ...NAV_STATE_KEYS, build }, panel);
+      restoreNavState(NAV_STATE_KEYS, panel);
       remount();
     } catch {
       const isOpen = group.querySelector(TRIGGER)?.getAttribute("data-nb-state") === "open";
@@ -279,7 +290,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
       ? undefined
       : new ResizeObserver(() => {
           const nowVisible = root.clientHeight > 0;
-          if (nowVisible && !visible) restoreNavState({ ...NAV_STATE_KEYS, build }, root);
+          if (nowVisible && !visible) restoreNavState(NAV_STATE_KEYS, root);
           visible = nowVisible;
         });
   resize?.observe(root);
@@ -306,7 +317,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
  * Self-contained: it is serialized into an inline script, so it may reference
  * nothing outside its own body.
  */
-export function restoreNavState(config: NavRestoreConfig, scope?: Element): void {
+export function restoreNavState(keys: typeof NAV_STATE_KEYS, scope?: Element): void {
   const read = (key: string) => {
     try {
       return JSON.parse(sessionStorage.getItem(key) || "null");
@@ -317,11 +328,15 @@ export function restoreNavState(config: NavRestoreConfig, scope?: Element): void
   const restoredAttr = "data-nb-nav-restored";
   const triggerSel = "[data-nb-collapsible-trigger]";
   const contentSel = "[data-nb-collapsible-content]";
+  // The build id comes from the container being restored, never from this
+  // closure: after a view-transition swap, the listener registered by an
+  // earlier page (possibly an earlier deployment) restores the new markup.
   let cache: { build?: string; rows?: Record<string, string> } | null | undefined;
-  const cachedRows = (key: string) => {
-    if (!config.build) return undefined;
-    if (cache === undefined) cache = read(config.rows);
-    return cache && cache.build === config.build && cache.rows ? cache.rows[key] : undefined;
+  const cachedRows = (root: Element, key: string) => {
+    const build = root.getAttribute("data-nb-nav-build");
+    if (!build) return undefined;
+    if (cache === undefined) cache = read(keys.rows);
+    return cache && cache.build === build && cache.rows ? cache.rows[key] : undefined;
   };
   // Restored groups appear open, never opening: transitions stay off until
   // the restored state has been painted.
@@ -350,11 +365,11 @@ export function restoreNavState(config: NavRestoreConfig, scope?: Element): void
   };
   // Only a group whose rows were left out is filled; rows the server rendered
   // (the current page's trail, with its highlight) are never replaced.
-  const fill = (group: Element) => {
+  const fill = (root: Element, group: Element) => {
     const src = group.getAttribute("data-nb-nav-src");
     const panel = group.querySelector(contentSel);
     if (!src || !panel) return false;
-    const html = cachedRows(`${src} ${group.getAttribute("data-nb-nav-group")}`);
+    const html = cachedRows(root, `${src} ${group.getAttribute("data-nb-nav-group")}`);
     if (!html) return false;
     const template = document.createElement("template");
     template.innerHTML = html;
@@ -364,7 +379,8 @@ export function restoreNavState(config: NavRestoreConfig, scope?: Element): void
     return true;
   };
   const restoreRoot = (root: HTMLElement, within: Element) => {
-    const stateKey = config.state + root.getAttribute("data-nb-nav-state");
+    cache = undefined; // read fresh each pass: a listener outlives many pages
+    const stateKey = keys.state + root.getAttribute("data-nb-nav-state");
     const state = read(stateKey) || {};
     const open = new Set<string>(Array.isArray(state.open) ? state.open : []);
     const seen = new Set<Element>();
@@ -376,7 +392,7 @@ export function restoreNavState(config: NavRestoreConfig, scope?: Element): void
         seen.add(group);
         if (!open.has(group.getAttribute("data-nb-nav-group") || "")) return;
         setOpen(group);
-        if (fill(group)) changed = true;
+        if (fill(root, group)) changed = true;
       });
     }
     if (quiet.length > 0) {
@@ -417,14 +433,12 @@ export function restoreNavState(config: NavRestoreConfig, scope?: Element): void
     return;
   }
   // Once per container: the inline script and the swap listener both reach
-  // a swapped-in sidebar. The listener keeps the config of the page that
-  // registered it; the swapped-in page's own script, which runs after it,
-  // corrects the build id.
+  // a swapped-in sidebar.
   const restore = () =>
     document.querySelectorAll<HTMLElement>("[data-nb-nav-state]").forEach((root) => {
-      const done = root.hasAttribute(restoredAttr);
-      root.setAttribute(restoredAttr, config.build);
-      if (!done) restoreRoot(root, root);
+      if (root.hasAttribute(restoredAttr)) return;
+      root.setAttribute(restoredAttr, "");
+      restoreRoot(root, root);
     });
   restore();
   const flag = "__nbNavStateBound";

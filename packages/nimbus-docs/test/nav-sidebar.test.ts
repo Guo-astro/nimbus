@@ -67,10 +67,11 @@ const group = (id: string, opts: { src?: string; open?: boolean; rows?: string }
     <div data-nb-collapsible-content data-nb-state="${opts.open ? "open" : "closed"}"><div class="wrap">${opts.rows ?? ""}</div></div>
   </div>`;
 
-/** A page with one sidebar: a collapsed group and the current page's trail. */
-function page(src = "/api/a/") {
+/** A page with one sidebar, rendered by build `build`: a collapsed group and
+ *  the current page's trail. */
+function page(src = "/api/a/", build = "b1") {
   document.body.innerHTML = `
-    <aside data-nb-nav-state="k" data-nb-nav-scroller="desktop">
+    <aside data-nb-nav-state="k" data-nb-nav-build="${build}" data-nb-nav-scroller="desktop">
       ${group("tags.A", { src })}
       ${group("tags.T", { open: true, rows: `<ul><li><a aria-current="page" href="/api/t/x/">Current</a></li></ul>` })}
     </aside>`;
@@ -81,11 +82,13 @@ const panel = (id: string) =>
 const trigger = (id: string) =>
   document.querySelector<HTMLElement>(`[data-nb-nav-group='${id}'] [data-nb-collapsible-trigger]`)!;
 const saved = () => JSON.parse(sessionStorage.getItem(`${NAV_STATE_KEYS.state}k`) ?? "{}");
-const config = (build: string) => ({ ...NAV_STATE_KEYS, build });
 const cacheRows = (build: string, rows: Record<string, string>) =>
   sessionStorage.setItem(NAV_STATE_KEYS.rows, JSON.stringify({ build, rows }));
-const html = (body: string) =>
-  Promise.resolve(new Response(`<!DOCTYPE html><body>${body}</body>`, { status: 200 }));
+/** A fetched page, rendered by build `build`. */
+const html = (body: string, build = "b1") =>
+  Promise.resolve(
+    new Response(`<!DOCTYPE html><body><aside data-nb-nav-build="${build}">${body}</aside></body>`, { status: 200 }),
+  );
 
 describe("restoreNavState", () => {
   test("reopens remembered groups, fills only collapsed ones, and keeps the trail's highlight", () => {
@@ -96,7 +99,7 @@ describe("restoreNavState", () => {
       "undefined tags.T": "<ul><li>Stale T</li></ul>",
       "null tags.T": "<ul><li>Stale T</li></ul>",
     });
-    restoreNavState(config("b1"));
+    restoreNavState(NAV_STATE_KEYS);
     assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "open");
     assert.equal(panel("tags.A").textContent, "Cached A");
     assert.ok(panel("tags.A").querySelector(":scope > .wrap > ul"), "the panel keeps one wrapper");
@@ -106,23 +109,42 @@ describe("restoreNavState", () => {
 
   test("ignores rows cached by another build, and caches nothing in dev", () => {
     for (const build of ["b2", ""]) {
-      page();
+      page("/api/a/", build);
       sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
       cacheRows("b1", { "/api/a/ tags.A": "<ul><li>Old</li></ul>" });
-      restoreNavState(config(build));
+      restoreNavState(NAV_STATE_KEYS);
       assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "open");
       assert.equal(panel("tags.A").textContent, "", `build "${build}"`);
     }
   });
 
-  test("restores each container once, and stamps the page's build id", () => {
-    const root = page();
+  test("restores each container once", () => {
+    page();
     sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
-    restoreNavState(config("old"));
+    restoreNavState(NAV_STATE_KEYS);
     trigger("tags.A").setAttribute("data-nb-state", "closed");
-    restoreNavState(config("new"));
+    restoreNavState(NAV_STATE_KEYS);
     assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "closed", "not restored twice");
-    assert.equal(root.getAttribute("data-nb-nav-restored"), "new");
+  });
+
+  // After a view-transition swap, the swap listener registered by the first
+  // page restores the new markup before that page's own script runs. It must
+  // judge cached rows by the new markup's build, not the first page's.
+  test("after a swap, judges cached rows by the new page's build", () => {
+    page("/api/a/", "old");
+    sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
+    restoreNavState(NAV_STATE_KEYS); // binds the swap listener (once per window)
+    cacheRows("old", { "/api/a/ tags.A": "<ul><li>Old row</li></ul>" });
+    page("/api/a/", "new"); // the deploy, then a client-side navigation
+    document.dispatchEvent(new window.Event("astro:after-swap"));
+    assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "open");
+    assert.equal(panel("tags.A").textContent, "", "old build's rows not shown");
+    assert.ok(document.querySelector("[data-nb-nav-group='tags.A'][data-nb-nav-src]"), "still loads");
+
+    cacheRows("new", { "/api/a/ tags.A": "<ul><li>New row</li></ul>" });
+    page("/api/a/", "new");
+    document.dispatchEvent(new window.Event("astro:after-swap"));
+    assert.equal(panel("tags.A").textContent, "New row");
   });
 });
 
@@ -142,7 +164,6 @@ describe("initNavSidebar", () => {
 
   test("loads a group's rows from its page by exact coordinate, and caches them", async () => {
     const root = page("/api/load/");
-    root.setAttribute("data-nb-nav-restored", "b1");
     respond = () =>
       html(`
         ${group(`tags.A"x`, { open: true, rows: "<ul><li>Wrong group</li></ul>" })}
@@ -162,7 +183,7 @@ describe("initNavSidebar", () => {
   test("on failure, follows the link only when the reader opened the group", async () => {
     sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
     let root = page("/api/fail-restored/");
-    restoreNavState(config("b1"));
+    restoreNavState(NAV_STATE_KEYS);
     let stop = initNavSidebar(root);
     await settle();
     assert.equal(navigations.length, 0, "restored open: stays on the page");
@@ -220,5 +241,50 @@ describe("initNavSidebar", () => {
       assert.equal(navigations.length, 0, src);
       stop();
     }
+  });
+
+  test("a deploy mid-session: no old pages from memory, no rows cached across builds", async () => {
+    respond = () => html(group("tags.A", { open: true, rows: "<ul><li>Old build</li></ul>" }), "old");
+    let root = page("/api/deploy/", "old");
+    let stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "Old build");
+    stop();
+
+    // The next page comes from the new build; the module (and its memory) lives on.
+    respond = () => html(group("tags.A", { open: true, rows: "<ul><li>New build</li></ul>" }), "new");
+    sessionStorage.removeItem(NAV_STATE_KEYS.rows);
+    root = page("/api/deploy/", "new");
+    stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "New build", "fetched again, not from memory");
+    stop();
+
+    // A cache served the old build's page: ask once more, bypassing caches.
+    let calls = 0;
+    respond = () =>
+      calls++ === 0
+        ? html(group("tags.A", { open: true, rows: "<ul><li>Cached old copy</li></ul>" }), "old")
+        : html(group("tags.A", { open: true, rows: "<ul><li>Fresh</li></ul>" }), "new");
+    root = page("/api/deploy-cached/", "new");
+    stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "Fresh");
+    assert.equal(calls, 2);
+    stop();
+
+    // Still from another build (a stale edge): shown, but not cached as this build's.
+    respond = () => html(group("tags.A", { open: true, rows: "<ul><li>Stale edge copy</li></ul>" }), "old");
+    sessionStorage.removeItem(NAV_STATE_KEYS.rows);
+    root = page("/api/deploy-stale/", "new");
+    stop = initNavSidebar(root);
+    trigger("tags.A").setAttribute("data-nb-state", "open");
+    await settle();
+    assert.equal(panel("tags.A").textContent, "Stale edge copy");
+    assert.equal(sessionStorage.getItem(NAV_STATE_KEYS.rows), null);
+    stop();
   });
 });

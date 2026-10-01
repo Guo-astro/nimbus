@@ -73,13 +73,13 @@ function testAdapter(entrypoint: string): AstroIntegration {
 }
 
 const PAGE = `---
-import { getApiRoute, getApiStaticPaths, navStateScript } from ${moduleUrl("../src/runtime.ts")};
+import { getApiRoute, getApiStaticPaths, navBuildId, navStateScript } from ${moduleUrl("../src/runtime.ts")};
 export const prerender = true;
 export const getStaticPaths = getApiStaticPaths("api");
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
 ---
-<main><nav-json set:html={JSON.stringify(result.nav).replaceAll("<", "\\\\u003c")}></nav-json></main>
+<main data-nb-nav-build={navBuildId}><nav-json set:html={JSON.stringify(result.nav).replaceAll("<", "\\\\u003c")}></nav-json></main>
 <script is:inline aria-hidden="true" set:html={navStateScript} />`;
 
 interface Site {
@@ -184,7 +184,7 @@ function navOf(html: string): ApiNav {
   return JSON.parse(json) as ApiNav;
 }
 
-const buildIdOf = (html: string) => /"build":"([^"]*)"/.exec(html)?.[1];
+const buildIdOf = (html: string) => /data-nb-nav-build="([^"]*)"/.exec(html)?.[1];
 const flatten = (items: ApiNavItem[]): ApiNavItem[] =>
   items.flatMap((item) => [item, ...flatten(item.children)]);
 const find = (items: ApiNavItem[], coordinate: string) =>
@@ -249,7 +249,7 @@ for (const request of [false, true]) {
       assert.ok(fromOverview > 0, "categories load from the v1 overview");
     });
 
-    test("pages stamp one build id into the restore script", async () => {
+    test("pages carry one build id", async () => {
       const ids = new Set<string | undefined>();
       for (const { pages } of versions) {
         for (const page of pages.slice(0, 3)) ids.add(buildIdOf((await site.get(`${BASE}${page}`)).body));
@@ -275,20 +275,24 @@ describe("outdated starter components", () => {
   const onDemand = [{ collection: "api", sidebar: "on-demand" }];
 
   test("fail with the command that updates them", async () => {
-    const dir = await site({ [item]: "old", [layout]: "import { initNavSidebar }" });
-    const error = outdatedApiSidebarError(onDemand, dir);
+    const dir = await site({ [item]: "old", [layout]: "data-nb-nav-build={navBuildId}" });
+    const error = outdatedApiSidebarError(onDemand, dir, dir);
     assert.match(error ?? "", /ApiSidebarItem\.astro predates it/);
-    assert.match(error ?? "", /`npx @cloudflare\/nimbus-docs add api-layout` and choose Overwrite for api-layout and api-sidebar/);
+    assert.match(error ?? "", /nimbus-docs add api-layout` and choose Overwrite for api-layout and api-sidebar/);
+    assert.match(error ?? "", /registry is older than this project/);
+    await writeFile(path.join(dir, "pnpm-lock.yaml"), "");
+    await writeFile(path.join(dir, "package.json"), JSON.stringify({ devDependencies: { "@cloudflare/nimbus-docs": "*" } }));
+    assert.match(outdatedApiSidebarError(onDemand, dir, dir) ?? "", /`pnpm (exec )?nimbus-docs add api-layout`/, "the site's package manager");
     assert.doesNotMatch(error ?? "", /ApiLayout/);
   });
 
   test("stay quiet when current, replaced, or not on-demand", async () => {
-    const current = await site({ [item]: "item.childrenHref", [layout]: "initNavSidebar" });
-    assert.equal(outdatedApiSidebarError(onDemand, current), undefined);
-    assert.equal(outdatedApiSidebarError(onDemand, await site({})), undefined);
+    const current = await site({ [item]: "item.childrenHref", [layout]: "data-nb-nav-build" });
+    assert.equal(outdatedApiSidebarError(onDemand, current, current), undefined);
+    assert.equal(outdatedApiSidebarError(onDemand, await site({}), os.tmpdir()), undefined);
     const old = await site({ [item]: "old", [layout]: "old" });
-    assert.equal(outdatedApiSidebarError([{ collection: "api" }], old), undefined);
-    assert.match(outdatedApiSidebarError(onDemand, old) ?? "", /ApiSidebarItem\.astro and src\/.*ApiLayout\.astro predate it/);
+    assert.equal(outdatedApiSidebarError([{ collection: "api" }], old, old), undefined);
+    assert.match(outdatedApiSidebarError(onDemand, old, old) ?? "", /ApiSidebarItem\.astro and src\/.*ApiLayout\.astro predate it/);
   });
 });
 

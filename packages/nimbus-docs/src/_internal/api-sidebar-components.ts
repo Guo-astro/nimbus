@@ -4,6 +4,7 @@ import path from "node:path";
 
 import type { ApiSpec } from "../types.js";
 import { resolveApiFamily } from "./api/resolve-versions.js";
+import { invocation } from "../cli/pm.js";
 import { walkFilesSync } from "./fs-walk.js";
 import { runningNimbusVersion } from "./upgrades.js";
 
@@ -54,12 +55,13 @@ export function navBuildId(
 export function outdatedApiSidebarError(
   api: readonly { collection: string; sidebar?: string }[],
   srcDir: string,
+  projectRoot: string,
 ): string | undefined {
   const onDemand = api.filter((entry) => entry.sidebar === "on-demand");
   if (onDemand.length === 0) return undefined;
   const expected: Array<[file: string, marker: string]> = [
     ["components/ui/api-sidebar/ApiSidebarItem.astro", "childrenHref"],
-    ["components/ui/api-layout/ApiLayout.astro", "initNavSidebar"],
+    ["components/ui/api-layout/ApiLayout.astro", "data-nb-nav-build"],
   ];
   const outdated = expected.flatMap(([file, marker]) => {
     try {
@@ -74,7 +76,9 @@ export function outdatedApiSidebarError(
     `nimbus-docs: \`sidebar: "on-demand"\` (${collections}) needs newer API components. ` +
     `${outdated.map((f) => `src/${f}`).join(" and ")} ${outdated.length === 1 ? "predates" : "predate"} it, ` +
     `so collapsed groups would not open and x-tagGroups categories would link nowhere. ` +
-    `Run \`npx @cloudflare/nimbus-docs add api-layout\` and choose Overwrite for api-layout and api-sidebar ` +
-    `(Skip keeps your edits to the other components), or remove \`sidebar: "on-demand"\`.`
+    `Run \`${invocation("add api-layout", projectRoot)}\` and choose Overwrite for api-layout and api-sidebar ` +
+    `(Skip keeps your edits to the other components), or remove \`sidebar: "on-demand"\`. ` +
+    `If it warns that the registry is older than this project, the new components aren't published yet; ` +
+    `keep \`sidebar: "full"\` until they are.`
   );
 }

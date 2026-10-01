@@ -15,6 +15,7 @@
  * an `NIMBUS_REGISTRY_URL` env override for local development.
  */
 
+import { coerce, lt } from "semver";
 import { z } from "astro/zod";
 
 import {
@@ -104,6 +105,32 @@ function getBaseUrl(): string {
 /** The registry host in use (honors `NIMBUS_REGISTRY_URL`) — recorded as a component's `source`. */
 export function registrySource(): string {
   return getBaseUrl();
+}
+
+/**
+ * Warning string when the registry's components come from a different
+ * nimbus-docs release than the project's, else `null`. Pure.
+ *
+ * The registry is a single channel that updates when the docs site is
+ * deployed, so right after a release it can still serve the previous
+ * release's components (which may lack what the new package expects), and a
+ * project behind the latest release gets components newer than its package.
+ * Prerelease tags are ignored: a preview of 0.16.0 matches the 0.16.0 registry.
+ */
+export function registryVersionWarning(
+  registryVersion: string | undefined,
+  installedVersion: string | null,
+): string | null {
+  const core = (v: string | null | undefined) => (v ? coerce(v)?.version : undefined);
+  const registry = core(registryVersion);
+  const installed = core(installedVersion);
+  if (!registry || !installed || registry === installed) return null;
+  return lt(registry, installed)
+    ? `The registry (${getBaseUrl()}) still serves components from nimbus-docs ${registry}, ` +
+        `older than this project's ${installed}. It updates when the docs site is deployed for ` +
+        `${installed}; until then, components may lack features ${installed} documents.`
+    : `The registry serves components from nimbus-docs ${registry}, newer than this project's ` +
+        `${installed}. They may use APIs ${installed} lacks; update @cloudflare/nimbus-docs first.`;
 }
 
 /**

@@ -9,7 +9,7 @@ Add `sidebar` to `api` entries, so large API references stop putting the whole n
 api: [{ collection: "api", spec: "./src/api/openapi.yaml", sidebar: "on-demand" }],
 ```
 
-`ApiNavItem` gains optional `deferred` and `childrenHref` fields. `@cloudflare/nimbus-docs/client` adds `initNavSidebar()`, and `@cloudflare/nimbus-docs/runtime` adds `navStateScript`, an inline script. Together they keep a sidebar's open groups, loaded rows, and scroll position from page to page for the session, restored before the page paints and without replaying animations. Cached rows are tied to the build, so a new deployment never shows rows from an older one.
+`ApiNavItem` gains optional `deferred` and `childrenHref` fields. `@cloudflare/nimbus-docs/client` adds `initNavSidebar()`, and `@cloudflare/nimbus-docs/runtime` adds `navStateScript`, an inline script, and `navBuildId`, which a sidebar renders as `data-nb-nav-build`. Together they keep a sidebar's open groups, loaded rows, and scroll position from page to page for the session, restored before the page paints and without replaying animations. Cached rows are tied to the build that rendered the page, so after a deployment readers never see rows from an older one, including on client-side navigation. `apiCollection({ … })` warns when it sets a `sidebar` the config doesn't match.
 
 A tag's `x-displayName` now sets its label in the sidebar, page title, and breadcrumbs, while its `name` still decides its coordinate and route. This lets a spec group hundreds of flat tags under readable parents.
 
@@ -17,4 +17,4 @@ Group pages now list their subsections (`ApiSectionPage.sections`), in HTML and 
 
 Starter components: `ApiSidebarItem` renders a deferred group as a closed group with an empty panel, and `ApiLayout` mounts `initNavSidebar` and the restore script for both the desktop rail and the mobile drawer. The API sidebar now keeps the groups a reader opened and its scroll position from page to page in every mode, and no longer fades or replays group animations during navigation. The mobile drawer moved ahead of the desktop rail in `ApiLayout`, so one inline script restores both before the page paints. `ApiBody` lists a group page's subsections.
 
-Existing sites keep working unchanged with the default `sidebar: "full"`. `"on-demand"` needs the new API components: with older ones, the build fails and names the outdated files. Update them with `nimbus-docs add api-layout`, choosing Overwrite for `api-layout` and `api-sidebar`.
+Existing sites keep working unchanged with the default `sidebar: "full"`. `"on-demand"` needs the new API components: with older ones, the build fails and names the outdated files. Update them with `nimbus-docs add api-layout`, choosing Overwrite for `api-layout` and `api-sidebar`. `nimbus-docs add` now warns when the registry serves components from a different release than the project's `@cloudflare/nimbus-docs`.

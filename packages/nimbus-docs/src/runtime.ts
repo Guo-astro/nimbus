@@ -1470,10 +1470,14 @@ interface ApiRouteProps {
   coordinate: string;
 }
 
-// Set per `astro build`; empty in dev and when not built by Vite. Versions
-// the sidebar's session cache, so rows cached before a deploy are not shown.
 declare const __NIMBUS_BUILD_ID__: string;
-const NAV_BUILD_ID =
+/**
+ * Identifies the build that rendered a page, for the sidebar's session
+ * cache: render it as `data-nb-nav-build` on each `data-nb-nav-state`
+ * container, so rows cached before a deploy are never shown. Empty in dev
+ * (no cache).
+ */
+export const navBuildId: string =
   typeof __NIMBUS_BUILD_ID__ === "string" ? __NIMBUS_BUILD_ID__ : "";
 declare const __NIMBUS_THIN_API_ENTRIES__: boolean;
 const THIN_API_ENTRIES =
@@ -1624,10 +1628,10 @@ async function resolveApiRoute(
  *   <script is:inline aria-hidden="true" set:html={navStateScript} />
  *
  * Pair with `initNavSidebar` from `@cloudflare/nimbus-docs/client`, which
- * records the state and loads collapsed groups. See `client/nav-sidebar.ts`
+ * records the state and loads collapsed groups, and `navBuildId`. See `client/nav-sidebar.ts`
  * for the markup contract.
  */
-export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson({ ...NAV_STATE_KEYS, build: NAV_BUILD_ID })});})();`;
+export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson(NAV_STATE_KEYS)});})();`;
 
 // JSON embedded in an inline <script>: escape what could close the element or
 // break the script (`<`, `>`, `/`, and the U+2028/U+2029 line separators).

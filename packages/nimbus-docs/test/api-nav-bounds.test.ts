@@ -238,7 +238,7 @@ describe("sidebar: on-demand", () => {
 });
 
 describe("the configured mode", () => {
-  const loadInto = async (loader: ReturnType<typeof apiCollection>["loader"]) => {
+  const loadInto = async (loader: ReturnType<typeof apiCollection>["loader"], warnings: string[] = []) => {
     const store = new Map<string, unknown>();
     await loader.load({
       collection: "bounded",
@@ -254,7 +254,7 @@ describe("the configured mode", () => {
         addModuleImport() {},
       },
       meta: { get: () => undefined, set() {}, has: () => false, delete() {} },
-      logger: { info() {}, warn() {}, error() {}, debug() {}, label: "t", fork() { return this; } },
+      logger: { info() {}, warn: (m: string) => void warnings.push(m), error() {}, debug() {}, label: "t", fork() { return this; } },
       config: { root: pathToFileURL(ROOT), output: "static" },
       parseData: async ({ data }: { data: unknown }) => data,
       renderMarkdown: async () => ({ html: "" }),
@@ -277,6 +277,18 @@ describe("the configured mode", () => {
     await loadInto(apiCollection({ collection: "bounded", spec }).loader);
     const unconfigured = await projectConfiguredApiPage("bounded", null, "scriptsPut");
     assert.deepEqual(unconfigured.nav, getApiNav(model, "scriptsPut"), "no config entry: full");
+  });
+
+  test("an explicit sidebar the config doesn't match warns", async () => {
+    const warnings: string[] = [];
+    registerApiCollections(pathToFileURL(ROOT), []);
+    await loadInto(apiCollection({ collection: "bounded", spec, sidebar: "on-demand" } as never).loader, warnings);
+    assert.equal(warnings.filter((w) => /sets `sidebar`.*Using "full"/.test(w)).length, 1);
+
+    warnings.length = 0;
+    registerApiCollections(pathToFileURL(ROOT), [{ collection: "bounded", spec, sidebar: "on-demand" }]);
+    await loadInto(apiCollection({ collection: "bounded", spec, sidebar: "on-demand" } as never).loader, warnings);
+    assert.equal(warnings.filter((w) => /sets `sidebar`/.test(w)).length, 0, "matches the config");
   });
 });
 

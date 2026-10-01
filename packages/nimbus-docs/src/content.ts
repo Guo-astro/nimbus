@@ -345,14 +345,22 @@ export function apiCollection(options?: ApiCollectionOptions): {
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
       const { collection, spec, label, versions, requireOperationId, routes } =
         explicit ?? registered!;
-      // The sidebar mode always comes from the Nimbus config's `api` entry,
-      // which also decides whether the fragment routes it needs are injected.
+      // The sidebar mode always comes from the Nimbus config's `api` entry:
+      // request rendering and the build's component check read it there too.
       const sidebar = (
         registered ??
         getRegisteredApiCollections(astroConfig.root)?.find(
           (entry) => entry.collection === collection,
         )
       )?.sidebar;
+      const explicitSidebar = (options as { sidebar?: unknown } | undefined)?.sidebar;
+      if (explicit && explicitSidebar !== undefined && explicitSidebar !== sidebar) {
+        logger.warn(
+          `apiCollection({ collection: "${collection}" }) sets \`sidebar\`, which is read only from the ` +
+            `\`api\` entry in the Nimbus config (astro.config.*). Using ${sidebar ? `"${sidebar}"` : `"full"`}; ` +
+            `set \`sidebar\` on that entry instead.`,
+        );
+      }
       noteApiCollectionLoad(astroConfig.root, context.collection, collection);
 
       const {

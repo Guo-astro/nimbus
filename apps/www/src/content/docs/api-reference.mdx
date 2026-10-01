@@ -265,7 +265,7 @@ tags:
     parent: workers
 ```
 
-In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open, without replaying their animation. Rows loaded on one page show on the next before it paints; a new deployment starts over, so readers never see rows from an older build.
+In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open, without replaying their animation. Rows loaded on one page show on the next before it paints; a new deployment starts over, so rows saved before it are never shown after it.
 
 Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config, and the build warns if the two disagree.
 
@@ -277,7 +277,7 @@ Every group page lists its operations and its subsections, and the API overview 
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
 
-For each component that differs from your copy, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
+For each component already in your project, it asks whether to overwrite it, even if your copy is unchanged. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 

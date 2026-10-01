@@ -25,7 +25,9 @@ test("progress prints plain lines without a terminal", () => {
     spinner.start("Resolving dependencies");
     spinner.stop("Resolved 2 items.");
   });
-  assert.doesNotMatch(out, /\x1b/);
+  // Colour is picocolors' call (it turns on under CI); what must not appear are
+  // the spinner's cursor controls: hide/show, move left, erase.
+  assert.doesNotMatch(out, /\x1b\[(?:\?25[lh]|\d*[DJK])/);
   assert.equal(out.match(/Resolving dependencies/g)?.length, 1);
   assert.equal(out.match(/Resolved 2 items\./g)?.length, 1);
 });

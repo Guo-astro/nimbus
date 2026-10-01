@@ -9,7 +9,7 @@ Add `sidebar` to `api` entries, so large API references stop putting the whole n
 api: [{ collection: "api", spec: "./src/api/openapi.yaml", sidebar: "on-demand" }],
 ```
 
-`ApiNavItem` gains optional `deferred` and `childrenHref` fields. `@cloudflare/nimbus-docs/client` adds `initNavSidebar()`, and `@cloudflare/nimbus-docs/runtime` adds `navStateScript`, an inline script, and `navBuildId`, which a sidebar renders as `data-nb-nav-build`. Together they keep a sidebar's open groups, loaded rows, and scroll position from page to page for the session, restored before the page paints and without replaying animations. Cached rows are tied to the build that rendered the page, so after a deployment readers never see rows from an older one, including on client-side navigation. `apiCollection({ … })` warns when it sets a `sidebar` the config doesn't match.
+`ApiNavItem` gains optional `deferred` and `childrenHref` fields. `@cloudflare/nimbus-docs/client` adds `initNavSidebar()`, and `@cloudflare/nimbus-docs/runtime` adds `navStateScript`, an inline script, and `navBuildId`, which a sidebar renders as `data-nb-nav-build`. Together they keep a sidebar's open groups, loaded rows, and scroll position from page to page for the session, restored before the page paints and without replaying animations. Cached rows are tied to the build that rendered the page, so rows cached before a deployment are never shown after it, including on client-side navigation. `apiCollection({ … })` warns when it sets a `sidebar` the config doesn't match.
 
 A tag's `x-displayName` now sets its label in the sidebar, page title, and breadcrumbs, while its `name` still decides its coordinate and route. This lets a spec group hundreds of flat tags under readable parents.
 

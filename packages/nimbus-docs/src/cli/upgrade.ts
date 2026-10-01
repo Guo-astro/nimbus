@@ -641,7 +641,15 @@ export async function diffCommand(
     if (flags.apply) return applyOne(cwd, file, g, targets);
 
     if (file && targets.length === 0) {
-      p.log.error(`No change for "${file}" vs the recorded tag. Run \`${invocation("outdated")}\` to list changes.`);
+      // A real project file outside what diff compares (package.json, …).
+      const srcPrefix = `${g.srcRoot.replace(/\/+$/, "")}/`;
+      const untracked =
+        existsSync(join(cwd, file)) && !file.startsWith(srcPrefix) && !STARTER_ROOT_FILES.includes(posix.basename(file));
+      p.log.error(
+        !untracked
+          ? `No change for "${file}" vs the recorded tag. Run \`${invocation("outdated")}\` to list changes.`
+          : `"${file}" isn't a starter file \`diff\` tracks: it compares ${srcPrefix}, ${STARTER_ROOT_FILES.join(", ")}.`,
+      );
       process.exitCode = 1;
       return;
     }

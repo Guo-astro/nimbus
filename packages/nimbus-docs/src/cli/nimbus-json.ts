@@ -7,11 +7,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
 
 import { z } from "astro/zod";
 
+import { writeFileAtomic } from "./fs-atomic.js";
 import { invocation } from "./pm.js";
 import type { ComponentItem, RegistryFile } from "./resolver.js";
 
@@ -105,7 +106,8 @@ export function readNimbusJson(cwd: string): NimbusJson | null {
 }
 
 export function writeNimbusJson(cwd: string, data: NimbusJson): void {
-  writeFileSync(join(cwd, NIMBUS_JSON), JSON.stringify(data, null, 2) + "\n");
+  // Atomic: a write cut short must not leave the provenance record half-written.
+  writeFileAtomic(join(cwd, NIMBUS_JSON), JSON.stringify(data, null, 2) + "\n");
 }
 
 // Registry paths are src-relative, so one root routes the whole install —

@@ -401,12 +401,16 @@ test("an apply whose tag can't be recorded is undone", async (t) => {
   const fixture = starterFixture();
   try {
     const { project, source } = fixture;
-    const record = path.join(project, "nimbus.json");
-    fs.chmodSync(record, 0o444);
-    const result = await runDiff("AGENT.md", { apply: true }, { cwd: project, source });
-    fs.chmodSync(record, 0o644);
+    // The page's directory stays writable; nimbus.json's (the project root) doesn't.
+    fs.chmodSync(project, 0o555);
+    let result;
+    try {
+      result = await runDiff("src/pages/index.astro", { apply: true }, { cwd: project, source });
+    } finally {
+      fs.chmodSync(project, 0o755);
+    }
     assert.equal(result.exitCode, 1);
-    assert.equal(fs.readFileSync(path.join(project, "AGENT.md"), "utf8"), "# Agents\nold guidance\n");
+    assert.equal(fs.readFileSync(path.join(project, "src/pages/index.astro"), "utf8"), "<h1>one</h1>\n");
     assert.equal(readNimbusJson(project)?.templatesTagByFile, undefined);
   } finally {
     fixture.cleanup();
@@ -420,6 +424,25 @@ test("outdated's commands keep the --to it compared against", async () => {
     const outdated = await gatherOutdated(project, { json: true, to: "templates-v0.3.0" }, source);
     const page = outdated.starter.find((item) => item.file === "src/pages/index.astro");
     assert.deepEqual(page?.action.command?.args.slice(1), ["diff", "src/pages/index.astro", "--apply", "--to", "templates-v0.3.0"]);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("diff names a project file it doesn't track", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    const errors: string[] = [];
+    const { log } = await import("@clack/prompts");
+    const original = log.error;
+    log.error = (message: string) => void errors.push(message);
+    try {
+      assert.equal((await runDiff("package.json", {}, { cwd: project, source })).exitCode, 1);
+    } finally {
+      log.error = original;
+    }
+    assert.match(errors.join("\n"), /"package\.json" isn't a starter file `diff` tracks/);
   } finally {
     fixture.cleanup();
   }

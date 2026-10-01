@@ -21,6 +21,8 @@ const COMMAND_FLAGS: Record<string, readonly string[]> = {
 // --yes reads as "assume yes" anywhere, so it's harmless where nothing prompts.
 const GLOBAL_FLAGS = ["help", "version", "color", "yes"];
 const SHORT_FLAGS: Record<string, string> = { y: "yes", h: "help", v: "version" };
+// Flags that take a value: `--no-<flag>` would pass `false` as that value.
+const VALUE_FLAGS = new Set(["type", "format", "rule", "root", "to", "adapter", "template-dir", "cwd", "src-dir", "from"]);
 
 /** The error for the first flag `command` doesn't take, or null when all are
  * valid. Unknown commands are left to the dispatcher's own error. */
@@ -41,7 +43,11 @@ export function unknownFlagError(command: string | undefined, argv: string[]): s
       continue;
     }
     const flag = token.slice(2).split("=")[0]!;
-    if (valid.has(flag) || valid.has(flag.replace(/^no-/, ""))) continue;
+    const negated = flag.startsWith("no-") ? flag.slice(3) : null;
+    if (negated && VALUE_FLAGS.has(negated) && valid.has(negated)) {
+      return `\`--${flag}\` isn't a flag: --${negated} takes a value. Leave it out instead.`;
+    }
+    if (valid.has(flag) || (negated !== null && valid.has(negated))) continue;
     return notTaken(name, `--${flag}`, allowed);
   }
   return null;

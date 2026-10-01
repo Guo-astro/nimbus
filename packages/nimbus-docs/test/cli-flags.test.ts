@@ -42,3 +42,8 @@ test("--color and --no-color pass on every command, as picocolors reads them", (
     }
   }
 });
+
+test("--no-<flag> is refused for a flag that takes a value", () => {
+  assert.match(unknownFlagError("outdated", ["outdated", "--no-to", "--json"]) ?? "", /`--no-to` isn't a flag: --to takes a value/);
+  assert.equal(unknownFlagError("outdated", ["outdated", "--no-all"]), null);
+});

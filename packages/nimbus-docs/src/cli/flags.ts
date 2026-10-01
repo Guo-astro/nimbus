@@ -9,16 +9,17 @@ import { suggest } from "../_internal/levenshtein.js";
 // Every flag each command reads in `index.ts`. Keep in step with its dispatch.
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
   list: ["type"],
-  add: ["type", "yes", "print", "overwrite", "adapter"],
-  check: ["env", "structure", "lint", "types", "migrations", "fix", "json", "format", "quiet", "yes", "src-dir"],
+  add: ["type", "print", "overwrite", "adapter"],
+  check: ["env", "structure", "lint", "types", "migrations", "fix", "json", "format", "quiet", "src-dir"],
   lint: ["format", "quiet", "rule", "fix"],
   init: ["force", "root"],
   outdated: ["all", "to", "template-dir", "json", "src-dir"],
-  migrate: ["yes", "json", "print", "dry-run", "diff", "cwd", "src-dir", "from"],
+  migrate: ["json", "print", "dry-run", "diff", "cwd", "src-dir", "from"],
   diff: ["all", "apply", "to", "template-dir"],
 };
-// picocolors reads --color / --no-color from argv for every command's output.
-const GLOBAL_FLAGS = ["help", "version", "color"];
+// picocolors reads --color / --no-color from argv for every command's output;
+// --yes reads as "assume yes" anywhere, so it's harmless where nothing prompts.
+const GLOBAL_FLAGS = ["help", "version", "color", "yes"];
 const SHORT_FLAGS: Record<string, string> = { y: "yes", h: "help", v: "version" };
 
 /** The error for the first flag `command` doesn't take, or null when all are

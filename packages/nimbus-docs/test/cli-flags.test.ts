@@ -29,7 +29,8 @@ test("every documented flag passes for its command", () => {
 
 test("an unknown flag gets a suggestion; flags after -- are arguments", () => {
   assert.match(unknownFlagError("check", ["check", "--jsno"]) ?? "", /Did you mean --json\?/);
-  assert.match(unknownFlagError("diff", ["diff", "-y"]) ?? "", /`diff` doesn't take -y/);
+  assert.match(unknownFlagError("diff", ["diff", "-x"]) ?? "", /Unknown flag -x/);
+  assert.equal(unknownFlagError("init", ["init", "--force", "-y"]), null);
   assert.equal(unknownFlagError("lint", ["lint", "--", "--anything"]), null);
   assert.equal(unknownFlagError("nonsense", ["nonsense", "--cwd", "x"]), null);
 });

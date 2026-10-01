@@ -246,12 +246,15 @@ api: [
 | Value | What each page includes | A collapsed group |
 | --- | --- | --- |
 | `"full"` (default) | The whole tree. | Opens in place. |
-| `"on-demand"` | Top-level items, plus the current page's branch. | Opens in place and loads its contents the first time. |
-| `"links"` | Top-level items, plus the current page's branch. | Links to the group's page. |
+| `"on-demand"` | Top-level items, plus the current page's branch. | Opens in place, loading its rows the first time. |
 
-In both bounded modes, the current page's ancestors are open and show all their children, so its neighbors are one click away. Root, schema, and webhook pages show top-level items only. The setting applies to every version of a family.
+With `"on-demand"`, the current page's ancestors are open and show all their children, so its neighbors are one click away. Schema and webhook pages show top-level items only. The setting applies to every version of a family.
 
-Bounded pages still carry every top-level item, so an API with hundreds of flat tags stays heavy. Group its tags with `x-tagGroups` or a tag's `parent`, which Nimbus reads in any OpenAPI version. A tag's `x-displayName` sets the label readers see, while its `name` keeps deciding its coordinate and route:
+When a reader opens a collapsed group, the sidebar fetches the page its label links to and copies the group's rows from that page's sidebar. A group without a page, such as an `x-tagGroups` category, takes its rows from the API overview instead. Fetching starts when the pointer moves over a group or it receives focus, so rows usually appear as soon as it opens. If they cannot load, opening the group goes to its page instead.
+
+Without JavaScript, a collapsed group's label still links to its page. Categories from `x-tagGroups` have no page to link to, so they open only on pages inside them; the API overview's body links every section.
+
+Every page still carries every top-level item, so an API with hundreds of flat tags stays heavy. Group its tags under a tag's `parent` or with `x-tagGroups`, which Nimbus reads in any OpenAPI version. A tag's `x-displayName` sets the label readers see, while its `name` keeps deciding its coordinate and route:
 
 ```yaml title="openapi.yaml"
 tags:
@@ -262,17 +265,19 @@ tags:
     parent: workers
 ```
 
-With `"on-demand"`, Nimbus builds one small HTML file per group under `/nimbus-api/nav/<collection>/` and renders it with your `src/components/ui/api-sidebar/ApiSidebarItem.astro`, so loaded rows match the rest of the sidebar. The sidebar starts loading a group when the pointer moves over it or it receives focus, and keeps loaded rows for the session, so a remembered group shows its rows on the next page without a request. Group file URLs carry a version of the navigation tree, so after a deployment an open tab loads the new rows instead of reusing old ones. The group files stay out of the sitemap and the search index. Without JavaScript, a group's label still links to its page. Request-rendered collections serve the same files on request.
+In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open, without replaying their animation. Rows loaded on one page show on the next before it paints; a new deployment starts over, so readers never see rows from an older build.
 
-In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session. Restored groups appear already open, without replaying their animation.
-
-In both bounded modes, a group with no page of its own, such as an `x-tagGroups` category, shows its direct children instead, so every group stays reachable without JavaScript.
-
-Set `sidebar` on the `api` entry in the Nimbus config, which also decides whether Nimbus builds the group files. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config.
+Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config.
 
 Every group page lists its operations and its subsections, and the API overview lists every top-level section, so all pages stay reachable in every mode.
 
-To apply the same rule to navigation you build yourself, call `boundApiNav(nav, { mode })` from `@cloudflare/nimbus-docs/api`, or pass `{ sidebar }` as the third argument of `getApiNav`.
+#### Upgrading an existing site
+
+`"on-demand"` needs the API sidebar and layout components from Nimbus 0.16 or later. With older copies, the build fails and names the outdated files. To update them, run:
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
+
+For each component that differs from your copy, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
 
 ### Build or request rendering
 
@@ -338,7 +343,6 @@ For a collection named `api`, the reference integrates with these routes when th
 | `/api/llms.txt` | API-only `llms.txt` index. |
 | `/llms.txt` and `/llms-full.txt` | Site-wide page index and full Markdown documentation. |
 | `/nimbus-api/coordinates.json` | Public coordinate-to-URL manifest. |
-| `/nimbus-api/nav/api/<group>/` | Navigation group contents, with `sidebar: "on-demand"` only. |
 
 The API entries also join the existing Pagefind search, sitemap, and OG-image routes when those features are enabled in the project.
 

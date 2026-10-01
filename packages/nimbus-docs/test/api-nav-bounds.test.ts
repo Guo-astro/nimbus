@@ -1,7 +1,7 @@
-// Bounded API navigation: the one rule behind `api[].sidebar` ("full",
-// "on-demand", "links"). Every output path goes through `applyApiSidebarMode`,
-// so these tests pin the rule itself, `getApiNav`, the static projection, and
-// the prepared (server) nav against each other for every coordinate.
+// Bounded API navigation: the rule behind `api[].sidebar: "on-demand"`. Every
+// output path goes through `applyApiSidebarMode`, so these tests pin the rule
+// itself, and the static projection and the prepared (server) nav against it,
+// for every page.
 
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
@@ -12,29 +12,22 @@ import {
   activatePreparedApiNav,
   prepareApiNav,
 } from "../src/_internal/api/prepared.js";
-import {
-  apiNavFragmentHref,
-  apiNavGroupChildren,
-  apiNavRevision,
-  apiNavGroupKey,
-  apiNavGroups,
-  applyApiSidebarMode,
-} from "../src/_internal/api/nav-bounds.js";
+import { apiNavGroups, applyApiSidebarMode } from "../src/_internal/api/nav-bounds.js";
+import { toDocumentHref } from "../src/_internal/url.js";
 import { projectConfiguredApiPage } from "../src/_internal/api-loader.js";
 import { registerApiCollections } from "../src/_internal/api-collection-registry.js";
 import { validateNimbusConfig } from "../src/_internal/validate.js";
 import {
-  boundApiNav,
   buildApiModel,
   getApiNav,
   getApiPageSlugs,
   type ApiModel,
   type ApiNav,
   type ApiNavItem,
-  type ApiSidebarMode,
 } from "../src/api/index.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const MOUNT = "/bounded";
 
 const ok = { "200": { description: "ok" } };
 
@@ -86,48 +79,40 @@ const byLabel = (items: ApiNavItem[], label: string) => {
 };
 const flatten = (items: ApiNavItem[]): ApiNavItem[] =>
   items.flatMap((item) => [item, ...flatten(item.children)]);
-const coordinates = () => [
-  undefined,
-  ...getApiPageSlugs(model).map((page) => page.coordinate),
-];
+const coordinates = () => getApiPageSlugs(model).map((page) => page.coordinate);
+const OVERVIEW = "bounded";
+
+/** The on-demand nav a page renders, as every output path computes it. */
+const pageNav = (coordinate: string): ApiNav =>
+  applyApiSidebarMode(getApiNav(model, coordinate), {
+    mode: "on-demand",
+    mountPath: MOUNT,
+    overview: coordinate === OVERVIEW,
+  });
+
+/** The page an href renders: its coordinate. */
+const pageAt = (href: string): string => {
+  if (href === toDocumentHref(MOUNT)) return OVERVIEW;
+  const item = flatten(getApiNav(model).items).find((i) => i.href === href);
+  assert.ok(item, `${href} is a page`);
+  return item.coordinate;
+};
+
+const find = (items: ApiNavItem[], coordinate: string) =>
+  flatten(items).find((i) => i.coordinate === coordinate);
 
 describe("sidebar: full", () => {
-  test("is the default and leaves getApiNav unchanged for every page", () => {
+  test("returns the nav itself", () => {
     for (const coordinate of coordinates()) {
       const nav = getApiNav(model, coordinate);
-      assert.deepEqual(getApiNav(model, coordinate, { sidebar: "full" }), nav);
-      assert.equal(JSON.stringify(nav).includes('"deferred"'), false);
-      assert.equal(boundApiNav(nav, { mode: "full" }), nav, "same object");
+      assert.equal(applyApiSidebarMode(nav, { mode: "full", mountPath: MOUNT }), nav);
     }
   });
 });
 
 describe("sidebar: on-demand", () => {
-  test("a root page shows top-level items; page-less categories keep their direct children", () => {
-    const nav = getApiNav(model, undefined, { sidebar: "on-demand" });
-    assert.deepEqual(
-      nav.items.map((item) => [item.label, item.deferred, item.children.length]),
-      [
-        ["Loose", true, 0],
-        ["Compute & Storage", undefined, 2],
-        ["Networking", undefined, 1],
-      ],
-    );
-    // Without JavaScript a page-less group has nothing to link to, so its
-    // children are in the page; each child is itself collapsed.
-    const compute = byLabel(nav.items, "Compute & Storage");
-    assert.equal(compute.childrenHref, undefined, "nothing to load");
-    assert.deepEqual(
-      compute.children.map((c) => [c.label, c.deferred, Boolean(c.childrenHref)]),
-      [
-        ["Workers", true, true],
-        ["KV", true, true],
-      ],
-    );
-  });
-
-  test("an operation page opens its trail; siblings stay collapsed", () => {
-    const nav = getApiNav(model, "scriptsPut", { sidebar: "on-demand" });
+  test("an operation page opens its trail; everything else is collapsed", () => {
+    const nav = pageNav("scriptsPut");
     const compute = byLabel(nav.items, "Compute & Storage");
     assert.equal(compute.expanded, true);
     assert.equal(compute.deferred, undefined);
@@ -139,142 +124,120 @@ describe("sidebar: on-demand", () => {
     const scripts = byLabel(workers.children, "Scripts");
     assert.equal(byLabel(scripts.children, "Upload a script").active, true);
     assert.equal(byLabel(compute.children, "KV").deferred, true);
-    const networking = byLabel(nav.items, "Networking");
-    assert.equal(networking.deferred, undefined, "page-less: never deferred");
-    assert.equal(byLabel(networking.children, "DNS").deferred, true);
-  });
-
-  test("open groups on the trail still name their fragment, for caching", () => {
-    const nav = getApiNav(model, "scriptsPut", { sidebar: "on-demand" });
-    const compute = byLabel(nav.items, "Compute & Storage");
-    const revision = apiNavRevision(getApiNav(model));
-    assert.equal(compute.childrenHref, undefined, "page-less: never collapsed into a fragment");
-    const workers = byLabel(compute.children, "Workers");
-    assert.equal(workers.childrenHref, apiNavFragmentHref("/bounded", workers.coordinate, revision));
-  });
-
-  test("a tag page shows its own children, each collapsed", () => {
-    const nav = getApiNav(model, "tags.Workers", { sidebar: "on-demand" });
-    const workers = byLabel(byLabel(nav.items, "Compute & Storage").children, "Workers");
-    assert.equal(workers.active, true);
-    assert.equal(byLabel(workers.children, "Scripts").deferred, true);
-  });
-
-  test("every deferred group has a fragment URL", () => {
-    const nav = getApiNav(model, undefined, { sidebar: "on-demand" });
-    const deferred = flatten(nav.items).filter((item) => item.deferred);
-    assert.equal(deferred.length, 4);
-    for (const item of deferred) {
-      assert.equal(
-        item.childrenHref,
-        apiNavFragmentHref("/bounded", item.coordinate, apiNavRevision(getApiNav(model))),
-      );
-      assert.match(item.childrenHref!, /^\/nimbus-api\/nav\/bounded\/[a-z0-9-]+\/\?v=[0-9a-f]{8}$/);
-    }
-  });
-
-  test("fragment URLs share one version per tree, which changes with the tree", async () => {
-    const version = (nav: ApiNav) => new URL(nav.items[0]!.childrenHref!, "https://x").searchParams.get("v");
-    const first = version(getApiNav(model, "scriptsPut", { sidebar: "on-demand" }));
-    assert.ok(first);
-    assert.equal(version(getApiNav(model, "tags.Networking", { sidebar: "on-demand" })), first);
-    const renamed = JSON.parse(JSON.stringify(spec).replace("Upload a script", "Upload a Worker"));
-    const changed = await buildApiModel({ collection: "bounded", spec: renamed });
-    assert.notEqual(version(getApiNav(changed, "scriptsPut", { sidebar: "on-demand" })), first);
-  });
-});
-
-describe("sidebar: links", () => {
-  test("a page-less category shows its direct children, each collapsed", () => {
-    const nav = getApiNav(model, undefined, { sidebar: "links" });
-    const compute = byLabel(nav.items, "Compute & Storage");
-    assert.equal(compute.href, undefined);
-    assert.equal(compute.deferred, undefined);
-    for (const child of compute.children) {
-      assert.equal(child.deferred, true);
-      assert.equal(typeof child.href, "string", "a collapsed group is a link");
-      assert.equal(child.childrenHref, undefined, "links mode loads nothing");
-    }
+    assert.equal(byLabel(nav.items, "Networking").deferred, true);
     assert.equal(byLabel(nav.items, "Loose").deferred, true);
   });
 
-  test("links mode never points at fragments", () => {
+  test("a collapsed group loads from its own page; a page-less one from the overview", () => {
+    const nav = pageNav("looseGet");
+    const kv = find(nav.items, "tags.KV");
+    assert.equal(kv, undefined, "inside a collapsed category");
+    const networking = byLabel(nav.items, "Networking");
+    assert.equal(networking.href, undefined);
+    assert.equal(networking.childrenHref, toDocumentHref(MOUNT));
+    const compute = byLabel(pageNav("dnsList").items, "Compute & Storage");
+    assert.equal(compute.childrenHref, toDocumentHref(MOUNT));
+    const dns = byLabel(byLabel(pageNav("dnsList").items, "Networking").children, "DNS");
+    assert.equal(dns.active, undefined);
+    assert.equal(dns.expanded, true, "on the trail: open, nothing to load");
+    assert.equal(dns.childrenHref, undefined);
+  });
+
+  test("the overview lists every page-less group's children, each collapsed", () => {
+    const nav = pageNav(OVERVIEW);
+    const compute = byLabel(nav.items, "Compute & Storage");
+    assert.deepEqual(
+      compute.children.map((c) => [c.label, c.deferred, c.childrenHref]),
+      [
+        ["Workers", true, byLabel(getApiNav(model).items, "Compute & Storage").children[0]!.href],
+        ["KV", true, byLabel(getApiNav(model).items, "Compute & Storage").children[1]!.href],
+      ],
+    );
+    assert.equal(byLabel(nav.items, "Loose").deferred, true);
+  });
+
+  test("only collapsed groups carry childrenHref", () => {
     for (const coordinate of coordinates()) {
-      const nav = getApiNav(model, coordinate, { sidebar: "links" });
-      assert.equal(JSON.stringify(nav).includes("childrenHref"), false);
+      for (const item of flatten(pageNav(coordinate).items)) {
+        assert.equal(Boolean(item.childrenHref), Boolean(item.deferred), `${coordinate}: ${item.coordinate}`);
+        if (item.deferred) assert.equal(item.children.length, 0);
+      }
     }
   });
 
-  test("no deferred item in links mode lacks a page", () => {
+  // The invariant the client relies on: for every collapsed group on every
+  // page, the page it names lists that group open, with rows equal to the
+  // full tree's, and no row there is the current page.
+  test("every collapsed group's rows are on the page it names, without a highlight", () => {
+    const full = getApiNav(model);
+    let checked = 0;
     for (const coordinate of coordinates()) {
-      const nav = getApiNav(model, coordinate, { sidebar: "links" });
-      for (const item of flatten(nav.items)) {
-        if (item.deferred) assert.ok(item.href, `${item.coordinate} links somewhere`);
+      for (const group of flatten(pageNav(coordinate).items).filter((i) => i.deferred)) {
+        const source = pageNav(pageAt(group.childrenHref!));
+        const there = find(source.items, group.coordinate);
+        assert.ok(there && !there.deferred, `${group.childrenHref} lists ${group.coordinate} open`);
+        assert.deepEqual(
+          there.children.map((c) => c.coordinate),
+          find(full.items, group.coordinate)!.children.map((c) => c.coordinate),
+        );
+        for (const row of there.children) {
+          assert.equal(row.active, undefined, `${row.coordinate} is not highlighted there`);
+          assert.equal(row.expanded, undefined);
+        }
+        checked += 1;
       }
+    }
+    assert.ok(checked > 10);
+  });
+
+  test("every item is reachable from the overview by opening groups", () => {
+    const reached = new Set<string>();
+    const visit = (items: ApiNavItem[]) => {
+      for (const item of items) {
+        reached.add(item.coordinate);
+        const rows = item.deferred
+          ? find(pageNav(pageAt(item.childrenHref!)).items, item.coordinate)!.children
+          : item.children;
+        visit(rows);
+      }
+    };
+    visit(pageNav(OVERVIEW).items);
+    for (const group of apiNavGroups(getApiNav(model))) {
+      for (const item of [group, ...group.children]) {
+        assert.ok(reached.has(item.coordinate), `${item.coordinate} is reachable`);
+      }
+    }
+  });
+
+  test("every row matches the full tree's row", () => {
+    const strip = ({ children: _c, deferred: _d, childrenHref: _h, ...row }: ApiNavItem) => row;
+    for (const coordinate of coordinates()) {
+      const full = new Map(
+        flatten(getApiNav(model, coordinate).items).map((i) => [i.coordinate, strip(i)]),
+      );
+      for (const item of flatten(pageNav(coordinate).items)) {
+        assert.deepEqual(strip(item), full.get(item.coordinate));
+      }
+    }
+  });
+
+  test("prepared (server) navigation bounds identically for every page", () => {
+    const prepared = prepareApiNav(getApiNav(model));
+    for (const coordinate of coordinates()) {
+      assert.deepEqual(
+        applyApiSidebarMode(activatePreparedApiNav(prepared, coordinate), {
+          mode: "on-demand",
+          mountPath: MOUNT,
+          overview: coordinate === OVERVIEW,
+        }),
+        pageNav(coordinate),
+        coordinate,
+      );
     }
   });
 });
 
-describe("bounded pages stay reachable and consistent", () => {
-  for (const mode of ["on-demand", "links"] as ApiSidebarMode[]) {
-    test(`${mode}: every item appears in a page or in its parent's fragment`, () => {
-      const full = getApiNav(model);
-      const reached = new Set<string>();
-      const collect = (items: ApiNavItem[]) =>
-        flatten(items).forEach((item) => reached.add(item.coordinate));
-      collect(getApiNav(model, undefined, { sidebar: mode }).items);
-      for (const group of apiNavGroups(full)) {
-        collect(apiNavGroupChildren(full, group.coordinate, { mode }) ?? []);
-      }
-      for (const item of flatten(full.items)) {
-        assert.ok(reached.has(item.coordinate), `${item.coordinate} is reachable`);
-      }
-    });
-
-    test(`${mode}: every item on a page matches the full tree's row`, () => {
-      const strip = ({ children: _c, deferred: _d, childrenHref: _h, ...row }: ApiNavItem) => row;
-      for (const coordinate of coordinates()) {
-        const full = new Map(
-          flatten(getApiNav(model, coordinate).items).map((i) => [i.coordinate, strip(i)]),
-        );
-        for (const item of flatten(getApiNav(model, coordinate, { sidebar: mode }).items)) {
-          assert.deepEqual(strip(item), full.get(item.coordinate));
-        }
-      }
-    });
-  }
-
-  test("a fragment carries no page's trail and bounds its own children", () => {
-    const full = getApiNav(model, "scriptsPut");
-    const children = apiNavGroupChildren(full, "tags.Workers", { mode: "on-demand" })!;
-    assert.equal(JSON.stringify(children).match(/"(active|expanded)":true/), null);
-    assert.equal(byLabel(children, "Scripts").deferred, true);
-    assert.equal(apiNavGroupChildren(full, "scriptsPut", { mode: "on-demand" }), undefined);
-    assert.equal(apiNavGroupChildren(full, "missing", { mode: "on-demand" }), undefined);
-  });
-
-  test("group keys are URL-safe, distinct, and stable", () => {
-    const keys = apiNavGroups(getApiNav(model)).map((g) => apiNavGroupKey(g.coordinate));
-    assert.equal(new Set(keys).size, keys.length);
-    for (const key of keys) assert.match(key, /^[a-z0-9-]+-[0-9a-f]{8}$/);
-    assert.equal(apiNavGroupKey("tags.A B"), apiNavGroupKey("tags.A B"));
-    assert.notEqual(apiNavGroupKey("tags.A B"), apiNavGroupKey("tags.A-B"));
-  });
-
-  test("prepared (server) navigation bounds identically for every coordinate", () => {
-    const prepared = prepareApiNav(getApiNav(model));
-    for (const mode of ["full", "on-demand", "links"] as ApiSidebarMode[]) {
-      for (const coordinate of coordinates()) {
-        if (!coordinate) continue;
-        assert.deepEqual(
-          applyApiSidebarMode(activatePreparedApiNav(prepared, coordinate), mode, "/bounded", prepared.revision),
-          getApiNav(model, coordinate, { sidebar: mode }),
-          `${mode} ${coordinate}`,
-        );
-      }
-    }
-  });
-
+describe("the configured mode", () => {
   const loadInto = async (loader: ReturnType<typeof apiCollection>["loader"]) => {
     const store = new Map<string, unknown>();
     await loader.load({
@@ -300,23 +263,16 @@ describe("bounded pages stay reachable and consistent", () => {
     } as never);
   };
 
-  test("the static projection applies the configured mode", async () => {
+  test("the static projection applies it, overview included", async () => {
     registerApiCollections(pathToFileURL(ROOT), [{ collection: "bounded", spec, sidebar: "on-demand" }]);
     await loadInto(apiCollection().loader);
     for (const coordinate of coordinates()) {
-      if (!coordinate) continue;
       const { nav } = await projectConfiguredApiPage("bounded", null, coordinate);
-      assert.deepEqual(nav, getApiNav(model, coordinate, { sidebar: "on-demand" }));
+      assert.deepEqual(nav, pageNav(coordinate), coordinate);
     }
   });
 
-  test("explicit loader options take the mode from the config, which owns the fragment routes", async () => {
-    // A mode on the loader alone would bound pages whose fragment routes were never injected.
-    registerApiCollections(pathToFileURL(ROOT), [{ collection: "bounded", spec, sidebar: "links" }]);
-    await loadInto(apiCollection({ collection: "bounded", spec }).loader);
-    const { nav } = await projectConfiguredApiPage("bounded", null, "scriptsPut");
-    assert.deepEqual(nav, getApiNav(model, "scriptsPut", { sidebar: "links" }));
-
+  test("comes from the config entry, not the loader options", async () => {
     registerApiCollections(pathToFileURL(ROOT), []);
     await loadInto(apiCollection({ collection: "bounded", spec }).loader);
     const unconfigured = await projectConfiguredApiPage("bounded", null, "scriptsPut");
@@ -326,17 +282,19 @@ describe("bounded pages stay reachable and consistent", () => {
 
 describe("config", () => {
   const base = { site: "https://example.com", title: "T" };
-  test("accepts the three modes", () => {
-    for (const sidebar of ["full", "on-demand", "links"]) {
+  test("accepts the two modes", () => {
+    for (const sidebar of ["full", "on-demand"]) {
       assert.doesNotThrow(() =>
         validateNimbusConfig({ ...base, api: [{ collection: "api", spec: "./a.yaml", sidebar }] }),
       );
     }
   });
   test("rejects anything else with a readable message", () => {
-    assert.throws(
-      () => validateNimbusConfig({ ...base, api: [{ collection: "api", spec: "./a.yaml", sidebar: "lazy" }] }),
-      /"api\[\]\.sidebar" must be "full", "on-demand", or "links"/,
-    );
+    for (const sidebar of ["links", "lazy"]) {
+      assert.throws(
+        () => validateNimbusConfig({ ...base, api: [{ collection: "api", spec: "./a.yaml", sidebar }] }),
+        /"api\[\]\.sidebar" must be "full" or "on-demand"/,
+      );
+    }
   });
 });

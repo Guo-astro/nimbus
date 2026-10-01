@@ -316,12 +316,12 @@ export interface ApiNavItem {
   deprecated?: boolean;
   active?: boolean;
   expanded?: boolean;
-  /** Set when this item has children that this nav leaves out (a bounded
-   *  `sidebar` mode). `children` is then empty. */
+  /** A collapsed group whose children are not in this page (`sidebar:
+   *  "on-demand"`). `children` is then empty. */
   deferred?: boolean;
-  /** Where this group's children load from (`"on-demand"` mode only): set on
-   *  every group, so an open group's fragment can be cached for pages where it
-   *  is collapsed. Root-relative, without the site base, like `href`. */
+  /** For a deferred group: the page whose sidebar lists its children — the
+   *  group's own page, or the API overview for a group without one.
+   *  Root-relative, without the site base, like `href`. */
   childrenHref?: string;
   children: ApiNavItem[];
 }

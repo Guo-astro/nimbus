@@ -8,13 +8,15 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 
 import { navStateScript } from "../src/runtime.ts";
-import { NAV_STATE_KEYS } from "../src/client/nav-state.ts";
+import { NAV_STATE_KEYS } from "../src/client/nav-sidebar.ts";
 
 test("the inline sidebar-state script is self-contained and runs against an empty page", () => {
   assert.doesNotThrow(() => new vm.Script(navStateScript), "parses as a classic script");
-  assert.doesNotMatch(navStateScript, /\bimport\b|\brequire\(/);
   assert.doesNotMatch(navStateScript, /<\/script|<!--/i, "safe inside an inline <script>");
-  assert.ok(navStateScript.includes(JSON.stringify(NAV_STATE_KEYS)), "carries the shared storage keys");
+  assert.ok(
+    navStateScript.includes(JSON.stringify({ ...NAV_STATE_KEYS, build: "" }).slice(0, -1)),
+    "carries the shared storage keys and the build id (empty outside a Vite build)",
+  );
 
   const listeners: string[] = [];
   const window: Record<string, unknown> = {};

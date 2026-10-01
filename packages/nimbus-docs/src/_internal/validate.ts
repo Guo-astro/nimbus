@@ -309,8 +309,8 @@ const apiSpecShape = {
     .optional(),
   routes: routePolicySchema.optional(),
   sidebar: z
-    .enum(["full", "on-demand", "links"], {
-      error: '"api[].sidebar" must be "full", "on-demand", or "links"',
+    .enum(["full", "on-demand"], {
+      error: '"api[].sidebar" must be "full" or "on-demand"',
     })
     .optional(),
 };

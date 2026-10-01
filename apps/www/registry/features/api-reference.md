@@ -238,11 +238,9 @@ const socialImage = `/og${page.href.replace(/\/$/, "")}.png`;
 The nav is handled by `ApiSidebar` inside `ApiLayout` — there's no separate
 `ApiNavList` to write. To customise the tree's look (icons, grouping, a
 collapse-all affordance), edit `src/components/ui/api-sidebar/`; the active/
-expanded flags and verb come pre-resolved on each `ApiNavItem`. Keep
-`ApiSidebarItem.astro` at that path: with `sidebar: "on-demand"` on the `api`
-entry, Nimbus renders loaded groups with it. For a large API (hundreds of
-operations), suggest `sidebar: "on-demand"` so pages don't each carry the whole
-tree.
+expanded flags and verb come pre-resolved on each `ApiNavItem`. For a large
+API (hundreds of operations), suggest `sidebar: "on-demand"` on the `api`
+entry so pages don't each carry the whole tree.
 
 ## 5. Optional — add to the sidebar
 

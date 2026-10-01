@@ -85,12 +85,12 @@ function preparedNavOf(model: ApiModel): PreparedApiNav {
 function projectedNav(
   model: ApiModel,
   coordinate: string,
+  overview: boolean,
   bounds?: ApiNavBounds,
 ): ApiNav {
-  const prepared = preparedNavOf(model);
-  const nav = activatePreparedApiNav(prepared, coordinate);
+  const nav = activatePreparedApiNav(preparedNavOf(model), coordinate);
   return bounds
-    ? applyApiSidebarMode(nav, bounds.sidebar, bounds.mountPath, prepared.revision)
+    ? applyApiSidebarMode(nav, { mode: bounds.sidebar, mountPath: bounds.mountPath, overview })
     : nav;
 }
 
@@ -203,9 +203,10 @@ export async function projectApiModelPage(
   coordinate: string,
   bounds?: ApiNavBounds,
 ): Promise<{ page: ApiPageProps; nav: ApiNav }> {
+  const page = getApiPageProps(model, coordinate);
   return {
-    page: await prepareApiPageCode(getApiPageProps(model, coordinate)),
-    nav: projectedNav(model, coordinate, bounds),
+    page: await prepareApiPageCode(page),
+    nav: projectedNav(model, coordinate, page.kind === "api", bounds),
   };
 }
 
@@ -263,19 +264,6 @@ export async function projectConfiguredApiPage(
   );
 }
 
-/** The full, unactivated navigation of one configured API, plus its mount. */
-export async function projectConfiguredApiNav(
-  collection: string,
-  version: string | null,
-): Promise<{ nav: ApiNav; mountPath: string }> {
-  const model = await configuredApiModel(collection, version);
-  const bounds = configuredBounds.get(configuredModelKey(collection, version));
-  return {
-    nav: preparedNavOf(model).nav,
-    mountPath: bounds?.mountPath ?? `/${collection}`,
-  };
-}
-
 /** Page props without highlighted code or navigation, for Markdown output. */
 export async function projectConfiguredApiPageProps(
   collection: string,
@@ -291,5 +279,4 @@ export async function projectConfiguredApiPageProps(
 registerConfiguredApiProjector({
   page: projectConfiguredApiPage,
   pageProps: projectConfiguredApiPageProps,
-  nav: projectConfiguredApiNav,
 });

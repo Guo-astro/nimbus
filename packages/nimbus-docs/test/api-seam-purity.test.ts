@@ -55,14 +55,11 @@ const ALLOWED_TYPES = [
   "JsonValue",
   "SpecSource",
   "Diagnostic",
-  "ApiSidebarMode",
-  "BoundApiNavOptions",
 ];
 
 const RUNTIME_EXPORTS = [
   "ApiBuildError",
   "apiSchemaVersion",
-  "boundApiNav",
   "buildApiModel",
   "clearApiModelCache",
   "getApiFieldCitations",

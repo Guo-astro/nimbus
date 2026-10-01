@@ -26,8 +26,9 @@ interface Props {
 }
 
 const { page, nav, collection, version, coordinate } = Astro.props;
-// Sidebar state is shared per API version, across both sidebar copies.
-const navKey = version ? `${nav.collection}@${version}` : nav.collection;
+// Sidebar state is shared per API version, across both sidebar copies. The
+// base keeps two sites on one origin apart.
+const navKey = `${import.meta.env.BASE_URL}|${nav.collection}${version ? `@${version}` : ""}`;
 
 const versionStatus =
   collection && version
@@ -59,7 +60,9 @@ if (versionStatus?.isHidden) {
 }
 ---
 
-{/* Mobile navigation — native <dialog> for free focus trap, escape, backdrop. */}
+{/* Mobile navigation — native <dialog> for free focus trap, escape, backdrop.
+    It comes before the rail so the inline restore script after the rail
+    finds both sidebar copies already parsed. */}
 <dialog
   data-mobile-sidebar
   data-state="closed"
@@ -90,7 +93,7 @@ if (versionStatus?.isHidden) {
 
 <div class="flex w-full">
   {/* The rail keeps its open groups and scroll across pages: the inline script
-      below restores them before paint, and `trackNavState` records them. It is
+      below restores them before paint, and `initNavSidebar` records them. It is
       excluded from the page transition so it never fades or replays. */}
   <aside
     data-nb-nav-state={navKey}
@@ -151,9 +154,9 @@ if (versionStatus?.isHidden) {
 
 
 <script>
-  import { mount, lockScroll, unlockScroll, generateId, trackNavState } from "@cloudflare/nimbus-docs/client";
+  import { mount, lockScroll, unlockScroll, generateId, initNavSidebar } from "@cloudflare/nimbus-docs/client";
 
-  mount("[data-nb-nav-state]", trackNavState);
+  mount("[data-nb-nav-state]", initNavSidebar);
 
   const CLOSE_DURATION_MS = 250;
   const DESKTOP_QUERY = "(min-width: 48rem)";

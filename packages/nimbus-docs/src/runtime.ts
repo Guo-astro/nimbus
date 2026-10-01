@@ -75,9 +75,8 @@ import {
   type PageResolutionContext,
   type ProsePage,
 } from "./_internal/page-resolution.js";
-import { NAV_STATE_KEYS, restoreNavState } from "./client/nav-state.js";
+import { NAV_STATE_KEYS, restoreNavState } from "./client/nav-sidebar.js";
 import {
-  projectConfiguredApiNav,
   projectConfiguredApiPage,
   projectConfiguredApiPageProps,
 } from "./_internal/api-projector.js";
@@ -1471,6 +1470,11 @@ interface ApiRouteProps {
   coordinate: string;
 }
 
+// Set per `astro build`; empty in dev and when not built by Vite. Versions
+// the sidebar's session cache, so rows cached before a deploy are not shown.
+declare const __NIMBUS_BUILD_ID__: string;
+const NAV_BUILD_ID =
+  typeof __NIMBUS_BUILD_ID__ === "string" ? __NIMBUS_BUILD_ID__ : "";
 declare const __NIMBUS_THIN_API_ENTRIES__: boolean;
 const THIN_API_ENTRIES =
   typeof __NIMBUS_THIN_API_ENTRIES__ !== "undefined" &&
@@ -1578,7 +1582,7 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
-        const [{ applyApiSidebarMode, apiNavRevision }, { resolveApiVersion }, config] =
+        const [{ applyApiSidebarMode }, { resolveApiVersion }, config] =
           await Promise.all([
             import("./_internal/api/nav-bounds.js"),
             import("./_internal/api/resolve-versions.js"),
@@ -1589,12 +1593,11 @@ async function resolveApiRoute(
         return {
           page: prepared.page,
           nav: target
-            ? applyApiSidebarMode(
-                nav,
-                target.sidebar,
-                target.mountPath,
-                preparedNav.revision ?? apiNavRevision(preparedNav.nav),
-              )
+            ? applyApiSidebarMode(nav, {
+                mode: target.sidebar,
+                mountPath: target.mountPath,
+                overview: prepared.page.kind === "api",
+              })
             : nav,
         };
       },
@@ -1614,17 +1617,23 @@ async function resolveApiRoute(
 
 /**
  * An inline script that keeps a sidebar steady across page loads: it reopens
- * the groups the reader left open (without animating), shows their loaded
+ * the groups the reader left open (without animating), shows their cached
  * rows, and restores scroll, before the page paints. Render it right after
- * the sidebar markup, unbundled so it runs during parsing:
+ * the last sidebar container, unbundled so it runs during parsing:
  *
  *   <script is:inline aria-hidden="true" set:html={navStateScript} />
  *
- * Pair with `trackNavState` from `@cloudflare/nimbus-docs/client`, which
- * records the state. See `client/nav-state.ts` for the markup contract.
+ * Pair with `initNavSidebar` from `@cloudflare/nimbus-docs/client`, which
+ * records the state and loads collapsed groups. See `client/nav-sidebar.ts`
+ * for the markup contract.
  */
+export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson({ ...NAV_STATE_KEYS, build: NAV_BUILD_ID })});})();`;
+
 // JSON embedded in an inline <script>: escape what could close the element or
 // break the script (`<`, `>`, `/`, and the U+2028/U+2029 line separators).
+// `__name` (above) is a no-op stand-in for the helper esbuild's keep-names
+// mode (tsx, Vite) inserts into function bodies; the serialized body must not
+// depend on it.
 function inlineScriptJson(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, "\\u003C")
@@ -1632,115 +1641,6 @@ function inlineScriptJson(value: unknown): string {
     .replace(/\//g, "\\u002F")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
-}
-
-// `__name` is a no-op stand-in for the helper esbuild's keep-names mode (tsx,
-// Vite) inserts into function bodies; the serialized body must not depend on it.
-export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson(NAV_STATE_KEYS)});})();`;
-
-// ---------------------------------------------------------------------------
-// `sidebar: "on-demand"` fragments. Nimbus injects one route per collection,
-// `/nimbus-api/nav/<collection>/[...slug]`, rendered with the site's own
-// `ApiSidebarItem`; these two helpers are its data side. Not a public API.
-// ---------------------------------------------------------------------------
-
-const API_NAV_FRAGMENT_ROUTE = /^\/nimbus-api\/nav\/([^/]+)\/\[\.\.\.slug\]\/?$/;
-
-function apiNavFragmentCollection(routePattern: string): string {
-  const match = API_NAV_FRAGMENT_ROUTE.exec(routePattern);
-  if (!match) {
-    throw new Error(
-      `nimbus-docs: "${routePattern}" is not a Nimbus API navigation fragment route.`,
-    );
-  }
-  return match[1]!;
-}
-
-async function apiNavFragmentTargets(collection: string) {
-  const config = await loadNimbusConfig();
-  const entry = (config.api ?? []).find((a) => a.collection === collection);
-  if (!entry) {
-    throw new Error(
-      `nimbus-docs: no \`api\` entry for navigation fragments of "${collection}".`,
-    );
-  }
-  const { resolveApiFamily } =
-    await import("./_internal/api/resolve-versions.js");
-  return resolveApiFamily(entry);
-}
-
-/** @internal Static paths for the injected `"on-demand"` fragment route. */
-export const getApiNavFragmentPaths: GetStaticPaths = async ({ routePattern }) => {
-  const collection = apiNavFragmentCollection(routePattern);
-  const { apiNavFragmentIndex } = await import("./_internal/api/nav-bounds.js");
-  const paths = [];
-  for (const target of await apiNavFragmentTargets(collection)) {
-    const { nav } = await projectConfiguredApiNav(collection, target.version);
-    for (const [key, coordinate] of apiNavFragmentIndex(nav)) {
-      paths.push({
-        params: { slug: target.isDefault ? key : `${target.version}/${key}` },
-        props: { collection, version: target.version, coordinate },
-      });
-    }
-  }
-  return paths;
-};
-
-/** @internal The group one `"on-demand"` fragment renders, or a 404. */
-export async function getApiNavFragment(
-  astro: AstroGlobal,
-): Promise<{ item: import("./api/index.js").ApiNavItem } | Response> {
-  const { apiNavFragment, apiNavFragmentIndex } =
-    await import("./_internal/api/nav-bounds.js");
-  const props = astro.props as {
-    collection?: string;
-    version?: string | null;
-    coordinate?: string;
-  };
-  if (props.collection && props.coordinate) {
-    const { nav, mountPath } = await projectConfiguredApiNav(
-      props.collection,
-      props.version ?? null,
-    );
-    const item = apiNavFragment(nav, props.coordinate, mountPath);
-    if (!item) {
-      throw new Error(
-        `nimbus-docs: "${props.coordinate}" is not a navigation group of "${props.collection}".`,
-      );
-    }
-    return { item };
-  }
-
-  // Request-rendered: resolve the slug against the prepared root navigation,
-  // so serving a fragment never parses the source specification.
-  const notFound = () => new Response(null, { status: 404 });
-  const collection = apiNavFragmentCollection(astro.routePattern);
-  const segments = (astro.params.slug ?? "").split("/").filter(Boolean);
-  const targets = await apiNavFragmentTargets(collection);
-  const target =
-    segments.length === 2
-      ? targets.find((t) => !t.isDefault && t.version === segments[0])
-      : segments.length === 1
-        ? targets.find((t) => t.isDefault)
-        : undefined;
-  if (!target) return notFound();
-  const { apiPageRoute } = await import("./_internal/api/resolve-versions.js");
-  const { isPreparedApiNav } = await import("./_internal/api/prepared.js");
-  const root = await getVisibleEntry(
-    collection,
-    apiPageRoute(target, "").storeId,
-  );
-  const prepared = (root?.data as { prepared?: { nav?: unknown } } | undefined)
-    ?.prepared?.nav;
-  const nav = isPreparedApiNav(prepared)
-    ? prepared.nav
-    : (await projectConfiguredApiNav(collection, target.version)).nav;
-  const coordinate = apiNavFragmentIndex(nav).get(segments.at(-1)!);
-  const item =
-    coordinate === undefined
-      ? undefined
-      : apiNavFragment(nav, coordinate, target.mountPath);
-  return item ? { item } : notFound();
 }
 
 /**

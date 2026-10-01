@@ -489,3 +489,28 @@ describe("renderEntryAsMarkdown: the second parsed-tree review", () => {
     assert.equal(render({ Loop: ({ children }) => `<Loop>${children}</Loop>` }, "<Loop>x</Loop>\n"), "x");
   });
 });
+
+describe("renderEntryAsMarkdown: site renderers and parse failures", () => {
+  const render = (body: string, componentMap?: Record<string, (ctx: { children: string }) => string>) =>
+    renderEntryAsMarkdown({ body, filePath: "page.mdx" }, componentMap ? { componentMap } : {});
+
+  test("a renderer's plain Markdown goes in exactly as written", () => {
+    assert.equal(render("<MyList>x</MyList>\n", { MyList: () => "* one\n* two\n\n| a |\n|:-|\n| b |" }), "* one\n* two\n\n| a |\n|:-|\n| b |");
+  });
+
+  test("a renderer's output that uses a component still converts", () => {
+    assert.equal(render("<MyTip>Read this.</MyTip>\n", { MyTip: ({ children }) => `<Aside>${children}</Aside>` }), "> **Note**\n>\n> Read this.");
+  });
+
+  test("a body Sätteri can't parse keeps its text, with a warning", () => {
+    const warn = console.warn;
+    const warnings: string[] = [];
+    console.warn = (message: string) => void warnings.push(message);
+    try {
+      assert.equal(render("Intro.\n\n<div>\nnever closed\n"), "Intro.\n\n<div>\nnever closed");
+    } finally {
+      console.warn = warn;
+    }
+    assert.match(warnings.join("\n"), /\[nimbus\] Generated Markdown for page\.mdx keeps its MDX as written: it couldn't be parsed/);
+  });
+});

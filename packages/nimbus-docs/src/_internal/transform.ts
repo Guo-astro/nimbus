@@ -20,6 +20,7 @@ import {
   type CitationIndex,
 } from "./api/citations.js";
 import { getTabs, isCommandType } from "../lib/pkgm.js";
+import { runtimeWarn } from "./runtime-warn.js";
 
 export interface MarkdownComponentRenderContext {
   name: string;
@@ -404,11 +405,13 @@ function renderElement(node: JsxElement, ctx: Context): MdNode[] {
 }
 
 /**
- * A custom renderer's output is Markdown that may use other components
- * (`<Aside>…</Aside>`): render it too. The renderer's own name is left out, so
- * output that repeats it can't recurse.
+ * A custom renderer's output goes in as written: the site chose it. Only
+ * output that uses other components (`<Aside>…</Aside>`) is rendered again,
+ * so those convert too. The renderer's own name is left out then, so output
+ * that repeats it can't recurse.
  */
 function renderedOutput(rendered: string, node: JsxElement, ctx: Context): MdNode[] {
+  if (!/<[A-Z][\w.]*[\s/>]/.test(rendered)) return [{ type: "html", value: rendered }];
   let tree: MdNode;
   try {
     tree = satteri().mdxToMdast(rendered);
@@ -607,7 +610,19 @@ export function renderEntryAsMarkdown(
   if (!isMdx) return markdown.trim();
 
   const { mdxToMdast, markdownToMdast } = satteri();
-  const tree = mdxToMdast(markdown);
+  let tree: MdNode;
+  try {
+    tree = mdxToMdast(markdown);
+  } catch (error) {
+    // A page the site's own Markdown processor accepts can still be one
+    // Sätteri can't parse: keep its text rather than fail the build.
+    runtimeWarn(
+      `Generated Markdown for ${entry.filePath ?? "a page"} keeps its MDX as written: it couldn't be parsed (${
+        error instanceof Error ? error.message : String(error)
+      }).`,
+    );
+    return markdown.trim();
+  }
   walk(tree, (node) => {
     if (isJsx(node) && node.name === "Render") {
       throw new Error(

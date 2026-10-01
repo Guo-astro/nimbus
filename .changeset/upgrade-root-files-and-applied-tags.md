@@ -8,5 +8,3 @@
 - `check` and `add adapter-cloudflare` use `@astrojs/cloudflare@~14.3.0`. pnpm saved the old `>=14.3.0 <14.4.0` as `^14.3.x`, which allows 14.4.
 - `add` and `init` print plain lines without a terminal, instead of spinner escapes.
 - A duplicate page or unknown MDX component fails the build without a stack trace.
-- Generated Markdown keeps list structure around components: code blocks and nested lists stay in their list items, and components stay inside the list item, card, or blockquote that holds them.
-- Components without a Markdown renderer no longer leave raw tags.

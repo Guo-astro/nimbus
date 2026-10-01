@@ -119,215 +119,11 @@ function parseAttrs(raw = ""): Record<string, string | boolean> {
   return attrs;
 }
 
-/**
- * String-valued attributes only: quoted values and string-literal expressions
- * (`title={"Setup"}`). A title written as code (`title={t("k")}`) has no text
- * to show, so it's left out and the caller's fallback applies.
- */
-function textAttrs(raw = ""): Record<string, string> {
-  const attrs: Record<string, string> = {};
-  const re = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|\{\s*(?:"([^"]*)"|'([^']*)'|`([^`$]*)`)\s*\})/g;
-  for (const match of raw.matchAll(re)) {
-    const [, name, ...values] = match;
-    const value = values.find((v) => v !== undefined);
-    if (name && value !== undefined) attrs[name] = value;
-  }
-  return attrs;
-}
-
-const indentOf = (line: string): number => columns(/^[ \t]*/.exec(line)![0]);
-const JSX_TAG_LINE = /^[ \t]*<\/?[A-Za-z]/;
-
-/**
- * Where Markdown puts a line indented `indent` columns, given the lines above
- * it: the content column of the list item that holds it, or 0. MDX has no
- * indented code, so indentation outside a list item is only layout; kept, 4 or
- * more columns would read as code in Markdown. JSX tag lines are skipped: their
- * indentation is markup nesting, not Markdown structure. `lineUp(k)` is the
- * line `k` lines above, as written; `placed(k)` is the column it now starts
- * at, when those lines have been moved.
- */
-function markdownColumn(
-  lineUp: (k: number) => string | undefined,
-  indent: number,
-  isItem: boolean,
-  placed: (k: number) => number = (k) => indentOf(lineUp(k)!),
-): number {
-  if (indent === 0) return 0;
-  // Only lines less indented than `bound` can hold this one.
-  let bound = indent;
-  for (let k = 1, line = lineUp(k); line !== undefined; line = lineUp(++k)) {
-    if (!line.trim() || indentOf(line) >= bound) continue;
-    const item = LIST_ITEM.exec(line);
-    if (item) {
-      const shift = placed(k) - indentOf(line);
-      const column = contentColumn(item);
-      if (indent >= column) return shift + column;
-      // Short of the item's content: a sibling item, a lazy continuation of
-      // the line right above, or (after a blank line) outside the item.
-      if (isItem) return shift + columns(item[1]!);
-      if (k === 1) return shift + column;
-      bound = indentOf(line);
-      continue;
-    }
-    // Indented text or markup belongs to whatever holds it; keep looking.
-    if (JSX_TAG_LINE.test(line) || indentOf(line) > 0) continue;
-    return 0;
-  }
-  return 0;
-}
-
-/**
- * A component's children as Markdown lines: leading blank lines and trailing
- * whitespace dropped, and each line's indentation set by the list structure
- * around it. Stripping all indentation would move a list item's code block
- * and prose out of the item. A first line on the tag's own line is kept as is.
- */
 function cleanChildren(children: string): string {
-  const lines = children.replace(/\s+$/, "").split("\n");
-  const first = lines[0]!.trim() ? lines.shift()!.trim() : null;
-  while (lines.length > 0 && !lines[0]!.trim()) lines.shift();
-  const columnsAt: number[] = [];
-  // An HTML element's closing tag goes where its opening tag went: inside the
-  // list item that holds the element, or out of a list the element wraps.
-  const openTags: Array<{ name: string; column: number }> = [];
-  const out = lines.map((line, index) => {
-    const text = line.replace(/^[ \t]*/, "");
-    const closing = /^<\/([a-z][\w-]*)\s*>/.exec(text)?.[1];
-    let opener = -1;
-    for (let i = openTags.length - 1; closing && i >= 0; i--) {
-      if (openTags[i]!.name === closing) {
-        opener = i;
-        break;
-      }
-    }
-    if (opener >= 0) {
-      columnsAt[index] = openTags[opener]!.column;
-      openTags.length = opener;
-    } else {
-      columnsAt[index] = text
-        ? markdownColumn((k) => lines[index - k], indentOf(line), LIST_ITEM.test(line), (k) => columnsAt[index - k]!)
-        : 0;
-      const opening = /^<([a-z][\w-]*)\b[^>]*>(?!.*<\/\1\s*>)/.exec(text);
-      if (opening && !opening[0].endsWith("/>")) openTags.push({ name: opening[1]!, column: columnsAt[index]! });
-    }
-    return text ? " ".repeat(columnsAt[index]!) + text : "";
-  });
-  return (first === null ? out : [first, ...out]).join("\n").trim();
-}
-
-// Leading `>` and list markers on a line, with their spacing.
-const CONTAINER_START = /^(?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])[ \t]))*[ \t]*/;
-
-/** Where a component's tag sits, and so where its output goes. */
-interface TagSite {
-  /** Indentation that replaces the tag's own (a tag matched at its line's start). */
-  first: string;
-  /** Prefix for every later output line: a list item's indentation, quote markers. */
-  rest: string;
-  /** Only indentation or container markers precede the tag on its line. */
-  ownsLine: boolean;
-  /** List or quote markers precede the tag on its line. */
-  afterMarker: boolean;
-  /** Only whitespace follows the tag's end on its line. */
-  endsLine: boolean;
-  /** The line above the tag's is blank (or there is none). */
-  blankBefore: boolean;
-  /** The line below the tag's end is blank, a list item, or absent. */
-  openAfter: boolean;
-  /** Quote markers each child line carries, removed before rendering. */
-  quotes: number;
-}
-
-/** Lines above `lineStart`, read backwards on demand: `k = 1` is the line right above. */
-function linesAbove(whole: string, lineStart: number): (k: number) => string | undefined {
-  const read: string[] = [];
-  let cursor = lineStart - 1; // the newline that ends the line above
-  return (k) => {
-    while (read.length < k && cursor >= 0) {
-      // lastIndexOf treats a negative start as 0, which would reread line 0.
-      const start = cursor === 0 ? 0 : whole.lastIndexOf("\n", cursor - 1) + 1;
-      read.push(whole.slice(start, cursor));
-      cursor = start - 1;
-    }
-    return read[k - 1];
-  };
-}
-
-function tagSite(whole: string, offset: number, lead: string | undefined, length: number): TagSite {
-  const lineStart = whole.lastIndexOf("\n", offset - 1) + 1;
-  const above = linesAbove(whole, lineStart);
-  const lineEnd = whole.indexOf("\n", offset + length);
-  const nextEnd = lineEnd === -1 ? -1 : whole.indexOf("\n", lineEnd + 1);
-  const after = lineEnd === -1 ? "" : whole.slice(lineEnd + 1, nextEnd === -1 ? undefined : nextEnd);
-  const site = {
-    endsLine: /^[ \t]*$/.test(whole.slice(offset + length, lineEnd === -1 ? undefined : lineEnd)),
-    blankBefore: !above(1)?.trim(),
-    openAfter: !after.trim() || LIST_ITEM.test(after),
-  };
-  const placed = (prefix: string) => ({ ...site, quotes: (prefix.match(/>/g) ?? []).length });
-  if (lead !== undefined) {
-    const indent = " ".repeat(markdownColumn(above, columns(lead), false));
-    return { ...placed(""), first: indent, rest: indent, ownsLine: true, afterMarker: false };
-  }
-  const before = whole.slice(lineStart, offset);
-  const container = CONTAINER_START.exec(before)![0];
-  const ownsLine = container === before;
-  const rest = /\S/.test(container)
-    ? container.replace(LIST_MARKER, (marker) => " ".repeat(marker.length))
-    : " ".repeat(markdownColumn(above, columns(container), false));
-  return { ...placed(rest), first: "", rest, ownsLine, afterMarker: ownsLine && /\S/.test(before) };
-}
-
-/** Remove the quote markers a child line carries from its enclosing blockquote. */
-function unquote(children: string, quotes: number): string {
-  if (quotes === 0) return children;
-  const marker = new RegExp(`^[ \\t]*(?:>[ \\t]?){1,${quotes}}`);
-  return children.replace(/[^\n]+/g, (line) => line.replace(marker, ""));
-}
-
-/**
- * Place a component's output at its tag's site. A block (a callout, a list of
- * steps) gets its own lines: blank lines around it when its neighbours would
- * otherwise run into it, and a fresh line when text precedes the tag.
- */
-function place(output: string, site: TagSite, block: boolean): string {
-  const blank = site.rest.trimEnd();
-  const indentLines = (text: string) =>
-    text.replace(/\n([^\n]*)/g, (_line, line: string) => `\n${line ? site.rest + line : blank}`);
-  if (block && !site.ownsLine) return `\n${blank}\n${site.rest}${indentLines(output)}\n${blank}\n${site.rest}`;
-  const lead = block && !site.afterMarker && !site.blankBefore ? `${blank}\n` : "";
-  const tail = block && site.endsLine && !site.openAfter ? `\n${blank}` : "";
-  return `${lead}${site.first}${indentLines(output)}${tail}`;
-}
-
-/**
- * Replace every match of `tag` (a component's opening-to-closing pattern) with
- * `render`'s output placed at the tag's site. The optional leading group lets
- * a tag that starts its line replace its own indentation.
- */
-function replaceComponent(
-  markdown: string,
-  tag: RegExp,
-  block: boolean | ((site: TagSite) => boolean),
-  render: (groups: string[], site: TagSite) => string | null,
-): string {
-  // The leading group shifts `tag`'s backreferences by one.
-  const source = tag.source.replace(/\\(\d)/g, (_ref, n: string) => `\\${Number(n) + 1}`);
-  const re = new RegExp(`(^[ \\t]+)?(?:${source})`, "gm");
-  return markdown.replace(re, (...args: unknown[]) => {
-    const match = args[0] as string;
-    const whole = args[args.length - 1] as string;
-    const offset = args[args.length - 2] as number;
-    const lead = args[1] as string | undefined;
-    const site = tagSite(whole, lead === undefined ? offset : offset + lead.length, lead, match.length - (lead?.length ?? 0));
-    const groups = (args.slice(2, -2) as Array<string | undefined>).map((group) =>
-      group === undefined ? "" : unquote(group, site.quotes),
-    );
-    const output = render(groups, site);
-    if (output === null) return match;
-    return place(output, site, typeof block === "function" ? block(site) : block);
-  });
+  return children
+    .replace(/^\s+/g, "")
+    .replace(/\s+$/g, "")
+    .replace(/\n[ \t]+/g, "\n");
 }
 
 function blockquote(body: string): string {
@@ -366,100 +162,85 @@ function renderPackageManagers(
   ].join("\n");
 }
 
-/**
- * `<Name …>…</Name>` with no `<Name` inside: the innermost of nested
- * same-name components, so each closing tag pairs with its own opening tag.
- * Callers repeat until none are left, working outwards.
- */
-function innermost(name: string, attrs = "([^>]*)"): RegExp {
-  return new RegExp(`<${name}\\b${attrs}>((?:(?!<${name}\\b)[\\s\\S])*?)<\\/${name}>`);
-}
-
-function replaceNested(
-  markdown: string,
-  tag: RegExp,
-  block: boolean,
-  render: Parameters<typeof replaceComponent>[3],
-): string {
-  let out = markdown;
-  for (let previous = ""; previous !== out; ) {
-    previous = out;
-    out = replaceComponent(out, tag, block, render);
-  }
-  return out;
-}
-
 function applyDefaultComponentTransforms(markdown: string): string {
   let out = markdown;
 
-  out = replaceComponent(out, /<PackageManagers\b([^>]*)\/>/, false, ([rawAttrs]) =>
-    renderPackageManagers(parseAttrs(rawAttrs)),
+  out = out.replace(
+    /<PackageManagers\b([^>]*)\/>/g,
+    (_match, rawAttrs: string) => renderPackageManagers(parseAttrs(rawAttrs)),
   );
 
-  out = replaceNested(out, innermost("Aside"), true, ([rawAttrs, children]) => {
-    const attrs = parseAttrs(rawAttrs);
-    const type = asTitle(attrs.type, "note").toUpperCase();
-    const title = asTitle(textAttrs(rawAttrs).title, type.charAt(0) + type.slice(1).toLowerCase());
-    return blockquote(`**${title}**\n\n${cleanChildren(children!)}`);
-  });
+  out = out.replace(
+    /<Aside\b([^>]*)>([\s\S]*?)<\/Aside>/g,
+    (_match, rawAttrs: string, children: string) => {
+      const attrs = parseAttrs(rawAttrs);
+      const type = asTitle(attrs.type, "note").toUpperCase();
+      const title = asTitle(
+        attrs.title,
+        type.charAt(0) + type.slice(1).toLowerCase(),
+      );
+      const body = cleanChildren(children);
+      return blockquote(`**${title}**\n\n${body}`);
+    },
+  );
 
-  // Cards are list items: consecutive cards stay one tight list.
-  out = replaceNested(out, innermost("Card"), false, ([rawAttrs, children]) => {
-    const title = asTitle(textAttrs(rawAttrs).title, "Card");
-    const body = cleanChildren(children!);
-    if (!body) return `- **${title}**`;
-    // A one-line body follows the title; anything more (a list, paragraphs)
-    // goes below it, inside the item.
-    if (!body.includes("\n") && !LIST_ITEM.test(body)) return `- **${title}** — ${body}`;
-    return `- **${title}**\n\n  ${body.replace(/\n(?=[^\n])/g, "\n  ")}`;
-  });
+  out = out.replace(
+    /<Card\b([^>]*)>([\s\S]*?)<\/Card>/g,
+    (_match, rawAttrs: string, children: string) => {
+      const attrs = parseAttrs(rawAttrs);
+      const title = asTitle(attrs.title, "Card");
+      const body = cleanChildren(children);
+      return `- **${title}**${body ? ` — ${body}` : ""}`;
+    },
+  );
   out = out.replace(/<\/?CardGrid\b[^>]*>/g, "");
 
-  out = replaceComponent(out, /<LinkCard\b([^>]*?)\s*\/>/, false, ([rawAttrs]) => {
-    const attrs = textAttrs(rawAttrs);
-    const title = asTitle(attrs.title, "Link");
-    const label = attrs.href ? `[${title}](${attrs.href})` : `**${title}**`;
-    return `- ${label}${attrs.description ? ` — ${attrs.description}` : ""}`;
-  });
-
-  out = replaceNested(out, innermost("Steps", "[^>]*"), true, ([children]) => {
-    let index = 0;
-    return cleanChildren(children!).replace(
-      /<Step\b([^>]*)>([\s\S]*?)<\/Step>/g,
-      (_stepMatch, rawAttrs: string, stepChildren: string, offset: number, whole: string) => {
-        index += 1;
-        const newLine = offset > 0 && whole[offset - 1] !== "\n" ? "\n" : "";
-        const marker = `${index}. `;
-        const title = asTitle(textAttrs(rawAttrs).title, `Step ${index}`);
-        const body = cleanChildren(stepChildren).replace(/\n(?=[^\n])/g, `\n${" ".repeat(marker.length)}`);
-        return `${newLine}${marker}**${title}**${body ? `\n\n${" ".repeat(marker.length)}${body}` : ""}`;
-      },
-    );
-  });
-
-  out = replaceNested(out, innermost("Tabs", "[^>]*"), true, ([children]) =>
-    cleanChildren(children!).replace(
-      /<TabItem\b([^>]*)>([\s\S]*?)<\/TabItem>/g,
-      (_tabMatch, rawAttrs: string, tabChildren: string, offset: number, whole: string) => {
-        const label = asTitle(textAttrs(rawAttrs).label, "Option");
-        const body = cleanChildren(tabChildren);
-        const newBlock = offset > 0 && whole[offset - 1] !== "\n" ? "\n\n" : "";
-        return `${newBlock}### ${label}${body ? `\n\n${body}` : ""}`;
-      },
-    ),
+  out = out.replace(
+    /<LinkCard\b([^>]*?)\s*\/>/g,
+    (_match, rawAttrs: string) => {
+      const attrs = parseAttrs(rawAttrs);
+      const title = asTitle(attrs.title, "Link");
+      const href = typeof attrs.href === "string" ? attrs.href : "";
+      const description =
+        typeof attrs.description === "string" ? attrs.description : "";
+      const label = href ? `[${title}](${href})` : `**${title}**`;
+      return `- ${label}${description ? ` — ${description}` : ""}`;
+    },
   );
 
-  // Components without a renderer keep their children rather than leaking JSX
-  // into the markdown. Repeat until none are left: unwrapping `<AccordionGroup>`
-  // exposes its `<Accordion>` tags. One on a line of its own is a block, so
-  // consecutive ones (`<AccordionTrigger>`, `<AccordionContent>`) don't run into
-  // one paragraph. Attributes are dropped: a `title` is often only a tooltip.
-  const wrapper = /<([A-Z][A-Za-z0-9]*)\b[^>]*>([\s\S]*?)<\/\1>/;
-  const isBlock = (site: TagSite) => site.ownsLine && site.endsLine;
-  for (let previous = ""; previous !== out; ) {
-    previous = out;
-    out = replaceComponent(out, wrapper, isBlock, ([, children]) => cleanChildren(children!));
-  }
+  out = out.replace(
+    /<Steps\b[^>]*>([\s\S]*?)<\/Steps>/g,
+    (_match, children: string) => {
+      let index = 0;
+      return children.replace(
+        /<Step\b([^>]*)>([\s\S]*?)<\/Step>/g,
+        (_stepMatch, rawAttrs: string, stepChildren: string) => {
+          index += 1;
+          const attrs = parseAttrs(rawAttrs);
+          const title = asTitle(attrs.title, `Step ${index}`);
+          const body = cleanChildren(stepChildren);
+          return `${index}. **${title}**${body ? `\n\n   ${body.replace(/\n/g, "\n   ")}` : ""}`;
+        },
+      );
+    },
+  );
+
+  out = out.replace(
+    /<Tabs\b[^>]*>([\s\S]*?)<\/Tabs>/g,
+    (_match, children: string) =>
+      children.replace(
+        /<TabItem\b([^>]*)>([\s\S]*?)<\/TabItem>/g,
+        (_tabMatch, rawAttrs: string, tabChildren: string) => {
+          const attrs = parseAttrs(rawAttrs);
+          const label = asTitle(attrs.label, "Option");
+          return `### ${label}\n\n${cleanChildren(tabChildren)}`;
+        },
+      ),
+  );
+
+  // If user content includes raw component wrappers we don't know about,
+  // preserve their children rather than leaking JSX into the markdown.
+  out = out.replace(/<([A-Z][A-Za-z0-9]*)\b[^>]*>([\s\S]*?)<\/\1>/g, "$2");
   out = out.replace(/<([A-Z][A-Za-z0-9]*)\b[^>]*\/>/g, "");
 
   return out;
@@ -473,18 +254,25 @@ function applyCustomComponentTransforms(
   let out = markdown;
   for (const [name, render] of Object.entries(componentMap)) {
     const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = replaceComponent(
-      out,
-      new RegExp(`<${escapedName}(?=[\\s/>])([^>]*)>([\\s\\S]*?)<\\/${escapedName}>`),
-      false,
-      ([rawAttrs, children]) =>
-        render({ name, attrs: parseAttrs(rawAttrs), children: cleanChildren(children!), base }),
+    const paired = new RegExp(
+      `<${escapedName}(?=[\\s/>])([^>]*)>([\\s\\S]*?)<\\/${escapedName}>`,
+      "g",
     );
-    out = replaceComponent(
-      out,
-      new RegExp(`<${escapedName}(?=[\\s/>])([^>]*)\\/>`),
-      false,
-      ([rawAttrs]) => render({ name, attrs: parseAttrs(rawAttrs), children: "", base }),
+    out = out.replace(paired, (_match, rawAttrs: string, children: string) =>
+      render({
+        name,
+        attrs: parseAttrs(rawAttrs),
+        children: cleanChildren(children),
+        base,
+      }),
+    );
+
+    const selfClosing = new RegExp(
+      `<${escapedName}(?=[\\s/>])([^>]*)\\/>`,
+      "g",
+    );
+    out = out.replace(selfClosing, (_match, rawAttrs: string) =>
+      render({ name, attrs: parseAttrs(rawAttrs), children: "", base }),
     );
   }
   return out;
@@ -546,8 +334,10 @@ export function renderEntryAsMarkdown(
 
   // Normalize layout before restoring code so code blocks stay byte-identical.
   markdown = markdown
-    .replace(/^[ \t]+$/gm, "")
-    .replace(/^([ \t]*(?:>[ \t]*)+)\n(?:\1\n)+/gm, "$1\n");
+    .replace(/^[ \t]+(- (?:\*\*|\[))/gm, "$1")
+    .replace(/^[ \t]+(\d+\. \*\*)/gm, "$1")
+    .replace(/^[ \t]+(### )/gm, "$1")
+    .replace(/^[ \t]+$/gm, "");
   markdown = dedentComponentFences(markdown)
     .replace(/\n{3,}/g, "\n\n")
     .trim();

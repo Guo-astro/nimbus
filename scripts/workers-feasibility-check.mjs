@@ -409,6 +409,20 @@ function assertProse(html) {
   );
 }
 
+// API code is highlighted with token classes; shiki.css must define every one
+// a page uses, or that code renders uncoloured.
+function assertTokenClassesDefined(html, css, label) {
+  const used = new Set(html.match(/nb-shiki-[a-z0-9]+/g) ?? []);
+  const defined = new Set(
+    [...css.matchAll(/\.(nb-shiki-[a-z0-9]+)\{/g)].map((match) => match[1]),
+  );
+  const missing = [...used].filter((name) => !defined.has(name));
+  assert(
+    missing.length === 0,
+    `${label} uses token classes shiki.css does not define: ${missing.join(", ")}`,
+  );
+}
+
 function assertPreparedApi(html, kind) {
   assert(
     html.includes(`data-feasibility-api-kind="${kind}"`),
@@ -919,6 +933,13 @@ assert(
   shikiCss.includes(".nb-shiki-"),
   "all-build baseline omitted Shiki token styles",
 );
+assert(
+  staticKinds.get("operation").html.includes("nb-shiki-"),
+  "build-rendered operation page rendered no classed code tokens",
+);
+for (const [kind, { html }] of staticKinds) {
+  assertTokenClassesDefined(html, shikiCss, `build-rendered ${kind} API page`);
+}
 
 console.log(`${PREFIX} proving request prose beside build-rendered API pages`);
 build(site, { docs: "request", api: "build" });
@@ -993,6 +1014,8 @@ await withWorkerd(site, async (origin) => {
   assertProse(prose.html);
   assertNoProbe(prose.html, "static-prose");
 
+  const styles = await request(origin, "/_nimbus/shiki.css");
+  assert(styles.response.status === 200, "Shiki styles were not served");
   for (const [kind, { route }] of staticKinds) {
     const first = await request(origin, route, `${kind}-one`);
     const second = await request(origin, route, `${kind}-two`);
@@ -1001,6 +1024,7 @@ await withWorkerd(site, async (origin) => {
       `${kind} API route ${route} returned ${first.response.status}/${second.response.status}: ${first.html.slice(0, 500)}`,
     );
     assertPreparedApi(first.html, kind);
+    assertTokenClassesDefined(first.html, styles.html, `request-rendered ${kind} API page`);
     assertGeneratedAssetsExist(site, first.html, `request API ${route}`);
     assertProbe(first.html, `${kind}-one`);
     assertProbe(second.html, `${kind}-two`);

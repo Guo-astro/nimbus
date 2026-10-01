@@ -22,6 +22,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as p from "@clack/prompts";
 
 import { addCommand, detectPackageManager } from "./pm.js";
+import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
 
 export interface InstallOptions {
@@ -147,7 +148,7 @@ export async function installComponents(
     if (newDeps.length > 0) {
       const pm = detectPackageManager(options.cwd);
       const { bin, args } = addCommand(pm, newDeps);
-      const spinner = p.spinner();
+      const spinner = progress();
       spinner.start(`${pm} add ${newDeps.join(" ")}`);
       try {
         await runCommand(bin, args, options.cwd);

@@ -139,7 +139,7 @@ export function resolveUpgradeBaseline(options: {
       targetVersion,
       source: "missing",
       installFirst: true,
-      error: `The executing Nimbus CLI is ${runningVersion}, but the selected project has Nimbus ${installedVersion} installed. Run the command with the project's own CLI (for example \`${invocation("migrate", options.projectRoot)}\`), or install dependencies with \`${installCommand(options.projectRoot)}\` if the lockfile already has ${runningVersion}.`,
+      error: `The executing Nimbus CLI is ${runningVersion}, but the selected project has Nimbus ${installedVersion} installed. Run the command with the project's own CLI (for example \`${invocation("migrate", options.projectRoot)}\`), or install dependencies with \`${installCommand(options.projectRoot)}\` if the lockfile already has ${runningVersion}, or, in a workspace that links the package, rebuild it.`,
     };
   }
   if (options.fromVersion !== undefined) {

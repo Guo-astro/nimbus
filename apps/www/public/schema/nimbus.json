@@ -8,6 +8,10 @@
     "version": { "type": ["string", "null"] },
     "lastReviewedNimbusVersion": { "type": ["string", "null"] },
     "templatesTag": { "type": ["string", "null"] },
+    "templatesTagByFile": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
     "variant": { "type": ["string", "null"] },
     "registry": { "type": "string" },
     "reconstructed": { "type": "boolean" },

@@ -45,6 +45,7 @@ import {
   type ResolvedRouteLike,
   type UserRouteDeclaration,
 } from "./_internal/build-report.js";
+import { authorError } from "./_internal/author-error.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
 import { parseComponentsRegistry } from "./_internal/parse-components-registry.js";
@@ -754,7 +755,7 @@ export function nimbus(
               projectRoot,
             });
             if (failures.length > 0) {
-              throw new Error(formatFailures(failures));
+              throw authorError(formatFailures(failures));
             }
             logger.info(
               `MDX validation passed — ${globals.length} global component${globals.length === 1 ? "" : "s"} registered, ${contentDirs.length} content dir${contentDirs.length === 1 ? "" : "s"} scanned.`,
@@ -1055,7 +1056,7 @@ export function nimbus(
         const collisions = duplicateRoutes.filter((d) => !d.shadowedByPage);
         if (shadowed.length > 0) logger.warn(formatShadowedRoutes(shadowed));
         if (collisions.length > 0) {
-          throw new Error(formatDuplicateRoutes(collisions));
+          throw authorError(formatDuplicateRoutes(collisions));
         }
 
         // Cross-check `versions.others` against registered collections.

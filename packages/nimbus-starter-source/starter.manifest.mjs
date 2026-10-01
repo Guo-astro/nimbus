@@ -38,6 +38,12 @@
  * @property {string[]} devOnlyPaths Path prefixes (relative to the
  *   starter root) stripped from shipped templates. Use directory paths
  *   ending with "/" to filter whole trees.
+ * @property {string[]} trackedRootFiles Root files every site keeps in the
+ *   starter's shape. `nimbus-docs outdated` and `diff` compare them against
+ *   upstream like `src/`; the CLI mirrors this list (a nimbus-docs test keeps
+ *   them equal). Package-manager files and files the scaffolder rewrites
+ *   (package.json, wrangler.jsonc, nimbus.json, …) differ on every site and
+ *   stay out; their changes ship as upgrade entries.
  * @property {string[]} declinedBuildScripts Dependency names whose install
  *   scripts the generator declines in the shipped template's
  *   pnpm-workspace.yaml (pnpm's build-scripts gate). Named exactly, never a
@@ -85,6 +91,9 @@ export const STARTER_MANIFEST = {
   // shipped templates while keeping them in the canonical kitchen-sink
   // dev tree. Nothing is currently dev-only.
   devOnlyPaths: [],
+
+  // Root files upgrades track alongside src/. Every variant must ship each one.
+  trackedRootFiles: ["AGENT.md", "CLAUDE.md", "tsconfig.json"],
 
   // Install scripts declined in shipped templates to clear pnpm's build-scripts
   // gate. Both ship prebuilds, so declining is strictly narrower than allowing.

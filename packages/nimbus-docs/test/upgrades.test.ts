@@ -293,6 +293,11 @@ test("installedNimbusVersion finds an installed project or workspace package", (
       resolveUpgradeBaseline({ projectRoot: project }).error ?? "",
       new RegExp(`executing Nimbus CLI is ${runningNimbusVersion().replaceAll(".", "\\.")}`),
     );
+    assert.match(resolveUpgradeBaseline({ projectRoot: project }).error ?? "", /project's own CLI/);
+    assert.match(
+      resolveUpgradeBaseline({ projectRoot: project }).error ?? "",
+      /in a workspace that links the package, rebuild it\./,
+    );
     fs.writeFileSync(
       path.join(root, "node_modules", "@cloudflare", "nimbus-docs", "package.json"),
       JSON.stringify({ version: "not-semver" }),

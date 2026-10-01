@@ -19,9 +19,10 @@ import {
   type PreparedApiNav,
 } from "./api/prepared.js";
 import { registerConfiguredApiProjector } from "./api-projector.js";
+import { applyApiSidebarMode } from "./api/nav-bounds.js";
 import { resolveSpecSource } from "./api/resolve-spec.js";
-import { resolveApiVersion } from "./api/resolve-versions.js";
-import type { ApiSpec } from "../types.js";
+import { resolveApiFamily, resolveApiVersion } from "./api/resolve-versions.js";
+import type { ApiSidebarMode, ApiSpec } from "../types.js";
 
 export {
   clearApiModelCache,
@@ -34,8 +35,15 @@ export { buildApiModel, resolveSpecSource };
 export { apiPageRoute, resolveApiFamily } from "./api/resolve-versions.js";
 export { prepareApiNav, preparedApiVersion } from "./api/prepared.js";
 
+/** Where a projected page's navigation is bounded. Omitted = the full tree. */
+interface ApiNavBounds {
+  sidebar: ApiSidebarMode;
+  mountPath: string;
+}
+
 const preparedNavCache = new WeakMap<ApiModel, PreparedApiNav>();
 const configuredModels = new Map<string, Promise<ApiModel>>();
+const configuredBounds = new Map<string, ApiNavBounds>();
 let configuredApi: ApiSpec[] = [];
 let configuredRoot = "";
 
@@ -47,11 +55,12 @@ export function registerConfiguredApiModel(
   collection: string,
   version: string | null,
   model: ApiModel,
+  bounds?: ApiNavBounds,
 ): void {
-  configuredModels.set(
-    configuredModelKey(collection, version),
-    Promise.resolve(model),
-  );
+  const key = configuredModelKey(collection, version);
+  configuredModels.set(key, Promise.resolve(model));
+  if (bounds) configuredBounds.set(key, bounds);
+  else configuredBounds.delete(key);
 }
 
 export function configureApiProjector(
@@ -61,15 +70,28 @@ export function configureApiProjector(
   configuredApi = api;
   configuredRoot = root;
   configuredModels.clear();
+  configuredBounds.clear();
 }
 
-function projectedNav(model: ApiModel, coordinate: string): ApiNav {
+function preparedNavOf(model: ApiModel): PreparedApiNav {
   let prepared = preparedNavCache.get(model);
   if (!prepared) {
     prepared = prepareApiNav(getApiNav(model));
     preparedNavCache.set(model, prepared);
   }
-  return activatePreparedApiNav(prepared, coordinate);
+  return prepared;
+}
+
+function projectedNav(
+  model: ApiModel,
+  coordinate: string,
+  overview: boolean,
+  bounds?: ApiNavBounds,
+): ApiNav {
+  const nav = activatePreparedApiNav(preparedNavOf(model), coordinate);
+  return bounds
+    ? applyApiSidebarMode(nav, { mode: bounds.sidebar, mountPath: bounds.mountPath, overview })
+    : nav;
 }
 
 const HIGHLIGHTABLE = new Set([
@@ -179,11 +201,23 @@ export async function prepareApiPageCode(
 export async function projectApiModelPage(
   model: ApiModel,
   coordinate: string,
+  bounds?: ApiNavBounds,
 ): Promise<{ page: ApiPageProps; nav: ApiNav }> {
+  const page = getApiPageProps(model, coordinate);
   return {
-    page: await prepareApiPageCode(getApiPageProps(model, coordinate)),
-    nav: projectedNav(model, coordinate),
+    page: await prepareApiPageCode(page),
+    nav: projectedNav(model, coordinate, page.kind === "api", bounds),
   };
+}
+
+function configuredTarget(collection: string, version: string | null) {
+  const target = resolveApiVersion(configuredApi, collection, version);
+  if (!target || !configuredRoot) {
+    throw new Error(
+      `nimbus-docs: API model for collection "${collection}"${version ? ` version "${version}"` : ""} was not configured by the Nimbus integration.`,
+    );
+  }
+  return target;
 }
 
 function configuredApiModel(
@@ -193,16 +227,11 @@ function configuredApiModel(
   const key = configuredModelKey(collection, version);
   let model = configuredModels.get(key);
   if (!model) {
-    const target = resolveApiVersion(
-      configuredApi,
-      collection,
-      version,
-    );
-    if (!target || !configuredRoot) {
-      throw new Error(
-        `nimbus-docs: API model for collection "${collection}"${version ? ` version "${version}"` : ""} was not configured by the Nimbus integration.`,
-      );
-    }
+    const target = configuredTarget(collection, version);
+    configuredBounds.set(key, {
+      sidebar: target.sidebar,
+      mountPath: target.mountPath,
+    });
     model = resolveSpecSource(
       {
         collection: target.namespace,
@@ -227,10 +256,29 @@ export async function projectConfiguredApiPage(
   version: string | null,
   coordinate: string,
 ): Promise<{ page: ApiPageProps; nav: ApiNav }> {
+  const model = await configuredApiModel(collection, version);
   return projectApiModelPage(
-    await configuredApiModel(collection, version),
+    model,
     coordinate,
+    configuredBounds.get(configuredModelKey(collection, version)),
   );
+}
+
+/**
+ * Every configured API version's full navigation and sidebar bounds: what
+ * sidebar rows are made from. Reuses the models the content loader built.
+ */
+export async function configuredApiNavs(): Promise<
+  Array<{ nav: ApiNav } & ApiNavBounds>
+> {
+  const navs: Array<{ nav: ApiNav } & ApiNavBounds> = [];
+  for (const entry of configuredApi) {
+    for (const target of resolveApiFamily(entry)) {
+      const model = await configuredApiModel(entry.collection, target.version);
+      navs.push({ nav: getApiNav(model), sidebar: target.sidebar, mountPath: target.mountPath });
+    }
+  }
+  return navs;
 }
 
 /** Page props without highlighted code or navigation, for Markdown output. */

@@ -75,6 +75,7 @@ import {
   type PageResolutionContext,
   type ProsePage,
 } from "./_internal/page-resolution.js";
+import { NAV_STATE_KEYS, restoreNavState } from "./client/nav-sidebar.js";
 import {
   projectConfiguredApiPage,
   projectConfiguredApiPageProps,
@@ -1469,6 +1470,15 @@ interface ApiRouteProps {
   coordinate: string;
 }
 
+declare const __NIMBUS_BUILD_ID__: string;
+/**
+ * Identifies the build that rendered a page, for the sidebar's session
+ * cache: render it as `data-nb-nav-build` on each `data-nb-nav-state`
+ * container, so rows cached before a deploy are never shown. Empty in dev
+ * (no cache).
+ */
+export const navBuildId: string =
+  typeof __NIMBUS_BUILD_ID__ === "string" ? __NIMBUS_BUILD_ID__ : "";
 declare const __NIMBUS_THIN_API_ENTRIES__: boolean;
 const THIN_API_ENTRIES =
   typeof __NIMBUS_THIN_API_ENTRIES__ !== "undefined" &&
@@ -1576,9 +1586,23 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
+        const [{ applyApiSidebarMode }, { resolveApiVersion }, config] =
+          await Promise.all([
+            import("./_internal/api/nav-bounds.js"),
+            import("./_internal/api/resolve-versions.js"),
+            loadNimbusConfig(),
+          ]);
+        const target = resolveApiVersion(config.api, collection, version);
+        const nav = activatePreparedApiNav(preparedNav, coordinate);
         return {
           page: prepared.page,
-          nav: activatePreparedApiNav(preparedNav, coordinate),
+          nav: target
+            ? applyApiSidebarMode(nav, {
+                mode: target.sidebar,
+                mountPath: target.mountPath,
+                overview: prepared.page.kind === "api",
+              })
+            : nav,
         };
       },
     },
@@ -1593,6 +1617,34 @@ async function resolveApiRoute(
     version: result.page.version,
     coordinate: result.page.coordinate,
   };
+}
+
+/**
+ * An inline script that keeps a sidebar steady across page loads: it reopens
+ * the groups the reader left open (without animating), shows their cached
+ * rows, and restores scroll, before the page paints. Render it right after
+ * the last sidebar container, unbundled so it runs during parsing:
+ *
+ *   <script is:inline aria-hidden="true" set:html={navStateScript} />
+ *
+ * Pair with `initNavSidebar` from `@cloudflare/nimbus-docs/client`, which
+ * records the state and loads collapsed groups, and `navBuildId`. See `client/nav-sidebar.ts`
+ * for the markup contract.
+ */
+export const navStateScript = `(function(){var __name=function(f){return f};(${restoreNavState.toString()})(${inlineScriptJson(NAV_STATE_KEYS)});})();`;
+
+// JSON embedded in an inline <script>: escape what could close the element or
+// break the script (`<`, `>`, `/`, and the U+2028/U+2029 line separators).
+// `__name` (above) is a no-op stand-in for the helper esbuild's keep-names
+// mode (tsx, Vite) inserts into function bodies; the serialized body must not
+// depend on it.
+function inlineScriptJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003C")
+    .replace(/>/g, "\\u003E")
+    .replace(/\//g, "\\u002F")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 /**

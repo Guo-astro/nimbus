@@ -35,6 +35,7 @@ import type { ApiRoutePolicy, ApiVersionSpec } from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
+  getRegisteredApiCollections,
   resolveRegisteredApiCollection,
 } from "./_internal/api-collection-registry.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
@@ -339,16 +340,27 @@ export function apiCollection(options?: ApiCollectionOptions): {
       // Without explicit options, read the Nimbus config's `api` entry named
       // after this collection key. The read happens per load, so a dev refresh
       // after an astro.config edit sees the edited entry.
-      const {
-        collection,
-        spec,
-        label,
-        versions,
-        requireOperationId,
-        routes,
-      } =
-        explicit ??
-        resolveRegisteredApiCollection(astroConfig.root, context.collection);
+      const registered = explicit
+        ? undefined
+        : resolveRegisteredApiCollection(astroConfig.root, context.collection);
+      const { collection, spec, label, versions, requireOperationId, routes } =
+        explicit ?? registered!;
+      // The sidebar mode always comes from the Nimbus config's `api` entry:
+      // request rendering and the build's component check read it there too.
+      const sidebar = (
+        registered ??
+        getRegisteredApiCollections(astroConfig.root)?.find(
+          (entry) => entry.collection === collection,
+        )
+      )?.sidebar;
+      const explicitSidebar = (options as { sidebar?: unknown } | undefined)?.sidebar;
+      if (explicit && explicitSidebar !== undefined && explicitSidebar !== sidebar) {
+        logger.warn(
+          `apiCollection({ collection: "${collection}" }) sets \`sidebar\`, which is read only from the ` +
+            `\`api\` entry in the Nimbus config (astro.config.*). Using ${sidebar ? `"${sidebar}"` : `"full"`}; ` +
+            `set \`sidebar\` on that entry instead.`,
+        );
+      }
       noteApiCollectionLoad(astroConfig.root, context.collection, collection);
 
       const {
@@ -380,6 +392,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         versions,
         requireOperationId,
         routes,
+        sidebar,
       });
 
       // M4: a non-default version id must not collide with a top-level page
@@ -424,6 +437,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
               collection,
               target.version ?? null,
               model,
+              { sidebar: target.sidebar, mountPath: target.mountPath },
             );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; surface

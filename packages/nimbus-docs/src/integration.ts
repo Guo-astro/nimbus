@@ -77,6 +77,7 @@ import {
 } from "./_internal/validate-mdx-content.js";
 import { validateNimbusConfig } from "./_internal/validate.js";
 import { makeHiddenSitemapFilter } from "./_internal/hidden-sitemap.js";
+import { navBuildId, outdatedApiSidebarError } from "./_internal/api-sidebar-components.js";
 import { virtualConfigPlugin } from "./_internal/virtual-config.js";
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
@@ -458,6 +459,8 @@ export function nimbus(
   let sitemapBareRootUrl: string | null = null;
   let sitemapHasResolvedRootPage = false;
   let building = false;
+  // What `astro:build:setup` hashes into the sidebar's build id.
+  let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
   let indexedCollectionsForBuild: string[] = [];
   let apiCollectionsForBuild: string[] = [];
@@ -493,6 +496,7 @@ export function nimbus(
         // content/assets stay root-relative via their collection bases.
         const srcDir = fileURLToPath(astroConfig.srcDir);
         const projectRoot = fileURLToPath(astroConfig.root);
+        navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
         beginPreparedMarkdownSession(astroConfig.root);
         registerApiCollections(
@@ -939,6 +943,8 @@ export function nimbus(
             rendering: mode,
           });
         }
+        const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
+        if (outdatedSidebar) throw authorError(outdatedSidebar);
         if (building) {
           injectRoute({
             pattern: REQUEST_ROUTE_INVENTORY_PATTERN,
@@ -1779,6 +1785,16 @@ export function nimbus(
             projectRootForBuild,
           );
         }
+      },
+      // Content sync has built the API models by now, so the sidebar's build id
+      // can hash their navigation rather than whole specs. Dev never caches
+      // rows, so it gets no id.
+      "astro:build:setup": async ({ updateConfig }) => {
+        const navs = navBuildInputs.hasApi
+          ? await (await import("./_internal/api-loader.js")).configuredApiNavs()
+          : [];
+        const id = navBuildId(navs, navBuildInputs.srcDir, navBuildInputs.base);
+        updateConfig({ define: { __NIMBUS_BUILD_ID__: JSON.stringify(id) } });
       },
       "astro:routes:resolved": ({ routes }) => {
         markdownRoutes.update(

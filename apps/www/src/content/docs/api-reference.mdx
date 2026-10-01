@@ -229,6 +229,58 @@ The version marked `default: true` owns `/api`; other versions mount below their
 
 Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
 
+### Sidebar for large APIs
+
+By default, every API page includes the whole navigation tree. For a large API, that tree can be most of each page's size. Set `sidebar` on the `api` entry to include less:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    sidebar: "on-demand",
+  },
+],
+```
+
+| Value | What each page includes | A collapsed group |
+| --- | --- | --- |
+| `"full"` (default) | The whole tree. | Opens in place. |
+| `"on-demand"` | Top-level items, plus the current page's branch. | Opens in place, loading its rows the first time. |
+
+With `"on-demand"`, the current page's ancestors are open and show all their children, so its neighbors are one click away. Schema and webhook pages show top-level items only. The setting applies to every version of a family.
+
+When a reader opens a collapsed group, the sidebar fetches the page its label links to and copies the group's rows from that page's sidebar. A group without a page, such as an `x-tagGroups` category, takes its rows from the API overview instead. Fetching starts when the pointer moves over a group or it receives focus, so rows usually appear as soon as it opens. If they cannot load, opening the group goes to its page instead.
+
+Without JavaScript, a collapsed group's label still links to its page. Categories from `x-tagGroups` have no page to link to, so they open only on pages inside them; the API overview's body links every section.
+
+Every page still carries every top-level item, so an API with hundreds of flat tags stays heavy. Group its tags under a tag's `parent` or with `x-tagGroups`, which Nimbus reads in any OpenAPI version. A tag's `x-displayName` sets the label readers see, while its `name` keeps deciding its coordinate and route:
+
+```yaml title="openapi.yaml"
+tags:
+  - name: workers
+    x-displayName: Workers
+  - name: workers.scripts
+    x-displayName: Scripts
+    parent: workers
+```
+
+In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open, without replaying their animation. Rows loaded on one page show on the next before it paints; a new deployment starts over, so rows saved before it are never shown after it.
+
+Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config, and the build warns if the two disagree.
+
+Every group page lists its operations and its subsections, and the API overview lists every top-level section, so all pages stay reachable in every mode.
+
+#### Upgrading an existing site
+
+`"on-demand"` needs API sidebar and layout components from the same release as your `@cloudflare/nimbus-docs`. With older copies, the build fails and names the outdated files. To update them, run:
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
+
+For each component already in your project, it asks whether to overwrite it, even if your copy is unchanged. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
+
+Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
+
 ### Build or request rendering
 
 API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:

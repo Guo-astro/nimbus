@@ -308,6 +308,11 @@ const apiSpecShape = {
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
   routes: routePolicySchema.optional(),
+  sidebar: z
+    .enum(["full", "on-demand"], {
+      error: '"api[].sidebar" must be "full" or "on-demand"',
+    })
+    .optional(),
 };
 const apiSpecKeys = new Set(Object.keys(apiSpecShape));
 const apiSpecSchema = z

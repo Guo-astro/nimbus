@@ -460,7 +460,7 @@ class Walker implements ParseContext {
     this.collectHierarchy();
     for (const tag of asArray(this.doc.tags)) {
       if (!isPlainObject(tag) || typeof tag.name !== "string") continue;
-      this.ensureSection(tag.name, asString(tag.description));
+      this.ensureSection(tag.name, asString(tag.description), true, asString(tag["x-displayName"]));
     }
     // x-tagGroups categories are nav-only grouping nodes:
     // they get a section node so member ancestry (breadcrumbs, auto-expand)
@@ -566,7 +566,7 @@ class Walker implements ParseContext {
    * `addSections`; tags first seen on an operation are synthesized here so an
    * operation never dangles under a parent coordinate that has no node.
    */
-  ensureSection(tag: string, description?: string, page = true): void {
+  ensureSection(tag: string, description?: string, page = true, displayName?: string): void {
     if (this.navByTag.has(tag)) return;
     const coord = sectionCoordinate(tag);
     const parentTag = this.tagParent.get(tag);
@@ -578,15 +578,19 @@ class Walker implements ParseContext {
     // slugified projection (`tagRouteSegment`) rather than a verbatim,
     // route-faulted segment — a spaced tag like "User Management" routes cleanly
     // while its coordinate stays opaque and citeable.
+    // `x-displayName` (a widely used vendor extension) labels the section for
+    // readers; the tag name stays the identity: coordinate, route, hierarchy.
+    const label = displayName && displayName !== tag ? displayName : undefined;
     this.node(coord, "section", parent, {
       kind: "section",
       name: tag,
+      ...(label ? { displayName: label } : {}),
       description,
     });
     // A nav-only category (page === false) is a grouping node with a model node
     // for ancestry but no page — so it is never routed and carries no href.
     if (page) this.page(coord, `tags/${tagRouteSegment(tag)}`);
-    this.navByTag.set(tag, { coordinate: coord, label: tag, kind: "section", children: [] });
+    this.navByTag.set(tag, { coordinate: coord, label: label ?? tag, kind: "section", children: [] });
   }
 
   /**

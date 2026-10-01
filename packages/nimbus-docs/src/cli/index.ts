@@ -56,11 +56,13 @@ import {
   getIndexEntry,
   listEntries,
   registrySource,
+  registryVersionWarning,
   resolveComponentTree,
 } from "./resolver.js";
 import { unknownFlagError } from "./flags.js";
 import { progress } from "./progress.js";
 import { diffCommand, outdatedCommand } from "./upgrade.js";
+import { installedNimbusVersion, runningNimbusVersion } from "../_internal/upgrades.js";
 
 // Load the CLI-only registry override without importing feature/build variables
 // into process.env before the Vite-parity preflight runs.
@@ -445,6 +447,13 @@ async function addCommand(
       "Install order:\n  " + items.map((i) => i.name).join(" → "),
     );
   }
+
+  let projectVersion: string | null = null;
+  try {
+    projectVersion = installedNimbusVersion(cwd) ?? runningNimbusVersion();
+  } catch {}
+  const skew = registryVersionWarning(items.find((i) => i.name === slug)?.version, projectVersion);
+  if (skew) p.log.warn(skew);
 
   const report = await installComponents(items, {
     cwd,

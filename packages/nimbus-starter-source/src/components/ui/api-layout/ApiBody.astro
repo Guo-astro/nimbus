@@ -280,13 +280,27 @@ const deprecationHtml = page.deprecated
   )}
 
   {page.kind === "section" && (
-    <ul class="flex list-none flex-col gap-1 p-0">
-      {page.operations.map((op) => (
-        <li>
-          <a href={withBase(op.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-2 hover:underline">{op.label}</a>
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul class="flex list-none flex-col gap-1 p-0">
+        {page.operations.map((op) => (
+          <li>
+            <a href={withBase(op.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-2 hover:underline">{op.label}</a>
+          </li>
+        ))}
+      </ul>
+      {page.sections && (
+        <section>
+          <h2 class="mb-2 text-sm font-semibold text-foreground">Sections</h2>
+          <ul class="flex list-none flex-col gap-1 p-0">
+            {page.sections.map((s) => (
+              <li>
+                <a href={withBase(s.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-2 hover:underline">{s.label}</a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
   )}
 
   {page.kind === "api" && (

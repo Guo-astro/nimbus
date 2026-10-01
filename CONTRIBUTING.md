@@ -83,6 +83,16 @@ A bare `pnpm --filter @nimbus/www build` doesn't rebuild `nimbus-docs`, so after
 
 `CLAUDE.md` / `AGENT.md` carry the deeper architecture notes — you don't need them to run the repo.
 
+### Releases
+
+Merging the "chore: bump package versions" PR publishes to npm. Right after it publishes, deploy the docs site:
+
+```sh
+pnpm --filter @nimbus/www run deploy
+```
+
+`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ.
+
 ### Preview releases
 
 To let someone install and test a PR before it merges, add the `pr preview`

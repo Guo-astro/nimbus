@@ -12,6 +12,7 @@
  */
 
 export { mount } from "./mount";
+export { initNavSidebar } from "./nav-sidebar";
 export { makeDisclosure } from "./disclosure";
 export type { DisclosureOptions, DisclosureInstance } from "./disclosure";
 export { initDisclosureGroup } from "./disclosure-group";

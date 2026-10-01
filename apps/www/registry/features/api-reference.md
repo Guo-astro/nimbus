@@ -238,7 +238,10 @@ const socialImage = `/og${page.href.replace(/\/$/, "")}.png`;
 The nav is handled by `ApiSidebar` inside `ApiLayout` — there's no separate
 `ApiNavList` to write. To customise the tree's look (icons, grouping, a
 collapse-all affordance), edit `src/components/ui/api-sidebar/`; the active/
-expanded flags and verb come pre-resolved on each `ApiNavItem`.
+expanded flags and verb come pre-resolved on each `ApiNavItem`. For a large
+API (hundreds of operations), suggest `sidebar: "on-demand"` on the `api`
+entry so pages don't each carry the whole tree.
+
 ## 5. Optional — add to the sidebar
 
 Sidebar layout is taste-laden; ask before editing. If the user wants an "API"

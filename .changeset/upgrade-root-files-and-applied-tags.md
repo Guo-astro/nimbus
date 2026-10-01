@@ -9,4 +9,4 @@
 - `add` and `init` print plain lines without a terminal, instead of spinner escapes.
 - A duplicate page or unknown MDX component fails the build without a stack trace.
 - Generated Markdown keeps list structure around components: code blocks and nested lists stay in their list items, and components stay inside the list item, card, or blockquote that holds them.
-- Components without a Markdown renderer no longer leave raw tags; a `title` becomes a bold line.
+- Components without a Markdown renderer no longer leave raw tags.

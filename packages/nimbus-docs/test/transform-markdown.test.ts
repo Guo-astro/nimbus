@@ -293,7 +293,7 @@ describe("renderEntryAsMarkdown: component placement", () => {
   test("<Steps> inside a card starts on its own line within the card", () => {
     assert.equal(
       mdx('<Card title="Setup">\n  <Steps>\n    <Step title="Install">\n      Run it.\n    </Step>\n  </Steps>\n</Card>\n'),
-      "- **Setup** — \n\n  1. **Install**\n\n     Run it.",
+      "- **Setup**\n\n  1. **Install**\n\n     Run it.",
     );
   });
 
@@ -366,4 +366,31 @@ test("tab items and steps written on one line each keep their label", () => {
     mdx('<Steps><Step title="A">One.</Step><Step title="B">Two.</Step></Steps>\n'),
     "1. **A**\n\n   One.\n2. **B**\n\n   Two.",
   );
+});
+
+describe("renderEntryAsMarkdown: nesting the reviewers found", () => {
+  test("a card whose body is a list keeps the list under its title", () => {
+    assert.equal(mdx('<Card title="Options">\n\n- Alpha.\n- Beta.\n\n</Card>\n'), "- **Options**\n\n  - Alpha.\n  - Beta.");
+  });
+
+  test("an <Aside> inside an <Aside> keeps both", () => {
+    assert.equal(
+      mdx('<Aside title="Outer">\n\nOuter text.\n\n<Aside title="Inner">\n\nInner text.\n\n</Aside>\n\nOuter ending.\n\n</Aside>\n'),
+      "> **Outer**\n>\n> Outer text.\n>\n> > **Inner**\n> >\n> > Inner text.\n>\n> Outer ending.",
+    );
+  });
+
+  test("an HTML wrapper inside a list item stays in the item, with its component", () => {
+    assert.equal(
+      mdx('<Aside title="Notice">\n\n- Parent.\n\n  <div>\n\n  <Tabs>\n  <TabItem label="First">\n\n  Body.\n\n  </TabItem>\n  </Tabs>\n\n  </div>\n\n- Sibling.\n\n</Aside>\n'),
+      "> **Notice**\n>\n> - Parent.\n>\n>   <div>\n>\n>   ### First\n>\n>   Body.\n>\n>   </div>\n>\n> - Sibling.",
+    );
+  });
+
+  test("an HTML wrapper around cards closes where it opened", () => {
+    assert.equal(
+      mdx('<Frame>\n  <div>\n    <CardGrid>\n      <Card title="A">one</Card>\n      <Card title="B">two</Card>\n    </CardGrid>\n  </div>\n</Frame>\n'),
+      "<div>\n\n- **A** — one\n- **B** — two\n\n</div>",
+    );
+  });
 });

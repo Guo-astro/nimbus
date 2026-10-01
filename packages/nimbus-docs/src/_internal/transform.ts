@@ -137,7 +137,6 @@ function textAttrs(raw = ""): Record<string, string> {
 
 const indentOf = (line: string): number => columns(/^[ \t]*/.exec(line)![0]);
 const JSX_TAG_LINE = /^[ \t]*<\/?[A-Za-z]/;
-const HTML_TAG_LINE = /^[ \t]*<\/?[a-z]/;
 
 /**
  * Where Markdown puts a line indented `indent` columns, given the lines above
@@ -189,14 +188,29 @@ function cleanChildren(children: string): string {
   const first = lines[0]!.trim() ? lines.shift()!.trim() : null;
   while (lines.length > 0 && !lines[0]!.trim()) lines.shift();
   const columnsAt: number[] = [];
+  // An HTML element's closing tag goes where its opening tag went: inside the
+  // list item that holds the element, or out of a list the element wraps.
+  const openTags: Array<{ name: string; column: number }> = [];
   const out = lines.map((line, index) => {
     const text = line.replace(/^[ \t]*/, "");
-    // An HTML tag line stays in the output as an HTML block, which its JSX
-    // nesting indentation would push into the list above. A component tag line
-    // keeps its place: the component renders there later.
-    columnsAt[index] = text && !HTML_TAG_LINE.test(line)
-      ? markdownColumn((k) => lines[index - k], indentOf(line), LIST_ITEM.test(line), (k) => columnsAt[index - k]!)
-      : 0;
+    const closing = /^<\/([a-z][\w-]*)\s*>/.exec(text)?.[1];
+    let opener = -1;
+    for (let i = openTags.length - 1; closing && i >= 0; i--) {
+      if (openTags[i]!.name === closing) {
+        opener = i;
+        break;
+      }
+    }
+    if (opener >= 0) {
+      columnsAt[index] = openTags[opener]!.column;
+      openTags.length = opener;
+    } else {
+      columnsAt[index] = text
+        ? markdownColumn((k) => lines[index - k], indentOf(line), LIST_ITEM.test(line), (k) => columnsAt[index - k]!)
+        : 0;
+      const opening = /^<([a-z][\w-]*)\b[^>]*>(?!.*<\/\1\s*>)/.exec(text);
+      if (opening && !opening[0].endsWith("/>")) openTags.push({ name: opening[1]!, column: columnsAt[index]! });
+    }
     return text ? " ".repeat(columnsAt[index]!) + text : "";
   });
   return (first === null ? out : [first, ...out]).join("\n").trim();
@@ -352,6 +366,29 @@ function renderPackageManagers(
   ].join("\n");
 }
 
+/**
+ * `<Name …>…</Name>` with no `<Name` inside: the innermost of nested
+ * same-name components, so each closing tag pairs with its own opening tag.
+ * Callers repeat until none are left, working outwards.
+ */
+function innermost(name: string, attrs = "([^>]*)"): RegExp {
+  return new RegExp(`<${name}\\b${attrs}>((?:(?!<${name}\\b)[\\s\\S])*?)<\\/${name}>`);
+}
+
+function replaceNested(
+  markdown: string,
+  tag: RegExp,
+  block: boolean,
+  render: Parameters<typeof replaceComponent>[3],
+): string {
+  let out = markdown;
+  for (let previous = ""; previous !== out; ) {
+    previous = out;
+    out = replaceComponent(out, tag, block, render);
+  }
+  return out;
+}
+
 function applyDefaultComponentTransforms(markdown: string): string {
   let out = markdown;
 
@@ -359,7 +396,7 @@ function applyDefaultComponentTransforms(markdown: string): string {
     renderPackageManagers(parseAttrs(rawAttrs)),
   );
 
-  out = replaceComponent(out, /<Aside\b([^>]*)>([\s\S]*?)<\/Aside>/, true, ([rawAttrs, children]) => {
+  out = replaceNested(out, innermost("Aside"), true, ([rawAttrs, children]) => {
     const attrs = parseAttrs(rawAttrs);
     const type = asTitle(attrs.type, "note").toUpperCase();
     const title = asTitle(textAttrs(rawAttrs).title, type.charAt(0) + type.slice(1).toLowerCase());
@@ -367,10 +404,14 @@ function applyDefaultComponentTransforms(markdown: string): string {
   });
 
   // Cards are list items: consecutive cards stay one tight list.
-  out = replaceComponent(out, /<Card\b([^>]*)>([\s\S]*?)<\/Card>/, false, ([rawAttrs, children]) => {
+  out = replaceNested(out, innermost("Card"), false, ([rawAttrs, children]) => {
     const title = asTitle(textAttrs(rawAttrs).title, "Card");
-    const body = cleanChildren(children!).replace(/\n(?=[^\n])/g, "\n  ");
-    return `- **${title}**${body ? ` — ${body}` : ""}`;
+    const body = cleanChildren(children!);
+    if (!body) return `- **${title}**`;
+    // A one-line body follows the title; anything more (a list, paragraphs)
+    // goes below it, inside the item.
+    if (!body.includes("\n") && !LIST_ITEM.test(body)) return `- **${title}** — ${body}`;
+    return `- **${title}**\n\n  ${body.replace(/\n(?=[^\n])/g, "\n  ")}`;
   });
   out = out.replace(/<\/?CardGrid\b[^>]*>/g, "");
 
@@ -381,7 +422,7 @@ function applyDefaultComponentTransforms(markdown: string): string {
     return `- ${label}${attrs.description ? ` — ${attrs.description}` : ""}`;
   });
 
-  out = replaceComponent(out, /<Steps\b[^>]*>([\s\S]*?)<\/Steps>/, true, ([children]) => {
+  out = replaceNested(out, innermost("Steps", "[^>]*"), true, ([children]) => {
     let index = 0;
     return cleanChildren(children!).replace(
       /<Step\b([^>]*)>([\s\S]*?)<\/Step>/g,
@@ -396,7 +437,7 @@ function applyDefaultComponentTransforms(markdown: string): string {
     );
   });
 
-  out = replaceComponent(out, /<Tabs\b[^>]*>([\s\S]*?)<\/Tabs>/, true, ([children]) =>
+  out = replaceNested(out, innermost("Tabs", "[^>]*"), true, ([children]) =>
     cleanChildren(children!).replace(
       /<TabItem\b([^>]*)>([\s\S]*?)<\/TabItem>/g,
       (_tabMatch, rawAttrs: string, tabChildren: string, offset: number, whole: string) => {

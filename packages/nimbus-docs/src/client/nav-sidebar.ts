@@ -95,6 +95,19 @@ function cacheRows(build: string, key: string, html: string): void {
 
 const pages = new Map<string, Promise<Document>>();
 
+/** `src` as a same-origin page URL, or `undefined`: rows (markup) and the
+ *  failure fallback (a navigation) only ever come from this site. */
+function pageUrl(src: string | null): string | undefined {
+  if (!src) return undefined;
+  try {
+    const url = new URL(src, window.location.href);
+    const web = url.protocol === "https:" || url.protocol === "http:";
+    return web && url.origin === window.location.origin ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function fetchPage(src: string): Promise<Document> {
   let pending = pages.get(src);
   if (pending) {
@@ -156,20 +169,21 @@ export function initNavSidebar(root: HTMLElement): () => void {
 
   const panelOf = (group: Element) => group.querySelector<HTMLElement>(CONTENT);
   const prefetch = (group: Element) => {
-    const src = group.getAttribute(SRC);
-    if (src) void fetchPage(src).catch(() => {});
+    const url = pageUrl(group.getAttribute(SRC));
+    if (url) void fetchPage(url).catch(() => {});
   };
 
   // `follow`: if the rows cannot load, go to the page that lists them. Only
   // when the reader opened the group; a group restored open never redirects.
   const load = async (group: HTMLElement, follow: boolean) => {
     const src = group.getAttribute(SRC);
+    const url = pageUrl(src);
     const id = group.getAttribute(GROUP);
     const panel = panelOf(group);
-    if (!src || !id || !panel || panel.hasAttribute("aria-busy")) return;
+    if (!src || !url || !id || !panel || panel.hasAttribute("aria-busy")) return;
     panel.setAttribute("aria-busy", "true");
     try {
-      const rows = rowsIn(await fetchPage(src), id);
+      const rows = rowsIn(await fetchPage(url), id);
       if (destroyed || !panel.isConnected) return;
       if (!rows) throw new Error(`${src} does not list ${id}`);
       if (!group.hasAttribute(SRC)) return;
@@ -181,7 +195,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
       remount();
     } catch {
       const isOpen = group.querySelector(TRIGGER)?.getAttribute("data-nb-state") === "open";
-      if (follow && !destroyed && isOpen) window.location.assign(src);
+      if (follow && !destroyed && isOpen) window.location.assign(url);
     } finally {
       panel.removeAttribute("aria-busy");
     }

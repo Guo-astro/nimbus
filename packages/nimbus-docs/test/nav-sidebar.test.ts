@@ -45,7 +45,7 @@ before(() => {
     g[name] = name === "window" ? dom.window : (dom.window as any)[name];
   }
   g.fetch = (src: string) => {
-    fetches.push(src);
+    fetches.push(new URL(src).pathname);
     return respond(src);
   };
 });
@@ -205,5 +205,20 @@ describe("initNavSidebar", () => {
     assert.deepEqual(fetches, ["/api/hover/"], "opening reuses the prefetch");
     assert.equal(panel("tags.A").textContent, "A");
     stop();
+  });
+
+  test("never fetches or follows a source outside this site", async () => {
+    for (const src of ["javascript:alert(1)", "https://evil.test/api/a/", "//evil.test/x/"]) {
+      sessionStorage.clear();
+      const root = page(src);
+      const stop = initNavSidebar(root);
+      document.querySelector("[data-nb-nav-group='tags.A'] a")!
+        .dispatchEvent(new window.Event("pointerover", { bubbles: true }));
+      trigger("tags.A").setAttribute("data-nb-state", "open");
+      await settle();
+      assert.deepEqual(fetches, [], src);
+      assert.equal(navigations.length, 0, src);
+      stop();
+    }
   });
 });

@@ -59,16 +59,18 @@ export default defineConfig({
     "@scalar/openapi-parser",
     "@readme/httpsnippet",
   ],
-  // Bundle the remark-lint stack and github-slugger into dist so consuming
-  // projects don't gain new transitive deps. Their logic is inlined into
-  // the published artifacts via `noExternal`. `github-slugger` is used by
-  // the `nimbus/duplicate-slug` pre-build check to canonicalize entry IDs
-  // the same way Astro's content layer does.
+  // Bundle the remark-lint stack, the Markdown serializer, and github-slugger
+  // into dist so consuming projects don't gain new transitive deps. Their
+  // logic is inlined into the published artifacts via `noExternal`.
+  // `github-slugger` is used by the `nimbus/duplicate-slug` pre-build check
+  // to canonicalize entry IDs the same way Astro's content layer does; the
+  // `mdast-util-*` serializers write generated Markdown.
   noExternal: [
     "github-slugger",
     "unified",
     "vfile",
     /^remark-lint-/,
+    /^mdast-util-/,
   ],
   // Transitive deps of the `noExternal` packages (e.g. `mdast-util-phrasing`,
   // `unist-util-*`) ride along into the bundle. tsdown surfaces this as a

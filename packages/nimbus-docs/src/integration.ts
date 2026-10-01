@@ -944,7 +944,7 @@ export function nimbus(
           });
         }
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
-        if (outdatedSidebar) throw new Error(outdatedSidebar);
+        if (outdatedSidebar) throw authorError(outdatedSidebar);
         if (building) {
           injectRoute({
             pattern: REQUEST_ROUTE_INVENTORY_PATTERN,

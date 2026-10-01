@@ -436,7 +436,7 @@ export async function gatherOutdated(
       if (compatibility) warnings.push({ scope: "starter", ...compatibility });
       const applyBlocker = compatibility?.code === "starter-needs-newer-package" ? compatibility.message : null;
       for (const finding of gathered.findings.filter(shown)) {
-        starter.push({ file: finding.file, status: finding.status, action: starterAction(cwd, finding, applyBlocker) });
+        starter.push({ file: finding.file, status: finding.status, action: starterAction(cwd, finding, applyBlocker, flags) });
       }
     } catch (error) {
       if (!fatal) errors.push({ scope: "starter", code: "starter-unavailable", message: errorMessage(error), recoverable: true });
@@ -493,8 +493,15 @@ export async function gatherOutdated(
   };
 }
 
-function starterAction(cwd: string, finding: StarterFinding, compatibility: string | null): OutdatedAction {
-  const view = selfCommand(["diff", finding.file], cwd);
+function starterAction(
+  cwd: string,
+  finding: StarterFinding,
+  compatibility: string | null,
+  flags: UpgradeFlags,
+): OutdatedAction {
+  // Compare against the same tree outdated did, or apply would take another tag.
+  const target = flags.templateDir ? ["--template-dir", flags.templateDir] : flags.to ? ["--to", flags.to] : [];
+  const view = selfCommand(["diff", finding.file, ...target], cwd);
   if (finding.status === "clean" || finding.status === "added" || finding.status === "removed") {
     if (compatibility) {
       return {
@@ -506,7 +513,7 @@ function starterAction(cwd: string, finding: StarterFinding, compatibility: stri
     }
     return {
       kind: "apply",
-      command: selfCommand(["diff", finding.file, "--apply"], cwd),
+      command: selfCommand(["diff", finding.file, "--apply", ...target], cwd),
       automatic: true,
       instructions: ["Review the diff, then apply only while the clean preimage or absence still matches."],
     };
@@ -757,7 +764,16 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     }
     writeFileAtomic(abs, upstream);
   }
-  recordAppliedTag(cwd, target.treeFile, g.upstreamTag);
+  try {
+    recordAppliedTag(cwd, target.treeFile, g.upstreamTag);
+  } catch (error) {
+    // Unrecorded, the applied file would read as a hand-merge later: undo it.
+    if (disk === null) fs.rmSync(abs, { force: true });
+    else writeFileAtomic(abs, disk);
+    p.log.error(`Didn't apply ${target.file}: couldn't record its tag in nimbus.json (${errorMessage(error)}).`);
+    process.exitCode = 1;
+    return;
+  }
   p.log.success(`Applied upstream ${target.file}. Review with \`git diff\`.`);
 }
 

@@ -398,8 +398,9 @@ class Walker implements ParseContext {
   }
 
   /** With `schemaPages: false`, a spec that defines schemas but no operations or
-   *  webhooks publishes only its root page. Legal, but almost certainly not what
-   *  the author meant, so say so once. */
+   *  webhooks shows its schemas on no page at all (types render only inline, on
+   *  operations). Legal, but almost certainly not what the author meant, so say
+   *  so once. Tag pages may still exist, so make no claim about the page count. */
   private warnIfOnlySchemas(): void {
     if (this.schemaPages) return;
     if (Object.keys(this.doc.components?.schemas ?? {}).length === 0) return;
@@ -408,7 +409,7 @@ class Walker implements ParseContext {
     }
     this.registry.addWarning(
       `This spec defines schemas but no operations or webhooks, and \`schemaPages\` is false, ` +
-        `so the reference has only its root page. Set \`schemaPages: true\` to publish a page per schema.`,
+        `so its schemas appear on no page. Set \`schemaPages: true\` to publish a page per schema.`,
       undefined,
       undefined,
       "schema-pages-only-root",

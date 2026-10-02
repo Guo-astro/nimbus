@@ -671,6 +671,15 @@ function projectPageWithView(
 ): ApiPageProps {
   const node = view.node(coordinate);
   if (!node) throw new Error(`No API node for coordinate "${coordinate}".`);
+  // A node without a page (a schema under `schemaPages: false`, an x-tagGroups
+  // category) has no route of its own; projecting it would hand back the API
+  // root's href and Markdown URL as if they were its own.
+  if (!view.hasPage(coordinate)) {
+    throw new Error(
+      `Coordinate "${coordinate}" is a ${node.kind} node, which is not a page` +
+        (node.kind === "schema" ? " (schema pages are off for this collection)." : "."),
+    );
+  }
 
   switch (node.kind) {
     case "operation": {

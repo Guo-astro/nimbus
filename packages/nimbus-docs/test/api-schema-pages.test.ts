@@ -119,10 +119,28 @@ components:
     assert.deepEqual([...off.model.pages.pages], ["api"]);
     const warnings = off.diagnostics.filter((d) => d.code === "schema-pages-only-root");
     assert.equal(warnings.length, 1);
-    assert.match(warnings[0]!.message, /schemaPages/);
+    assert.match(warnings[0]!.message, /schemas appear on no page/);
 
     const on = await parseOpenApi({ collection: "api", spec });
     assert.equal(on.diagnostics.filter((d) => d.code === "schema-pages-only-root").length, 0);
+  });
+
+  test("the schemas-only warning makes no page-count claim when tag pages exist", async () => {
+    const spec = `
+openapi: 3.1.0
+info: { title: Types, version: "1" }
+paths: {}
+tags:
+  - name: Types
+components:
+  schemas:
+    Thing: { type: string }
+`;
+    const off = await parseOpenApi({ collection: "api", spec, schemaPages: false });
+    assert.deepEqual([...off.model.pages.pages].sort(), ["api", "tags.Types"]);
+    const warning = off.diagnostics.find((d) => d.code === "schema-pages-only-root");
+    assert.ok(warning, "still warns: the schemas appear on no page");
+    assert.doesNotMatch(warning.message, /root page/);
   });
 
   test("schema identities still claim their slug: operationId schemas/User collides with schema User", async () => {
@@ -193,6 +211,39 @@ describe("schemaPages: false — view model", () => {
     const envs = renderApiPageMarkdown(getApiPageProps(await model(false, MAP_SPEC), "putEnvs"));
     assert.doesNotMatch(envs, /\/schemas\//);
     assert.match(envs, /\(map<Env>, optional\)/, "an unlinked field type reads like any other unlinked type");
+  });
+});
+
+describe("page props for a coordinate without a page", () => {
+  test("a schema under schemaPages: false is rejected, not given the root's URLs", async () => {
+    const off = await model(false);
+    assert.throws(
+      () => getApiPageProps(off, "Dispute"),
+      /Coordinate "Dispute" is a schema node, which is not a page \(schema pages are off for this collection\)/,
+    );
+    assert.equal(getApiPageProps(await model(), "Dispute").kind, "schema", "default still projects it");
+  });
+
+  test("an x-tagGroups category (nav-only) is rejected too", async () => {
+    const spec = `
+openapi: 3.1.0
+info: { title: Grouped, version: "1" }
+x-tagGroups:
+  - name: Compute
+    tags: [Workers]
+tags:
+  - name: Workers
+paths:
+  /workers:
+    get:
+      operationId: listWorkers
+      tags: [Workers]
+      responses:
+        "200": { description: ok }
+`;
+    const grouped = await model(undefined, spec);
+    assert.throws(() => getApiPageProps(grouped, "tags.Compute"), /Coordinate "tags\.Compute" is a section node, which is not a page\.$/);
+    assert.equal(getApiPageProps(grouped, "tags.Workers").kind, "section");
   });
 });
 

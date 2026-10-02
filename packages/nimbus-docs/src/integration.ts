@@ -2057,8 +2057,8 @@ function materializeLintConfig(
       "utf8",
     );
   } catch {
-    // Non-fatal — without the file, `nimbus-docs lint` falls back to the
-    // defaults, where every authoring rule is off.
+    // Non-fatal — without the file, `nimbus-docs lint` exits 1 asking for a
+    // build (every authoring rule would be off), unless `--rule` is passed.
   }
 }
 

@@ -1,7 +1,11 @@
 /**
- * `nimbus-docs lint` fails closed when a link rule is on and
- * `.nimbus/routes.json` can't be used: one `error` diagnostic on that file,
- * exit 1, whatever the configured severity. Drives the real CLI.
+ * `nimbus-docs lint` refuses to report a pass it didn't check. Drives the
+ * real CLI.
+ *
+ * - No `.nimbus/lint.json` (no build yet): every rule would be off, so it
+ *   exits 1 unless `--rule` names one.
+ * - A link rule is on and `.nimbus/routes.json` can't be used: one `error`
+ *   diagnostic on that file, exit 1, whatever the configured severity.
  */
 
 import assert from "node:assert/strict";
@@ -37,7 +41,10 @@ interface Envelope {
   }>;
 }
 
-function lint(project: Project, args: string[] = []): { status: number | null; json: Envelope } {
+function run(
+  project: Project,
+  args: string[] = [],
+): { status: number | null; stdout: string; stderr: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-route-truth-cli-"));
   try {
     fs.mkdirSync(path.join(dir, "src/content/docs"), { recursive: true });
@@ -65,15 +72,18 @@ function lint(project: Project, args: string[] = []): { status: number | null; j
       ["--import", TSX, CLI, "lint", "--format", "json", ...args],
       { cwd: dir, encoding: "utf8" },
     );
-    let json: Envelope;
-    try {
-      json = JSON.parse(res.stdout) as Envelope;
-    } catch {
-      throw new Error(`stdout is not JSON:\n${res.stdout}\nstderr:\n${res.stderr}`);
-    }
-    return { status: res.status, json };
+    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function lint(project: Project, args: string[] = []): { status: number | null; json: Envelope } {
+  const res = run(project, args);
+  try {
+    return { status: res.status, json: JSON.parse(res.stdout) as Envelope };
+  } catch {
+    throw new Error(`stdout is not JSON:\n${res.stdout}\nstderr:\n${res.stderr}`);
   }
 }
 
@@ -158,4 +168,23 @@ test("usable routes.json runs the rule as configured", () => {
   assert.equal(result.json.diagnostics.length, 1);
   assert.equal(result.json.diagnostics[0]!.severity, "warn");
   assert.match(result.json.diagnostics[0]!.message, /broken link "\/nope"/);
+});
+
+test("missing lint.json exits 1: with no rules enabled, nothing would be checked", () => {
+  const res = run({ routes: routes({}) });
+  assert.equal(res.status, 1);
+  assert.equal(res.stdout, "");
+  assert.match(res.stderr, /`\.nimbus\/lint\.json` is missing, so no lint rules are enabled\. Run `astro build`/);
+});
+
+test("missing lint.json still runs the rule named by --rule", () => {
+  const result = lint({ routes: null }, ["--rule", "nimbus/single-h1"]);
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.json.diagnostics, []);
+});
+
+test("lint.json with every rule off is a clean run, not an error", () => {
+  const result = lint({ rules: { "nimbus/internal-link": "off" }, routes: null });
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.json.diagnostics, []);
 });

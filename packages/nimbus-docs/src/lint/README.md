@@ -56,9 +56,11 @@ projects get zero new transitive deps when they install `nimbus-docs`.
   integration at `astro:config:setup` and throw to fail the build. They
   can't be configured. Shipped: `duplicate-slug`, `mdx-syntax`.
 - **Authoring rules** (`kind: "authoring"`) run in `nimbus-docs lint`,
-  default to `error`, and are configurable via the integration's `rules`
-  option (materialized to `.nimbus/lint.json`). The build is never gated
-  on them.
+  are off by default, and are enabled via the integration's `rules`
+  option, which `astro build` and `astro dev` materialize to
+  `.nimbus/lint.json`. Without that file every rule would be off, so
+  `nimbus-docs lint` exits 1 asking for a build, unless `--rule` names the
+  rule to run. The build is never gated on them.
 
 ## Shipped rules
 
@@ -229,7 +231,7 @@ key, so they're written without the base too.
 **Trade-off: lint requires `astro build`.** `astro sync` and `astro dev`
 don't emit pages, so they don't update `.nimbus/routes.json`. CI is
 build-then-lint, in one job or with the whole `.nimbus/` directory passed
-as an artifact (`lint.json` is needed too). Files written by integrations
+as an artifact (lint exits 1 without `lint.json`). Files written by integrations
 whose `build:done` runs after Nimbus's aren't captured.
 
 **Missing route truth fails closed.** `astro build` invalidates the

@@ -1215,7 +1215,7 @@ test("configured request routes are explained to the build invariant", async (t)
       ),
     ),
     {
-      version: 1,
+      version: 2,
       base: "",
       knownRoutes: [
         "/built",

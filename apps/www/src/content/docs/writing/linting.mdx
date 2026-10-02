@@ -47,6 +47,29 @@ nimbus(config, {
 
 Per-collection `rules` shallow-merge over the top-level set. Authoring rules are **off by default** — omitting `rules` entirely runs none of them; you opt in per rule.
 
+## Check links
+
+`nimbus/internal-link` reports internal links that don't reach a URL your site serves. It checks them against `.nimbus/routes.json`, which `astro build` writes at the end of the build. The file lists every page and every other file the build produced, such as `/llms.txt`, feeds, `.md` alternates, and files from `public/`. Pages rendered on request are included too.
+
+Run `astro build` before `nimbus-docs lint`. When the rule is on and `.nimbus/routes.json` is missing, isn't valid JSON, or came from a different version of Nimbus, lint reports one error on that file and exits `1`, whatever severity you gave the rule. When a build starts, it deletes the previous build's file, or marks it incomplete if it can't be deleted, so lint never accepts it after a failed build. If the file can be neither deleted nor changed, the build fails until you fix its permissions or remove it.
+
+Write links without Astro's `base`. Nimbus adds the base when the page renders, so with `base: "/docs"` the link `[Guide](/guide)` goes to `/docs/guide`. Writing `[Guide](/docs/guide)` renders as `/docs/docs/guide`, and lint reports it with the path to use instead. Patterns in the rule's `ignore` option are written the same way, without the base.
+
+Files written by an integration that finishes after Nimbus aren't in the list. Add them to `ignore`.
+
+### Gate CI on links
+
+Run the build and lint in the same job:
+
+```sh
+astro build
+nimbus-docs lint
+```
+
+To lint in a separate job, pass the whole `.nimbus/` directory from the build job as an artifact. Lint also needs `.nimbus/lint.json`, which holds your `rules`.
+
+`nimbus-docs check` doesn't build. It checks links against `.nimbus/routes.json` when an earlier build left one, but when the file is missing it skips the rule and leaves a note instead of failing. To gate CI on links, run `astro build` and then `lint`.
+
 ## In-file disables
 
-Turn rules off for a single file with `nimbusDisableRules` frontmatter or inline comments — no config required. The severities authored above are materialized to `.nimbus/lint.json` so the standalone CLI reads the same config the integration does.
+Turn rules off for a single file with `nimbusDisableRules` frontmatter or inline comments — no config required. The severities authored above are materialized to `.nimbus/lint.json` by `astro build` and `astro dev`, so the standalone CLI reads the same config the integration does. Without that file, `nimbus-docs lint` exits `1` and asks you to build first, because no rule would run. `--rule` still runs the rule it names.

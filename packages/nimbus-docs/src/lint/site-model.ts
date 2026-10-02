@@ -1,10 +1,10 @@
 /**
  * Lint-side data shapes + the `nimbus/duplicate-slug` build validator.
  *
- * Route truth for `nimbus/internal-link` comes from Astro itself
- * (`astro:build:done` hands us the emitted `pages` array — the single
- * source of truth for served URLs). The integration writes that to
- * `.nimbus/routes.json`; the type lives here only so the rule and the
+ * Route truth for `nimbus/internal-link` comes from the build itself: at
+ * the end of `astro:build:done` the integration records Astro's `pages`
+ * plus every file in the build output, and writes them to
+ * `.nimbus/routes.json`. The type lives here only so the rule and the
  * writer agree on the shape.
  *
  * The duplicate-slug validator runs *before* the build because Astro
@@ -325,18 +325,37 @@ export function contentEntryUrl(
 
 // ---------------------------------------------------------------------------
 // Route truth — shape only. The integration's `astro:build:done` hook
-// constructs and writes this; `internal-link.ts` reads it.
+// constructs and writes this; `route-truth.ts` reads it for `internal-link`.
 // ---------------------------------------------------------------------------
 
+/**
+ * Version 2: `knownRoutes` covers every emitted file, and lint no longer
+ * strips `base` from links.
+ */
+export const ROUTE_TRUTH_VERSION = 2;
+
+/**
+ * Written over `.nimbus/routes.json` when a build can't delete the previous
+ * build's file, so lint reports an unfinished build instead of using it.
+ */
+export const INCOMPLETE_ROUTE_TRUTH = { incomplete: true } as const;
+
 export interface RouteTruth {
-  /** Schema version. Bump if the shape changes. */
-  version: 1;
-  /** Astro `base` config (`"/docs"`, `""`). Empty string when unset. */
+  /**
+   * Schema version. Bump when the shape or the meaning of `knownRoutes`
+   * changes, so lint refuses a file an older build wrote.
+   */
+  version: typeof ROUTE_TRUTH_VERSION;
+  /**
+   * Astro `base` config (`"/docs"`, `""`). Empty string when unset. For
+   * reference only: `knownRoutes` and authored links are both base-free.
+   */
   base: string;
   /**
-   * Every URL Astro emitted during the last build, canonicalized to
-   * `/foo` form (no trailing slash unless root). The lint rule resolves
-   * internal links against this set.
+   * Every URL the last build produced, as route keys
+   * (`_internal/route-key.ts`): pages, endpoints, `.md` alternates, and
+   * `public/` files, plus request-rendered pages and concrete on-demand
+   * routes. The lint rule resolves internal links against this set.
    */
   knownRoutes: string[];
   /**

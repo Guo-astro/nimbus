@@ -16,7 +16,9 @@ import path from "node:path";
 import {
   findMdxFiles,
   lintPaths,
+  ruleEnabledAnywhere,
   validateLintOptions,
+  withRuleOff,
   IMPLEMENTED_CODES,
   type CollectionsConfig,
   type RulesConfig,
@@ -55,7 +57,7 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   } else if (
     !error &&
-    internalLinkEnabled(config) &&
+    ruleEnabledAnywhere("nimbus/internal-link", config.rules, config.collections) &&
     !fs.existsSync(path.join(cwd, ".nimbus", "routes.json"))
   ) {
     notes.push({
@@ -66,41 +68,11 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
     // Noted structurally above — disable the rule so it doesn't also run and
     // write its own skip warning to stderr.
-    effective = withRuleDisabled(config, "nimbus/internal-link");
+    effective = withRuleOff(config, "nimbus/internal-link");
   }
 
   for (const d of lintPaths(files, cwd, effective)) findings.push(fromDiagnostic(d));
   return { scope: "authoring", findings, notes, evaluated: true };
-}
-
-function withRuleDisabled(
-  config: MaterializedConfig,
-  code: keyof RulesConfig,
-): MaterializedConfig {
-  const collections: CollectionsConfig = {};
-  for (const [name, collection] of Object.entries(config.collections)) {
-    collections[name] = collection.rules
-      ? { ...collection, rules: { ...collection.rules, [code]: "off" } }
-      : collection;
-  }
-  return {
-    ...config,
-    rules: { ...config.rules, [code]: "off" },
-    collections,
-  };
-}
-
-function internalLinkEnabled(config: MaterializedConfig): boolean {
-  const code = "nimbus/internal-link";
-  const settings: unknown[] = [(config.rules as Record<string, unknown>)[code]];
-  for (const collection of Object.values(config.collections)) {
-    const rules = collection.rules as Record<string, unknown> | undefined;
-    if (rules) settings.push(rules[code]);
-  }
-  return settings.some((setting) => {
-    const severity = Array.isArray(setting) ? setting[0] : setting;
-    return severity === "error" || severity === "warn";
-  });
 }
 
 export interface MaterializedConfig {

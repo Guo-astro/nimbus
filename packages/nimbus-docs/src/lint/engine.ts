@@ -13,6 +13,8 @@ import path from "node:path";
 
 import {
   resolveRuleForCollection,
+  ruleEnabledAnywhere,
+  withRuleOff,
   type CollectionsConfig,
   type RulesConfig,
 } from "./config.js";
@@ -20,6 +22,7 @@ import type { Diagnostic, Severity } from "./diagnostic.js";
 import { collectDisables, isDisabled } from "./disables.js";
 import { applyFixes } from "./fix.js";
 import { parseSource, type ParsedFile } from "./parse.js";
+import { readRouteTruth, ROUTE_TRUTH_FILE } from "./route-truth.js";
 import type { RuleReport } from "./rule.js";
 import { RULES } from "./rules/index.js";
 import type { AuthoringRuleCode } from "./diagnostic.js";
@@ -176,6 +179,54 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
       a.code.localeCompare(b.code),
   );
   return out;
+}
+
+/**
+ * True when `code` resolves to `warn` or `error` for at least one
+ * collection under `opts`, including `--rule` force-enabling it (see
+ * `lintFile`). Per-file and inline disables aren't considered.
+ */
+export function ruleWillRun(code: AuthoringRuleCode, opts: LintOptions = {}): boolean {
+  if (opts.only !== undefined && opts.only !== code) return false;
+  const rules = opts.rules ?? {};
+  if (opts.only === code && rules[code] === undefined) return true;
+  return ruleEnabledAnywhere(code, rules, opts.collections ?? {});
+}
+
+/** Rules that resolve links against `.nimbus/routes.json`. */
+const ROUTE_TRUTH_RULES = ["nimbus/internal-link"] as const satisfies readonly AuthoringRuleCode[];
+
+/**
+ * Fail closed. When a rule that needs `.nimbus/routes.json` will run and
+ * the file is missing, unreadable, or has an unknown version, return one
+ * `error` diagnostic on that file (whatever the configured severity) and
+ * options with those rules off, so they don't run against nothing.
+ * Otherwise return the options unchanged and no diagnostic.
+ */
+export function guardRouteTruth(
+  projectRoot: string,
+  opts: LintOptions,
+): { opts: LintOptions; diagnostic: Diagnostic | null } {
+  const enabled = ROUTE_TRUTH_RULES.filter((code) => ruleWillRun(code, opts));
+  const [first] = enabled;
+  if (first === undefined) return { opts, diagnostic: null };
+  const { problem } = readRouteTruth(projectRoot);
+  if (problem === undefined) return { opts, diagnostic: null };
+
+  let guarded = { ...opts, rules: opts.rules ?? {}, collections: opts.collections ?? {} };
+  for (const code of enabled) guarded = withRuleOff(guarded, code);
+  return {
+    opts: guarded,
+    diagnostic: {
+      code: first,
+      severity: "error",
+      source: "docs-compiler",
+      file: ROUTE_TRUTH_FILE,
+      message: `links can't be checked: ${problem}`,
+      line: 1,
+      column: 1,
+    },
+  };
 }
 
 /** Lint a set of absolute file paths, reading + parsing each one. */

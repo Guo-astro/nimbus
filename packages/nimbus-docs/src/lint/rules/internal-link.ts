@@ -1,9 +1,15 @@
 /**
- * nimbus/internal-link — internal links that don't resolve to a real
- * page on the site. Reads route truth from `.nimbus/routes.json`
- * materialized at integration time; without that file the rule skips
- * silently (every link would otherwise false-positive — the worst
- * outcome for a trust-sensitive rule).
+ * nimbus/internal-link — internal links that don't resolve to a URL the
+ * build produced. Reads route truth from `.nimbus/routes.json`, which
+ * `astro build` writes from Astro's pages plus every emitted file.
+ *
+ * Missing route truth fails closed in `nimbus-docs lint`: when the file is
+ * missing, unreadable, incomplete, or has an unknown `version`, the CLI
+ * reports one `error` on `.nimbus/routes.json` and doesn't run this rule
+ * (`guardRouteTruth` in `engine.ts`). `nimbus-docs check` runs the rule
+ * when the file exists, and turns a missing file into a note. If the rule
+ * is still reached without usable truth, it writes one line to stderr and
+ * reports nothing.
  *
  * Coverage:
  *   - `link` nodes (`[text](url)`)
@@ -19,27 +25,37 @@
  *   - External links (with a scheme) are skipped.
  *   - In-page anchors (`#section`) are skipped (hash validation lives in
  *     the future `nimbus/internal-link-hash` rule).
- *   - The Astro `base` prefix is normalized away on both sides.
+ *   - Links and routes share one key (`_internal/route-key.ts`): no query,
+ *     hash, or trailing slash, percent-decoded, `foo/index.html` and
+ *     `foo.html` as `/foo`.
+ *   - Astro's `base` is never stripped. The renderer prefixes `base` to
+ *     every authored root-relative link, so authored `/x` is compared with
+ *     the base-free route `/x`, and a link that repeats the base
+ *     (`/docs/x` under `base: "/docs"`) is reported: it renders as
+ *     `/docs/docs/x`.
  *   - Links under an opaque namespace (a non-framework dynamic route file)
  *     stay silent — silence beats false-positive.
  *   - When the framework root catch-all is present, content entries are
  *     the truth for the root namespace.
  *   - A near-match in the route set produces a "did you mean" hint via
- *     Levenshtein distance — same pattern `component-pascalcase` uses.
+ *     Levenshtein distance — same pattern `component-pascalcase` uses. The
+ *     hint prints the route as stored, which is how the link should be
+ *     written.
  *   - `ignore: string[]` supports full glob syntax (`**`, `*`, `{a,b}`, …)
  *     via `../../_internal/ignore-glob.js` (picomatch-backed), matched
- *     against the post-normalization URL (no `base` prefix, no trailing
- *     slash, no hash/query) — author patterns against the site-root form.
+ *     against the link's route key: the authored path without trailing
+ *     slash, hash, or query. Patterns are written without `base`, like
+ *     links.
  *
- * Relative links (`./foo`, `../bar`) error by default. `allowRelative: true`
+ * Relative links (`./foo`, `../bar`, bare `foo`) error by default. `allowRelative: true`
  * silences them for projects that want to use them.
  */
 
-import fs from "node:fs";
 import path from "node:path";
 
 import { matchesAnyIgnore } from "../../_internal/ignore-glob.js";
 import { suggest } from "../../_internal/levenshtein.js";
+import { linkRouteKey } from "../../_internal/route-key.js";
 import {
   collect,
   startOf,
@@ -47,37 +63,40 @@ import {
   type MdNode,
   type ParsedFile,
 } from "../parse.js";
+import { readRouteTruth } from "../route-truth.js";
 import type { Rule } from "../rule.js";
-import type { RouteTruth } from "../site-model.js";
 
-// Process-level cache: read `routes.json` once per CLI invocation, not
-// once per file. The rule itself is stateless; the cache lives in the
-// module scope.
-let cached: { root: string; truth: RouteTruth | null } | null = null;
-let missingWarned = false;
+interface LoadedRoutes {
+  knownRoutes: Set<string>;
+  opaqueNamespaces: string[];
+  /** Normalized `base` (`/docs`), or `""` when unset. Only used for hints. */
+  base: string;
+}
 
-function loadRouteTruth(file: ParsedFile): RouteTruth | null {
+// Process-level cache: read `routes.json` and build the route `Set` once
+// per CLI invocation, not once per file. The rule itself is stateless; the
+// cache lives in the module scope.
+let cached: { root: string; routes: LoadedRoutes | null } | null = null;
+
+function loadRoutes(file: ParsedFile): LoadedRoutes | null {
   const root = inferProjectRoot(file.absPath);
-  if (cached && cached.root === root) return cached.truth;
+  if (cached && cached.root === root) return cached.routes;
 
-  let truth: RouteTruth | null = null;
-  try {
-    const raw = fs.readFileSync(
-      path.join(root, ".nimbus", "routes.json"),
-      "utf8",
-    );
-    const parsed = JSON.parse(raw) as RouteTruth;
-    if (parsed.version === 1) truth = parsed;
-  } catch {
-    if (!missingWarned) {
-      process.stderr.write(
-        "nimbus/internal-link: skipped — `.nimbus/routes.json` is missing. Run `astro build` first; the route truth is materialized at `astro:build:done`.\n",
-      );
-      missingWarned = true;
-    }
+  const { truth, problem } = readRouteTruth(root);
+  if (problem !== undefined) {
+    process.stderr.write(`nimbus/internal-link: skipped — ${problem}\n`);
   }
-  cached = { root, truth };
-  return truth;
+  let routes: LoadedRoutes | null = null;
+  if (truth) {
+    const base = linkRouteKey(truth.base);
+    routes = {
+      knownRoutes: new Set(truth.knownRoutes),
+      opaqueNamespaces: truth.opaqueNamespaces,
+      base: base === "/" ? "" : base,
+    };
+  }
+  cached = { root, routes };
+  return routes;
 }
 
 /** Find the project root from a content file by walking up to the parent of `src`. */
@@ -105,8 +124,8 @@ export const internalLink: Rule = {
     // known trade-off vs. the route-tagged alternative.
     if (ctx.file.frontmatter?.draft === true) return;
 
-    const truth = loadRouteTruth(ctx.file);
-    if (!truth) return;
+    const routes = loadRoutes(ctx.file);
+    if (!routes) return;
 
     const allowRelative = ctx.options.allowRelative === true;
     // Pass through raw, unfiltered — `matchesAnyIgnore` caches its
@@ -115,17 +134,18 @@ export const internalLink: Rule = {
     const ignore = ctx.options.ignore;
     const extraComponents = readExtraComponents(ctx.options.components);
 
-    // Route truth is materialized from Astro's `pages` at `astro:build:done`
-    // (see `materializeRouteTruthFromPages` in `integration.ts`). We just
-    // compare against it.
-    const knownRoutes = new Set<string>(truth.knownRoutes);
+    // Route truth is written at the end of `astro:build:done` (see
+    // `materializeRouteTruth` in `integration.ts`). We just compare
+    // against it.
+    const { knownRoutes, opaqueNamespaces } = routes;
     const definitions = collectDefinitions(ctx.file.tree);
 
     for (const occ of collectLinkOccurrences(ctx.file.tree, definitions, extraComponents)) {
       const url = occ.url;
       if (!url) continue;
       if (isExternal(url)) continue;
-      if (url.startsWith("#")) continue; // in-page anchor
+      // Same page: an in-page anchor, or a query on the current URL.
+      if (url.startsWith("#") || url.startsWith("?")) continue;
 
       if (isRelative(url)) {
         if (allowRelative) continue;
@@ -137,26 +157,35 @@ export const internalLink: Rule = {
         continue;
       }
 
-      // Normalize first, then match `ignore` against the post-base form.
-      // Authors write patterns relative to the site root (`/api/**`),
-      // matching them against the raw URL would miss `/docs/api/foo` on a
-      // site with `base: "/docs"`.
-      const normalized = normalizeForLookup(url, truth.base);
-      if (matchesAnyIgnore(normalized, ignore)) continue;
-      if (isUnderOpaqueNamespace(normalized, truth.opaqueNamespaces)) continue;
-      if (knownRoutes.has(normalized)) continue;
+      // Normalize first so `ignore` sees the same key as the lookup: no
+      // trailing slash, hash, or query. Base is never stripped (see header).
+      const key = linkRouteKey(url);
+      if (matchesAnyIgnore(key, ignore)) continue;
+      if (isUnderOpaqueNamespace(key, opaqueNamespaces)) continue;
+      if (knownRoutes.has(key)) continue;
 
-      const hint = suggest(normalized, knownRoutes, 3);
+      // A link that repeats the base is the likeliest mistake under a
+      // non-empty base, and too far from the right route for Levenshtein
+      // to find it. Suggest from the path after the base instead.
+      const afterBase = withoutBase(key, routes.base);
+      const hint =
+        afterBase !== null && knownRoutes.has(afterBase)
+          ? afterBase
+          : suggest(afterBase ?? key, knownRoutes, 3);
+      const baseNote =
+        afterBase !== null
+          ? ` Write links without the base "${routes.base}"; it's added when the page renders.`
+          : "";
       ctx.report({
         message: hint
-          ? `broken link "${url}" — did you mean "${denormalize(hint, truth.base)}"?`
-          : `broken link "${url}" — no page resolves to this path.`,
+          ? `broken link "${url}" — did you mean "${hint}"?${baseNote}`
+          : `broken link "${url}" — no page resolves to this path.${baseNote}`,
         line: occ.line,
         column: occ.column,
         ...(hint
           ? {
               fix: {
-                description: `replace "${url}" with "${denormalize(hint, truth.base)}"`,
+                description: `replace "${url}" with "${hint}"`,
                 edits: [],
               },
             }
@@ -290,52 +319,23 @@ function isExternal(url: string): boolean {
   );
 }
 
+/**
+ * Anything that isn't root-relative resolves against the current page:
+ * `./foo`, `../foo`, and bare `foo` alike. Checked before normalization,
+ * which would turn `foo` into `/foo` and match an unrelated root route.
+ */
 function isRelative(url: string): boolean {
-  return url.startsWith("./") || url.startsWith("../");
+  return !url.startsWith("/");
 }
 
 /**
- * Strip the Astro `base` prefix, any query string, any hash, and the
- * trailing slash, then percent-decode. Result is the canonical form used
- * in the route truth's `contentRoutes` and `pageRoutes` — Astro emits
- * routes with raw (decoded) segments, so an authored link like
- * `[x](/guides/setup%20notes)` must decode to match a route stored as
- * `/guides/setup notes`.
+ * The part of a route key after `base` when the key repeats it, or null.
+ * Only for hints: a link that repeats the base is reported either way.
  */
-function normalizeForLookup(url: string, base: string): string {
-  let s = url;
-  const q = s.indexOf("?");
-  if (q !== -1) s = s.slice(0, q);
-  const h = s.indexOf("#");
-  if (h !== -1) s = s.slice(0, h);
-
-  const normBase = stripTrailingSlash(base === "" ? "" : base.startsWith("/") ? base : `/${base}`);
-  if (normBase !== "" && normBase !== "/" && s.startsWith(normBase + "/")) {
-    s = s.slice(normBase.length);
-  } else if (normBase !== "" && normBase !== "/" && s === normBase) {
-    s = "/";
-  }
-
-  s = stripTrailingSlash(s);
-  if (s === "") s = "/";
-  try {
-    s = decodeURI(s);
-  } catch {
-    // Malformed encoding — leave as-is so the lookup will (correctly) fail
-    // and surface a broken-link diagnostic the author can fix.
-  }
-  return s;
-}
-
-/** Re-attach `base` for display in "did you mean" hints. */
-function denormalize(route: string, base: string): string {
-  if (!base || base === "/" || base === "") return route;
-  const normBase = base.startsWith("/") ? stripTrailingSlash(base) : `/${stripTrailingSlash(base)}`;
-  return route === "/" ? normBase : `${normBase}${route}`;
-}
-
-function stripTrailingSlash(s: string): string {
-  return s.length > 1 && s.endsWith("/") ? s.slice(0, -1) : s;
+function withoutBase(key: string, base: string): string | null {
+  if (base === "") return null;
+  if (key === base) return "/";
+  return key.startsWith(`${base}/`) ? key.slice(base.length) : null;
 }
 
 function isUnderOpaqueNamespace(
@@ -354,5 +354,4 @@ function isUnderOpaqueNamespace(
 // load per CLI run; tests want isolation between cases.
 export function _resetInternalLinkCacheForTests(): void {
   cached = null;
-  missingWarned = false;
 }

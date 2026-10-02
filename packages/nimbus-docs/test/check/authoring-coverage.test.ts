@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { checkAuthoring } from "../../src/check/authoring.js";
 import { _resetInternalLinkCacheForTests } from "../../src/lint/rules/internal-link.js";
+import { ROUTE_TRUTH_VERSION } from "../../src/lint/site-model.js";
 
 interface ProjectOpts {
   body?: string;
@@ -33,7 +34,7 @@ function project(opts: ProjectOpts = {}): string {
   if (opts.routesJson) {
     fs.writeFileSync(
       path.join(dir, ".nimbus", "routes.json"),
-      JSON.stringify({ version: 1, ...opts.routesJson }),
+      JSON.stringify({ version: ROUTE_TRUTH_VERSION, ...opts.routesJson }),
     );
   }
   return dir;

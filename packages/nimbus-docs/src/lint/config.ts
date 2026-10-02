@@ -97,6 +97,36 @@ export function resolveRuleForCollection(
   return resolveRule(code, rules);
 }
 
+/**
+ * True when `code` is `warn` or `error` at the top level or in any
+ * collection's overrides. Doesn't account for `--rule`; see
+ * `ruleWillRun` in `engine.ts`.
+ */
+export function ruleEnabledAnywhere(
+  code: AuthoringRuleCode,
+  rules: RulesConfig,
+  collections: CollectionsConfig,
+): boolean {
+  const layers = [rules, ...Object.values(collections).map((c) => c.rules ?? {})];
+  return layers.some(
+    (layer) => layer[code] !== undefined && resolveRule(code, layer).severity !== "off",
+  );
+}
+
+/** `rules` and `collections` with `code` turned off at the top level and in every collection that sets it. */
+export function withRuleOff<T extends { rules: RulesConfig; collections: CollectionsConfig }>(
+  config: T,
+  code: AuthoringRuleCode,
+): T {
+  const collections: CollectionsConfig = {};
+  for (const [name, collection] of Object.entries(config.collections)) {
+    collections[name] = collection.rules
+      ? { ...collection, rules: { ...collection.rules, [code]: "off" } }
+      : collection;
+  }
+  return { ...config, rules: { ...config.rules, [code]: "off" }, collections };
+}
+
 export interface ValidatedLintOptions {
   rules: RulesConfig;
   collections: CollectionsConfig;

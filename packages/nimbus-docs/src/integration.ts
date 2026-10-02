@@ -62,9 +62,13 @@ import {
   findDuplicateRoutes,
   formatDuplicateRoutes,
   formatShadowedRoutes,
+  INCOMPLETE_ROUTE_TRUTH,
+  ROUTE_TRUTH_VERSION,
   type RouteOwner,
   type RouteTruth,
 } from "./lint/site-model.js";
+import { emittedFileRoutes } from "./_internal/emitted-routes.js";
+import { routeKey } from "./_internal/route-key.js";
 import {
   filterIndexableCollections,
   parseCollectionBases,
@@ -439,6 +443,8 @@ export function nimbus(
   let projectRootForBuild = "";
   let srcDirForBuild = "";
   let astroBaseForBuild = "";
+  // Astro's `build.assets` directory, left out of the route truth.
+  let assetsDirForBuild = "_astro";
   // Captured at config:done / routes:resolved, consumed by the build:done
   // prerender-invariant reporter.
   let outputModeForBuild: "static" | "server" = "static";
@@ -496,6 +502,10 @@ export function nimbus(
         // content/assets stay root-relative via their collection bases.
         const srcDir = fileURLToPath(astroConfig.srcDir);
         const projectRoot = fileURLToPath(astroConfig.root);
+        // A build that fails must not leave the previous build's route truth
+        // for `nimbus-docs lint` to check against, so invalidate it before
+        // any setup work that can throw (and long before content sync).
+        if (building) invalidateRouteTruth(projectRoot);
         navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
         beginPreparedMarkdownSession(astroConfig.root);
@@ -770,9 +780,9 @@ export function nimbus(
         // content.config.ts lights up every indexing surface
         // automatically — no second file to edit.
 
-        // Stash for the `astro:build:done` hook, which uses Astro's actual
-        // emitted `pages` array as the route truth (single source of truth
-        // — Astro itself tells us which URLs the site serves).
+        // Stash for the `astro:build:done` hook, which writes the route
+        // truth from what the build actually emitted: Astro's `pages` plus
+        // every file in the output directory.
         projectRootForBuild = projectRoot;
         srcDirForBuild = srcDir;
         astroBaseForBuild = astroConfig.base ?? "";
@@ -1547,6 +1557,9 @@ export function nimbus(
             }
           }
         }
+        // Read here, not at config:setup: a later integration can still
+        // change it with `updateConfig`.
+        assetsDirForBuild = astroConfig.build?.assets ?? "_astro";
         outputModeForBuild =
           buildOutput ??
           (astroConfig.output === "server" ? "server" : "static");
@@ -1973,17 +1986,6 @@ export function nimbus(
           }
         }
 
-        materializeRouteTruthFromPages(
-          projectRootForBuild,
-          astroBaseForBuild,
-          publicPages,
-          [
-            ...requestRoutes,
-            ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
-          ],
-          logger,
-        );
-
         materializeCoordinatesManifest(
           projectRootForBuild,
           coordinatesManifest,
@@ -2010,6 +2012,21 @@ export function nimbus(
             inventory.filter((entry) => entry.request && entry.searchable),
           );
         }
+
+        // Last, so the walk sees every file Nimbus wrote. Files written by
+        // integrations whose `build:done` runs after this one aren't seen.
+        materializeRouteTruth({
+          projectRoot: projectRootForBuild,
+          base: astroBaseForBuild,
+          distDir,
+          assetsDir: assetsDirForBuild,
+          pages: publicPages,
+          onDemandRoutes: [
+            ...requestRoutes,
+            ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
+          ],
+          logger,
+        });
       },
     },
   };
@@ -2040,55 +2057,56 @@ function materializeLintConfig(
       "utf8",
     );
   } catch {
-    // Non-fatal — `nimbus-docs lint` falls back to all-rules-on defaults.
+    // Non-fatal — without the file, `nimbus-docs lint` exits 1 asking for a
+    // build (every authoring rule would be off), unless `--rule` is passed.
   }
 }
 
 /**
- * Write the site's route truth to `<root>/.nimbus/routes.json` from Astro's
- * emitted pages, request-rendered collection inventory, and concrete
- * on-demand route patterns.
+ * Write the site's route truth to `<root>/.nimbus/routes.json`: Astro's
+ * emitted pages, every file in the build output (`emittedFileRoutes`), the
+ * request-rendered collection inventory, and concrete on-demand route
+ * patterns. Every entry is a route key (`_internal/route-key.ts`), the same
+ * shape `internal-link` looks links up with.
  *
- * Best-effort write, same as `materializeLintConfig`. When the file is
- * missing (e.g. lint ran before any `astro build`), `internal-link` skips
- * silently rather than false-positive.
+ * A failure is logged as a warning, and the file is deleted or marked
+ * incomplete so `nimbus-docs lint` fails closed. The build fails only when
+ * the file can be neither deleted nor overwritten (`invalidateRouteTruth`),
+ * because lint would otherwise accept an old file.
  *
  * Duplicate-slug detection lives in `astro:config:setup` (above), not
  * here. Astro silently dedupes colliding routes before this hook fires,
  * so a post-build collision check on `pages` would never see the
  * collisions it claims to catch.
  */
-function materializeRouteTruthFromPages(
-  projectRoot: string,
-  base: string,
-  pages: readonly { pathname: string }[],
-  onDemandRoutes: readonly string[],
-  logger: { warn: (msg: string) => void; debug?: (msg: string) => void },
-): void {
-  // Normalize and dedupe pathnames into the canonical `/foo` form used by
-  // the lookup logic in `internal-link.ts`. The dedupe is defensive —
-  // Astro already deduped before this hook, so `pages` shouldn't contain
-  // collisions; we still tolerate it in case a route re-emits across
-  // formats (e.g. `.html` + `.md` siblings).
-  const canonical = new Set<string>();
-  for (const { pathname } of pages) {
-    canonical.add(canonicalizePathname(pathname));
-  }
-  for (const pathname of onDemandRoutes) {
-    canonical.add(canonicalizePathname(pathname));
-  }
-
-  const truth: RouteTruth = {
-    version: 1,
-    base,
-    knownRoutes: [...canonical].sort(),
-    // Nimbus collections remain enumerable even when their HTML is rendered
-    // on request, so broad opaque namespaces would only hide broken links.
-    opaqueNamespaces: [],
-  };
-
+function materializeRouteTruth(input: {
+  projectRoot: string;
+  base: string;
+  distDir: string;
+  assetsDir: string;
+  pages: readonly { pathname: string }[];
+  onDemandRoutes: readonly string[];
+  logger: { warn: (msg: string) => void };
+}): void {
   try {
-    const dir = path.join(projectRoot, ".nimbus");
+    // A Set, because the sources overlap: a prerendered page is in both
+    // `pages` and the output directory.
+    const routes = new Set<string>();
+    for (const { pathname } of input.pages) routes.add(routeKey(pathname));
+    for (const pathname of input.onDemandRoutes) routes.add(routeKey(pathname));
+    for (const route of emittedFileRoutes(input.distDir, input.assetsDir)) {
+      routes.add(route);
+    }
+
+    const truth: RouteTruth = {
+      version: ROUTE_TRUTH_VERSION,
+      base: input.base,
+      knownRoutes: [...routes].sort(),
+      // Nimbus collections remain enumerable even when their HTML is rendered
+      // on request, so broad opaque namespaces would only hide broken links.
+      opaqueNamespaces: [],
+    };
+    const dir = path.join(input.projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "routes.json"),
@@ -2096,8 +2114,36 @@ function materializeRouteTruthFromPages(
       "utf8",
     );
   } catch (err) {
-    logger.debug?.(
-      `failed to write .nimbus/routes.json — internal-link will skip: ${(err as Error).message}`,
+    // Throws when the old file can't be made unusable either.
+    invalidateRouteTruth(input.projectRoot);
+    input.logger.warn(
+      `failed to write .nimbus/routes.json, so \`nimbus-docs lint\` can't check links: ${(err as Error).message}`,
+    );
+  }
+}
+
+/**
+ * Make sure `nimbus-docs lint` can't use an existing `.nimbus/routes.json`.
+ * Deletes it; if that fails (a read-only `.nimbus/`, say), overwrites it
+ * with the marker lint reports as an unfinished build. If both fail, throws:
+ * the old file would stay readable and be checked against forever, even
+ * after a successful build.
+ */
+function invalidateRouteTruth(projectRoot: string): void {
+  const file = path.join(projectRoot, ".nimbus", "routes.json");
+  let removeError: unknown;
+  try {
+    fs.rmSync(file, { force: true });
+    return;
+  } catch (err) {
+    removeError = err;
+  }
+  try {
+    fs.writeFileSync(file, JSON.stringify(INCOMPLETE_ROUTE_TRUTH) + "\n", "utf8");
+  } catch {
+    throw new Error(
+      `nimbus-docs: can't delete or overwrite .nimbus/routes.json from the previous build (${(removeError as Error).message}). ` +
+        "Delete it or fix its permissions; otherwise `nimbus-docs lint` would check links against an old build.",
     );
   }
 }

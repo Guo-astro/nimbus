@@ -56,9 +56,11 @@ projects get zero new transitive deps when they install `nimbus-docs`.
   integration at `astro:config:setup` and throw to fail the build. They
   can't be configured. Shipped: `duplicate-slug`, `mdx-syntax`.
 - **Authoring rules** (`kind: "authoring"`) run in `nimbus-docs lint`,
-  default to `error`, and are configurable via the integration's `rules`
-  option (materialized to `.nimbus/lint.json`). The build is never gated
-  on them.
+  are off by default, and are enabled via the integration's `rules`
+  option, which `astro build` and `astro dev` materialize to
+  `.nimbus/lint.json`. Without that file every rule would be off, so
+  `nimbus-docs lint` exits 1 asking for a build, unless `--rule` names the
+  rule to run. The build is never gated on them.
 
 ## Shipped rules
 
@@ -179,14 +181,27 @@ this doesn't add a transitive dep for consumers.
 
 ### `internal-link` — route truth
 
-The integration hooks into `astro:build:done` and writes Astro's emitted
-`pages` array verbatim into `.nimbus/routes.json`. Every URL on that list
-is a page Astro just wrote to disk — there is no reconstruction step, no
-slug mirroring, and no coupling to Astro's internal URL-normalization
-rules. The build/lint contract is straightforward:
+At the end of `astro:build:done`, after Nimbus has written its own outputs,
+the integration writes `.nimbus/routes.json` from what the build emitted:
 
-> After `astro build`, `.nimbus/routes.json` reflects exactly what the
-> site serves. `nimbus/internal-link` resolves links against that set.
+- Astro's `pages` array;
+- every file in the output directory Astro passes to the hook (the client
+  directory for server output), as route keys: `foo/index.html` and
+  `foo.html` become `/foo`, every other file keeps its extension
+  (`/llms.txt`, `/welcome/index.md`, `/files/doc.pdf`). Left out: Astro's
+  final `build.assets` directory (read at `astro:config:done`), `pagefind/`, `_nimbus/`, and the platform files
+  `_headers`, `_redirects`, `_routes.json`, `.assetsignore`, and
+  `_worker.js` at the output root;
+- request-rendered pages from the request-route inventory, and concrete
+  on-demand routes.
+
+Links and routes share one key function (`_internal/route-key.ts`), so the
+two sides can't drift. There is no reconstruction step, no slug mirroring,
+and no coupling to Astro's internal URL-normalization rules. The
+build/lint contract:
+
+> After `astro build`, `.nimbus/routes.json` lists every URL the build
+> produced. `nimbus/internal-link` resolves links against that set.
 
 **What this catches that filesystem-based reconstruction misses:**
 
@@ -194,27 +209,45 @@ rules. The build/lint contract is straightforward:
   `github-slugger` (lowercase, hyphenation, unicode), so `WIP/Foo.mdx`
   serves at `/wip/foo`. A reconstructed URL from the raw filesystem path
   would say `/WIP/Foo` and false-flag every valid lowercase link.
-- `trailingSlash`, `base`, `i18n` routing, `build.format` — Astro applies
-  these during route resolution. The emitted pathnames are the truth;
-  any reconstruction has to chase Astro's config surface in lockstep.
+- `trailingSlash`, `i18n` routing, `build.format` — Astro applies these
+  during route resolution. The emitted pathnames are the truth; any
+  reconstruction has to chase Astro's config surface in lockstep.
 - `draft: true` filtering — draft entries are excluded from the build,
   so a link from a published page to a draft page is genuinely broken in
   production. The materialized truth correctly excludes drafts.
 
 **Why not reconstruct from filesystem?** Filesystem reconstruction must
-duplicate Astro's routing and content-layer normalization. Using the
-emitted `pages` list avoids that coupling.
+duplicate Astro's routing and content-layer normalization. Using what the
+build emitted avoids that coupling.
+
+**`base` is never stripped.** Output paths are base-free, and the renderer
+prefixes `base` to every authored root-relative link
+(`_internal/authored-links.ts`). So an authored `/x` is compared with the
+route `/x`, and a link that repeats the base (`/docs/x` under
+`base: "/docs"`) is reported, because it renders as `/docs/docs/x`. The
+hint prints the route as stored (`/x`). `ignore` patterns match the same
+key, so they're written without the base too.
 
 **Trade-off: lint requires `astro build`.** `astro sync` and `astro dev`
 don't emit pages, so they don't update `.nimbus/routes.json`. CI is
-typically build-then-lint. Local hooks running `nimbus-docs lint` should
-chain `astro build` first. The rule's behavior when `routes.json` is absent
-or stale is documented below.
+build-then-lint, in one job or with the whole `.nimbus/` directory passed
+as an artifact (lint exits 1 without `lint.json`). Files written by integrations
+whose `build:done` runs after Nimbus's aren't captured.
 
-**Missing route truth → silent skip.** When `.nimbus/routes.json` is
-absent, `nimbus/internal-link` writes one warning line to stderr and
-skips. Without route truth, every link would otherwise false-positive —
-the worst possible outcome for a trust-sensitive rule.
+**Missing route truth fails closed.** `astro build` invalidates the
+previous file at the start of `astro:config:setup`, before any setup work
+that can throw and before content sync: it deletes the file, or, when
+that fails, overwrites it with `{ "incomplete": true }`. When it can do
+neither, the build fails and asks for the permissions to be fixed. The old
+file is still on disk then, and a separately run lint would accept it; the
+build failure is what keeps a build-then-lint CI gate from passing. When an enabled link rule meets a `routes.json` that's
+missing, unreadable, incomplete, or has an unknown `version`,
+`nimbus-docs lint` reports one `error` on `.nimbus/routes.json` at 1:1,
+whatever the configured severity, and doesn't run the rule
+(`guardRouteTruth` in `engine.ts`). `nimbus-docs check` is a build-free
+preflight: it checks links against a `routes.json` an earlier build left,
+but a missing file is a note and disables the rule there. Reliable CI link
+gating is `astro build`, then `lint`.
 
 **Stale route truth → may miss new content.** Between builds, content
 added since the last build doesn't appear in `routes.json`. Links to

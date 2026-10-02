@@ -23,6 +23,7 @@ export interface ApiSpecEntry {
   /** Base URL for the resolved model's pages. Defaults to `/<collection>`. */
   mountPath?: string;
   requireOperationId?: boolean;
+  schemaPages?: boolean;
   routes?: RoutePolicy;
 }
 
@@ -34,6 +35,7 @@ export async function resolveSpecSource(
   const mountPath = entry.mountPath ? { mountPath: entry.mountPath } : {};
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};
+  const noSchemaPages = entry.schemaPages === false ? { schemaPages: false as const } : {};
 
   if (typeof entry.spec !== "string") {
     return {
@@ -43,6 +45,7 @@ export async function resolveSpecSource(
       ...mountPath,
       ...strict,
       ...routes,
+      ...noSchemaPages,
     };
   }
 
@@ -67,5 +70,6 @@ export async function resolveSpecSource(
     ...mountPath,
     ...strict,
     ...routes,
+    ...noSchemaPages,
   };
 }

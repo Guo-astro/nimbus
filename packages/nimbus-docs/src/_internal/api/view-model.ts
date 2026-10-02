@@ -336,9 +336,12 @@ function variantView(
   inlineFields = false,
 ): ApiVariant {
   const resolved = v.coordinate && view.node(v.coordinate) ? v.coordinate : undefined;
-  const out: ApiVariant = resolved
-    ? { label: v.label, href: view.href(resolved) }
-    : { label: v.label };
+  // Links follow pages, not nodes: with `schemaPages: false` the schema node
+  // still exists (so its properties preview inline) but has no page to link to.
+  const out: ApiVariant =
+    resolved && view.hasPage(resolved)
+      ? { label: v.label, href: view.href(resolved) }
+      : { label: v.label };
   if (inlineFields && resolved) {
     // Inline the variant's properties one level deep — nested unions inside the
     // variant link out (allowInline = false) so a cyclic union can't recurse.
@@ -444,7 +447,7 @@ function fieldView(
     out.descriptionHtml = renderMarkdown(description);
   }
   if (f.union) out.union = unionView(view, f.union, allowInline);
-  if (f.typeRef?.coordinate && view.node(f.typeRef.coordinate)) {
+  if (f.typeRef?.coordinate && view.hasPage(f.typeRef.coordinate)) {
     out.typeRef = { label: f.typeRef.label, href: view.href(f.typeRef.coordinate) };
   }
 

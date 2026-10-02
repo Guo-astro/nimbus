@@ -264,6 +264,17 @@ export interface ApiSpec {
    */
   requireOperationId?: boolean;
   /**
+   * Publish a page for each `components/schemas` entry, at
+   * `/<collection>/schemas/<Name>`. Default `true`. Applies to every version of
+   * a family.
+   *
+   * Set `false` when the reference should show types only inline. Schemas still
+   * shape operation pages (fields, union previews), but get no page, Markdown
+   * file, sitemap or search entry, or citation coordinate, and type names that
+   * linked to them render as text. A citation to a schema fails the build.
+   */
+  schemaPages?: boolean;
+  /**
    * Route convention for this collection's pages. Omit to keep the default
    * `operationId`-based URLs. For a version family, set `routes` on each
    * {@link ApiVersionSpec} instead — a family-level policy is rejected, since

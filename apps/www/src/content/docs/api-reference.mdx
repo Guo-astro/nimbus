@@ -46,7 +46,7 @@ The recipe tells the agent to inspect your project, ask for the specification pa
 
 #### Why the specification is not in `src/content`
 
-`src/content/docs/` contains authored MDX entries. An OpenAPI document is an input to a loader: Nimbus projects it into many operation, schema, tag, and webhook entries in the registered `api` collection.
+`src/content/docs/` contains authored MDX entries. An OpenAPI document is an input to a loader: Nimbus projects it into many operation, schema, tag, and webhook entries in the registered `api` collection. Schema entries can be turned off; see [Schema pages](#schema-pages).
 
 Keeping the source under `src/api/` makes that distinction visible. The path is only a convention; `src/content/api/openapi.yaml` also works if the configured `spec` points there.
 
@@ -281,6 +281,30 @@ For each component already in your project, it asks whether to overwrite it, eve
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 
+### Schema pages
+
+By default, every entry in `components/schemas` gets a page at `/api/schemas/<Name>`. In a large API, schema pages can outnumber operation pages. To show types only inline, on the operations that use them, set `schemaPages: false`:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    schemaPages: false,
+  },
+],
+```
+
+Operation pages don't change: request and response fields, and the properties previewed under each union variant, still come from the schemas. What goes away for each schema:
+
+- its page, Markdown version, and OG image;
+- its sitemap, search, and `llms.txt` entries;
+- its coordinates, for the schema and its fields, in citations and `coordinates.json`.
+
+Type names that linked to a schema page, such as union variants, discriminator mappings, and `map<Name>` value types, render as text instead.
+
+An `api.ref:` citation in your content to a schema or a schema field fails the build and names the setting. Cite an operation that uses the type instead. Schema names still claim their `schemas/<Name>` routes, so turning schema pages back on can't collide with an operation. The setting applies to every version of a family.
+
 ### Build or request rendering
 
 API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:
@@ -340,7 +364,7 @@ For a collection named `api`, the reference integrates with these routes when th
 | Route | Purpose |
 | --- | --- |
 | `/api` | Default-version API overview. |
-| `/api/<page-slug>` | Operation, schema, tag, or webhook page. |
+| `/api/<page-slug>` | Operation, schema, tag, or webhook page. Schema pages are omitted with [`schemaPages: false`](#schema-pages). |
 | `/api/<page-slug>/index.md` | Clean Markdown version. |
 | `/api/llms.txt` | API-only `llms.txt` index. |
 | `/llms.txt` and `/llms-full.txt` | Site-wide page index and full Markdown documentation. |

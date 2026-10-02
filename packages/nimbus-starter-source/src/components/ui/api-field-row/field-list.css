@@ -218,6 +218,8 @@
 .fl-constraint-value {
   font-family: var(--font-mono, ui-monospace, monospace);
   color: var(--color-foreground);
+  /* Unbroken tokens (base64, long IDs) wrap instead of widening the page. */
+  overflow-wrap: anywhere;
 }
 
 /* ---- Nesting ---- */

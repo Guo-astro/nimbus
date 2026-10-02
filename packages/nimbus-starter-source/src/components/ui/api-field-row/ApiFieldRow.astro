@@ -20,14 +20,11 @@ const toks = typeTokens(field);
 const constraints = constraintPairs(field.constraints);
 const omitted = field.childCount - field.children.length;
 const detail = (v: unknown): string => JSON.stringify(v);
-// Specs often declare `[]`, `{}` or `""` as an example; those show nothing.
-const isEmpty = (v: unknown): boolean =>
-  v === "" || (Array.isArray(v) ? v.length === 0 : typeof v === "object" && v !== null && Object.keys(v).length === 0);
-// Constraints, default and example share one line, in that order.
+// Constraints and default share one line, in that order. Field examples are not
+// shown: the code rail's request and response examples already carry them.
 const meta = [
   ...constraints,
   ...(field.default !== undefined ? [{ name: "default", value: detail(field.default) }] : []),
-  ...(field.example !== undefined && !isEmpty(field.example) ? [{ name: "example", value: detail(field.example) }] : []),
 ];
 
 const linkSvg = `<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;

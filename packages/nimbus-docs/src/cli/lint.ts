@@ -21,6 +21,7 @@ import {
   fixPaths,
   formatJson,
   formatPretty,
+  guardRouteTruth,
   IMPLEMENTED_CODES,
   isRuleCode,
   lintPaths,
@@ -98,7 +99,9 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
   }
 
   const { rules, collections, site } = loadMaterializedConfig(cwd);
-  const opts = {
+  // Fail closed: a link rule that's on but has no usable route truth is one
+  // error on `.nimbus/routes.json`, and doesn't run.
+  const { opts, diagnostic: routeTruthFailure } = guardRouteTruth(cwd, {
     rules,
     collections,
     site,
@@ -107,7 +110,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     // narrowing (LintOptions.only is `AuthoringRuleCode` because `--rule`
     // can't force-enable a build validator).
     only: flags.rule as import("../lint/diagnostic.js").AuthoringRuleCode | undefined,
-  };
+  });
 
   let diagnostics: Diagnostic[];
   let interrupted = false;
@@ -155,6 +158,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     diagnostics = lintPaths(files, cwd, opts);
   }
 
+  if (routeTruthFailure) diagnostics.unshift(routeTruthFailure);
   const summary = summarize(diagnostics, files.length);
 
   if (flags.format === "json") {

@@ -40,8 +40,8 @@ function stripTrailingSlash(s: string): string {
 /**
  * Match `url` against the rule's raw `ignore` option.
  *
- * - `url` must already be normalized by the caller (no `base` prefix, no
- *   trailing slash, no hash/query).
+ * - `url` must already be normalized by the caller (no trailing slash, no
+ *   hash/query). `internal-link` passes the authored path, base included.
  * - Each pattern gets its trailing slash stripped before compiling, so a
  *   bare `"/api/"` (no `/**`) still matches `/api` exactly — same as the
  *   previous matcher.

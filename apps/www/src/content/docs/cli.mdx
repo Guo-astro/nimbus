@@ -195,6 +195,8 @@ Pass `--json` for agent-readable output. `status` is `passed`, `failed`, or `par
 
 Checks that couldn't run are listed as `notes` on their scope rather than as findings, each with the reason it was skipped.
 
+`check` checks links only when an earlier `astro build` left `.nimbus/routes.json`; without it, link checking is a note, not an error. To gate CI on links, run `astro build` and then `nimbus-docs lint`; see [Check links](/writing/linting#check-links).
+
 ## `nimbus-docs lint`
 
 Walks `src/content/`, runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
@@ -211,6 +213,8 @@ Flags — combine with `lint`:
 | `--quiet` | errors only, suppress warnings |
 
 Severity overrides live with the integration (`nimbus(config, { rules })`); in-file disables (`nimbusDisableRules` frontmatter, inline comments) work with no config.
+
+`nimbus/internal-link` needs `astro build` to run first. Without the route list the build writes, lint exits `1` with an error on `.nimbus/routes.json`.
 
 ## Help and version
 

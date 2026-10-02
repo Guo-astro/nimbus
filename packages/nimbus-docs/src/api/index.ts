@@ -103,7 +103,7 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
   // but different policies must never alias.
   const key = `${source.collection}::${source.mountPath ?? ""}::${
     source.requireOperationId ? "strictOpId" : ""
-  }::${source.schemaPages === false ? "noSchemaPages" : ""}::${stableStringify(source.routes)}::${specDigest(raw)}`;
+  }::${source.schemaPages ? "schemaPages" : ""}::${stableStringify(source.routes)}::${specDigest(raw)}`;
   const cached = handleCache.get(key);
   if (cached) return cached;
   const promise = parseOpenApi(source).then((r) => wrap(r.model));

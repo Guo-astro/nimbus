@@ -1,5 +1,6 @@
-// `schemaPages: false` keeps every schema node (so operation pages still show
-// their fields and union previews) but publishes no schema page. Pins the four
+// `schemaPages: false` (the default) keeps every schema node (so operation pages
+// still show their fields and union previews) but publishes no schema page;
+// `true` restores schema pages exactly as before the option existed. Pins the four
 // consequences: no schema routes, links follow pages rather than nodes,
 // citations to a schema fail with a reason that names the option, and schema
 // identities still claim their slugs so turning pages back on never collides.
@@ -91,15 +92,16 @@ describe("schemaPages: config", () => {
     const on = await model(true);
     const off = await model(false);
     assert.notEqual(on, off);
-    assert.equal(await model(), on, "unset is the default (true)");
+    assert.equal(await model(), off, "unset is the default (false)");
   });
 });
 
 describe("schemaPages: false — parse", () => {
   test("no schema page is registered; operation and root pages are unchanged", async () => {
-    const on = getApiPageSlugs(await model());
-    const off = getApiPageSlugs(await model(false));
-    assert.ok(on.some((p) => p.slug.startsWith("schemas/")), "default publishes schema pages");
+    const on = getApiPageSlugs(await model(true));
+    const off = getApiPageSlugs(await model());
+    assert.ok(on.some((p) => p.slug.startsWith("schemas/")), "schemaPages: true publishes schema pages");
+    assert.deepEqual(getApiPageSlugs(await model(false)), off, "false is the default");
     assert.deepEqual(
       off,
       on.filter((p) => !p.slug.startsWith("schemas/")),
@@ -121,7 +123,7 @@ components:
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!.message, /schemas appear on no page/);
 
-    const on = await parseOpenApi({ collection: "api", spec });
+    const on = await parseOpenApi({ collection: "api", spec, schemaPages: true });
     assert.equal(on.diagnostics.filter((d) => d.code === "schema-pages-only-root").length, 0);
   });
 
@@ -184,9 +186,9 @@ describe("schemaPages: false — view model", () => {
   test("inline variant property previews are unchanged", async () => {
     const strip = (variants: ApiVariant[]) => variants.map(({ href: _href, ...rest }) => rest);
     for (const op of ["create", "openDispute"]) {
-      const on = allVariants(getApiPageProps(await model(), op) as ApiOperationPage);
+      const on = allVariants(getApiPageProps(await model(true), op) as ApiOperationPage);
       const off = allVariants(getApiPageProps(await model(false), op) as ApiOperationPage);
-      assert.ok(on.every((v) => typeof v.href === "string"), `${op}: default links every variant`);
+      assert.ok(on.every((v) => typeof v.href === "string"), `${op}: schemaPages: true links every variant`);
       assert.deepEqual(strip(off), strip(on));
     }
   });
@@ -196,7 +198,7 @@ describe("schemaPages: false — view model", () => {
       (getApiPageProps(await model(schemaPages, MAP_SPEC), "putEnvs") as ApiOperationPage).body.find(
         (f) => f.name === "envs",
       )!;
-    const on = await field();
+    const on = await field(true);
     const off = await field(false);
     assert.equal(on.typeRef?.label, "Env");
     assert.equal(off.type, "map<Env>");
@@ -221,7 +223,7 @@ describe("page props for a coordinate without a page", () => {
       () => getApiPageProps(off, "Dispute"),
       /Coordinate "Dispute" is a schema node, which is not a page \(schema pages are off for this collection\)/,
     );
-    assert.equal(getApiPageProps(await model(), "Dispute").kind, "schema", "default still projects it");
+    assert.equal(getApiPageProps(await model(true), "Dispute").kind, "schema", "schemaPages: true projects it");
   });
 
   test("an x-tagGroups category (nav-only) is rejected too", async () => {
@@ -251,7 +253,7 @@ describe("schemaPages: false — citations", () => {
   const off: ApiSpec[] = [{ collection: "api", spec: SMALLCO, schemaPages: false }];
 
   test("the index and coordinates manifest leave out schemas and schema fields", async () => {
-    const on = await buildCitationIndex([{ collection: "api", spec: SMALLCO }], root);
+    const on = await buildCitationIndex([{ collection: "api", spec: SMALLCO, schemaPages: true }], root);
     const result = await buildCitationIndex(off, root);
     assert.ok(on.index.has("api:Dispute") && on.index.has("api:Dispute.status"));
     assert.ok(!result.index.has("api:Dispute") && !result.index.has("api:Dispute.status"));

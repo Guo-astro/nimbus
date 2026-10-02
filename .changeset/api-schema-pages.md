@@ -2,6 +2,8 @@
 "@cloudflare/nimbus-docs": minor
 ---
 
-Add `schemaPages` to `api` entries, so an API reference can show types only inline. `true` (the default) keeps today's output. With `false`, schemas still shape operation pages, including the properties previewed under each union variant, but get no page, Markdown version, OG image, sitemap, search, or `llms.txt` entry, or citation coordinate. Union variants, discriminator mappings, and `map<Name>` types that linked to a schema page render as text. A citation in your content to a schema or schema field fails the build and names the setting. Schema names still claim their `schemas/<Name>` routes, so turning pages back on can't collide with an operation.
+**Breaking:** API references no longer publish a page for each `components/schemas` entry. To keep schema pages, add `schemaPages: true` to the `api` entry; that restores today's output exactly.
 
-`getApiPageProps` now throws for a coordinate that has no page, such as a schema with `schemaPages: false` or an `x-tagGroups` category, instead of returning the API root's URLs as if they were its own.
+With schema pages off (the new default), schemas still shape operation pages, including the properties previewed under each union variant, but get no page, Markdown version, OG image, sitemap, search, or `llms.txt` entry, or citation coordinate. Union variants, discriminator mappings, and `map<Name>` types render as text. A citation in your content to a schema or schema field fails the build and names the setting. Schema names still claim their `schemas/<Name>` routes, so turning pages on can't collide with an operation. On a 400-operation slice of a large public spec, this cut output files by 60% and build time by more than half.
+
+`getApiPageProps` now throws for a coordinate that has no page, such as a schema with schema pages off or an `x-tagGroups` category, instead of returning the API root's URLs as if they were its own.

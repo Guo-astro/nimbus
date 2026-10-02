@@ -54,7 +54,7 @@ export interface ResolvedApiVersion {
   label: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId: boolean;
-  /** Publish a page per `components/schemas` entry. Family-wide; default true. */
+  /** Publish a page per `components/schemas` entry. Family-wide; default false. */
   schemaPages: boolean;
   /** Route convention for this target, or `undefined` for legacy operationId URLs. */
   routes?: RoutePolicy;
@@ -107,7 +107,7 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         hidden: false,
         label: entry.label ?? family,
         requireOperationId: entry.requireOperationId ?? false,
-        schemaPages: entry.schemaPages ?? true,
+        schemaPages: entry.schemaPages ?? false,
         routes: asRoutePolicy(entry.routes),
         sidebar: entry.sidebar ?? "full",
       },
@@ -129,7 +129,7 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       hidden: v.hidden ?? false,
       label: v.label ?? v.version,
       requireOperationId: entry.requireOperationId ?? false,
-      schemaPages: entry.schemaPages ?? true,
+      schemaPages: entry.schemaPages ?? false,
       routes: asRoutePolicy(v.routes),
       sidebar: entry.sidebar ?? "full",
     };

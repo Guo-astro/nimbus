@@ -35,7 +35,7 @@ export async function resolveSpecSource(
   const mountPath = entry.mountPath ? { mountPath: entry.mountPath } : {};
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};
-  const noSchemaPages = entry.schemaPages === false ? { schemaPages: false as const } : {};
+  const schemaPages = entry.schemaPages ? { schemaPages: true as const } : {};
 
   if (typeof entry.spec !== "string") {
     return {
@@ -45,7 +45,7 @@ export async function resolveSpecSource(
       ...mountPath,
       ...strict,
       ...routes,
-      ...noSchemaPages,
+      ...schemaPages,
     };
   }
 
@@ -70,6 +70,6 @@ export async function resolveSpecSource(
     ...mountPath,
     ...strict,
     ...routes,
-    ...noSchemaPages,
+    ...schemaPages,
   };
 }

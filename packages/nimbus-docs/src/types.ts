@@ -265,13 +265,14 @@ export interface ApiSpec {
   requireOperationId?: boolean;
   /**
    * Publish a page for each `components/schemas` entry, at
-   * `/<collection>/schemas/<Name>`. Default `true`. Applies to every version of
-   * a family.
+   * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
+   * of a family.
    *
-   * Set `false` when the reference should show types only inline. Schemas still
-   * shape operation pages (fields, union previews), but get no page, Markdown
-   * file, sitemap or search entry, or citation coordinate, and type names that
-   * linked to them render as text. A citation to a schema fails the build.
+   * By default, types show only inline: schemas shape operation pages (fields,
+   * union previews) but get no page, Markdown file, sitemap or search entry, or
+   * citation coordinate, type names render as text, and a citation to a schema
+   * fails the build. Set `true` to publish schema pages, link type names to
+   * them, and make schemas citable.
    */
   schemaPages?: boolean;
   /**

@@ -55,7 +55,7 @@ export interface SpecSource {
   mountPath?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
-  /** Publish a page per `components/schemas` entry. Default true. */
+  /** Publish a page per `components/schemas` entry. Default false. */
   schemaPages?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
@@ -182,7 +182,7 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       sampleTools,
       source.requireOperationId ?? false,
       source.routes,
-      source.schemaPages ?? true,
+      source.schemaPages ?? false,
     );
     const model = walker.walk();
     if (source.mountPath !== undefined) model.mountPath = source.mountPath;
@@ -364,7 +364,7 @@ class Walker implements ParseContext {
     sampleTools?: SampleTools | null,
     readonly requireOperationId: boolean = false,
     readonly routePolicy?: RoutePolicy,
-    readonly schemaPages: boolean = true,
+    readonly schemaPages: boolean = false,
   ) {
     this.registry = new CoordinateRegistry(collection);
     // Schema tables are captured once here — the walk never reassigns them on `doc`.

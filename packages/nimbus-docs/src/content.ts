@@ -261,7 +261,7 @@ export interface ApiCollectionOptions {
   versions?: ApiVersionSpec[];
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
-  /** Publish a page per `components/schemas` entry. Default true. */
+  /** Publish a page per `components/schemas` entry. Default false. */
   schemaPages?: boolean;
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */

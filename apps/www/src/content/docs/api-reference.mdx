@@ -312,8 +312,9 @@ With schema pages off, an `api.ref:` citation in your content to a schema or a s
 Each operation page shows the request in cURL, TypeScript, and Python. Parameter values come from the specification:
 
 - A parameter's own `example`, or its first `examples` entry, comes first.
-- Otherwise the value is generated from the parameter's schema, the same way request bodies are: `example`, `const`, first `examples` entry, first `enum` value, `default`, then `allOf` members and the first `oneOf` branch (or the first `anyOf` branch when there's no `oneOf`). Without any of these, the value is a representative one, such as `string` or `0`.
-- A path parameter whose schema declares no value shows its name in angle brackets instead, such as `<account_id>`. A made-up identifier would name no real resource.
+- Otherwise the value is generated from the parameter's schema with [openapi-sampler](https://github.com/Redocly/openapi-sampler), the same way request bodies are. Without a declared value, it's a type guess, such as `string`, `0`, or a format's stock value.
+- A path parameter keeps the generated value only when a value declared in its schema produces it: an `example`, `const`, `examples`, `enum`, or `default` in a part of the schema the sampler reads. Those parts are every `allOf` member, the first `oneOf` branch (or the first `anyOf` branch when there's no `oneOf`), and `if` with `then`. Otherwise it shows its name in angle brackets, such as `<account_id>`: a guessed identifier would name no real resource.
+- Required query parameters and headers keep the generated value, guesses included. One with no schema, or whose generated value is an array or object, shows `<name>`.
 
 Credentials always render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are, as in a real request. Request bodies use the request example, or a value generated from the schema.
 
@@ -323,7 +324,9 @@ curl --request GET \
   --header 'Authorization: Bearer <token>'
 ```
 
-An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker.
+An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker and in the page's Markdown version. An entry without a `label` uses its `lang`, and a repeated name is numbered: `Python`, `Python (2)`.
+
+Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs add api-code-rail` and choose **Overwrite** for `ApiCodeRail.astro` and `code-rail.client.ts`, and **Skip** for the other components.
 
 To keep generated languages next to authored samples, set `samples.keepGenerated` on the `api` entry:
 

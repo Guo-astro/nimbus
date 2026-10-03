@@ -266,19 +266,29 @@ export function buildOperationSamples(
 // A sample's id is its language for the first sample in that language, then
 // `<lang>-2`, `<lang>-3`. Every language in the list is reserved first, so a
 // sample whose language is `bash-2` always gets `bash-2`, and a second `bash`
-// sample skips to `bash-3`.
+// sample skips to `bash-3`. Labels get the same treatment for display: a
+// repeated label becomes `Python (2)`, so the picker and the Markdown headings
+// never show two identical names. Languages and sources are unchanged.
 function withIds(samples: Omit<CodeSample, "id">[]): CodeSample[] {
-  const reserved = new Set(samples.map((sample) => sample.lang));
+  const ids = unique(samples.map((sample) => sample.lang), (base, n) => `${base}-${n}`);
+  const labels = unique(samples.map((sample) => sample.label), (base, n) => `${base} (${n})`);
+  return samples.map((sample, i) => ({ id: ids[i]!, ...sample, label: labels[i]! }));
+}
+
+// Keeps the first of each value and numbers the repeats from 2, skipping any
+// numbered form another entry already uses.
+function unique(values: string[], numbered: (base: string, n: number) => string): string[] {
+  const reserved = new Set(values);
   const taken = new Set<string>();
-  return samples.map((sample) => {
-    let id = sample.lang;
-    if (taken.has(id)) {
+  return values.map((value) => {
+    let out = value;
+    if (taken.has(out)) {
       let n = 2;
-      while (reserved.has(`${sample.lang}-${n}`) || taken.has(`${sample.lang}-${n}`)) n++;
-      id = `${sample.lang}-${n}`;
+      while (reserved.has(numbered(value, n)) || taken.has(numbered(value, n))) n++;
+      out = numbered(value, n);
     }
-    taken.add(id);
-    return { id, ...sample };
+    taken.add(out);
+    return out;
   });
 }
 
@@ -309,6 +319,8 @@ function generateSamples(
 // declared `<id>` stays encoded, a body's `%3Cid%3E` stays as written) and
 // works for names URL encoding would change (`filter[name]`, non-ASCII). A
 // prefix the request's own data already contains is skipped.
+const MARKER = /nbph\d+q\d+z/g;
+
 function buildMarkedHar(
   input: OperationSampleInput,
   mediaType: string,
@@ -359,11 +371,12 @@ function convert(
       );
     }
     // Every marker sits inside a string literal the target has already quoted,
-    // so the restored `<name>` is escaped for that target's quoting.
-    for (const [marker, name] of placeholders) {
-      source = source.split(marker).join(escapeForTarget(lang.target, `<${name}>`));
-    }
-    return source;
+    // so the restored `<name>` is escaped for that target's quoting. One pass,
+    // so a restored name that looks like a marker is never replaced again.
+    return source.replace(MARKER, (marker) => {
+      const name = placeholders.get(marker);
+      return name === undefined ? marker : escapeForTarget(lang.target, `<${name}>`);
+    });
   } catch {
     return undefined;
   }
@@ -435,18 +448,21 @@ type ParamValues = Map<OpenApiParameter, string | undefined>;
 // Each parameter's sample value; `undefined` renders a `<name>` placeholder.
 // The parameter's own `example` or `examples` come first, as OpenAPI
 // specifies. Otherwise openapi-sampler picks the value, so precedence and
-// composition (`allOf`, first `oneOf`/`anyOf` branch) are the sampler's. A
-// path parameter whose schema declares no value gets the placeholder instead
-// of a type guess: a made-up identifier names no real resource. Query and
-// header parameters keep the sampler's value, guesses included.
+// composition are the sampler's. A path parameter keeps the sampler's value
+// only when a declaration the sampler reads supports it; anything else is a
+// type guess (`string`, `0`, a format's stock value), and a made-up identifier
+// names no real resource, so it gets the placeholder. Query and header
+// parameters keep the sampler's value, guesses included.
 function paramValues(tools: SampleTools, params: OpenApiParameter[]): ParamValues {
   const values: ParamValues = new Map();
   for (const p of params) {
     const own = scalarText([p.example, firstExample(p.examples)].find((c) => c !== undefined));
     if (own !== undefined) {
       values.set(p, own);
-    } else if (p.schema && (p.in !== "path" || declaresValue(p.schema, new Set()))) {
-      values.set(p, scalarText(sampleForRole(tools, p.schema, "request")));
+    } else if (p.schema) {
+      const sampled = scalarText(sampleForRole(tools, p.schema, "request"));
+      const declared = p.in !== "path" || (sampled !== undefined && supportingValues(p.schema).has(sampled));
+      values.set(p, declared ? sampled : undefined);
     } else {
       values.set(p, undefined);
     }
@@ -454,26 +470,71 @@ function paramValues(tools: SampleTools, params: OpenApiParameter[]): ParamValue
   return values;
 }
 
-// Whether the sampler would read a declared value anywhere in this schema:
-// its own `example`, `const`, `examples`, `enum`, or `default`, any `allOf`
-// member, and the branch the sampler follows: the first `oneOf` branch, or the
-// first `anyOf` branch only when there's no `oneOf` (the sampler ignores
-// `anyOf` next to `oneOf`). It decides only between the sampler's value and a
-// placeholder; the sampler still picks the value.
-function declaresValue(s: OpenApiSchema | undefined, seen: Set<OpenApiSchema>): boolean {
-  if (!s || typeof s !== "object" || seen.has(s)) return false;
-  seen.add(s);
-  if (
-    s.example !== undefined ||
-    s.const !== undefined ||
-    s.default !== undefined ||
-    (Array.isArray(s.examples) && s.examples.length > 0) ||
-    (Array.isArray(s.enum) && s.enum.length > 0)
-  ) {
-    return true;
-  }
-  const branch = s.oneOf && s.oneOf.length > 0 ? s.oneOf[0] : s.anyOf?.[0];
-  return (s.allOf ?? []).some((member) => declaresValue(member, seen)) || declaresValue(branch, seen);
+// The declared values the sampler can return for a scalar schema, as text,
+// following the sampler's own order of reading a schema (openapi-sampler
+// `traverse`): an `example` short-circuits; `allOf` merges the rest of the
+// schema with every member; `oneOf` takes its first branch, or `anyOf` its
+// first branch when there's no `oneOf`; `if` with `then` merges the schema,
+// `if`, and `then` first and reads the result (`else` is never read);
+// otherwise `const`, `examples`, `enum`, and `default`. Values in branches the
+// sampler skips don't count, so an unused branch's `"string"` can't vouch for a
+// guessed `"string"`.
+function supportingValues(schema: OpenApiSchema): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<OpenApiSchema>();
+  const add = (value: unknown) => {
+    const text = scalarText(value);
+    if (text !== undefined) out.add(text);
+  };
+  const addOwn = (s: OpenApiSchema) => {
+    add(s.const);
+    if (Array.isArray(s.examples)) s.examples.forEach(add);
+    if (Array.isArray(s.enum)) s.enum.forEach(add);
+    add(s.default);
+  };
+  const visit = (s: OpenApiSchema | undefined): void => {
+    if (!s || typeof s !== "object" || seen.has(s)) return;
+    seen.add(s);
+    if (s.example !== undefined) return add(s.example);
+    if (s.allOf !== undefined) {
+      addOwn(s);
+      visit({ ...s, allOf: undefined });
+      for (const member of s.allOf) visit(member);
+      return;
+    }
+    const branch = s.oneOf?.length ? s.oneOf[0] : s.anyOf?.length ? s.anyOf[0] : undefined;
+    if (branch) {
+      addOwn(s);
+      return visit(branch);
+    }
+    if (s.if && s.then) {
+      // The merged schema decides, as for the sampler: a `oneOf` in `then`
+      // outranks an `anyOf` in `if`.
+      const { if: condition, then, ...rest } = s;
+      return visit(mergeLikeSampler(rest, condition, then) as OpenApiSchema);
+    }
+    addOwn(s);
+  };
+  visit(schema);
+  return out;
+}
+
+// openapi-sampler's `mergeDeep`, which it applies to `if` and `then`: later
+// objects win, nested objects (arrays too, index by index) merge.
+function mergeLikeSampler(...objects: unknown[]): unknown {
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object";
+  return objects.reduce<Record<string, unknown>>(
+    (prev, obj) => {
+      for (const key of Object.keys((obj as Record<string, unknown>) ?? {})) {
+        const pVal = prev[key];
+        const oVal = (obj as Record<string, unknown>)[key];
+        prev[key] = isObject(pVal) && isObject(oVal) ? (mergeLikeSampler(pVal, oVal) as Record<string, unknown>) : oVal;
+      }
+      return prev;
+    },
+    Array.isArray(objects[objects.length - 1]) ? ([] as unknown as Record<string, unknown>) : {},
+  );
 }
 
 // A parameter's first `examples` entry with an inline value, in spec order.

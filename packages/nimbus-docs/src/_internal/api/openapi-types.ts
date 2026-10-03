@@ -156,6 +156,9 @@ export interface OpenApiSchema {
   oneOf?: OpenApiSchema[];
   anyOf?: OpenApiSchema[];
   allOf?: OpenApiSchema[];
+  /** JSON Schema conditional; the sampler merges `if` and `then`. */
+  if?: OpenApiSchema;
+  then?: OpenApiSchema;
   discriminator?: { propertyName: string; mapping?: Record<string, string> };
   minimum?: number;
   maximum?: number;

@@ -876,7 +876,12 @@ describe("parameter and credential placeholders", () => {
     }
   });
 
-  test("placeholders with quotes or backslashes in their names keep every sample valid code", async () => {
+  test("placeholders with quotes or backslashes in their names keep every sample valid code", async (t) => {
+    // The shell and Python checks need those tools; the JavaScript check always runs.
+    const hasBash = spawnSync("bash", ["-c", "true"]).status === 0;
+    const hasPython = spawnSync("python3", ["-c", "pass"]).status === 0;
+    if (!hasBash) t.diagnostic("bash not found: skipping the cURL syntax check");
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python syntax check");
     const tools = await loadSampleTools();
     assert.ok(tools);
     const names = ["user'id", 'a"b', "c\\d"];
@@ -897,14 +902,18 @@ describe("parameter and credential placeholders", () => {
         params: params.map((name) => ({ name, in: "path" as const, required: true, schema: { type: "string" } })),
       });
       assert.equal(out.length, 3);
-      const bash = spawnSync("bash", ["-n"], { input: lang(out, "curl"), encoding: "utf8" });
-      assert.equal(bash.status, 0, `cURL is valid shell: ${bash.stderr}\n${lang(out, "curl")}`);
+      if (hasBash) {
+        const bash = spawnSync("bash", ["-n"], { input: lang(out, "curl"), encoding: "utf8" });
+        assert.equal(bash.status, 0, `cURL is valid shell: ${bash.stderr}\n${lang(out, "curl")}`);
+      }
       assert.doesNotThrow(() => new Function(lang(out, "typescript")), "TypeScript sample parses");
-      const python = spawnSync("python3", ["-c", "import ast, sys; ast.parse(sys.stdin.read())"], {
-        input: lang(out, "python"),
-        encoding: "utf8",
-      });
-      assert.equal(python.status, 0, `Python is valid: ${python.stderr}\n${lang(out, "python")}`);
+      if (hasPython) {
+        const python = spawnSync("python3", ["-c", "import ast, sys; ast.parse(sys.stdin.read())"], {
+          input: lang(out, "python"),
+          encoding: "utf8",
+        });
+        assert.equal(python.status, 0, `Python is valid: ${python.stderr}\n${lang(out, "python")}`);
+      }
     }
   });
 
@@ -969,7 +978,7 @@ describe("parameter and credential placeholders", () => {
     assert.match(lang(out, "curl"), new RegExp(`/${expected}$`));
   });
 
-  test("the sampler's allOf rule applies as is; a non-scalar value renders the placeholder; a parameter example wins", async () => {
+  test("a guess the sampler keeps over a declaration renders the placeholder; a non-scalar value too; a parameter example wins", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);
     const out = buildOperationSamples(tools, {
@@ -983,7 +992,102 @@ describe("parameter and credential placeholders", () => {
         { name: "c", in: "path", required: true, example: "param", schema: { type: "string", example: "schema" } },
       ],
     });
-    assert.match(lang(out, "curl"), /\/string\/<b>\/param'/);
+    assert.match(lang(out, "curl"), /\/<a>\/<b>\/param'/);
+  });
+
+  test("a path value is kept only when a declaration the sampler reads supports it", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    // A dereferenced `$ref` is a shared object, as the parser leaves it.
+    const id: OpenApiSchema = { type: "string", example: "real-id" };
+    const cases: { name: string; schema: OpenApiSchema; sampled: string; shown: string }[] = [
+      { name: "ref then type", schema: { allOf: [id, { type: "string" }] }, sampled: "string", shown: "<p>" },
+      { name: "type then ref", schema: { allOf: [{ type: "string" }, id] }, sampled: "real-id", shown: "real-id" },
+      { name: "ref", schema: id, sampled: "real-id", shown: "real-id" },
+      { name: "first oneOf", schema: { oneOf: [{ example: "one" }, { example: "two" }] }, sampled: "one", shown: "one" },
+      { name: "unused anyOf", schema: { anyOf: [{ type: "string" }, { enum: ["string"] }] }, sampled: "string", shown: "<p>" },
+      { name: "anyOf beside oneOf", schema: { oneOf: [{ type: "string" }], anyOf: [{ example: "string" }] }, sampled: "string", shown: "<p>" },
+      { name: "parent beside oneOf", schema: { default: "outer", oneOf: [{ type: "string" }] }, sampled: "outer", shown: "outer" },
+      { name: "uuid", schema: { type: "string", format: "uuid" }, sampled: "497f6eca-6276-4993-bfeb-53cbbbba6f08", shown: "<p>" },
+      { name: "date-time", schema: { type: "string", format: "date-time" }, sampled: "2019-08-24T14:15:22Z", shown: "<p>" },
+      { name: "integer", schema: { type: "integer" }, sampled: "0", shown: "<p>" },
+      { name: "if/then", schema: { type: "string", if: { type: "string" }, then: { enum: ["real-id"] } }, sampled: "real-id", shown: "real-id" },
+      { name: "if without then", schema: { type: "string", if: { enum: ["x"] } }, sampled: "string", shown: "<p>" },
+      {
+        name: "else",
+        schema: { type: "string", if: { type: "string" }, then: { type: "string" }, else: { enum: ["string"] } } as OpenApiSchema,
+        sampled: "string",
+        shown: "<p>",
+      },
+      // `if` and `then` merge before branches are chosen: `then`'s `oneOf` outranks `if`'s `anyOf`.
+      {
+        name: "conditional anyOf under oneOf",
+        schema: { type: "string", if: { anyOf: [{ type: "string", example: "string" }] }, then: { oneOf: [{ type: "string" }] } },
+        sampled: "string",
+        shown: "<p>",
+      },
+      {
+        name: "same, pre-merged",
+        schema: { type: "string", anyOf: [{ type: "string", example: "string" }], oneOf: [{ type: "string" }] },
+        sampled: "string",
+        shown: "<p>",
+      },
+      {
+        name: "conditional example in the chosen branch",
+        schema: { type: "string", if: { type: "string" }, then: { oneOf: [{ example: "real-id" }] } },
+        sampled: "real-id",
+        shown: "real-id",
+      },
+      { name: "authored string", schema: { type: "string", example: "string" }, sampled: "string", shown: "string" },
+      { name: "authored 0", schema: { type: "integer", default: 0 }, sampled: "0", shown: "0" },
+      { name: "authored true", schema: { type: "boolean", enum: [true] }, sampled: "true", shown: "true" },
+    ];
+    for (const c of cases) {
+      // Pins the sampler's behavior, so an upgrade that changes it fails here.
+      assert.equal(String(tools.sampler.sample(c.schema, { quiet: true, skipReadOnly: true })), c.sampled, c.name);
+      const out = buildOperationSamples(tools, {
+        method: "get",
+        path: "/x/{p}",
+        auth: [],
+        params: [{ name: "p", in: "path", required: true, schema: c.schema }],
+      });
+      assert.ok(lang(out, "curl").includes(`/x/${c.shown}'`) || lang(out, "curl").includes(`/x/${c.shown}\n`) || lang(out, "curl").endsWith(`/x/${c.shown}`), `${c.name}: ${lang(out, "curl")}`);
+    }
+  });
+
+  test("query and header values keep the sampler's guess", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const out = buildOperationSamples(tools, {
+      method: "get",
+      path: "/x",
+      auth: [],
+      params: [
+        { name: "q", in: "query", required: true, schema: { type: "string" } },
+        { name: "X-Count", in: "header", required: true, schema: { type: "integer" } },
+      ],
+    });
+    assert.ok(lang(out, "curl").includes("?q=string"));
+    assert.ok(lang(out, "curl").includes("--header 'X-Count: 0'"));
+  });
+
+  test("a placeholder name that looks like a marker is restored once, in every language", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const out = buildOperationSamples(tools, {
+      method: "get",
+      path: "/{nbph0q1z}/{b}",
+      auth: [],
+      params: [
+        { name: "nbph0q1z", in: "path", required: true, schema: { type: "string" } },
+        { name: "b", in: "path", required: true, schema: { type: "string" } },
+      ],
+    });
+    assert.equal(out.length, 3);
+    for (const sample of out) {
+      assert.ok(sample.source.includes("/<nbph0q1z>/<b>"), `${sample.lang}: ${sample.source}`);
+      assert.ok(!sample.source.includes("<<"), sample.lang);
+    }
   });
 
   test("body output is unchanged: declared examples and sampler output still fill it", async () => {
@@ -1106,6 +1210,28 @@ describe("samples.keepGenerated", () => {
     assert.deepEqual(headings, rail.samples.map((s) => s.label));
     assert.deepEqual(rail.samples.map((s) => s.lang), ["go", "python", "curl"]);
     for (const sample of rail.samples) assert.ok(md.includes(sample.source));
+  });
+
+  test("repeated labels are numbered the same way in the code rail and the Markdown twin", async () => {
+    const samples = [
+      { lang: "python", source: "print('a')" },
+      { lang: "python", source: "print('b')" },
+      { lang: "go", label: "python (2)", source: "x" },
+    ];
+    const op = await page(authoredSpec(samples), "getAccount");
+    const rail = await prepareApiPageCode(op);
+    assert.equal(rail.kind, "operation");
+    if (rail.kind !== "operation") return;
+    // `python (2)` is taken, so the second unlabeled Python sample is `python (3)`.
+    assert.deepEqual(rail.samples.map((s) => s.label), ["python", "python (3)", "python (2)"]);
+    // Ids, languages, and sources are unchanged.
+    assert.deepEqual(rail.samples.map((s) => [s.id, s.lang, s.source]), [
+      ["python", "python", "print('a')"],
+      ["python-2", "python", "print('b')"],
+      ["go", "go", "x"],
+    ]);
+    const md = renderApiPageMarkdown(op).split("## Code samples")[1]!.split(/^## /m)[0]!;
+    assert.deepEqual([...md.matchAll(/^### (.+)$/gm)].map((m) => m[1]), ["python", "python (3)", "python (2)"]);
   });
 
   test("an unknown id fails config validation and lists the valid ids", () => {

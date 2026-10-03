@@ -39,6 +39,12 @@ interface Props
 
 const { responses, samples, title, method, coordinate, class: className } = Astro.props;
 
+// A sample's picker key. Packages before 0.16.0 give samples no `id`; their
+// language is unique per operation there, so it serves as the key.
+function sampleKey(sample: { lang: string; id?: string }): string {
+  return sample.id ?? sample.lang;
+}
+
 function preparedCode(value: { highlightedHtml?: string }): string {
   if (!value.highlightedHtml) {
     throw new Error("Nimbus API code was not prepared during content sync.");
@@ -93,7 +99,7 @@ const respPanelId = (i: number) => `${respUid}-panel-${i}`;
         {samples.length > 0 && (
           <select class="nb-cr-langselect" data-nb-lang-select aria-label="Code sample">
             {samples.map((sample, i) => (
-              <option value={sample.id} selected={i === 0}>{sample.label}</option>
+              <option value={sampleKey(sample)} selected={i === 0}>{sample.label}</option>
             ))}
           </select>
         )}
@@ -101,7 +107,7 @@ const respPanelId = (i: number) => `${respUid}-panel-${i}`;
       {samples.length > 0 && (
         <div class="nb-cr-content overflow-hidden rounded-lg bg-card ring ring-border">
           {samples.map((sample, i) => (
-            <div data-nb-lang-panel data-nb-lang-value={sample.id} data-nb-sample-lang={sample.lang} hidden={i !== 0}>
+            <div data-nb-lang-panel data-nb-lang-value={sampleKey(sample)} data-nb-sample-lang={sample.lang} hidden={i !== 0}>
               <div class="nb-cr-body">
                 <Fragment set:html={preparedCode(sample)} />
               </div>

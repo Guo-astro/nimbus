@@ -102,6 +102,8 @@ export interface OpenApiParameter {
   required?: boolean;
   deprecated?: boolean;
   schema?: OpenApiSchema;
+  example?: unknown;
+  examples?: Record<string, { value?: unknown; externalValue?: string } | undefined>;
 }
 
 export interface OpenApiRequestBody {
@@ -148,6 +150,8 @@ export interface OpenApiSchema {
   const?: unknown;
   default?: unknown;
   example?: unknown;
+  /** OAS 3.1 / JSON Schema example list. */
+  examples?: unknown[];
   nullable?: boolean;
   oneOf?: OpenApiSchema[];
   anyOf?: OpenApiSchema[];

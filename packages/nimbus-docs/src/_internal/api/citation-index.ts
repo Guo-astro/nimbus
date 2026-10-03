@@ -56,6 +56,7 @@ export async function buildCitationIndex(
         mountPath: target.mountPath,
         requireOperationId: target.requireOperationId,
         routes: target.routes,
+        samples: target.samples,
       },
       root,
     );

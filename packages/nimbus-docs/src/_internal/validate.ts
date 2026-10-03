@@ -9,6 +9,7 @@ import { z } from "astro/zod";
 import type { NimbusConfig } from "../types.js";
 import { withStrictKeys, reportUnknownKeys } from "./strict-keys.js";
 import { prefixEntryFault, routeSlugFault } from "./api/route-policy.js";
+import { GENERATED_SAMPLE_LANGS } from "./api/samples.js";
 
 // `new URL("https:example.com")` does NOT throw (protocol `https:`, host
 // `example.com`), so a bare `.url()`/`new URL()` check waves through a missing
@@ -261,6 +262,28 @@ const routePolicySchema = z
     }
   });
 
+const sampleLangList = GENERATED_SAMPLE_LANGS.map((l) => `"${l}"`).join(", ");
+const samplesShape = {
+  keepGenerated: z
+    .array(
+      z.enum(GENERATED_SAMPLE_LANGS, {
+        error: `"api[].samples.keepGenerated" entries must be one of ${sampleLangList}`,
+      }),
+    )
+    .optional(),
+};
+const samplesKeys = new Set(Object.keys(samplesShape));
+const samplesSchema = z
+  .object(samplesShape)
+  .passthrough()
+  .superRefine((samples, ctx) => {
+    reportUnknownKeys(samples, ctx, samplesKeys, {
+      removedKeys: {},
+      contextLabel: "api samples field",
+      unknownHint: () => 'The only valid key is "keepGenerated".',
+    });
+  });
+
 const apiVersionSpecShape = {
   version: z
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
@@ -307,6 +330,7 @@ const apiSpecShape = {
   requireOperationId: z
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
+  samples: samplesSchema.optional(),
   routes: routePolicySchema.optional(),
   sidebar: z
     .enum(["full", "on-demand"], {

@@ -345,7 +345,10 @@ export interface NamedRequestExample extends DerivedExample {
 }
 
 export interface CodeSample {
-  /** `curl`, `typescript`, `python`, … */
+  /** Unique within the operation: the language for its first sample, then
+   *  `<lang>-2`, `<lang>-3`, … for further samples in the same language. */
+  id: string;
+  /** `curl`, `typescript`, `python`, …: the syntax, not the sample's identity. */
   lang: string;
   label: string;
   source: string;

@@ -15,7 +15,10 @@
  *
  * The language picker is a progressive-enhanced native <select>: every sample
  * ships in the HTML (crawlable — the first is visible, the rest reachable once
- * `code-rail.client` wires the select's change handler).
+ * `code-rail.client` wires the select's change handler). Options and panels are
+ * keyed by `sample.id`, not `sample.lang`, so two samples in one language (an
+ * SDK call and a raw request) each get their own option; each panel carries its
+ * `lang` so the client can save the reader's language across pages.
  */
 import { cn } from "@/lib/cn";
 import ApiMethodChip from "@/components/ui/api-sidebar/ApiMethodChip.astro";
@@ -88,9 +91,9 @@ const respPanelId = (i: number) => `${respUid}-panel-${i}`;
           <span class="nb-cr-title">{title}</span>
         </span>
         {samples.length > 0 && (
-          <select class="nb-cr-langselect" data-nb-lang-select aria-label="Sample language">
+          <select class="nb-cr-langselect" data-nb-lang-select aria-label="Code sample">
             {samples.map((sample, i) => (
-              <option value={sample.lang} selected={i === 0}>{sample.label}</option>
+              <option value={sample.id} selected={i === 0}>{sample.label}</option>
             ))}
           </select>
         )}
@@ -98,7 +101,7 @@ const respPanelId = (i: number) => `${respUid}-panel-${i}`;
       {samples.length > 0 && (
         <div class="nb-cr-content overflow-hidden rounded-lg bg-card ring ring-border">
           {samples.map((sample, i) => (
-            <div data-nb-lang-panel data-nb-lang-value={sample.lang} hidden={i !== 0}>
+            <div data-nb-lang-panel data-nb-lang-value={sample.id} data-nb-sample-lang={sample.lang} hidden={i !== 0}>
               <div class="nb-cr-body">
                 <Fragment set:html={preparedCode(sample)} />
               </div>

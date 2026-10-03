@@ -34,6 +34,7 @@ import type {
   RouteProvenance,
 } from "./model.js";
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSampleLang, ApiSamples } from "../../types.js";
 import { collectSecuritySchemes } from "./facts.js";
 import { loadSampleTools } from "./samples.js";
 import type { SampleTools } from "./samples.js";
@@ -57,6 +58,8 @@ export interface SpecSource {
   requireOperationId?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
+  samples?: ApiSamples;
 }
 
 export interface ParseResult {
@@ -180,6 +183,7 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       sampleTools,
       source.requireOperationId ?? false,
       source.routes,
+      source.samples?.keepGenerated,
     );
     const model = walker.walk();
     if (source.mountPath !== undefined) model.mountPath = source.mountPath;
@@ -361,6 +365,7 @@ class Walker implements ParseContext {
     sampleTools?: SampleTools | null,
     readonly requireOperationId: boolean = false,
     readonly routePolicy?: RoutePolicy,
+    readonly keepGenerated: readonly ApiSampleLang[] = [],
   ) {
     this.registry = new CoordinateRegistry(collection);
     // Schema tables are captured once here — the walk never reassigns them on `doc`.

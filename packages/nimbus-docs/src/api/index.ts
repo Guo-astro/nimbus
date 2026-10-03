@@ -115,12 +115,12 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
     typeof source.spec === "string" ? source.spec : JSON.stringify(source.spec);
   // Content-addressed: the key follows the *bytes*, not a path, so an edited
   // spec is a cache miss (dev hot-reload gets a fresh parse for free). The mount
-  // path, `requireOperationId`, and the route policy are keyed too, since each
-  // changes the output — two versions with identical spec bytes but different
-  // policies must never alias.
+  // path, `requireOperationId`, the route policy, and the sample policy are
+  // keyed too, since each changes the output: two versions with identical spec
+  // bytes but different policies must never alias.
   const key = `${source.collection}::${source.mountPath ?? ""}::${
     source.requireOperationId ? "strictOpId" : ""
-  }::${stableStringify(source.routes)}::${specDigest(raw)}`;
+  }::${stableStringify(source.routes)}::${stableStringify(source.samples)}::${specDigest(raw)}`;
   const cached = handleCache.get(key);
   if (cached) return cached;
   const promise = parseOpenApi(source).then((r) => wrap(r.model));
@@ -206,6 +206,7 @@ export async function getApiModel(
       mountPath: resolved.mountPath,
       requireOperationId: resolved.requireOperationId,
       routes: resolved.routes,
+      samples: resolved.samples,
     },
     root,
   ).then(buildApiModel);

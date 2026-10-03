@@ -5,6 +5,7 @@
  */
 
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSamples } from "../../types.js";
 
 export const apiSchemaVersion = 1;
 
@@ -34,6 +35,8 @@ export interface SpecSource {
   requireOperationId?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
+  samples?: ApiSamples;
 }
 
 declare const ApiModelBrand: unique symbol;
@@ -230,6 +233,12 @@ export interface ApiResponseMediaView {
 }
 
 export interface ApiCodeSampleView {
+  /** Unique within the operation; key panels and picker options by this. The
+   *  first sample in a language uses the language itself (`python`), so a
+   *  saved or linked language choice still matches; further samples in the
+   *  same language are `python-2`, `python-3`, and so on. */
+  id: string;
+  /** Syntax for highlighting and Markdown fences. Several samples may share it. */
   lang: string;
   label: string;
   source: string;

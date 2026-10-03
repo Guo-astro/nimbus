@@ -629,6 +629,7 @@ export function nimbus(
                         mountPath: target.mountPath,
                         requireOperationId: target.requireOperationId,
                         routes: target.routes,
+                        samples: target.samples,
                       },
                       projectRoot,
                     )

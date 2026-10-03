@@ -263,6 +263,8 @@ export interface ApiSpec {
    * missing case a build error. A coordinate/URL collision is always fatal.
    */
   requireOperationId?: boolean;
+  /** Code sample policy. Applies to every version of a family. */
+  samples?: ApiSamples;
   /**
    * Route convention for this collection's pages. Omit to keep the default
    * `operationId`-based URLs. For a version family, set `routes` on each
@@ -282,6 +284,20 @@ export interface ApiSpec {
    * Use `"on-demand"` for large APIs, where the full tree dominates page size.
    */
   sidebar?: ApiSidebarMode;
+}
+
+/** A language Nimbus generates code samples for. */
+export type ApiSampleLang = "curl" | "typescript" | "python";
+
+/** Code sample policy for one API collection. See {@link ApiSpec.samples}. */
+export interface ApiSamples {
+  /**
+   * Generated languages kept when an operation has authored `x-codeSamples`.
+   * They follow the authored samples; an authored sample in the same language
+   * replaces the generated one. Default `[]`: authored samples replace all
+   * generated ones.
+   */
+  keepGenerated?: ApiSampleLang[];
 }
 
 /** How much of the API navigation each page includes. See {@link ApiSpec.sidebar}. */

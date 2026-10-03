@@ -683,7 +683,7 @@ describe("parameter and credential placeholders", () => {
       ],
     });
     const url = "https://api.example.com/accounts/<account_id>/workflows/<workflow_name>/status";
-    assert.match(lang(out, "curl"), new RegExp(`--url '${url}'`));
+    assert.ok(lang(out, "curl").includes(`--url '${url}'`));
     assert.ok(lang(out, "typescript").includes(`'${url}'`));
     assert.ok(lang(out, "python").includes(`"${url}"`));
     for (const sample of out) assert.doesNotMatch(sample.source, /%3C|string|\b0\b/);

@@ -478,6 +478,7 @@ export function nimbus(
   // authored-source citation resolver and virtual:nimbus/coordinates read it
   // through a getter.
   let citationIndex = new Map<string, string>();
+  let unpublishedCitations = new Map<string, string>();
   let coordinatesManifest: CoordinatesManifest = {
     version: 2,
     collections: {},
@@ -628,6 +629,7 @@ export function nimbus(
                         label: target.label,
                         mountPath: target.mountPath,
                         requireOperationId: target.requireOperationId,
+                        schemaPages: target.schemaPages,
                         routes: target.routes,
                         samples: target.samples,
                       },
@@ -976,7 +978,7 @@ export function nimbus(
         // Remote refs fold into the citation index but not the manifest (which republishes
         // only local collections).
         {
-          const { index, manifest } = await buildCitationIndex(
+          const { index, manifest, unpublished } = await buildCitationIndex(
             config.api,
             projectRoot,
           );
@@ -987,6 +989,7 @@ export function nimbus(
             logger,
           );
           citationIndex = index;
+          unpublishedCitations = unpublished;
           coordinatesManifest = manifest;
         }
 
@@ -1261,6 +1264,7 @@ export function nimbus(
         const resolveAuthoredCitations = createAuthoredCitationResolver({
           contentDirs: citationContentDirs,
           getCitationIndex: () => citationIndex,
+          getUnpublishedCitations: () => unpublishedCitations,
         });
         const prepareAuthoredSource = (
           source: string,
@@ -1733,7 +1737,7 @@ export function nimbus(
           const rebakeCitationIndex = async (file: string) => {
             if (!rebakePaths.has(canonicalWatchPath(file))) return;
             try {
-              const { index, manifest } = await buildCitationIndex(
+              const { index, manifest, unpublished } = await buildCitationIndex(
                 config.api,
                 projectRootForBuild,
               );
@@ -1744,6 +1748,7 @@ export function nimbus(
                 server.config.logger,
               );
               citationIndex = index;
+              unpublishedCitations = unpublished;
               coordinatesManifest = manifest;
               (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(
                 projectRootForBuild,

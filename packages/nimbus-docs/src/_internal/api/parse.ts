@@ -56,6 +56,8 @@ export interface SpecSource {
   mountPath?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
+  /** Publish a page per `components/schemas` entry. Default false. */
+  schemaPages?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
   /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
@@ -183,6 +185,7 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       sampleTools,
       source.requireOperationId ?? false,
       source.routes,
+      source.schemaPages ?? false,
       source.samples?.keepGenerated,
     );
     const model = walker.walk();
@@ -365,6 +368,7 @@ class Walker implements ParseContext {
     sampleTools?: SampleTools | null,
     readonly requireOperationId: boolean = false,
     readonly routePolicy?: RoutePolicy,
+    readonly schemaPages: boolean = false,
     readonly keepGenerated: readonly ApiSampleLang[] = [],
   ) {
     this.registry = new CoordinateRegistry(collection);
@@ -384,6 +388,7 @@ class Walker implements ParseContext {
     parseOperations(this);
     parseWebhooks(this);
     parseSchemas(this);
+    this.warnIfOnlySchemas();
     // After every operationId is known (path operations AND webhooks), so a key
     // that names a real webhook is reported accurately, not as a typo.
     this.checkUnusedOverrides();
@@ -395,6 +400,25 @@ class Walker implements ParseContext {
       pages: { slugs: this.slugs, pages: this.pages, provenance: this.provenance },
       nav: { roots: this.navRoots },
     };
+  }
+
+  /** With `schemaPages: false`, a spec that defines schemas but no operations or
+   *  webhooks shows its schemas on no page at all (types render only inline, on
+   *  operations). Legal, but almost certainly not what the author meant, so say
+   *  so once. Tag pages may still exist, so make no claim about the page count. */
+  private warnIfOnlySchemas(): void {
+    if (this.schemaPages) return;
+    if (Object.keys(this.doc.components?.schemas ?? {}).length === 0) return;
+    for (const node of this.nodes.values()) {
+      if (node.kind === "operation") return;
+    }
+    this.registry.addWarning(
+      `This spec defines schemas but no operations or webhooks, and \`schemaPages\` is false, ` +
+        `so its schemas appear on no page. Set \`schemaPages: true\` to publish a page per schema.`,
+      undefined,
+      undefined,
+      "schema-pages-only-root",
+    );
   }
 
   /** Every configured `operations` override key must exist as an operationId in

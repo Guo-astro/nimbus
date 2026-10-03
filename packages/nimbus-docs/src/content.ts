@@ -261,6 +261,8 @@ export interface ApiCollectionOptions {
   versions?: ApiVersionSpec[];
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
+  /** Publish a page per `components/schemas` entry. Default false. */
+  schemaPages?: boolean;
   /** Code sample policy. See {@link ApiSamples}. */
   samples?: ApiSamples;
   /** Route convention for this collection's pages (unversioned only; for a family
@@ -323,6 +325,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
     label: options.label,
     versions: options.versions,
     requireOperationId: options.requireOperationId,
+    schemaPages: options.schemaPages,
     samples: options.samples,
     routes: options.routes,
   };
@@ -346,7 +349,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, requireOperationId, samples, routes } =
+      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, routes } =
         explicit ?? registered!;
       // The sidebar mode always comes from the Nimbus config's `api` entry:
       // request rendering and the build's component check read it there too.
@@ -394,6 +397,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         label,
         versions,
         requireOperationId,
+        schemaPages,
         samples,
         routes,
         sidebar,
@@ -432,6 +436,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 label: target.label,
                 mountPath: target.mountPath,
                 requireOperationId: target.requireOperationId,
+                schemaPages: target.schemaPages,
                 routes: target.routes,
                 samples: target.samples,
               },

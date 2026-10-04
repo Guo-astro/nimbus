@@ -1,5 +1,44 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.7.10
+
+### Patch Changes
+
+- [#191](https://github.com/cloudflare/nimbus/pull/191) [`11ebb39`](https://github.com/cloudflare/nimbus/commit/11ebb39c9ad606ce939e925021c0f59567ab677b) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - The `api-code-rail` component keys its sample picker by sample `id`, so several samples in one language each get their own option. It remembers the reader's language, not the exact sample: a saved language opens that language's first sample, and the choice syncs across open tabs. `?lang=` accepts a sample id or a language. With packages before 0.16.0, which give samples no `id`, the picker keys by language as before.
+
+  `api-code-rail` is distributed through the registry, not the scaffolded template. Existing sites update it with `nimbus-docs add api-code-rail`, choosing Overwrite for `ApiCodeRail.astro` and `code-rail.client.ts`.
+
+- [#189](https://github.com/cloudflare/nimbus/pull/189) [`5c96da8`](https://github.com/cloudflare/nimbus/commit/5c96da86ad9f5d5a1fdee4b83740d12e8c0b0400) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Refinements to the starter's API reference components:
+
+  - Status and method colours are retuned. Method chips use a tint and a 25% line from the same palette (`--nb-m-*-tint`, `--nb-m-*-line`).
+  - Field rows fold like code. A collapsed row ends in `{ 4 properties }`; an open row shows `{` on its signature and `}` under its children, centred on the guide line. "required" sits before the brace and never wraps away from it.
+  - Union fields drop the variant list from their type text, since the list below names each variant. The full names show as a tooltip on the field name.
+  - Constraints and default share one line. Field rows no longer show examples, because the code rail's request and response examples already include them. Long values wrap instead of widening the page.
+  - The code rail's response toggle is a compact segmented control, and the header and response rows share 8px insets.
+  - `LayerCard` takes `orientation="horizontal"`, which `ApiEndpointCard` uses. `Badge` gains an `outline` variant.
+  - Medium weight replaces semibold, letter-spacing is removed, and hover states no longer animate colour.
+
+- [#181](https://github.com/cloudflare/nimbus/pull/181) [`71ff242`](https://github.com/cloudflare/nimbus/commit/71ff2424f441c3d8fc57d09d69949365de81ed38) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Add `sidebar` to `api` entries, so large API references stop putting the whole navigation tree in every page. `"full"` (the default) keeps today's behavior. `"on-demand"` includes top-level items plus the current page's branch. A collapsed group opens in place and loads its rows from its own page, where the sidebar lists them open; a group without a page, such as an `x-tagGroups` category, loads them from the API overview. Without JavaScript, a collapsed group's label still links to its page. The mode is read from the `api` entry in the Nimbus config, including for sites that pass their entry to `apiCollection({ … })`.
+
+  ```ts
+  api: [{ collection: "api", spec: "./src/api/openapi.yaml", sidebar: "on-demand" }],
+  ```
+
+  `ApiNavItem` gains optional `deferred` and `childrenHref` fields. `@cloudflare/nimbus-docs/client` adds `initNavSidebar()`, and `@cloudflare/nimbus-docs/runtime` adds `navStateScript`, an inline script, and `navBuildId`, which a sidebar renders as `data-nb-nav-build`. Together they keep a sidebar's open groups, loaded rows, and scroll position from page to page for the session, restored before the page paints and without replaying animations. Cached rows are tied to the build that rendered the page, so rows cached before a deployment are never shown after it, including on client-side navigation. `apiCollection({ … })` warns when it sets a `sidebar` the config doesn't match.
+
+  A tag's `x-displayName` now sets its label in the sidebar, page title, and breadcrumbs, while its `name` still decides its coordinate and route. This lets a spec group hundreds of flat tags under readable parents.
+
+  Group pages now list their subsections (`ApiSectionPage.sections`), in HTML and Markdown, so every page stays reachable without the sidebar. The API overview no longer links an `x-tagGroups` category to itself: it lists the category's member sections instead. Both changes apply in every sidebar mode.
+
+  Starter components: `ApiSidebarItem` renders a deferred group as a closed group with an empty panel, and `ApiLayout` mounts `initNavSidebar` and the restore script for both the desktop rail and the mobile drawer. The API sidebar now keeps the groups a reader opened and its scroll position from page to page in every mode, and no longer fades or replays group animations during navigation. The mobile drawer moved ahead of the desktop rail in `ApiLayout`, so one inline script restores both before the page paints. `ApiBody` lists a group page's subsections.
+
+  Existing sites keep working unchanged with the default `sidebar: "full"`. `"on-demand"` needs the new API components: with older ones, the build fails and names the outdated files. Update them with `nimbus-docs add api-layout`, choosing Overwrite for `api-layout` and `api-sidebar`. `nimbus-docs add` now warns when the registry serves components from a different release than the project's `@cloudflare/nimbus-docs`.
+
+- [#182](https://github.com/cloudflare/nimbus/pull/182) [`9d2051c`](https://github.com/cloudflare/nimbus/commit/9d2051c4fb44eb9e5e4eb87db8cd081834fe7635) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Cloudflare server scaffolds depend on `@astrojs/cloudflare@~14.3.0`, matching `check`.
+
+- Updated dependencies [[`11e6d85`](https://github.com/cloudflare/nimbus/commit/11e6d8588dc197f701799c1859e7d3dc86d91b54), [`18b0005`](https://github.com/cloudflare/nimbus/commit/18b0005b4f0069f434a0b7f282148d2454666f20), [`9f54406`](https://github.com/cloudflare/nimbus/commit/9f5440652bce7612aee42521a5ff7c4c544b8f1a), [`71ff242`](https://github.com/cloudflare/nimbus/commit/71ff2424f441c3d8fc57d09d69949365de81ed38), [`a14c58f`](https://github.com/cloudflare/nimbus/commit/a14c58f663475e003d7705fd096cc24defec4b2d), [`278a3ff`](https://github.com/cloudflare/nimbus/commit/278a3ffb96ced884c299fd02c92a605e136f4df5), [`e5fe9f3`](https://github.com/cloudflare/nimbus/commit/e5fe9f3e680cbf3128d2c9c2a1b38d4ced496dda), [`aff3e9f`](https://github.com/cloudflare/nimbus/commit/aff3e9f05f90de4b1ff0b0015f61754173aed405), [`9d2051c`](https://github.com/cloudflare/nimbus/commit/9d2051c4fb44eb9e5e4eb87db8cd081834fe7635)]:
+  - @cloudflare/nimbus-docs@0.16.0
+
 ## 0.7.9
 
 ### Patch Changes

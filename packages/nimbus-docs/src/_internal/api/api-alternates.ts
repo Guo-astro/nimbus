@@ -64,6 +64,7 @@ export async function buildApiVersionAlternates(
             requireOperationId: target.requireOperationId,
             schemaPages: target.schemaPages,
             routes: target.routes,
+            samples: target.samples,
           },
           projectRoot,
         );

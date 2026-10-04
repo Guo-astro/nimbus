@@ -15,6 +15,7 @@ import path from "node:path";
 
 import type { SpecSource } from "./view-model.js";
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSamples } from "../../types.js";
 
 export interface ApiSpecEntry {
   collection: string;
@@ -25,6 +26,7 @@ export interface ApiSpecEntry {
   requireOperationId?: boolean;
   schemaPages?: boolean;
   routes?: RoutePolicy;
+  samples?: ApiSamples;
 }
 
 export async function resolveSpecSource(
@@ -36,6 +38,7 @@ export async function resolveSpecSource(
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};
   const schemaPages = entry.schemaPages ? { schemaPages: true as const } : {};
+  const samples = entry.samples?.keepGenerated?.length ? { samples: entry.samples } : {};
 
   if (typeof entry.spec !== "string") {
     return {
@@ -46,6 +49,7 @@ export async function resolveSpecSource(
       ...strict,
       ...routes,
       ...schemaPages,
+      ...samples,
     };
   }
 
@@ -71,5 +75,6 @@ export async function resolveSpecSource(
     ...strict,
     ...routes,
     ...schemaPages,
+    ...samples,
   };
 }

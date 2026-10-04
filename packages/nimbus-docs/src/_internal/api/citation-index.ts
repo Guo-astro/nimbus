@@ -94,6 +94,7 @@ export async function buildCitationIndex(
         requireOperationId: target.requireOperationId,
         schemaPages: target.schemaPages,
         routes: target.routes,
+        samples: target.samples,
       },
       root,
     );

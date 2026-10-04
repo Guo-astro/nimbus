@@ -31,7 +31,7 @@ import {
   definePartialsSchema,
   partialsSchema,
 } from "./schemas.js";
-import type { ApiRoutePolicy, ApiVersionSpec } from "./types.js";
+import type { ApiRoutePolicy, ApiSamples, ApiVersionSpec } from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
@@ -263,6 +263,8 @@ export interface ApiCollectionOptions {
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
   schemaPages?: boolean;
+  /** Code sample policy. See {@link ApiSamples}. */
+  samples?: ApiSamples;
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */
   routes?: ApiRoutePolicy;
@@ -324,6 +326,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
     versions: options.versions,
     requireOperationId: options.requireOperationId,
     schemaPages: options.schemaPages,
+    samples: options.samples,
     routes: options.routes,
   };
 
@@ -346,7 +349,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, requireOperationId, schemaPages, routes } =
+      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, routes } =
         explicit ?? registered!;
       // The sidebar mode always comes from the Nimbus config's `api` entry:
       // request rendering and the build's component check read it there too.
@@ -395,6 +398,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         versions,
         requireOperationId,
         schemaPages,
+        samples,
         routes,
         sidebar,
       });
@@ -434,6 +438,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 requireOperationId: target.requireOperationId,
                 schemaPages: target.schemaPages,
                 routes: target.routes,
+                samples: target.samples,
               },
               rootDir,
             );

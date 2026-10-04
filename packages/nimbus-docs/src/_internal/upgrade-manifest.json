@@ -263,6 +263,25 @@
       ]
     },
     {
+      "id": "api-code-sample-ids",
+      "introducedIn": "0.16.0",
+      "mode": "optional",
+      "changeset": "api-sample-placeholders",
+      "summary": "Optionally update the registry api-code-rail component, so several samples in one language each get their own option.",
+      "affected": "Sites with the api-code-rail registry component whose specs list more than one x-codeSamples entry with the same lang. Nimbus now keeps all of them instead of only the first.",
+      "instructions": [
+        "No action is needed if no operation has two x-codeSamples entries with the same lang. Without the update, choosing that language shows its samples one after another.",
+        "api-code-rail is a registry component, not part of the scaffolded template, so nimbus-docs diff does not cover it. Run nimbus-docs add api-code-rail.",
+        "When add asks about src/components/ui/api-code-rail/ApiCodeRail.astro and code-rail.client.ts, choose Overwrite if you haven't edited them. Choose Skip for other components to keep your copies. Don't pass --yes: it keeps every existing file, so the rail isn't updated. --overwrite updates it without asking, but also replaces every component the rail uses, including sidebar and api-sidebar; use it only if you haven't edited any of them.",
+        "If you have edited the rail, merge by hand. In ApiCodeRail.astro, use sample.id, or sample.lang when a sample has no id, for the option value and data-nb-lang-value, and add data-nb-sample-lang={sample.lang} to each panel. In code-rail.client.ts, keep the selection by id, but save and sync the panel's language, open a saved language as that language's first sample, and resolve ?lang= as an exact id first, then a language."
+      ],
+      "verify": [
+        "Open an operation with two samples in one language and confirm the picker lists both labels and shows one sample at a time.",
+        "Choose the second sample in a language, open another operation with one sample in that language, and confirm it opens that sample.",
+        "Confirm ?lang=curl and a link to a second sample, such as ?lang=python-2, open the expected sample."
+      ]
+    },
+    {
       "id": "page-urls-and-llms-routes",
       "introducedIn": "0.15.0",
       "mode": "optional",

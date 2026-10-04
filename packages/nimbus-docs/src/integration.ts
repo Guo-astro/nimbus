@@ -631,6 +631,7 @@ export function nimbus(
                         requireOperationId: target.requireOperationId,
                         schemaPages: target.schemaPages,
                         routes: target.routes,
+                        samples: target.samples,
                       },
                       projectRoot,
                     )

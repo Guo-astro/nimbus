@@ -697,7 +697,7 @@ function projectPageWithView(
         parameters: paramGroups(view, node.id),
         body: bodyFields.fields,
         responses: responseViews(view, node.id),
-        samples: f.samples.map((s) => ({ lang: s.lang, label: s.label, source: s.source })),
+        samples: f.samples.map((s) => ({ id: s.id, lang: s.lang, label: s.label, source: s.source })),
       };
       if (bodyFields.truncated) page.bodyTruncated = { total: bodyFields.total };
       if (f.example) {

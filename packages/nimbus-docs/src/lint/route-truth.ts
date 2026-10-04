@@ -51,7 +51,13 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
       problem: `\`${ROUTE_TRUTH_FILE}\` has version ${JSON.stringify(record.version)}, but this version of Nimbus reads version ${ROUTE_TRUTH_VERSION}. ${REBUILD}`,
     };
   }
-  if (!isStringArray(record.knownRoutes) || !isStringArray(record.opaqueNamespaces)) {
+  if (
+    !isStringArray(record.knownRoutes) ||
+    !isStringArray(record.opaqueNamespaces) ||
+    !isRedirectArray(record.redirects) ||
+    !isRedirectArray(record.redirectPages) ||
+    (record.redirectRules !== "cloudflare" && record.redirectRules !== "netlify")
+  ) {
     return { problem: `\`${ROUTE_TRUTH_FILE}\` doesn't have the expected shape. ${REBUILD}` };
   }
   return {
@@ -59,9 +65,22 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
       version: ROUTE_TRUTH_VERSION,
       base: typeof record.base === "string" ? record.base : "",
       knownRoutes: record.knownRoutes,
+      redirects: record.redirects,
+      redirectPages: record.redirectPages,
+      redirectRules: record.redirectRules,
       opaqueNamespaces: record.opaqueNamespaces,
     },
   };
+}
+
+function isRedirectArray(value: unknown): value is RouteTruth["redirects"] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (r) =>
+        typeof r?.from === "string" && typeof r.to === "string" && typeof r.status === "number",
+    )
+  );
 }
 
 function isStringArray(value: unknown): value is string[] {

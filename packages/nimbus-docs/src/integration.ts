@@ -128,8 +128,10 @@ import {
   formatRedirectsFile,
   normalizeRedirects,
   shouldEmitRedirects,
+  type NormalizedRedirect,
   type RedirectConfigLike,
 } from "./_internal/redirect-emitters.js";
+import { parseRedirectsFile } from "./_internal/redirects-file.js";
 import { resolveSite } from "./_internal/site-detect.js";
 import {
   canonicalCollectionRouteComponent,
@@ -373,6 +375,12 @@ export interface NimbusIntegrationOptions {
    */
   rules?: RulesConfig;
   /**
+   * A `_redirects`-syntax file your deployment reads under another name,
+   * such as one a Worker loads, for link checking. Relative to the project
+   * root.
+   */
+  redirectsFile?: string;
+  /**
    * Per-collection overrides. Each entry's `rules` block shallow-merges
    * over the top-level `rules` for files in that collection — same shape,
    * same validation, same build-validator carve-out (build validators
@@ -441,6 +449,7 @@ export function nimbus(
   // build materialization knows where to write `.nimbus/routes.json` and
   // what `base` Astro is using.
   let projectRootForBuild = "";
+  let redirectsFileForBuild: string | undefined;
   let srcDirForBuild = "";
   let astroBaseForBuild = "";
   // Astro's `build.assets` directory, left out of the route truth.
@@ -507,6 +516,15 @@ export function nimbus(
         // for `nimbus-docs lint` to check against, so invalidate it before
         // any setup work that can throw (and long before content sync).
         if (building) invalidateRouteTruth(projectRoot);
+        if (options.redirectsFile !== undefined) {
+          redirectsFileForBuild = path.resolve(projectRoot, options.redirectsFile);
+          if (!fs.existsSync(redirectsFileForBuild)) {
+            throw new Error(
+              `nimbus-docs: \`redirectsFile\` is "${options.redirectsFile}", but ${redirectsFileForBuild} doesn't exist. ` +
+                "Point it at the redirects file your deployment reads, or remove the option.",
+            );
+          }
+        }
         navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
         beginPreparedMarkdownSession(astroConfig.root);
@@ -2027,6 +2045,11 @@ export function nimbus(
           distDir,
           assetsDir: assetsDirForBuild,
           pages: publicPages,
+          redirects: {
+            astro: redirectsForBuild,
+            file: redirectsFileForBuild,
+            rules: detectDeploySignals(projectRootForBuild).netlify ? "netlify" : "cloudflare",
+          },
           onDemandRoutes: [
             ...requestRoutes,
             ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
@@ -2091,6 +2114,11 @@ function materializeRouteTruth(input: {
   distDir: string;
   assetsDir: string;
   pages: readonly { pathname: string }[];
+  redirects: {
+    astro: Record<string, RedirectConfigLike>;
+    file: string | undefined;
+    rules: RouteTruth["redirectRules"];
+  };
   onDemandRoutes: readonly string[];
   logger: { warn: (msg: string) => void };
 }): void {
@@ -2108,6 +2136,14 @@ function materializeRouteTruth(input: {
       version: ROUTE_TRUTH_VERSION,
       base: input.base,
       knownRoutes: [...routes].sort(),
+      redirects: siteRedirects({
+        distDir: input.distDir,
+        file: input.redirects.file,
+        defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
+        logger: input.logger,
+      }),
+      redirectPages: normalizeRedirects(input.redirects.astro, input.base).redirects,
+      redirectRules: input.redirects.rules,
       // Nimbus collections remain enumerable even when their HTML is rendered
       // on request, so broad opaque namespaces would only hide broken links.
       opaqueNamespaces: [],
@@ -2126,6 +2162,35 @@ function materializeRouteTruth(input: {
       `failed to write .nimbus/routes.json, so \`nimbus-docs lint\` can't check links: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * `<dist>/_redirects` (which already holds the redirects Nimbus or the
+ * adapter emitted), then `redirectsFile`. A read error throws, so the caller
+ * invalidates route truth.
+ */
+function siteRedirects(input: {
+  distDir: string;
+  file: string | undefined;
+  defaultStatus: number;
+  logger: { warn: (msg: string) => void };
+}): NormalizedRedirect[] {
+  const files = [path.join(input.distDir, "_redirects")].filter((f) => fs.existsSync(f));
+  if (input.file !== undefined) files.push(input.file);
+
+  const out: NormalizedRedirect[] = [];
+  let malformed = 0;
+  for (const file of files) {
+    const parsed = parseRedirectsFile(fs.readFileSync(file, "utf8"), input.defaultStatus);
+    out.push(...parsed.redirects);
+    malformed += parsed.malformed;
+  }
+  if (malformed > 0) {
+    input.logger.warn(
+      `${malformed} redirect line${malformed === 1 ? "" : "s"} couldn't be read (expected \`from to [status]\`), so link checking ignores ${malformed === 1 ? "it" : "them"}.`,
+    );
+  }
+  return out;
 }
 
 /**

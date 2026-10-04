@@ -57,6 +57,40 @@ Write links without Astro's `base`. Nimbus adds the base when the page renders, 
 
 Files written by an integration that finishes after Nimbus aren't in the list. Add them to `ignore`.
 
+### Redirects
+
+A link through a working redirect passes. Lint follows the redirect, and the link is broken only when the redirect leads to a page that doesn't exist, loops, or takes more than 20 redirects. Temporary redirects (`302`, `303`, `307`) are followed too.
+
+Lint matches redirects the way your platform does. With a `netlify.toml` in the project, Netlify's rules apply; otherwise Cloudflare's:
+
+| | Cloudflare | Netlify |
+|---|---|---|
+| Line without a status | `302` | `301` |
+| Trailing slash | Part of the source: `/old` doesn't match a rule for `/old/`. Lint says which spelling matches. | Ignored: `/old` and `/old/` match the same rule. |
+| A file exists at the source | The redirect still applies. | Only a rule forced with `!` applies. |
+
+On both, the query passes through to a destination that doesn't set its own, and `/guide /guide/ 301` is a redirect, not a loop.
+
+Nimbus reads redirects from the build's `_redirects` file and from Astro's `redirects` config, with no setup. If your deployment reads redirects from a file with another name, such as one a Worker loads, point Nimbus at it. The file uses `_redirects` syntax:
+
+```ts title="astro.config.ts"
+nimbus(config, { redirectsFile: "public/__redirects" });
+```
+
+To find links that go through a permanent redirect (`301`, `308`), turn on `nimbus/redirected-link`. It reports each one with the URL to link to instead, written without `base`. A destination outside `base` is suggested as a full URL on your `site`. It uses `nimbus/internal-link`'s `ignore` to decide whether the destination works, and stays silent when it doesn't.
+
+### Paths served by another system
+
+Some paths on your domain may be served by something other than this build, such as an API reference deployed separately. The build can't see them, so add them to `ignore`:
+
+```ts title="astro.config.ts"
+rules: {
+  "nimbus/internal-link": ["error", { ignore: ["/api/**"] }],
+},
+```
+
+Lint doesn't check links under those paths. To find dead links there, check your deployed site with a link checker.
+
 ### Gate CI on links
 
 Run the build and lint in the same job:
@@ -67,6 +101,7 @@ nimbus-docs lint
 ```
 
 To lint in a separate job, pass the whole `.nimbus/` directory from the build job as an artifact. Lint also needs `.nimbus/lint.json`, which holds your `rules`.
+
 
 `nimbus-docs check` doesn't build. It checks links against `.nimbus/routes.json` when an earlier build left one, but when the file is missing it skips the rule and leaves a note instead of failing. To gate CI on links, run `astro build` and then `lint`.
 

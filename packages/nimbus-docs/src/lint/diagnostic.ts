@@ -34,6 +34,7 @@ export const RULE_CODES = {
   "nimbus/frontmatter-shape": { kind: "authoring" },
   "nimbus/description-required": { kind: "authoring" },
   "nimbus/internal-link": { kind: "authoring" },
+  "nimbus/redirected-link": { kind: "authoring" },
   "nimbus/image-ref": { kind: "authoring" },
   "nimbus/orphan-page": { kind: "authoring" },
   "nimbus/sidebar-entry": { kind: "authoring" },

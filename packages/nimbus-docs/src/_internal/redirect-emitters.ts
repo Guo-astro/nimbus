@@ -15,6 +15,7 @@ export interface NormalizedRedirect {
   from: string;
   to: string;
   status: number;
+  force?: boolean;
 }
 
 export interface DeploySignals {

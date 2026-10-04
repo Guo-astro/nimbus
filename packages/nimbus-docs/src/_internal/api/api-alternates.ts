@@ -62,7 +62,9 @@ export async function buildApiVersionAlternates(
             label: target.label,
             mountPath: target.mountPath,
             requireOperationId: target.requireOperationId,
+            schemaPages: target.schemaPages,
             routes: target.routes,
+            samples: target.samples,
           },
           projectRoot,
         );

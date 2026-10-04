@@ -421,6 +421,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
       securitySchemes: ctx.doc.components?.securitySchemes,
       auth,
       xCodeSamples: op["x-codeSamples"] ?? op["x-code-samples"],
+      keepGenerated: ctx.keepGenerated,
     });
   }
   return facts;

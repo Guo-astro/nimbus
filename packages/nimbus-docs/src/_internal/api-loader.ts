@@ -239,7 +239,9 @@ function configuredApiModel(
         label: target.label,
         mountPath: target.mountPath,
         requireOperationId: target.requireOperationId,
+        schemaPages: target.schemaPages,
         routes: target.routes,
+        samples: target.samples,
       },
       configuredRoot,
     ).then(buildApiModel);

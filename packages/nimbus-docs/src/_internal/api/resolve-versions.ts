@@ -23,6 +23,7 @@
 
 import type {
   ApiRoutePolicy,
+  ApiSamples,
   ApiSidebarMode,
   ApiSpec,
   ApiVersionSpec,
@@ -54,6 +55,10 @@ export interface ResolvedApiVersion {
   label: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId: boolean;
+  /** Publish a page per `components/schemas` entry. Family-wide; default false. */
+  schemaPages: boolean;
+  /** Code sample policy. Family-wide. */
+  samples?: ApiSamples;
   /** Route convention for this target, or `undefined` for legacy operationId URLs. */
   routes?: RoutePolicy;
   /** How much navigation each page includes. Family-wide; default `"full"`. */
@@ -105,6 +110,8 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         hidden: false,
         label: entry.label ?? family,
         requireOperationId: entry.requireOperationId ?? false,
+        schemaPages: entry.schemaPages ?? false,
+        samples: entry.samples,
         routes: asRoutePolicy(entry.routes),
         sidebar: entry.sidebar ?? "full",
       },
@@ -126,6 +133,8 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       hidden: v.hidden ?? false,
       label: v.label ?? v.version,
       requireOperationId: entry.requireOperationId ?? false,
+      schemaPages: entry.schemaPages ?? false,
+      samples: entry.samples,
       routes: asRoutePolicy(v.routes),
       sidebar: entry.sidebar ?? "full",
     };

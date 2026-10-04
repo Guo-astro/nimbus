@@ -263,6 +263,20 @@ export interface ApiSpec {
    * missing case a build error. A coordinate/URL collision is always fatal.
    */
   requireOperationId?: boolean;
+  /** Code sample policy. Applies to every version of a family. */
+  samples?: ApiSamples;
+  /**
+   * Publish a page for each `components/schemas` entry, at
+   * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
+   * of a family.
+   *
+   * By default, types show only inline: schemas shape operation pages (fields,
+   * union previews) but get no page, Markdown file, sitemap or search entry, or
+   * citation coordinate, type names render as text, and a citation to a schema
+   * fails the build. Set `true` to publish schema pages, link type names to
+   * them, and make schemas citable.
+   */
+  schemaPages?: boolean;
   /**
    * Route convention for this collection's pages. Omit to keep the default
    * `operationId`-based URLs. For a version family, set `routes` on each
@@ -282,6 +296,20 @@ export interface ApiSpec {
    * Use `"on-demand"` for large APIs, where the full tree dominates page size.
    */
   sidebar?: ApiSidebarMode;
+}
+
+/** A language Nimbus generates code samples for. */
+export type ApiSampleLang = "curl" | "typescript" | "python";
+
+/** Code sample policy for one API collection. See {@link ApiSpec.samples}. */
+export interface ApiSamples {
+  /**
+   * Generated languages kept when an operation has authored `x-codeSamples`.
+   * They follow the authored samples; an authored sample in the same language
+   * replaces the generated one. Default `[]`: authored samples replace all
+   * generated ones.
+   */
+  keepGenerated?: ApiSampleLang[];
 }
 
 /** How much of the API navigation each page includes. See {@link ApiSpec.sidebar}. */

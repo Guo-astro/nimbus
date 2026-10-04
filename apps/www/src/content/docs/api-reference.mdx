@@ -46,7 +46,7 @@ The recipe tells the agent to inspect your project, ask for the specification pa
 
 #### Why the specification is not in `src/content`
 
-`src/content/docs/` contains authored MDX entries. An OpenAPI document is an input to a loader: Nimbus projects it into many operation, schema, tag, and webhook entries in the registered `api` collection.
+`src/content/docs/` contains authored MDX entries. An OpenAPI document is an input to a loader: Nimbus projects it into many operation, tag, and webhook entries in the registered `api` collection, plus schema entries when [schema pages](#schema-pages) are on.
 
 Keeping the source under `src/api/` makes that distinction visible. The path is only a convention; `src/content/api/openapi.yaml` also works if the configured `spec` points there.
 
@@ -192,8 +192,8 @@ Operations are not the only addressable items. Nimbus assigns coordinates to pag
 | Parameter | `retrieveEvent.path.event_id` |
 | Response | `retrieveEvent.response.200` |
 | Response field in an additional media type | `retrieveEvent.response.200.text-csv.id` |
-| Schema | `Event` |
-| Schema field | `Event.created_at` |
+| Schema (with [schema pages](#schema-pages) on) | `Event` |
+| Schema field (with schema pages on) | `Event.created_at` |
 | Webhook | `delivery.succeeded` |
 
 Use `/nimbus-api/coordinates.json` to inspect the exact coordinates and resolved URLs published by a built site.
@@ -281,6 +281,69 @@ For each component already in your project, it asks whether to overwrite it, eve
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 
+### Schema pages
+
+By default, types show only inline, on the operations that use them: request and response fields, and the properties previewed under each union variant, come from `components/schemas`, but a schema gets no page of its own. In a large API, schema pages would outnumber operation pages.
+
+To publish a page for every schema at `/api/schemas/<Name>`, set `schemaPages: true`:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    schemaPages: true,
+  },
+],
+```
+
+Each schema then also gets:
+
+- a Markdown version and an OG image;
+- sitemap, search, and `llms.txt` entries;
+- coordinates, for the schema and its fields, in citations and `coordinates.json`.
+
+Type names such as union variants, discriminator mappings, and `map<Name>` value types link to their schema pages; without them, they render as text. A union variant previews its properties one level deep, so turn schema pages on if readers need a variant's nested fields.
+
+With schema pages off, an `api.ref:` citation in your content to a schema or a schema field fails the build and names the setting. Cite an operation that uses the type instead. Schema names claim their `schemas/<Name>` routes either way, so turning schema pages on can't collide with an operation. The setting applies to every version of a family.
+
+### Code samples
+
+Each operation page shows the request in cURL, TypeScript, and Python. Parameter values come from the specification:
+
+- A parameter's own `example`, or its first `examples` entry, comes first.
+- Otherwise the value is generated from the parameter's schema with [openapi-sampler](https://github.com/Redocly/openapi-sampler), the same way request bodies are. Without a declared value, it's a type guess, such as `string`, `0`, or a format's stock value.
+- A path parameter keeps the generated value only when a value declared in its schema produces it: an `example`, `const`, `examples`, `enum`, or `default` in a part of the schema the sampler reads. Those parts are every `allOf` member, the first `oneOf` branch (or the first `anyOf` branch when there's no `oneOf`), and `if` with `then`. Otherwise it shows its name in angle brackets, such as `<account_id>`: a guessed identifier would name no real resource.
+- Required query parameters and headers keep the generated value, guesses included. One with no schema, or whose generated value is an array or object, shows `<name>`.
+
+Credentials always render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are, as in a real request. Request bodies use the request example, or a value generated from the schema.
+
+```sh
+curl --request GET \
+  --url 'https://api.example.com/accounts/<account_id>' \
+  --header 'Authorization: Bearer <token>'
+```
+
+An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker and in the page's Markdown version. An entry without a `label` uses its `lang`, and a repeated name is numbered: `Python`, `Python (2)`.
+
+Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs add api-code-rail` and choose **Overwrite** for `ApiCodeRail.astro` and `code-rail.client.ts`, and **Skip** for the other components.
+
+To keep generated languages next to authored samples, set `samples.keepGenerated` on the `api` entry:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    samples: { keepGenerated: ["curl"] },
+  },
+],
+```
+
+Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, and `typescript` or `ts`, in any case. An authored `shell` or `bash` sample does not replace cURL. Valid values are `"curl"`, `"typescript"`, and `"python"`. The setting applies to every version of a family.
+
+The code rail remembers the reader's language, not the exact sample: choosing a second Python sample opens the first Python sample on the next operation. A `?lang=` link opens the sample with that id, such as `python-2`, or the first sample in that language, such as `python`.
+
 ### Build or request rendering
 
 API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:
@@ -340,7 +403,7 @@ For a collection named `api`, the reference integrates with these routes when th
 | Route | Purpose |
 | --- | --- |
 | `/api` | Default-version API overview. |
-| `/api/<page-slug>` | Operation, schema, tag, or webhook page. |
+| `/api/<page-slug>` | Operation, tag, or webhook page, and schema pages with [`schemaPages: true`](#schema-pages). |
 | `/api/<page-slug>/index.md` | Clean Markdown version. |
 | `/api/llms.txt` | API-only `llms.txt` index. |
 | `/llms.txt` and `/llms-full.txt` | Site-wide page index and full Markdown documentation. |

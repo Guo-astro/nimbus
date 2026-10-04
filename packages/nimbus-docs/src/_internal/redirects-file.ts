@@ -1,8 +1,6 @@
 /**
- * Parse a `_redirects` file: `from to [status]` per line. A missing status
- * is the platform's default (Cloudflare 302, Netlify 301); a trailing `!` is
- * Netlify's force. Lines with conditions (4+ fields) are skipped, since they
- * depend on the request; lines that can't be read are counted as malformed.
+ * Parse a `_redirects` file: `from to [status]` per line. Lines with
+ * conditions (4+ fields) are skipped, since they depend on the request.
  */
 
 import type { NormalizedRedirect } from "./redirect-emitters.js";
@@ -24,12 +22,13 @@ export function parseRedirectsFile(
     const fields = trimmed.split(/\s+/);
     if (fields.length > 3) continue;
     const [from, to, rawStatus = String(defaultStatus)] = fields;
-    const status = Number(rawStatus.replace(/!$/, ""));
+    const force = rawStatus.endsWith("!");
+    const status = Number(force ? rawStatus.slice(0, -1) : rawStatus);
     if (!from || !to || !Number.isInteger(status)) {
       malformed++;
       continue;
     }
-    redirects.push({ from, to, status, ...(rawStatus.endsWith("!") ? { force: true } : {}) });
+    redirects.push(force ? { from, to, status, force } : { from, to, status });
   }
   return { redirects, malformed };
 }

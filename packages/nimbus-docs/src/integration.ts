@@ -375,12 +375,9 @@ export interface NimbusIntegrationOptions {
    */
   rules?: RulesConfig;
   /**
-   * A redirects file in `_redirects` syntax that your deployment applies but
-   * the build output doesn't contain under that name, such as a file a
-   * Worker reads. Relative paths resolve to the project root. Link checking
-   * follows its rules after the output's `_redirects` and Astro's
-   * `redirects`, which need no config. A path that doesn't exist fails the
-   * build at config setup.
+   * A `_redirects`-syntax file your deployment reads under another name,
+   * such as one a Worker loads, for link checking. Relative to the project
+   * root.
    */
   redirectsFile?: string;
   /**
@@ -452,7 +449,6 @@ export function nimbus(
   // build materialization knows where to write `.nimbus/routes.json` and
   // what `base` Astro is using.
   let projectRootForBuild = "";
-  // Absolute `redirectsFile`, checked to exist at config setup.
   let redirectsFileForBuild: string | undefined;
   let srcDirForBuild = "";
   let astroBaseForBuild = "";
@@ -2140,7 +2136,6 @@ function materializeRouteTruth(input: {
         defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
         logger: input.logger,
       }),
-      // Static builds write a meta-refresh page per Astro redirect.
       redirectPages: normalizeRedirects(input.redirects.astro, input.base).redirects,
       redirectRules: input.redirects.rules,
       // Nimbus collections remain enumerable even when their HTML is rendered
@@ -2164,9 +2159,9 @@ function materializeRouteTruth(input: {
 }
 
 /**
- * Platform redirect rules for route truth: `<dist>/_redirects` (which already
- * has Nimbus's or the adapter's emitted redirects), then `redirectsFile`.
- * A read error throws, so the caller invalidates route truth.
+ * `<dist>/_redirects` (which already holds the redirects Nimbus or the
+ * adapter emitted), then `redirectsFile`. A read error throws, so the caller
+ * invalidates route truth.
  */
 function siteRedirects(input: {
   distDir: string;
@@ -2174,10 +2169,12 @@ function siteRedirects(input: {
   defaultStatus: number;
   logger: { warn: (msg: string) => void };
 }): NormalizedRedirect[] {
+  const files = [path.join(input.distDir, "_redirects")].filter((f) => fs.existsSync(f));
+  if (input.file !== undefined) files.push(input.file);
+
   const out: NormalizedRedirect[] = [];
   let malformed = 0;
-  for (const file of [path.join(input.distDir, "_redirects"), input.file]) {
-    if (file === undefined || (file !== input.file && !fs.existsSync(file))) continue;
+  for (const file of files) {
     const parsed = parseRedirectsFile(fs.readFileSync(file, "utf8"), input.defaultStatus);
     out.push(...parsed.redirects);
     malformed += parsed.malformed;

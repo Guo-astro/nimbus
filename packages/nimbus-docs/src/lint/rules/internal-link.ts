@@ -53,7 +53,13 @@ import { suggest } from "../../_internal/levenshtein.js";
 import { linkRouteKey } from "../../_internal/route-key.js";
 import { inferProjectRoot, loadLinkEnv } from "../link-env.js";
 import { collectLinkOccurrences, readExtraComponents } from "../link-occurrences.js";
-import { isExternalUrl, resolveLinkCached, type LinkEnv } from "../link-resolver.js";
+import {
+  isExternalUrl,
+  isRelativeUrl,
+  isUnderOpaqueNamespace,
+  resolveLink,
+  type LinkEnv,
+} from "../link-resolver.js";
 import type { Rule } from "../rule.js";
 
 export const internalLink: Rule = {
@@ -85,7 +91,7 @@ export const internalLink: Rule = {
       // Same page: an in-page anchor, or a query on the current URL.
       if (url.startsWith("#") || url.startsWith("?")) continue;
 
-      if (isRelative(url)) {
+      if (isRelativeUrl(url)) {
         if (allowRelative) continue;
         ctx.report({
           message: `relative link "${url}" — internal docs links should be root-relative (e.g. /foo).`,
@@ -99,9 +105,9 @@ export const internalLink: Rule = {
       // trailing slash, hash, or query. Base is never stripped (see header).
       const key = linkRouteKey(url);
       if (matchesAnyIgnore(key, ignore)) continue;
-      if (isUnderOpaqueNamespace(key, env.opaqueNamespaces)) continue;
+      if (isUnderOpaqueNamespace(env, key)) continue;
 
-      const resolution = resolveLinkCached(env, url, { ignore });
+      const resolution = resolveLink(env, url, ignore);
       if (resolution.kind === "valid") continue;
 
       if (resolution.throughRedirect) {
@@ -159,15 +165,6 @@ function missingRouteReport(
 }
 
 /**
- * Anything that isn't root-relative resolves against the current page:
- * `./foo`, `../foo`, and bare `foo` alike. Checked before normalization,
- * which would turn `foo` into `/foo` and match an unrelated root route.
- */
-export function isRelative(url: string): boolean {
-  return !url.startsWith("/");
-}
-
-/**
  * The part of a route key after `base` when the key repeats it, or null.
  * Only for hints: a link that repeats the base is reported either way.
  */
@@ -175,16 +172,4 @@ function withoutBase(key: string, base: string): string | null {
   if (base === "") return null;
   if (key === base) return "/";
   return key.startsWith(`${base}/`) ? key.slice(base.length) : null;
-}
-
-export function isUnderOpaqueNamespace(
-  route: string,
-  opaqueNamespaces: readonly string[],
-): boolean {
-  for (const ns of opaqueNamespaces) {
-    if (ns === "/") return true;
-    if (route === ns) return true;
-    if (route.startsWith(`${ns}/`)) return true;
-  }
-  return false;
 }

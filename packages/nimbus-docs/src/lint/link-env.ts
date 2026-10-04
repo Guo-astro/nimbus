@@ -14,16 +14,7 @@ export function loadLinkEnv(projectRoot: string): LinkEnv | null {
   if (problem !== undefined) {
     process.stderr.write(`nimbus/internal-link: skipped — ${problem}\n`);
   }
-  const env = truth
-    ? createLinkEnv({
-        knownRoutes: truth.knownRoutes,
-        base: truth.base,
-        redirects: truth.redirects,
-        redirectPages: truth.redirectPages,
-        redirectRules: truth.redirectRules,
-        opaqueNamespaces: truth.opaqueNamespaces,
-      })
-    : null;
+  const env = truth ? createLinkEnv(truth) : null;
   cached = { root: projectRoot, env };
   return env;
 }

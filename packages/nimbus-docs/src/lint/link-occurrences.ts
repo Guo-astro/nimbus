@@ -6,13 +6,13 @@
 
 import { collect, startOf, visit, type MdNode } from "./parse.js";
 
-export interface LinkOccurrence {
+interface LinkOccurrence {
   url: string;
   line: number;
   column: number;
 }
 
-export interface ComponentSpec {
+interface ComponentSpec {
   name: string;
   attr: string;
 }
@@ -87,7 +87,7 @@ export function collectLinkOccurrences(
   return out;
 }
 
-export function collectDefinitions(root: MdNode): Map<string, string> {
+function collectDefinitions(root: MdNode): Map<string, string> {
   const out = new Map<string, string>();
   for (const def of collect(root, "definition")) {
     const id = typeof def.identifier === "string" ? def.identifier : "";

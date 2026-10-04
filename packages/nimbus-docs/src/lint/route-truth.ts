@@ -76,16 +76,10 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
 function isRedirectArray(value: unknown): value is RouteTruth["redirects"] {
   return (
     Array.isArray(value) &&
-    value.every((item) => {
-      const r = item as Record<string, unknown> | null;
-      return (
-        r !== null &&
-        typeof r === "object" &&
-        typeof r.from === "string" &&
-        typeof r.to === "string" &&
-        typeof r.status === "number"
-      );
-    })
+    value.every(
+      (r) =>
+        typeof r?.from === "string" && typeof r.to === "string" && typeof r.status === "number",
+    )
   );
 }
 

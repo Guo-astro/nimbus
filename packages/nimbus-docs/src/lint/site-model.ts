@@ -330,9 +330,9 @@ export function contentEntryUrl(
 
 /**
  * Version 2: `knownRoutes` covers every emitted file, and lint no longer
- * strips `base` from links.
+ * strips `base` from links. Version 3 adds `redirects`.
  */
-export const ROUTE_TRUTH_VERSION = 2;
+export const ROUTE_TRUTH_VERSION = 3;
 
 /**
  * Written over `.nimbus/routes.json` when a build can't delete the previous
@@ -358,6 +358,16 @@ export interface RouteTruth {
    * routes. The lint rule resolves internal links against this set.
    */
   knownRoutes: string[];
+  /** Platform rules from the output's `_redirects`, then `redirectsFile`, in order. Served paths. */
+  redirects: Array<{ from: string; to: string; status: number; force?: boolean }>;
+  /**
+   * Astro's meta-refresh pages, one per `redirects` entry. Kept apart from
+   * `redirects`: Netlify serves the page instead of an unforced rule at the
+   * same source.
+   */
+  redirectPages: Array<{ from: string; to: string; status: number }>;
+  /** `netlify` with a `netlify.toml`, else `cloudflare`. See `matchRedirect`. */
+  redirectRules: "cloudflare" | "netlify";
   /**
    * Reserved for future SSR-route handling — URL prefixes that can't be
    * statically enumerated. Empty in the current all-prerendered path.

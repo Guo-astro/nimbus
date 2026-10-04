@@ -25,6 +25,8 @@ import {
 } from "../lint/index.js";
 import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "./finding.js";
 
+const LINK_RULES = ["nimbus/internal-link", "nimbus/redirected-link"] as const;
+
 export function checkAuthoring(cwd: string): ScopeReport {
   const findings: CheckFinding[] = [];
   const notes: Note[] = [];
@@ -57,18 +59,18 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   } else if (
     !error &&
-    ruleEnabledAnywhere("nimbus/internal-link", config.rules, config.collections) &&
+    LINK_RULES.some((code) => ruleEnabledAnywhere(code, config.rules, config.collections)) &&
     !fs.existsSync(path.join(cwd, ".nimbus", "routes.json"))
   ) {
     notes.push({
       code: "nimbus/internal-link-skipped",
       reason:
-        "link checking skipped — `nimbus/internal-link` resolves against the route map `astro build` materializes into `.nimbus/routes.json`, which doesn't exist yet. Other authoring rules still ran.",
+        "link checking skipped — the link rules resolve against the route map `astro build` materializes into `.nimbus/routes.json`, which doesn't exist yet. Other authoring rules still ran.",
       requiresBuild: true,
     });
-    // Noted structurally above — disable the rule so it doesn't also run and
-    // write its own skip warning to stderr.
-    effective = withRuleOff(config, "nimbus/internal-link");
+    // Noted structurally above — disable the rules so they don't also run
+    // and write their own skip warning to stderr.
+    for (const code of LINK_RULES) effective = withRuleOff(effective, code);
   }
 
   for (const d of lintPaths(files, cwd, effective)) findings.push(fromDiagnostic(d));

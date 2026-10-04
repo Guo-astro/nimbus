@@ -171,6 +171,7 @@ The second argument to `nimbus()` controls build behavior:
 | `mdx`                | —                       | Options forwarded to Astro's MDX integration. Their behavior remains processor-owned.                                                                                                                                                                                                        |
 | `icons`              | `true`                  | Built-in icon system. `true` auto-detects `@iconify-json/*` packages (Phosphor, Material Icons, etc.) and local `src/icons/*.svg`. `false` to disable. Object for explicit config (`iconDir`, `include`, `svgoOptions`). See [Icon](/components/icon). |
 | `rules`              | `off` (opt-in)          | Authoring-lint severities — each rule is off until you enable it. See [Linting](/writing/linting).                                                                                                                                                     |
+| `redirectsFile`      | —                       | A redirects file in `_redirects` syntax that your deployment reads under another name. Link checking follows it. See [Linting](/writing/linting). |
 | `collections`        | —                       | Per-collection lint overrides.                                                                                                                                                                                                                         |
 
 ```ts

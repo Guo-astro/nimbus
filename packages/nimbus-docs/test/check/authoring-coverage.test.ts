@@ -5,7 +5,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { checkAuthoring } from "../../src/check/authoring.js";
-import { _resetInternalLinkCacheForTests } from "../../src/lint/rules/internal-link.js";
+import { _resetLinkEnvCacheForTests as _resetInternalLinkCacheForTests } from "../../src/lint/link-env.js";
 import { ROUTE_TRUTH_VERSION } from "../../src/lint/site-model.js";
 
 interface ProjectOpts {
@@ -95,7 +95,7 @@ test("lint.json + routes.json present → broken link is actually caught", () =>
   _resetInternalLinkCacheForTests();
   const dir = project({
     lintJson: INTERNAL_LINK_ON,
-    routesJson: { base: "/", knownRoutes: ["/"], opaqueNamespaces: [] },
+    routesJson: { base: "/", knownRoutes: ["/"], redirects: [], redirectPages: [], redirectRules: "cloudflare", opaqueNamespaces: [] },
   });
   try {
     const r = checkAuthoring(dir);

@@ -1215,13 +1215,16 @@ test("configured request routes are explained to the build invariant", async (t)
       ),
     ),
     {
-      version: 2,
+      version: 3,
       base: "",
       knownRoutes: [
         "/built",
         "/foo/_nimbus/request-route-inventory.json",
         "/guide",
       ],
+      redirects: [],
+      redirectPages: [],
+      redirectRules: "cloudflare",
       opaqueNamespaces: [],
     },
   );

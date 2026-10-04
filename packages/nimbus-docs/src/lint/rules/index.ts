@@ -15,6 +15,7 @@ import { imageRef } from "./image-ref.js";
 import { internalLink } from "./internal-link.js";
 import { listMarkerStyle } from "./list-marker-style.js";
 import { noSelfHostUrl } from "./no-self-host-url.js";
+import { redirectedLink } from "./redirected-link.js";
 import { singleH1 } from "./single-h1.js";
 
 export const RULES: Rule[] = [
@@ -34,6 +35,7 @@ export const RULES: Rule[] = [
   bareUrl,
   // Route-aware
   internalLink,
+  redirectedLink,
   imageRef,
 ];
 

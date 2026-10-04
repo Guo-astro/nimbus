@@ -15,6 +15,8 @@ export interface NormalizedRedirect {
   from: string;
   to: string;
   status: number;
+  /** Netlify's `!`. */
+  force?: boolean;
 }
 
 export interface DeploySignals {

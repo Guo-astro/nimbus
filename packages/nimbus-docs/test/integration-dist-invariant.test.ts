@@ -494,7 +494,7 @@ test("route truth records every emitted file except the final assets dir, search
     },
   });
   const truth = await readRouteTruthFile(projectRoot);
-  assert.equal(truth.version, 2);
+  assert.equal(truth.version, 3);
   assert.deepEqual(truth.knownRoutes, [
     "/",
     "/.well-known/security.txt",
@@ -630,4 +630,24 @@ test("a route truth failure is a warning and leaves no routes.json", { skip: asR
     readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
     { code: "ENOENT" },
   );
+});
+
+test("route truth keeps platform rules and Astro's redirect pages apart", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    signal: "netlify",
+    redirects: { "/old": "/missing" },
+    seedDist: { "old/index.html": "", _redirects: "/old /good 301\n" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.equal(truth.redirectRules, "netlify");
+  assert.deepEqual(truth.redirectPages, [{ from: "/old", to: "/missing", status: 301 }]);
+  assert.deepEqual(
+    truth.redirects.filter((r: { from: string }) => r.from === "/old").map((r: { to: string }) => r.to),
+    ["/good"],
+  );
+});
+
+test("without a netlify.toml, redirect rules are Cloudflare's", async (t) => {
+  const { projectRoot } = await driveBuild(t, { signal: "cloudflare" });
+  assert.equal((await readRouteTruthFile(projectRoot)).redirectRules, "cloudflare");
 });

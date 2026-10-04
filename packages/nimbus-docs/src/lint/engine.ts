@@ -142,6 +142,8 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
         file,
         options: resolved.options,
         site: opts.site,
+        optionsOf: (code) =>
+          resolveRuleForCollection(code, rules, collections, file.collection).options,
         report: (report) => reports.push(report),
       });
     } catch (err) {
@@ -194,7 +196,7 @@ export function ruleWillRun(code: AuthoringRuleCode, opts: LintOptions = {}): bo
 }
 
 /** Rules that resolve links against `.nimbus/routes.json`. */
-const ROUTE_TRUTH_RULES = ["nimbus/internal-link"] as const satisfies readonly AuthoringRuleCode[];
+const ROUTE_TRUTH_RULES = ["nimbus/internal-link", "nimbus/redirected-link"] as const satisfies readonly AuthoringRuleCode[];
 
 /**
  * Fail closed. When a rule that needs `.nimbus/routes.json` will run and

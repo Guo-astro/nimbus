@@ -8,6 +8,13 @@ export const visibilityDocs = [
     version: "v2",
   },
   {
+    url: "/entities/",
+    title: "Entities",
+    content:
+      "## Literal\nNebulacobalt entityneedle keeps &amp; and <b>tags</b> as written.",
+    version: "v2",
+  },
+  {
     url: "/v1/guide/",
     title: "Old guide",
     content: "## Install\nNebulacobalt legacytokens.",

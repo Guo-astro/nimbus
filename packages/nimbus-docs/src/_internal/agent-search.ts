@@ -1,5 +1,3 @@
-import { fromHtml } from "hast-util-from-html";
-
 import {
   SEARCH_LIMITS,
   PagefindCompatibilityError,
@@ -12,14 +10,17 @@ import type {
   DocumentationSection,
 } from "./agent-search-contract.js";
 
-function plainText(html: string): string {
-  const root = fromHtml(html, { fragment: true });
-  function visit(node: typeof root | (typeof root.children)[number]): string {
-    if (node.type === "text") return node.value;
-    if ("children" in node) return node.children.map(visit).join("");
-    return "";
-  }
-  return visit(root);
+/**
+ * Pagefind builds excerpts by escaping only `<` and `>` in the page text and
+ * then wrapping matched words in `<mark>`. Reverse exactly that, so literal
+ * entities in the documentation (such as `&amp;` in a code sample) survive and
+ * the browser and other runtimes agree. No HTML parser, no injection sink.
+ */
+function plainText(excerpt: string): string {
+  return excerpt
+    .replace(/<\/?mark>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
 /** Pagefind URLs may already include Astro's base. Never add it twice. */
@@ -54,8 +55,14 @@ function sectionUrl(
 export function createDocumentationSearch(
   loadIndex: () => Promise<DocumentationPagefind>,
   options: DocumentationSearchOptions,
-): (input: unknown) => Promise<DocumentationSearchResponse> {
-  const run = async (input: unknown): Promise<DocumentationSearchResponse> => {
+): (
+  input: unknown,
+  signal?: AbortSignal,
+) => Promise<DocumentationSearchResponse> {
+  const run = async (
+    input: unknown,
+    signal?: AbortSignal,
+  ): Promise<DocumentationSearchResponse> => {
     if (!input || typeof input !== "object" || Array.isArray(input))
       return failure("invalid_input");
     const record = input as Record<string, unknown>;
@@ -96,6 +103,7 @@ export function createDocumentationSearch(
       const seen = new Set<string>();
       // Load lazily and stop as soon as the section limit is met.
       for (const match of found.results.slice(0, SEARCH_LIMITS.maxLimit * 4)) {
+        signal?.throwIfAborted();
         const page = await match.data();
         const title = page.meta.title ?? "";
         const sections = page.sub_results?.length
@@ -117,15 +125,21 @@ export function createDocumentationSearch(
         }
       }
       return { results };
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       return failure("search_failed");
     }
   };
   // Pagefind mutates cached fragments while constructing query-specific excerpts.
   // Keep search + data hydration atomic relative to other calls on this instance.
+  // A call cancelled while queued never runs; one cancelled mid-flight stops
+  // hydrating and rejects, leaving the shared index for later calls.
   let pending: Promise<unknown> = Promise.resolve();
-  return (input) => {
-    const response = pending.then(() => run(input));
+  return (input, signal) => {
+    const response = pending.then(() => {
+      signal?.throwIfAborted();
+      return run(input, signal);
+    });
     pending = response.catch(() => undefined);
     return response;
   };

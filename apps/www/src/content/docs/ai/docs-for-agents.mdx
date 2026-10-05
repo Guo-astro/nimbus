@@ -44,13 +44,9 @@ The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, 
 
 ## Browser-agent search
 
-New starters register `search_documentation` through [WebMCP's current community draft](https://webmachinelearning.github.io/webmcp/) when the browser exposes `document.modelContext`. It is experimental and browser support varies. Unsupported browsers stay quiet and load no Pagefind assets for this feature. Search-disabled and custom-provider sites register no tool.
+The starter registers a `search_documentation` tool with `document.modelContext` ([WebMCP](https://webmachinelearning.github.io/webmcp/), an experimental browser API). It searches the site's Pagefind index and returns section titles, anchored URLs, and plain-text excerpts, with the same visibility rules as site search. Nothing loads until an agent calls the tool, and browsers without the API do nothing.
 
-The tool uses the same Pagefind index as site search, with its own instance to keep concurrent results independent. Registration loads only the tool definition; the search implementation and index load on the first tool call, even if nobody has opened the search dialog. Results contain section titles, anchored URLs, and plain-text excerpts. Default search excludes deprecated versions; an explicit visible version can include them. Hidden and unpublished pages remain outside the index.
-
-Pagefind needs a production build. In development, a missing index produces `index_unavailable` with a request to build first. Test real search against a production preview. WebMCP runs in the browser and does not call a remote `/mcp` endpoint.
-
-The starter's `WebMCP.astro` component registers and cleans up the tool through the standard client mount lifecycle, including view transitions. Existing sites can adopt it through the optional upgrade guidance. Use Pagefind 1.5.2 or newer, which provides isolated search instances. An older runtime without that API returns `index_unavailable` with an upgrade-and-rebuild instruction and warns once in the browser console.
+Sites with `search: false` or a custom provider register no tool. The index comes from a production build, so in development the tool returns `index_unavailable`. Pagefind 1.5.2 or newer is required. Existing sites copy `WebMCP.astro` from the starter and render it inside `<head>` in `BaseLayout.astro`.
 
 ## How pages are indexed
 

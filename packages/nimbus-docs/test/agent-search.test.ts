@@ -9,7 +9,7 @@ import { createDocumentationSearch } from "../src/_internal/agent-search.js";
 
 const page = (
   url = "/guide/#install",
-  excerpt = "Use <mark>tokens</mark> &amp; keys.",
+  excerpt = "Use <mark>tokens</mark> &lt;b&gt; &amp; keys.",
 ) => ({
   url,
   meta: { title: "Guide" },
@@ -111,7 +111,8 @@ test("section results decode text, cap Unicode excerpts, deduplicate URLs and st
     title: "Guide",
     heading: "Install",
     url: "https://example.com/docs/guide/#install",
-    excerpt: "Use tokens & keys.",
+    // Pagefind escapes only angle brackets; literal entities in docs stay as written.
+    excerpt: "Use tokens <b> &amp; keys.",
   });
   assert.equal(
     response.results[1]?.url,
@@ -205,4 +206,51 @@ test("concurrent calls do not cross-contaminate Pagefind fragment excerpts", asy
     results.map((result) => "results" in result && result.results[0]?.excerpt),
     ["one", "two"],
   );
+});
+
+test("a call cancelled while queued never runs; one cancelled mid-flight stops hydrating", async () => {
+  const searches: string[] = [];
+  let hydrated = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const search = createDocumentationSearch(
+    async () => ({
+      search: async (query) => {
+        searches.push(query);
+        return {
+          results: [
+            {
+              data: async () => {
+                hydrated++;
+                await gate;
+                return page();
+              },
+            },
+            {
+              data: async () => {
+                hydrated++;
+                return page("/guide/#next");
+              },
+            },
+          ],
+        };
+      },
+    }),
+    { site: "https://example.com" },
+  );
+  const first = new AbortController();
+  const queued = new AbortController();
+  const a = search({ query: "a", limit: 2 }, first.signal);
+  const b = search({ query: "b" }, queued.signal);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(searches, ["a"]);
+  assert.equal(hydrated, 1);
+  queued.abort();
+  first.abort();
+  release();
+  await assert.rejects(a, { name: "AbortError" });
+  await assert.rejects(b, { name: "AbortError" });
+  assert.deepEqual(searches, ["a"]);
+  assert.equal(hydrated, 1);
+  assert.ok("results" in (await search({ query: "c" })));
 });

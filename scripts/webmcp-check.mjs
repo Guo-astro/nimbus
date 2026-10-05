@@ -351,6 +351,7 @@ try {
       { query: "draftneedle" },
       { query: "noindexneedle" },
       { query: "optinneedle" },
+      { query: "entityneedle" },
     ];
     return Promise.all(
       queries.map((input) =>
@@ -378,6 +379,12 @@ try {
   for (const result of versionResults.slice(2, 5))
     assert.deepEqual(result.results, []);
   assert.equal(versionResults[5].results.length, 1);
+  // Pagefind escapes only angle brackets in excerpts; literal entities and
+  // tag-like text in the documentation must come back exactly as written.
+  assert.match(
+    versionResults[6].results[0]?.excerpt ?? "",
+    /keeps &amp; and <b>tags<\/b> as written/,
+  );
   await versioned.close();
   versionedIndex = false;
 

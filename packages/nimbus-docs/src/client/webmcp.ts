@@ -133,7 +133,7 @@ export function registerDocumentationWebMcp(
             lifetime.signal.throwIfAborted();
             execution.signal.throwIfAborted();
             if (!run) return searchFailure("search_failed");
-            const result = await run(input);
+            const result = await run(input, execution.signal);
             lifetime.signal.throwIfAborted();
             execution.signal.throwIfAborted();
             return result;

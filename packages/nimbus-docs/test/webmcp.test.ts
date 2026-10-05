@@ -74,7 +74,7 @@ function pagefind() {
                 {
                   title: "Start",
                   url: "/guide/#start",
-                  excerpt: `<mark>${query}</mark> &amp; details`,
+                  excerpt: `<mark>${query}</mark> &lt;i&gt; &amp; details`,
                 },
               ],
             }),
@@ -140,7 +140,7 @@ test("WebMCP registers the shared schema, loads only on first call, and shares o
         title: "Guide",
         heading: "Start",
         url: "https://example.test/docs/guide/#start",
-        excerpt: "alpha & details",
+        excerpt: "alpha <i> &amp; details",
       },
     ],
   });

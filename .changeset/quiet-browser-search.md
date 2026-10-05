@@ -3,4 +3,4 @@
 "@cloudflare/create-nimbus-docs": patch
 ---
 
-Add lazy Pagefind documentation search for WebMCP-enabled browsers.
+- The starter registers a `search_documentation` WebMCP tool, backed by the site's Pagefind index.

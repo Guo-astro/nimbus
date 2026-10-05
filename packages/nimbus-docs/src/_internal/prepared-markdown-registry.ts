@@ -311,6 +311,19 @@ export async function waitForPreparedMarkdownTransactions(
   }
 }
 
+/** Read one prepared entry without cloning the entire site's content graph. */
+export function getPreparedMarkdownEntry(
+  root: URL | string,
+  collection: string,
+  id: string,
+): PreparedMarkdownEntry | undefined {
+  const entry = state.roots
+    .get(preparedMarkdownRootKey(root))
+    ?.collections.get(collection)
+    ?.entries.get(id);
+  return entry ? structuredClone(entry) : undefined;
+}
+
 export function getPreparedMarkdownSnapshot(
   root: URL | string,
 ): PreparedMarkdownSnapshot | null {

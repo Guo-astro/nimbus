@@ -279,8 +279,8 @@ function assertEquivalent(actual, expected, label) {
   );
 }
 
-function assertDiscoverySurfaces(site) {
-  const client = join(site, "dist", "client");
+function assertDiscoverySurfaces(site, base = "") {
+  const client = join(site, "dist", "client", base);
   const sitemap = filesUnder(client)
     .filter((file) => /sitemap.*\.xml$/.test(file))
     .map((file) => readFileSync(file, "utf8"))
@@ -289,7 +289,7 @@ function assertDiscoverySurfaces(site) {
     [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)]
       .map((match) => new URL(match[1]))
       .filter((url) => url.origin === "https://workers-feasibility.test")
-      .map((url) => url.pathname.replace(/\/$/, "") || "/"),
+      .map((url) => url.pathname.slice(base.length).replace(/\/$/, "") || "/"),
   );
   assert(sitemapPaths.has("/runtime"), "sitemap omitted prose");
   assert(sitemapPaths.has("/api/Health/ping"), "sitemap omitted API operation");
@@ -330,7 +330,54 @@ function assertDiscoverySurfaces(site) {
   );
 }
 
+async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
+  const home = await request(origin, `${base}/`);
+  assert(home.response.status === 200, "discovery homepage was not 200");
+  const links = home.response.headers.get("Link") ?? "";
+  for (const rel of ["ard", "describedby", "alternate", "service-doc"])
+    assert(links.includes(`rel="${rel}"`), `homepage omitted ${rel} Link`);
+  if (ownerLink)
+    assert(links.includes('rel="help"'), "owner homepage Link was lost");
+  const ard = await request(origin, "/.well-known/ard.json");
+  const alias = await request(origin, "/.well-known/ai-catalog.json");
+  assert(
+    ard.response.status === 200 && alias.response.status === 200,
+    "discovery aliases were not 200",
+  );
+  assert(ard.html === alias.html, "discovery aliases differ");
+  for (const response of [ard.response, alias.response]) {
+    assert(
+      response.headers.get("Content-Type")?.includes("application/json"),
+      "discovery MIME type missing",
+    );
+    assert(
+      response.headers.get("Access-Control-Allow-Origin") === "*",
+      "discovery CORS missing",
+    );
+  }
+  for (const entry of JSON.parse(ard.html).entries) {
+    const url = new URL(entry.url);
+    assert(
+      url.pathname.startsWith(`${base}/`),
+      "discovery link omitted the base",
+    );
+    const resource = await request(origin, url.pathname);
+    assert(
+      resource.response.status === 200,
+      `advertised ${url.pathname} was not 200`,
+    );
+    if (entry.type === "text/markdown")
+      assert(
+        resource.response.headers
+          .get("Content-Type")
+          ?.includes("text/markdown"),
+        "homepage Markdown MIME type missing",
+      );
+  }
+}
+
 async function assertStaticSurfaces(origin) {
+  await assertAgentDiscovery(origin);
   for (const [route, evidence] of [
     ["/runtime/index.md", "This content rendered from a reusable partial."],
     ["/runtime/index.mdx", '<Aside type="note"'],
@@ -495,7 +542,7 @@ async function stop(child) {
   ]);
 }
 
-async function withWorkerd(site, check) {
+async function withWorkerd(site, check, assetsDirectory) {
   const port = await freePort();
   const child = spawn(
     join(
@@ -504,7 +551,12 @@ async function withWorkerd(site, check) {
       ".bin",
       process.platform === "win32" ? "wrangler.cmd" : "wrangler",
     ),
-    ["dev", "--port", String(port)],
+    [
+      "dev",
+      "--port",
+      String(port),
+      ...(assetsDirectory ? ["--assets", assetsDirectory] : []),
+    ],
     {
       cwd: site,
       detached: process.platform !== "win32",
@@ -600,10 +652,10 @@ async function request(origin, route, probe) {
   return { response, html: await response.text() };
 }
 
-function build(site, policy) {
+function build(site, policy, base = "") {
   writeRenderingPolicy(site, policy);
   run("pnpm", ["build"], { cwd: site, env: { ASTRO_KEY } });
-  assertDiscoverySurfaces(site);
+  assertDiscoverySurfaces(site, base);
   assertWorkerPurity(join(site, "dist", "server"));
 }
 
@@ -727,7 +779,10 @@ function assertWorkerPurityScanner() {
     ["/server/chunks/build-markdown-CX42.js", "build helper"],
     ["/node_modules/@cloudflare/nimbus-docs/src/build.ts", "build helper"],
     ["/node_modules/@cloudflare/nimbus-docs/dist/build.js", "build helper"],
-    [".astro/nimbus/agent-endpoint-assets/manifest.json", "agent-endpoint asset"],
+    [
+      ".astro/nimbus/agent-endpoint-assets/manifest.json",
+      "agent-endpoint asset",
+    ],
     ['require("binding.node")', "native binding"],
     ["/server/binding.node", "native binding"],
     ['WebAssembly.instantiate(atob("AGFzbAAAA"))', "embedded wasm"],
@@ -1024,7 +1079,11 @@ await withWorkerd(site, async (origin) => {
       `${kind} API route ${route} returned ${first.response.status}/${second.response.status}: ${first.html.slice(0, 500)}`,
     );
     assertPreparedApi(first.html, kind);
-    assertTokenClassesDefined(first.html, styles.html, `request-rendered ${kind} API page`);
+    assertTokenClassesDefined(
+      first.html,
+      styles.html,
+      `request-rendered ${kind} API page`,
+    );
     assertGeneratedAssetsExist(site, first.html, `request API ${route}`);
     assertProbe(first.html, `${kind}-one`);
     assertProbe(second.html, `${kind}-two`);
@@ -1113,6 +1172,78 @@ for (const manager of [
 ]) {
   await verifyPackageManagerConsumer(site, manager);
 }
+
+console.log(
+  `${PREFIX} proving request homepage discovery with and without a base`,
+);
+const discoveryConfigPath = join(site, "astro.config.ts");
+const discoveryConfig = readFileSync(discoveryConfigPath, "utf8");
+writeFileSync(
+  join(site, "src/pages/index.astro"),
+  `---
+export const prerender = false;
+Astro.response.headers.set("Link", '<https://example.net/help>; rel="help"');
+---
+<html><head><title>Discovery</title></head><body>Request homepage</body></html>`,
+);
+for (const base of ["", "/docs"]) {
+  writeFileSync(
+    discoveryConfigPath,
+    discoveryConfig.replace(
+      'output: "server",',
+      `output: "server", base: ${JSON.stringify(base || "/")},`,
+    ),
+  );
+  build(site, { docs: "request", api: "request" }, base);
+  await withWorkerd(site, (origin) => assertAgentDiscovery(origin, base, true));
+}
+
+console.log(`${PREFIX} preserving 404 when SSR cannot rewrite to prerendered llms.txt`);
+const missingHomepagePath = join(site, "dist/client/docs/index.md");
+const homepageBytes = readFileSync(missingHomepagePath);
+rmSync(missingHomepagePath);
+try {
+  await withWorkerd(site, async (origin) => {
+    assert((await request(origin, "/docs/llms.txt")).response.status === 200,
+      "prerendered llms.txt must still exist");
+    const missing = await request(origin, "/docs/index.md");
+    assert(missing.response.status === 404,
+      "missing homepage copy must remain a 404, not an SSR rewrite failure");
+  });
+} finally {
+  writeFileSync(missingHomepagePath, homepageBytes);
+}
+
+console.log(`${PREFIX} proving static-output Cloudflare discovery under a base`);
+writeFileSync(
+  discoveryConfigPath,
+  discoveryConfig.replace('output: "server",', 'output: "static", base: "/docs",'),
+);
+writeFileSync(
+  join(site, "src/pages/index.astro"),
+  '<html><head><title>Discovery</title></head><body>Static homepage</body></html>',
+);
+build(site, { docs: "build", api: "build" }, "/docs");
+// Cloudflare 14.3.3 corrects the base asset root only for server output.
+// Its static Wrangler config stays inside dist/client/docs with directory ".".
+// Exercise the documented CLI override rather than rewriting adapter output.
+await withWorkerd(
+  site,
+  (origin) => assertAgentDiscovery(origin, "/docs"),
+  "./dist/client",
+);
+run(
+  "pnpm",
+  [
+    "exec", "wrangler", "deploy", "--dry-run",
+    "--assets", "./dist/client",
+    "--outdir", join(workRoot, "static-wrangler-output"),
+  ],
+  { cwd: site },
+);
+// Restore server output for the final production bundle measurement.
+writeFileSync(discoveryConfigPath, discoveryConfig);
+build(site, { docs: "request", api: "request" });
 
 console.log(`${PREFIX} validating the production deployment bundle`);
 const deployOutput = join(workRoot, "wrangler-output");

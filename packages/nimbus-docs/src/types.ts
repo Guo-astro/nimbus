@@ -2,6 +2,20 @@
  * Public type surface for `nimbus-docs/types`.
  */
 
+/** Published resources exposed through virtual:nimbus/agent-capabilities. */
+export interface AgentApiPublication {
+  collection: string;
+  version?: string;
+  docsUrl: string;
+}
+
+export interface AgentCapabilities {
+  apis: AgentApiPublication[];
+  homepageMarkdownUrl?: string;
+  homepageDiscoverable?: boolean;
+  llmsUrl?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------

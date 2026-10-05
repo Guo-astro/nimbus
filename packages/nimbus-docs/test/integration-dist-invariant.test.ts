@@ -1,13 +1,8 @@
 /**
- * Dist-output invariant: with no adapter installed, the integration adds nothing
- * to `dist` beyond what it shipped before deploy-correctness — the new build
- * diagnostics go to the logger (stdout) and `.nimbus/` (project root), never to
- * `dist`. The single sanctioned dist artifact is `_redirects`, a deploy file
- * emitted only in the static lane when a deploy target is detected AND there is
- * at least one concrete redirect to write; otherwise dist stays identical to
- * baseline.
- *
- * Baseline = `_nimbus/shiki.css`, which predates this work and is always emitted.
+ * Deploy diagnostics go to the logger and `.nimbus/`, never to `dist`.
+ * Besides the normal discovery and code-style outputs, `_redirects` is added
+ * only for a detected static deployment with at least one concrete redirect.
+ * Prerendered discovery endpoints are covered by the real Astro build tests.
  */
 
 import assert from "node:assert/strict";
@@ -33,7 +28,7 @@ import { readRouteTruth } from "../src/lint/route-truth.js";
 
 const dirUrl = (p: string) => pathToFileURL(p + path.sep);
 
-const BASELINE_DIST = ["_nimbus/shiki.css"];
+const BASELINE_DIST = ["_headers", "_nimbus/shiki.css"];
 
 const CONTENT_CONFIG = `import { docsCollection } from "@cloudflare/nimbus-docs/content";
 export const collections = { docs: docsCollection({ base: "docs" }) };
@@ -502,6 +497,7 @@ test("route truth records every emitted file except the final assets dir, search
     "/_astro/manual.pdf",
     "/files/doc.pdf",
     "/foo",
+    "/index.md",
     "/keys/key.pem",
     "/llms.txt",
     "/rss.xml",

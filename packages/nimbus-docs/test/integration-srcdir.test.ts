@@ -53,6 +53,8 @@ async function runConfigSetup(opts: {
   assert.ok(hook, "integration exposes astro:config:setup");
 
   await hook!({
+    injectRoute: () => {},
+    addMiddleware: () => {},
     updateConfig: (config: Record<string, unknown>) => {
       updatedConfig = config;
       return {} as never;

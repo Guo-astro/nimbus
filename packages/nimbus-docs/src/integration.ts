@@ -546,6 +546,7 @@ export function nimbus(
         site: config.site,
         title: config.title,
         base: astroBaseForBuild,
+        output: outputModeForBuild,
       },
       capabilities: createAgentCapabilities({
         ...(hasHomepageMarkdown
@@ -1530,6 +1531,17 @@ export function nimbus(
                 () => adapterNameForBuild,
               ),
               {
+                // The asset loader imports a Workers runtime module; the
+                // Cloudflare adapter externalizes it, and so must any adapter
+                // standing in for it.
+                name: "nimbus-docs:cloudflare-externals",
+                resolveId(id: string) {
+                  return adapterNameForBuild === "@astrojs/cloudflare" && id.startsWith("cloudflare:")
+                    ? { id, external: true as const }
+                    : undefined;
+                },
+              },
+              {
                 name: "nimbus-docs:agent-endpoint-assets",
                 enforce: "pre",
                 applyToEnvironment: (environment) =>
@@ -1614,9 +1626,18 @@ export function nimbus(
         });
       },
       "astro:route:setup": ({ route }) => {
-        const mode = renderingRoutes.get(
-          normalizeRouteComponent(route.component),
-        );
+        const component = normalizeRouteComponent(route.component);
+        // The homepage renders on request only when some collection already
+        // does: a Worker that holds no content store keeps a static homepage.
+        if (
+          outputModeForBuild === "server" &&
+          routeComponentKeys(projectRootForBuild, path.join(srcDirForBuild, "pages", "index.astro")).includes(component) &&
+          ![...renderingRoutes.values()].includes("request")
+        ) {
+          route.prerender = true;
+          return;
+        }
+        const mode = renderingRoutes.get(component);
         if (!mode) return;
         route.prerender = mode === "build";
       },
@@ -1730,7 +1751,7 @@ export function nimbus(
           content: [
             'declare module "virtual:nimbus/agent-capabilities" {',
             '  export const capabilities: import("@cloudflare/nimbus-docs/types").AgentCapabilities;',
-            "  export const options: { site: string; title: string; base: string };",
+            '  export const options: { site: string; title: string; base: string; output: "static" | "server" };',
             "}",
             'declare module "virtual:nimbus/config" {',
             '  import type { NimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',

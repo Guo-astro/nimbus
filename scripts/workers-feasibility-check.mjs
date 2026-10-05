@@ -334,6 +334,39 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
   const home = await request(origin, `${base}/`);
   assert(home.response.status === 200, "discovery homepage was not 200");
   const links = home.response.headers.get("Link") ?? "";
+  // Markdown negotiation: a request-rendered homepage answers with the
+  // homepage Markdown and the same Link headers; a prerendered one stays HTML.
+  const markdown = await fetch(`${origin}${base}/`, {
+    headers: { Accept: "text/markdown, text/html;q=0.9" },
+  });
+  if (ownerLink) {
+    assert(
+      markdown.headers.get("Content-Type")?.includes("text/markdown"),
+      `negotiated homepage served as ${markdown.headers.get("Content-Type")}`,
+    );
+    assert(markdown.headers.get("Vary") === "Accept", "negotiated homepage omitted Vary: Accept");
+    assert(markdown.headers.get("Link") === links, "negotiated homepage changed its Link headers");
+    assert(
+      (await markdown.text()) === (await request(origin, `${base}/index.md`)).html,
+      "negotiated homepage differs from /index.md",
+    );
+    const page = await fetch(`${origin}${base}/runtime/`, {
+      headers: { Accept: "text/markdown, text/html;q=0.9" },
+    });
+    assert(
+      page.headers.get("Content-Type")?.includes("text/markdown") && page.headers.get("Vary") === "Accept",
+      "request-rendered page did not negotiate to Markdown",
+    );
+    assert(
+      (await page.text()) === (await request(origin, `${base}/runtime/index.md`)).html,
+      "negotiated page differs from its index.md",
+    );
+  } else {
+    assert(
+      markdown.headers.get("Content-Type")?.includes("text/html"),
+      "prerendered homepage negotiated although assets serve it",
+    );
+  }
   for (const rel of ["ard", "describedby", "alternate", "service-doc"])
     assert(links.includes(`rel="${rel}"`), `homepage omitted ${rel} Link`);
   if (ownerLink)

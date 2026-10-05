@@ -5,6 +5,7 @@ export interface AgentDiscoveryOptions {
   site: string;
   title: string;
   base: string;
+  output: "static" | "server";
 }
 export interface ArdEntry {
   identifier: string;

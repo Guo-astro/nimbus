@@ -42,6 +42,12 @@ Discovery files belong at the origin root. With a `base`, the Cloudflare adapter
 
 The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
+## Markdown negotiation
+
+On server output, a request-rendered page answers `Accept: text/markdown` with the same prepared Markdown as its `index.md`, at the canonical URL, with `Vary: Accept` on both forms and the page's other response headers kept. Markdown is chosen only when it outranks every HTML and wildcard range in the header; a browser's `*/*` keeps HTML, and so does `text/plain`. The homepage negotiates to its homepage Markdown, with the same Link headers, once a collection renders on request; on an all-build site it stays a static file.
+
+Prerendered pages and static sites return HTML: the host serves the file before any middleware runs. For those, Cloudflare's [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/) negotiates at the platform level and converts the HTML. Assets, API endpoints, and unknown routes pass through unchanged.
+
 ## How pages are indexed
 
 Indexing is multi-collection by default and schema-tolerant — every prepared collection registered in `src/content.config.ts` (except `partials` and reserved names) is walked, reading `title` and `description` when present. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.

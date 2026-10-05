@@ -340,6 +340,22 @@
       ]
     },
     {
+      "id": "homepage-renders-on-request",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "soft-markdown-negotiation",
+      "summary": "Optionally let the homepage render on request under server output so it negotiates Markdown.",
+      "affected": "Existing sites on server output whose src/pages/index.astro still exports prerender = true.",
+      "instructions": [
+        "Remove `export const prerender = true` from src/pages/index.astro. Under server output the homepage then renders on request when a collection already does, and answers Accept: text/markdown with the homepage Markdown; on an all-build site and on static output it stays a static file.",
+        "A request-rendered homepage is served by the Worker: public/_headers rules for / no longer apply (set them in the page or middleware) and the page is rendered per request rather than cached as an asset.",
+        "Keep the export if the homepage must stay a static asset."
+      ],
+      "verify": [
+        "On a server-output build, request / with Accept: text/markdown and confirm the homepage Markdown with Vary: Accept and the homepage Link headers."
+      ]
+    },
+    {
       "id": "agent-discovery-content-signals",
       "introducedIn": "0.17.0",
       "mode": "optional",

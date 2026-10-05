@@ -1,7 +1,55 @@
-import type { MiddlewareHandler } from "astro";
+import type { APIContext, MiddlewareHandler } from "astro";
 import { capabilities, options } from "virtual:nimbus/agent-capabilities";
 import { agentHomepageLinks } from "./agent-discovery.js";
-import { withBase } from "./url.js";
+import { prefersMarkdown } from "./markdown-negotiation.js";
+import { toRouteKey, withBase } from "./url.js";
+
+const home = withBase("/", options.base).replace(/\/$/, "");
+const isHome = (pathname: string) => pathname.replace(/\/$/, "") === home;
+
+function withHeaders(response: Response, set: (headers: Headers) => void): Response {
+  const headers = new Headers(response.headers);
+  set(headers);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function varyOnAccept(headers: Headers): void {
+  const current = headers.get("Vary");
+  if (current === "*" || /(^|,)\s*accept\s*(,|$)/i.test(current ?? "")) return;
+  headers.set("Vary", current ? `${current}, Accept` : "Accept");
+}
+
+/** The indexed entry behind a page URL, so Markdown is found by identity. */
+async function pageEntry(context: APIContext) {
+  const prefix = options.base.replace(/\/+$/, "");
+  const pathname = context.url.pathname;
+  if (prefix && !pathname.startsWith(`${prefix}/`)) return undefined;
+  const route = toRouteKey(pathname.slice(prefix.length) || "/");
+  const { getIndexedEntries } = await import("../runtime.js");
+  return (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
+}
+
+/**
+ * The Markdown alternate is a published file. On Cloudflare it comes from the
+ * assets binding, which works on every hostname; the dev server has no
+ * binding, so there it is read back from the server itself.
+ */
+async function publishedMarkdown(context: APIContext, pathname: string): Promise<Response | undefined> {
+  const path = withBase(pathname, options.base);
+  try {
+    // Loaded on demand: the binding module exists only where the Worker runs.
+    const { fetchAgentEndpointAsset } = await import("virtual:nimbus/agent-endpoint-asset-loader");
+    let file = await fetchAgentEndpointAsset(path, context.request);
+    if (!file && import.meta.env.DEV) file = await loopbackMarkdownInDev(context, path);
+    return file?.ok ? file : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function loopbackMarkdownInDev(context: APIContext, path: string): Promise<Response> {
+  return fetch(new URL(path, context.url), { method: context.request.method });
+}
 
 export const onRequest: MiddlewareHandler = async (context, next) => {
   const response = await next();
@@ -17,24 +65,32 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
     try {
       summary = await context.rewrite("/llms.txt");
     } catch {
-      // SSR cannot rewrite to a prerendered route if the copied asset is absent.
       return response;
     }
     if (summary.status !== 200) return response;
-    const headers = new Headers(summary.headers);
-    headers.set("Content-Type", "text/markdown; charset=utf-8");
-    return new Response(summary.body, { status: summary.status, headers });
+    return withHeaders(summary, (headers) => headers.set("Content-Type", "text/markdown; charset=utf-8"));
   }
-  const home = withBase("/", options.base).replace(/\/$/, "");
-  if (
-    response.status !== 200 ||
-    context.url.pathname.replace(/\/$/, "") !== home
-  )
-    return response;
+  if (response.status !== 200) return response;
+  const atHome = isHome(context.url.pathname);
+  // Only a request-rendered page on server output negotiates: a static host
+  // answers from its files before any middleware runs.
+  const live = options.output === "server" && !context.isPrerendered && (response.headers.get("Content-Type")?.includes("text/html") ?? false);
+  const entry = live && !atHome ? await pageEntry(context) : undefined;
+  const negotiates = live && (atHome ? !!capabilities.homepageMarkdownUrl : !!entry);
+  let markdown: Response | undefined;
+  if (negotiates && prefersMarkdown(context.request.headers.get("Accept"))) {
+    markdown = await publishedMarkdown(context, atHome ? "/index.md" : entry!.markdownUrl);
+  }
+  if (!negotiates && !atHome) return response;
+  // The Markdown form keeps the page's own response headers and swaps the body.
   const headers = new Headers(response.headers);
-  for (const value of agentHomepageLinks(capabilities, options))
-    headers.append("Link", value);
-  return new Response(response.body, {
+  if (markdown) {
+    for (const name of ["Content-Length", "Content-Encoding", "ETag", "Last-Modified"]) headers.delete(name);
+    headers.set("Content-Type", markdown.headers.get("Content-Type") ?? "text/markdown; charset=utf-8");
+  }
+  if (negotiates) varyOnAccept(headers);
+  if (atHome) for (const value of agentHomepageLinks(capabilities, options)) headers.append("Link", value);
+  return new Response(markdown ? (context.request.method === "HEAD" ? null : markdown.body) : response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,

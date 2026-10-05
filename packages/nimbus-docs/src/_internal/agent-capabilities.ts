@@ -6,8 +6,10 @@ export function createAgentCapabilities(input: {
   homepageMarkdownUrl?: string;
   homepageDiscoverable?: boolean;
   llmsUrl?: string;
+  skillsIndexUrl?: string;
 }): AgentCapabilities {
   return {
+    ...(input.skillsIndexUrl ? { skillsIndexUrl: input.skillsIndexUrl } : {}),
     ...(input.llmsUrl ? { llmsUrl: input.llmsUrl } : {}),
     apis:
       input.apis

@@ -9,6 +9,7 @@ export async function discoveryFixture(
   rootContent?: string,
   collection = "docs",
   withApi = false,
+  skills?: Record<string, string>,
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "nimbus-discovery-"));
   const write = async (file: string, body: string) => {
@@ -41,6 +42,8 @@ export async function discoveryFixture(
   );
   if (rootContent)
     await write(`src/content/${collection}/index.mdx`, rootContent);
+  for (const [file, body] of Object.entries(skills ?? {}))
+    await write(`skills/${file}`, body);
   await write(
     "src/pages/index.astro",
     '---\nAstro.response.headers.set("Link", \'<https://example.net/help>; rel="help"\');\n---\n<html><head><title>Home</title></head><body>Owner homepage</body></html>',
@@ -88,5 +91,6 @@ export async function discoveryFixture(
     config,
     write,
     read: (file: string) => readFile(path.join(root, file), "utf8"),
+    readBytes: (file: string) => readFile(path.join(root, file)),
   };
 }

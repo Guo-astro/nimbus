@@ -355,10 +355,16 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
       "discovery CORS missing",
     );
   }
-  for (const entry of JSON.parse(ard.html).entries) {
+  const entries = JSON.parse(ard.html).entries;
+  assert(
+    entries.some((entry) => entry.url.endsWith("/.well-known/agent-skills/index.json")),
+    "discovery omitted the agent skills index",
+  );
+  for (const entry of entries) {
     const url = new URL(entry.url);
+    // .well-known lives at the origin root; everything else sits under the base.
     assert(
-      url.pathname.startsWith(`${base}/`),
+      url.pathname.startsWith("/.well-known/") || url.pathname.startsWith(`${base}/`),
       "discovery link omitted the base",
     );
     const resource = await request(origin, url.pathname);
@@ -373,6 +379,23 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
           ?.includes("text/markdown"),
         "homepage Markdown MIME type missing",
       );
+    if (url.pathname.endsWith("/agent-skills/index.json")) {
+      assert(
+        resource.response.headers.get("Access-Control-Allow-Origin") === "*",
+        "skills index CORS missing",
+      );
+      for (const skill of JSON.parse(resource.html).skills) {
+        const artifact = await request(origin, skill.url);
+        assert(artifact.response.status === 200, `skill ${skill.url} was not 200`);
+        const expected = skill.type === "archive" ? "application/gzip" : "text/markdown";
+        assert(
+          artifact.response.headers.get("Content-Type")?.includes(expected),
+          `skill ${skill.url} served as ${artifact.response.headers.get("Content-Type")}`,
+        );
+        const head = await fetch(`${origin}${skill.url}`, { method: "HEAD" });
+        assert(head.status === 200, `HEAD ${skill.url} was not 200`);
+      }
+    }
   }
 }
 

@@ -14,6 +14,7 @@
     "build:templates": "node packages/create-nimbus-docs/scripts/copy-template.mjs",
     "api-reference:check": "node scripts/api-reference-check.mjs",
     "workers-feasibility:check": "node scripts/workers-feasibility-check.mjs",
+    "webmcp:check": "node scripts/webmcp-check.mjs",
     "templates:check": "node scripts/templates-check.mjs",
     "templates:sync": "node scripts/sync-templates-repo.mjs",
     "upgrades:check": "node scripts/upgrade-manifest.mjs",

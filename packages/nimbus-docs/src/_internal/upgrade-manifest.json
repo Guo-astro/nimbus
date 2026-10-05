@@ -355,6 +355,23 @@
         "Build the site and inspect robots.txt, preserving existing directives.",
         "Confirm the chosen Content-Signal values and the sitemap URL. Robots directives and Content Signals do not protect private documentation; require authentication for private content."
       ]
+    },
+    {
+      "id": "browser-documentation-search",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "quiet-browser-search",
+      "summary": "Optionally expose documentation search to browser agents through WebMCP.",
+      "affected": "Existing sites using Pagefind search that want the new starter browser-agent integration.",
+      "instructions": [
+        "Keep existing sites unchanged if browser-agent search is not wanted.",
+        "Add the starter WebMCP.astro component to BaseLayout.astro inside head. It reads virtual:nimbus/agent-capabilities and uses initDocumentationWebMcp with the standard mount lifecycle from @cloudflare/nimbus-docs/client.",
+        "Use Pagefind 1.5.2 or newer and run a fresh production build. No polyfill, remote MCP server, or extra search service is required."
+      ],
+      "verify": [
+        "In a browser implementing the current Document.modelContext draft, call search_documentation before opening the search dialog.",
+        "Verify that view transitions remove the old registration, unsupported browsers stay quiet, and disabled or custom search registers nothing."
+      ]
     }
   ]
 }

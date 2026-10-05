@@ -42,6 +42,16 @@ Discovery files belong at the origin root. With a `base`, the Cloudflare adapter
 
 The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
+## Browser-agent search
+
+New starters register `search_documentation` through [WebMCP's current community draft](https://webmachinelearning.github.io/webmcp/) when the browser exposes `document.modelContext`. It is experimental and browser support varies. Unsupported browsers stay quiet and load no Pagefind assets for this feature. Search-disabled and custom-provider sites register no tool.
+
+The tool uses the same Pagefind index as site search, with its own instance to keep concurrent results independent. Registration loads only the tool definition; the search implementation and index load on the first tool call, even if nobody has opened the search dialog. Results contain section titles, anchored URLs, and plain-text excerpts. Default search excludes deprecated versions; an explicit visible version can include them. Hidden and unpublished pages remain outside the index.
+
+Pagefind needs a production build. In development, a missing index produces `index_unavailable` with a request to build first. Test real search against a production preview. WebMCP runs in the browser and does not call a remote `/mcp` endpoint.
+
+The starter's `WebMCP.astro` component registers and cleans up the tool through the standard client mount lifecycle, including view transitions. Existing sites can adopt it through the optional upgrade guidance. Use Pagefind 1.5.2 or newer, which provides isolated search instances. An older runtime without that API returns `index_unavailable` with an upgrade-and-rebuild instruction and warns once in the browser console.
+
 ## How pages are indexed
 
 Indexing is multi-collection by default and schema-tolerant — every prepared collection registered in `src/content.config.ts` (except `partials` and reserved names) is walked, reading `title` and `description` when present. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.

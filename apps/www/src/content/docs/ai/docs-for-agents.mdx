@@ -30,32 +30,17 @@ A way to build documentation sites on top of Astro.
 
 ## Agent discovery
 
-Nimbus generates `/.well-known/ard.json` and the compatible `/.well-known/ai-catalog.json` from the site's published capabilities. The files have identical content, validated against the pinned ARD v0.91 and AI Catalog 1.0 schemas. A default docs site advertises its `llms.txt` index and homepage Markdown; homepage headers also link to visible API documentation. Removing the `llms.txt` route also removes its discovery entry. If no discoverable resources remain, the manifest has an empty `entries` array. This is valid against the pinned schemas, but does not satisfy checkers that require at least one entry.
+Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt` and the homepage Markdown at `/index.md`. The homepage also sends `Link` headers for those files and for each visible API reference, through `_headers` on static builds and through middleware when the homepage is request-rendered. Owner `_headers` rules are kept.
 
-If your site already owns either discovery path in `publicDir` or `src/pages`, Nimbus stops the build rather than overwriting it. Preserve any custom entries before moving the owner file or route; sites sharing an origin should combine entries in the origin deployment configuration.
+`/index.md` is the root content entry when there is one, otherwise the `llms.txt` content. A root entry with `noindex: true` is served but left out of discovery.
 
-The homepage Markdown at `/index.md` uses your published root content entry when one exists. Otherwise, it reuses the bytes from `/llms.txt`. A root entry with `noindex: true` remains directly readable but is omitted from discovery.
+If your site already has a file or route at either `.well-known` path, the build fails so you can move your entries first.
 
-Homepage responses include HTTP `Link` headers pointing to discovery, the index, and the Markdown alternate. Nimbus emits `_headers` on every static build, even without a detected deployment target, so discovery works when the output is later uploaded to a compatible host. Request-rendered homepages receive the same links through middleware. Owner-written `_headers` rules and existing response links are preserved. Each generated link has its own `Link:` line to avoid overflowing Cloudflare's [2,000-character line limit](https://developers.cloudflare.com/workers/static-assets/headers/). Cloudflare comma-joins duplicate values, preserving owner links alongside Nimbus's links. Hosts that do not support `_headers` need equivalent response-header configuration.
-
-### Sites under a base path
-
-With Astro `base: "/docs"`, documentation links include `/docs`, but well-known discovery URLs remain at the origin root. The Cloudflare adapter handles this mounting automatically for server output. For other hosts, deploy the emitted `.well-known` directory at `https://your-domain/.well-known/`, alongside the site's mounted output, and apply its `_headers` rules there. If another site owns that origin's discovery document, combine the entries in the origin's deployment configuration. Local development serves these origin-root discovery URLs automatically.
-
-With `output: "static"`, `base`, and `@astrojs/cloudflare` 14.3.3 together, the adapter generates a Wrangler configuration pointing inside the base directory. Set the outer asset root explicitly with [Wrangler's `--assets` option](https://developers.cloudflare.com/workers/wrangler/commands/workers/):
-
-```sh
-pnpm exec wrangler dev --assets ./dist/client
-pnpm exec wrangler deploy --assets ./dist/client
-```
-
-These paths assume Astro's default output directories. Adjust them if you customize the build output. This workaround is specific to static output with the Cloudflare adapter and a base path; the default static starter does not install that adapter.
+Discovery files belong at the origin root. With a `base`, the Cloudflare adapter puts them there for you; on other hosts, deploy the emitted `.well-known` directory at the root alongside the site. Static output with the Cloudflare adapter and a `base` needs `wrangler deploy --assets ./dist/client`.
 
 ### Content Signals
 
-New starters include an editable `Content-Signal` declaration in `src/pages/robots.txt.ts`, allowing search, AI input, and AI training. Review those choices before publishing and change each value to `no` where appropriate. Existing projects keep their current robots route; Nimbus provides optional upgrade guidance instead of replacing it.
-
-Content Signals describe permitted uses. `robots.txt` directives are requests to crawlers, not access protection. Neither restricts access or replaces authentication. Keep private material outside publicly served collections and assets. See the [Content Signals policy](https://contentsignals.org/) for the meaning of each directive.
+The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
 ## How pages are indexed
 

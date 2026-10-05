@@ -6,6 +6,9 @@ export const prerender = true;
 export function GET() {
   const body = [
     "User-agent: *",
+    // Content Signals (https://contentsignals.org). All three are "yes": the
+    // docs exist to be read, indexed, and fed to agents.
+    "Content-Signal: ai-train=yes, search=yes, ai-input=yes",
     "Allow: /",
     "",
     `Sitemap: ${new URL(withBase("/sitemap-index.xml", import.meta.env.BASE_URL), config.site).href}`,

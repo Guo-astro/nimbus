@@ -42,6 +42,12 @@ Discovery files belong at the origin root. With a `base`, the Cloudflare adapter
 
 The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
+## API catalog and published specs
+
+Sites with API collections serve an [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727) catalog at `/.well-known/api-catalog`, one entry per visible collection and version, linking the reference page, its Markdown, and the published spec. Each spec is published as one self-contained JSON file at its mount path, for example `/pets/openapi.json`; files it references are embedded under an `x-ext` extension. The homepage `Link` header and the discovery manifest point at them.
+
+Set `publishSpec: false` on a collection, or on one version, to keep that spec unpublished; its catalog entry keeps the documentation links. A spec that can't be bundled is skipped with a build warning naming the reference. Hidden versions still publish their file but appear in no catalog, manifest, or header. The catalog file has no extension, so a host that ignores `_headers` needs its own rule for the media type and the `api-catalog` Link on HEAD.
+
 ## How pages are indexed
 
 Indexing is multi-collection by default and schema-tolerant — every prepared collection registered in `src/content.config.ts` (except `partials` and reserved names) is walked, reading `title` and `description` when present. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.

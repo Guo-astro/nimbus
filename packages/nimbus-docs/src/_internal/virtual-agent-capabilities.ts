@@ -3,10 +3,19 @@ import type { AgentDiscoveryOptions } from "./agent-discovery.js";
 import type { ViteDevServer } from "vite";
 import type { VitePluginLike } from "./virtual-config.js";
 import { agentDiscoveryManifest } from "./agent-discovery.js";
+import {
+  API_CATALOG_MEDIA_TYPE,
+  API_CATALOG_PATH,
+  apiCatalog,
+  apiCatalogLink,
+} from "./agent-api-catalog.js";
+import { withBase } from "./url.js";
 export function virtualAgentCapabilitiesPlugin(
   get: () => Promise<{
     capabilities: AgentCapabilities;
     options: AgentDiscoveryOptions;
+    specFiles?: { file: string; type: string; contents: string }[];
+    specWarnings?: string[];
   }>,
 ): Omit<VitePluginLike, "load"> & {
   load(source: string): Promise<string | undefined>;
@@ -18,9 +27,46 @@ export function virtualAgentCapabilitiesPlugin(
     configureServer(server) {
       // Runs before Vite's base middleware: well-known discovery belongs to
       // the origin, including when the documentation lives under /docs/.
+      const warned = new Set<string>();
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(request.url ?? "/", "http://nimbus.local")
           .pathname;
+        const method = request.method ?? "";
+        if (["GET", "HEAD"].includes(method) && pathname === API_CATALOG_PATH) {
+          void get()
+            .then(({ capabilities, options }) => {
+              const catalog = apiCatalog(capabilities);
+              if (!catalog) return next();
+              response.setHeader("Content-Type", API_CATALOG_MEDIA_TYPE);
+              response.setHeader("Access-Control-Allow-Origin", "*");
+              response.setHeader("Link", apiCatalogLink(options.site));
+              response.end(
+                method === "HEAD" ? undefined : JSON.stringify(catalog, null, 2) + "\n",
+              );
+            })
+            .catch(next);
+          return;
+        }
+        if (["GET", "HEAD"].includes(method)) {
+          void get()
+            .then(({ options, specFiles, specWarnings }) => {
+              for (const warning of specWarnings ?? []) {
+                if (warned.has(warning)) continue;
+                warned.add(warning);
+                console.warn(warning);
+              }
+              // Astro's base middleware has already stripped the base.
+              const spec = specFiles?.find(
+                (item) => pathname === item.file || pathname === withBase(item.file, options.base),
+              );
+              if (!spec) return next();
+              response.setHeader("Content-Type", spec.type);
+              response.setHeader("Access-Control-Allow-Origin", "*");
+              response.end(method === "HEAD" ? undefined : spec.contents);
+            })
+            .catch(next);
+          return;
+        }
         if (
           !["GET", "HEAD"].includes(request.method ?? "") ||
           !["/.well-known/ard.json", "/.well-known/ai-catalog.json"].includes(

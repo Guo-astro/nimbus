@@ -281,6 +281,20 @@ For each component already in your project, it asks whether to overwrite it, eve
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 
+### Published spec
+
+Each collection publishes its spec as one self-contained JSON file at `/api/openapi.json`, with versions at their own mount path, and lists it in the site's API catalog. Set `publishSpec: false` on a collection, or on a single version, to keep that spec unpublished:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    publishSpec: false,
+  },
+],
+```
+
 ### Schema pages
 
 By default, types show only inline, on the operations that use them: request and response fields, and the properties previewed under each union variant, come from `components/schemas`, but a schema gets no page of its own. In a large API, schema pages would outnumber operation pages.

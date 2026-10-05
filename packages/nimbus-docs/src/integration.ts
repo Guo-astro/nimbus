@@ -90,6 +90,10 @@ import {
   appendAgentDiscoveryHeaders,
 } from "./_internal/agent-discovery.js";
 import { virtualAgentCapabilitiesPlugin } from "./_internal/virtual-agent-capabilities.js";
+import { API_CATALOG_PATH } from "./_internal/agent-api-catalog.js";
+import { publishOpenApiSpec } from "./_internal/api/publish-spec.js";
+import type { PublishSpecResult } from "./_internal/api/publish-spec.js";
+import type { AgentApiPublication } from "./types.js";
 import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
@@ -503,6 +507,23 @@ export function nimbus(
     collections: {},
   };
 
+  // Memoized per version on the mtimes of every file the last bundle read, so
+  // the build bundles once and dev follows edits to referenced files too.
+  const publishedSpecs = new Map<string, { stamp: string; result: PublishSpecResult }>();
+  const stampOf = (files: string[]) =>
+    files.map((file) => (fs.existsSync(file) ? fs.statSync(file).mtimeMs : "missing")).join(",");
+  const publishSpec = async (target: { versionKey: string; spec: string | Record<string, unknown> }) => {
+    const cached = publishedSpecs.get(target.versionKey);
+    if (cached && typeof target.spec === "string" && cached.stamp === stampOf(cached.result.spec?.files ?? [path.resolve(projectRootForBuild, target.spec)]))
+      return cached.result;
+    const result = await publishOpenApiSpec(target.spec, projectRootForBuild);
+    publishedSpecs.set(target.versionKey, {
+      stamp: stampOf(result.spec?.files ?? (typeof target.spec === "string" ? [path.resolve(projectRootForBuild, target.spec)] : [])),
+      result,
+    });
+    return result;
+  };
+
   const getAgentCapabilities = async () => {
     const absolute = (pathname: string) =>
       new URL(withBase(pathname, astroBaseForBuild), config.site).href;
@@ -541,7 +562,37 @@ export function nimbus(
       publicHomepage ||
       sharedHomepage ||
       (owner !== undefined && owner.shared !== "markdown");
+    // Every version publishes its spec file unless opted out, hidden ones
+    // included; discovery surfaces then drop hidden versions.
+    const specFiles: { file: string; url: string; type: string; contents: string }[] = [];
+    const specWarnings: string[] = [];
+    const apis: (AgentApiPublication & { hidden: boolean })[] = [];
+    for (const api of resolveAllApiCollections(config.api)) {
+      let spec: { url: string; type: string } | undefined;
+      if (api.publishSpec) {
+        const published = await publishSpec(api);
+        const file = `${api.mountPath}/${published.spec?.fileName ?? "spec"}`;
+        if (published.error !== undefined) {
+          specWarnings.push(
+            `nimbus-docs api: not publishing the spec for "${api.label}": ${published.error}. The catalog entry keeps its documentation links.`,
+          );
+        } else {
+          spec = { url: absolute(file), type: published.spec.mediaType };
+          specFiles.push({ file, url: spec.url, type: spec.type, contents: published.spec.contents });
+        }
+      }
+      apis.push({
+        collection: api.family,
+        ...(api.version ? { version: api.version } : {}),
+        docsUrl: absolute(toDocumentHref(api.mountPath)),
+        markdownUrl: absolute(`${api.mountPath}/index.md`),
+        ...(spec ? { spec } : {}),
+        hidden: api.hidden,
+      });
+    }
     return {
+      specFiles,
+      specWarnings,
       options: {
         site: config.site,
         title: config.title,
@@ -555,12 +606,7 @@ export function nimbus(
             }
           : {}),
         ...(hasLlms ? { llmsUrl: absolute("/llms.txt") } : {}),
-        apis: resolveAllApiCollections(config.api).map((api) => ({
-          collection: api.family,
-          ...(api.version ? { version: api.version } : {}),
-          docsUrl: absolute(toDocumentHref(api.mountPath)),
-          hidden: api.hidden,
-        })),
+        apis,
       }),
     };
   };
@@ -1053,6 +1099,10 @@ export function nimbus(
         for (const [pattern, name] of [
           ["/.well-known/ard.json", "agent-discovery-route"],
           ["/.well-known/ai-catalog.json", "agent-discovery-route"],
+          // Only sites with API collections get a catalog.
+          ...((config.api ?? []).length
+            ? [[API_CATALOG_PATH, "agent-api-catalog-route"] as const]
+            : []),
         ]) {
           const ownedPaths = [
             path.join(publicDir, pattern!),
@@ -1076,6 +1126,13 @@ export function nimbus(
             owner: "infrastructure",
             rendering: "build",
           });
+        }
+        for (const api of resolveAllApiCollections(config.api)) {
+          const owned = path.join(publicDir, api.mountPath, "openapi.json");
+          if (api.publishSpec && fs.existsSync(owned))
+            throw authorError(
+              `Nimbus publishes ${api.mountPath}/openapi.json from the "${api.label}" spec. Move ${path.relative(projectRoot, owned)}, or set publishSpec: false to keep serving your own file.`,
+            );
         }
         params.addMiddleware?.({
           entrypoint: new URL(
@@ -2163,8 +2220,14 @@ export function nimbus(
         const assetRoot = adapterNameForBuild === "@astrojs/cloudflare" && baseSegments.length
           ? path.resolve(distDir, ...baseSegments.map(() => ".."))
           : distDir;
+        for (const warning of discovery.specWarnings) logger.warn(warning);
+        for (const spec of discovery.specFiles) {
+          const target = path.join(distDir, ...spec.file.split("/").filter(Boolean));
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          fs.writeFileSync(target, spec.contents);
+        }
         if (assetRoot !== distDir) {
-          for (const filename of ["ard.json", "ai-catalog.json"]) {
+          for (const filename of ["ard.json", "ai-catalog.json", "api-catalog"]) {
             const source = path.join(distDir, ".well-known", filename);
             if (fs.existsSync(source)) {
               fs.mkdirSync(path.join(assetRoot, ".well-known"), { recursive: true });
@@ -2184,6 +2247,7 @@ export function nimbus(
             agentDiscoveryHeaderRules(
               discovery.capabilities,
               discovery.options,
+              discovery.specFiles.map((spec) => ({ pathname: new URL(spec.url).pathname, type: spec.type })),
             ),
           ),
         );

@@ -62,10 +62,11 @@ test("discovery and API documentation links exclude hidden collections", () => {
     llmsUrl: minimal.llmsUrl,
     homepageMarkdownUrl: minimal.homepageMarkdownUrl,
     apis: [
-      { collection: "pets", docsUrl: `${options.site}/docs/pets/` },
+      { collection: "pets", docsUrl: `${options.site}/docs/pets/`, markdownUrl: `${options.site}/docs/pets/index.md` },
       {
         collection: "private",
         docsUrl: `${options.site}/private/`,
+        markdownUrl: `${options.site}/private/index.md`,
         hidden: true,
       },
     ],
@@ -73,7 +74,9 @@ test("discovery and API documentation links exclude hidden collections", () => {
   assert.equal(agentDiscoveryManifest(capabilities, options).entries.length, 2);
   const links = agentHomepageLinks(capabilities, options).join(", ");
   assert.match(links, /service-doc/);
-  assert.doesNotMatch(links, /service-desc|api-catalog|private/);
+  assert.match(links, /api-catalog/);
+  // No published spec, so no service-desc; hidden collections appear nowhere.
+  assert.doesNotMatch(links, /service-desc|private/);
   assert.doesNotMatch(
     JSON.stringify(agentDiscoveryManifest(capabilities, options)),
     /mcp|skills|private/,
@@ -155,6 +158,7 @@ test("many API versions get separate bounded Link lines with unchanged header va
       collection: "pets",
       version: `v${version}`,
       docsUrl: `${options.site}/docs/pets/v${version}/`,
+      markdownUrl: `${options.site}/docs/pets/v${version}/index.md`,
     })),
   });
   const values = agentHomepageLinks(capabilities, options);

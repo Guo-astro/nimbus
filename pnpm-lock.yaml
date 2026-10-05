@@ -293,6 +293,9 @@ importers:
       '@readme/httpsnippet':
         specifier: ^11.4.0
         version: 11.4.0
+      '@scalar/json-magic':
+        specifier: 0.12.20
+        version: 0.12.20
       '@scalar/openapi-parser':
         specifier: ^0.28.12
         version: 0.28.12

@@ -340,6 +340,22 @@
       ]
     },
     {
+      "id": "api-catalog-published-specs",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "calm-api-catalog",
+      "summary": "API specs are now published and listed in an API catalog.",
+      "affected": "Sites with api collections. Each visible spec is served at /<collection>/openapi.json (versions at their mount path) and listed at /.well-known/api-catalog.",
+      "instructions": [
+        "Decide per collection and version whether the spec may be public. Set publishSpec: false on the collection, or on a version, to keep it unpublished; the catalog entry then carries documentation links only.",
+        "If you already serve /.well-known/api-catalog or a <collection>/openapi.json route yourself, move it: Nimbus fails the build rather than overwrite the catalog, and its spec files take the mount path."
+      ],
+      "verify": [
+        "Build the site and read /.well-known/api-catalog: every listed spec URL should be one you intend to publish, and no hidden version should appear.",
+        "Check a bundling warning names a reference you can fix or opt out of."
+      ]
+    },
+    {
       "id": "agent-discovery-content-signals",
       "introducedIn": "0.17.0",
       "mode": "optional",

@@ -355,16 +355,51 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
       "discovery CORS missing",
     );
   }
+  // RFC 9727: the catalog at the origin root, its profile, and the Link on HEAD.
+  assert(links.includes('rel="api-catalog"'), "homepage omitted the api-catalog Link");
+  for (const method of ["GET", "HEAD"]) {
+    const catalog = await fetch(`${origin}/.well-known/api-catalog`, { method });
+    assert(catalog.status === 200, `api-catalog ${method} was ${catalog.status}`);
+    assert(
+      catalog.headers.get("Content-Type") ===
+        'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
+      `api-catalog ${method} Content-Type was ${catalog.headers.get("Content-Type")}`,
+    );
+    assert(
+      catalog.headers.get("Link")?.includes('rel="api-catalog"'),
+      `api-catalog ${method} omitted its Link header`,
+    );
+    if (method === "GET") {
+      const { linkset } = await catalog.json();
+      assert(Array.isArray(linkset) && linkset.length > 0, "api-catalog is empty");
+      for (const context of linkset) {
+        assert(context.anchor && context["service-doc"]?.length === 2, "catalog entry shape");
+        for (const target of [...(context["service-desc"] ?? []), ...context["service-doc"]]) {
+          const resource = await request(origin, new URL(target.href).pathname);
+          assert(resource.response.status === 200, `catalog link ${target.href} was not 200`);
+          assert(
+            resource.response.headers.get("Content-Type")?.includes(target.type.split(";")[0]),
+            `catalog link ${target.href} served as ${resource.response.headers.get("Content-Type")}, not ${target.type}`,
+          );
+        }
+      }
+    }
+  }
   for (const entry of JSON.parse(ard.html).entries) {
     const url = new URL(entry.url);
+    // .well-known lives at the origin root; everything else sits under the base.
     assert(
-      url.pathname.startsWith(`${base}/`),
+      url.pathname.startsWith("/.well-known/") || url.pathname.startsWith(`${base}/`),
       "discovery link omitted the base",
     );
     const resource = await request(origin, url.pathname);
     assert(
       resource.response.status === 200,
       `advertised ${url.pathname} was not 200`,
+    );
+    assert(
+      resource.response.headers.get("Content-Type")?.includes(entry.type.split(";")[0]),
+      `advertised ${url.pathname} served as ${resource.response.headers.get("Content-Type")}, not ${entry.type}`,
     );
     if (entry.type === "text/markdown")
       assert(

@@ -556,6 +556,15 @@ export function nimbus(
         base: astroBaseForBuild,
       },
       capabilities: createAgentCapabilities({
+        search: config.search,
+        versions: config.versions
+          ? [config.versions.current, ...config.versions.others].map(
+              (name) => ({
+                name,
+                hidden: config.versions?.hidden?.includes(name),
+              }),
+            )
+          : [],
         ...(hasHomepageMarkdown
           ? {
               homepageMarkdownUrl: absolute("/index.md"),
@@ -2182,7 +2191,14 @@ export function nimbus(
 
         const homepageMarkdownPath = path.join(distDir, "index.md");
         const llmsPath = path.join(distDir, "llms.txt");
-        if (!fs.existsSync(homepageMarkdownPath) && fs.existsSync(llmsPath)) {
+        const homepageMarkdownRoute = markdownRouteRecords.find((route) =>
+          route.regex.test("/index.md"),
+        );
+        if (
+          homepageMarkdownRoute?.prerendered !== false &&
+          !fs.existsSync(homepageMarkdownPath) &&
+          fs.existsSync(llmsPath)
+        ) {
           fs.copyFileSync(llmsPath, homepageMarkdownPath);
         }
         const discovery = await getAgentCapabilities();

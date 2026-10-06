@@ -10,6 +10,8 @@ export interface AgentApiPublication {
 }
 
 export interface AgentCapabilities {
+  search: "pagefind" | "unavailable";
+  versions: string[];
   apis: AgentApiPublication[];
   homepageMarkdownUrl?: string;
   homepageDiscoverable?: boolean;

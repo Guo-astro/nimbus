@@ -12,6 +12,8 @@
  */
 
 export { mount } from "./mount";
+export { initDocumentationWebMcp } from "./webmcp";
+export type { DocumentationWebMcpOptions } from "./webmcp";
 export { initNavSidebar } from "./nav-sidebar";
 export { makeDisclosure } from "./disclosure";
 export type { DisclosureOptions, DisclosureInstance } from "./disclosure";

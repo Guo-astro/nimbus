@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { build } from "astro";
 import { discoveryFixture as fixture } from "./fixtures/agent-discovery-site.js";
+import { agentSites, siteApp, srcModule } from "./fixtures/agent-site.js";
 
 test("real Astro builds reuse llms bytes and preserve owner headers under a base", async () => {
   const site = await fixture();
@@ -124,6 +125,58 @@ test("owner homepage Markdown and llms fallback do not inherit an unused root en
     } finally {
       await rm(site.root, { recursive: true, force: true });
     }
+  }
+});
+
+test("an on-demand homepage Markdown owner is not shadowed by the static llms fallback", async () => {
+  const sites = agentSites();
+  try {
+    for (const sharedRoute of [false, true]) {
+      const site = await sites.buildSite(
+        {
+          "package.json": '{"type":"module"}',
+          "src/content.config.ts": `import { defineCollection } from "astro:content";
+import { docsCollection } from ${srcModule("content.ts")};
+export const collections = { docs: defineCollection(docsCollection({ base: "docs" })) };`,
+          "src/content/docs/guide.mdx": "---\ntitle: Guide\n---\nGuide body.",
+          "src/content/docs/index.mdx": "---\ntitle: Root\n---\nRoot body.",
+          "src/pages/index.astro": "---\nexport const prerender = true;\n---\n<html><body>Home</body></html>",
+          "src/pages/llms.txt.ts": `import { llmsRoute } from ${srcModule("agent-endpoints.ts")};
+export const prerender = true;
+export const { GET } = llmsRoute();`,
+          "src/pages/index.md.ts": `export const prerender = false;
+export function GET() {
+  return new Response("Owner request Markdown.", {
+    headers: { "Content-Type": "text/markdown" },
+  });
+}`,
+          ...(sharedRoute
+            ? {
+                "src/pages/[...slug]/index.md.ts": `import { markdownRoute } from ${srcModule("agent-endpoints.ts")};
+export const prerender = true;
+export const { GET, getStaticPaths } = markdownRoute();`,
+              }
+            : {}),
+        },
+        { server: true },
+      );
+      assert.match(
+        await readFile(path.join(site.root, "dist/llms.txt"), "utf8"),
+        /Guide/,
+      );
+      await assert.rejects(
+        readFile(path.join(site.root, "dist/index.md")),
+        { code: "ENOENT" },
+      );
+      const response = await (await siteApp(site)).render(
+        new Request("https://example.test/docs/index.md"),
+      );
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("Content-Type"), "text/markdown");
+      assert.equal(await response.text(), "Owner request Markdown.");
+    }
+  } finally {
+    await sites.cleanup();
   }
 });
 

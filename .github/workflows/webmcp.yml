@@ -1,0 +1,47 @@
+name: WebMCP browser checks
+
+on:
+  pull_request:
+    paths:
+      - "packages/nimbus-docs/**"
+      - "packages/nimbus-starter-source/**"
+      - "apps/www/package.json"
+      - "scripts/webmcp-check.mjs"
+      - "scripts/fixtures/webmcp/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/webmcp.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/nimbus-docs/**"
+      - "packages/nimbus-starter-source/**"
+      - "apps/www/package.json"
+      - "scripts/webmcp-check.mjs"
+      - "scripts/fixtures/webmcp/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/webmcp.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm --filter @cloudflare/nimbus-docs build
+      - run: pnpm webmcp:check

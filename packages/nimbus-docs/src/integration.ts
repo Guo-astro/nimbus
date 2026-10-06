@@ -548,6 +548,15 @@ export function nimbus(
         base: astroBaseForBuild,
       },
       capabilities: createAgentCapabilities({
+        search: config.search,
+        versions: config.versions
+          ? [config.versions.current, ...config.versions.others].map(
+              (name) => ({
+                name,
+                hidden: config.versions?.hidden?.includes(name),
+              }),
+            )
+          : [],
         ...(hasHomepageMarkdown
           ? {
               homepageMarkdownUrl: absolute("/index.md"),

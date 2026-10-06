@@ -206,3 +206,30 @@ test("base namespaces escape once, retain segment identity, and validate against
       );
   }
 });
+
+test("browser search capabilities follow the provider and exclude hidden versions", () => {
+  assert.equal(createAgentCapabilities({}).search, "pagefind");
+  assert.equal(
+    createAgentCapabilities({ search: { provider: "pagefind" } }).search,
+    "pagefind",
+  );
+  assert.equal(
+    createAgentCapabilities({ search: false }).search,
+    "unavailable",
+  );
+  assert.equal(
+    createAgentCapabilities({ search: { provider: "custom" } }).search,
+    "unavailable",
+  );
+  assert.deepEqual(
+    createAgentCapabilities({
+      versions: [
+        { name: "current" },
+        { name: "old" },
+        { name: "private", hidden: true },
+        { name: "current" },
+      ],
+    }).versions,
+    ["current", "old"],
+  );
+});

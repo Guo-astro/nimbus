@@ -131,3 +131,8 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare module "virtual:nimbus/agent-capabilities" {
+  export const capabilities: import("../types.js").AgentCapabilities;
+  export const options: import("../_internal/agent-discovery.js").AgentDiscoveryOptions;
+}

@@ -1,0 +1,30 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "Example",
+    "identifier": "https://docs.example.com/docs/",
+    "documentationUrl": "https://docs.example.com/docs/"
+  },
+  "entries": [
+    {
+      "identifier": "urn:air:docs.example.com:docs-docs:index",
+      "displayName": "Example documentation index",
+      "type": "text/plain",
+      "url": "https://docs.example.com/docs/llms.txt",
+      "representativeQueries": [
+        "Find the Example documentation",
+        "List topics covered by Example"
+      ]
+    },
+    {
+      "identifier": "urn:air:docs.example.com:docs-docs:home",
+      "displayName": "Example overview",
+      "type": "text/markdown",
+      "url": "https://docs.example.com/docs/index.md",
+      "representativeQueries": [
+        "Get started with Example",
+        "Read an overview of Example"
+      ]
+    }
+  ]
+}

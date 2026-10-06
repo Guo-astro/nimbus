@@ -1,0 +1,164 @@
+import type { AgentCapabilities } from "../types.js";
+import { safeDecode, withBase } from "./url.js";
+
+export interface AgentDiscoveryOptions {
+  site: string;
+  title: string;
+  base: string;
+}
+export interface ArdEntry {
+  identifier: string;
+  displayName: string;
+  type: string;
+  url: string;
+  representativeQueries: [string, string];
+}
+
+/** ARD v0.91 entries in the compatible AI Catalog 1.0 transport envelope. */
+export function agentDiscoveryManifest(
+  capabilities: AgentCapabilities,
+  options: AgentDiscoveryOptions,
+) {
+  const site = new URL(options.site);
+  const publisher =
+    site.hostname
+      .toLowerCase()
+      .replace(/\.$/, "")
+      .replace(/[^a-z0-9.-]/g, "-") || "localhost";
+  const homeUrl = new URL(site.origin + withBase("/", options.base));
+  // Escape each path segment once. Reserve '-' for segment boundaries and '_'
+  // for escaped bytes so /a/b, /a-b and /a_2Db remain distinct stable handles.
+  const token = (segment: string) =>
+    encodeURIComponent(safeDecode(segment))
+      .replace(
+        /[-_!'()*]/g,
+        (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+      )
+      .replace(/%/g, "_");
+  const mount = homeUrl.pathname.replace(/\/$/, "");
+  const namespace = `docs${mount ? `-${mount.slice(1).split("/").map(token).join("-")}` : ""}`;
+  const entries: ArdEntry[] = [];
+  function add(
+    key: string,
+    displayName: string,
+    type: string,
+    url: string,
+    queries: [string, string],
+  ) {
+    entries.push({
+      identifier: `urn:air:${publisher}:${namespace}:${key}`,
+      displayName,
+      type,
+      url,
+      representativeQueries: queries,
+    });
+  }
+  if (capabilities.llmsUrl)
+    add(
+      "index",
+      `${options.title} documentation index`,
+      "text/plain",
+      capabilities.llmsUrl,
+      [
+        `Find the ${options.title} documentation`,
+        `List topics covered by ${options.title}`,
+      ],
+    );
+  if (
+    capabilities.homepageMarkdownUrl &&
+    capabilities.homepageDiscoverable !== false
+  )
+    add(
+      "home",
+      `${options.title} overview`,
+      "text/markdown",
+      capabilities.homepageMarkdownUrl,
+      [
+        `Get started with ${options.title}`,
+        `Read an overview of ${options.title}`,
+      ],
+    );
+  return {
+    specVersion: "1.0",
+    host: {
+      displayName: options.title,
+      identifier: homeUrl.href,
+      documentationUrl: homeUrl.href,
+    },
+    entries,
+  };
+}
+
+function link(url: string, rel: string, type?: string): string {
+  // URL serialisation encodes delimiters supplied by content paths.
+  const target = new URL(url).href;
+  if (type && !/^[a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+$/.test(type))
+    throw new Error(`Invalid discovery media type: ${type}`);
+  return `<${target}>; rel="${rel}"${type ? `; type="${type}"` : ""}`;
+}
+
+/** One source for the static _headers file and request-rendered homepages. */
+export function agentHomepageLinks(
+  capabilities: AgentCapabilities,
+  options: AgentDiscoveryOptions,
+): string[] {
+  const links = [
+    link(new URL("/.well-known/ard.json", options.site).href, "ard"),
+  ];
+  if (capabilities.llmsUrl)
+    links.push(link(capabilities.llmsUrl, "describedby", "text/plain"));
+  if (
+    capabilities.homepageMarkdownUrl &&
+    capabilities.homepageDiscoverable !== false
+  )
+    links.push(
+      link(capabilities.homepageMarkdownUrl, "alternate", "text/markdown"),
+    );
+  for (const api of capabilities.apis)
+    links.push(link(api.docsUrl, "service-doc", "text/html"));
+  return links;
+}
+
+export function agentDiscoveryHeaderRules(
+  capabilities: AgentCapabilities,
+  options: AgentDiscoveryOptions,
+): string {
+  const home = withBase("/", options.base).replace(/\/$/, "");
+  const homePaths = new Set([home || "/", `${home}/`]);
+  // Cloudflare limits each _headers line to 2,000 characters and comma-joins
+  // repeated fields. Keep API collections/versions on separate Link lines.
+  const links = agentHomepageLinks(capabilities, options)
+    .map((value) => `  Link: ${value}`)
+    .join("\n");
+  const rules = [...homePaths].map((path) => `${path}\n${links}`);
+  for (const path of [
+    "/.well-known/ard.json",
+    "/.well-known/ai-catalog.json",
+  ]) {
+    rules.push(
+      `${path}\n  Content-Type: application/json\n  Access-Control-Allow-Origin: *`,
+    );
+  }
+  if (capabilities.homepageMarkdownUrl)
+    rules.push(
+      `${new URL(capabilities.homepageMarkdownUrl).pathname}\n  Content-Type: text/markdown; charset=utf-8`,
+    );
+  return `# Nimbus agent discovery (generated)\n${rules.join("\n\n")}\n# End Nimbus agent discovery\n`;
+}
+
+export function appendAgentDiscoveryHeaders(
+  ownerHeaders: string,
+  generated: string,
+): string {
+  const owner = ownerHeaders.replace(
+    /# Nimbus agent discovery \(generated\)\n[\s\S]*?# End Nimbus agent discovery\n?/g,
+    "",
+  );
+  const separator =
+    !owner || owner.endsWith("\n\n")
+      ? ""
+      : owner.endsWith("\n")
+        ? "\n"
+        : "\n\n";
+  return `${owner}${separator}${generated}`;
+}

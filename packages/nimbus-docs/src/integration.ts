@@ -83,6 +83,15 @@ import { validateNimbusConfig } from "./_internal/validate.js";
 import { makeHiddenSitemapFilter } from "./_internal/hidden-sitemap.js";
 import { navBuildId, outdatedApiSidebarError } from "./_internal/api-sidebar-components.js";
 import { virtualConfigPlugin } from "./_internal/virtual-config.js";
+import { createAgentCapabilities } from "./_internal/agent-capabilities.js";
+import { getPreparedMarkdownEntry } from "./_internal/prepared-markdown-registry.js";
+import {
+  agentDiscoveryHeaderRules,
+  appendAgentDiscoveryHeaders,
+} from "./_internal/agent-discovery.js";
+import { virtualAgentCapabilitiesPlugin } from "./_internal/virtual-agent-capabilities.js";
+import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
+
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
 import { virtualCoordinatesPlugin } from "./_internal/virtual-coordinates.js";
@@ -147,7 +156,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
 import { buildLastUpdatedIndex } from "./_internal/git-last-updated.js";
 import { virtualLastUpdatedPlugin } from "./_internal/last-updated-virtual.js";
 import {
@@ -449,6 +458,7 @@ export function nimbus(
   // build materialization knows where to write `.nimbus/routes.json` and
   // what `base` Astro is using.
   let projectRootForBuild = "";
+  let publicDirForBuild = "";
   let redirectsFileForBuild: string | undefined;
   let srcDirForBuild = "";
   let astroBaseForBuild = "";
@@ -491,6 +501,68 @@ export function nimbus(
   let coordinatesManifest: CoordinatesManifest = {
     version: 2,
     collections: {},
+  };
+
+  const getAgentCapabilities = async () => {
+    const absolute = (pathname: string) =>
+      new URL(withBase(pathname, astroBaseForBuild), config.site).href;
+    // Resolve the producer of /index.md, not an entry named "index" in an
+    // arbitrary collection. Owner routes/files and the llms fallback have no
+    // content-entry discovery policy to inherit.
+    const publicHomepage = fs.existsSync(
+      path.join(publicDirForBuild, "index.md"),
+    );
+    const owner = markdownRoutes
+      .records()
+      .find((route) => route.regex.test("/index.md"));
+    let rootEntry;
+    let sharedHomepage = false;
+    if (owner?.shared === "markdown") {
+      const assets = await loadAgentEndpointAssets();
+      const manifest =
+        await assets.ensureAgentEndpointAssets(projectRootForBuild);
+      const asset = manifest.markdownAssets.find(
+        (item) => item.surface === "markdown" && item.url === "/index.md",
+      );
+      if (asset) {
+        sharedHomepage = true;
+        rootEntry = getPreparedMarkdownEntry(
+          projectRootForBuild,
+          asset.collection,
+          asset.id,
+        );
+      }
+    }
+    const hasLlms = endpointRoutesForBuild.some(
+      (route) => route.pattern === "/llms.txt",
+    );
+    const hasHomepageMarkdown =
+      hasLlms ||
+      publicHomepage ||
+      sharedHomepage ||
+      (owner !== undefined && owner.shared !== "markdown");
+    return {
+      options: {
+        site: config.site,
+        title: config.title,
+        base: astroBaseForBuild,
+      },
+      capabilities: createAgentCapabilities({
+        ...(hasHomepageMarkdown
+          ? {
+              homepageMarkdownUrl: absolute("/index.md"),
+              homepageDiscoverable: rootEntry?.data.noindex !== true,
+            }
+          : {}),
+        ...(hasLlms ? { llmsUrl: absolute("/llms.txt") } : {}),
+        apis: resolveAllApiCollections(config.api).map((api) => ({
+          collection: api.family,
+          ...(api.version ? { version: api.version } : {}),
+          docsUrl: absolute(toDocumentHref(api.mountPath)),
+          hidden: api.hidden,
+        })),
+      }),
+    };
   };
 
   return {
@@ -703,6 +775,7 @@ export function nimbus(
         const publicDir = astroConfig.publicDir
           ? fileURLToPath(astroConfig.publicDir)
           : path.join(projectRoot, "public");
+        publicDirForBuild = publicDir;
         const faviconCandidates = [
           { file: "favicon.svg", type: "image/svg+xml" },
           { file: "favicon.ico", type: "image/x-icon" },
@@ -976,6 +1049,42 @@ export function nimbus(
         }
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw authorError(outdatedSidebar);
+        const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+        for (const [pattern, name] of [
+          ["/.well-known/ard.json", "agent-discovery-route"],
+          ["/.well-known/ai-catalog.json", "agent-discovery-route"],
+        ]) {
+          const ownedPaths = [
+            path.join(publicDir, pattern!),
+            ...["ts", "js"].map((ext) =>
+              path.join(srcDir, "pages", `${pattern!}.${ext}`),
+            ),
+          ];
+          const collision = ownedPaths.find((file) => fs.existsSync(file));
+          if (collision)
+            throw authorError(
+              `Nimbus now generates ${pattern}. Move your existing discovery document at ${path.relative(projectRoot, collision)} before upgrading; do not discard custom entries without reviewing them.`,
+            );
+          const entrypoint = new URL(
+            `./_internal/${name}.${extension}`,
+            import.meta.url,
+          );
+          injectRoute({ pattern: pattern!, entrypoint, prerender: true });
+          managedRoutesForBuild.push({
+            pattern: pattern!,
+            entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
+            owner: "infrastructure",
+            rendering: "build",
+          });
+        }
+        params.addMiddleware?.({
+          entrypoint: new URL(
+            `./_internal/agent-discovery-middleware.${extension}`,
+            import.meta.url,
+          ),
+          order: "post",
+        });
+
         if (building) {
           injectRoute({
             pattern: REQUEST_ROUTE_INVENTORY_PATTERN,
@@ -1450,6 +1559,7 @@ export function nimbus(
               },
               virtualApiBuildConfigPlugin(config.api, projectRoot),
               virtualLastUpdatedPlugin(lastUpdatedByPath),
+              virtualAgentCapabilitiesPlugin(getAgentCapabilities),
               virtualConfigPlugin(config, {
                 indexedCollections,
                 requestRenderingCollections: [...requestRenderingCollections],
@@ -1618,6 +1728,10 @@ export function nimbus(
         injectTypes({
           filename: "virtual-config.d.ts",
           content: [
+            'declare module "virtual:nimbus/agent-capabilities" {',
+            '  export const capabilities: import("@cloudflare/nimbus-docs/types").AgentCapabilities;',
+            "  export const options: { site: string; title: string; base: string };",
+            "}",
             'declare module "virtual:nimbus/config" {',
             '  import type { NimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
             "  export const config: NimbusConfig;",
@@ -2034,6 +2148,59 @@ export function nimbus(
           await runPagefind(
             distDir,
             inventory.filter((entry) => entry.request && entry.searchable),
+          );
+        }
+
+        const homepageMarkdownPath = path.join(distDir, "index.md");
+        const llmsPath = path.join(distDir, "llms.txt");
+        const homepageMarkdownRoute = markdownRouteRecords.find((route) =>
+          route.regex.test("/index.md"),
+        );
+        if (
+          homepageMarkdownRoute?.prerendered !== false &&
+          !fs.existsSync(homepageMarkdownPath) &&
+          fs.existsSync(llmsPath)
+        ) {
+          fs.copyFileSync(llmsPath, homepageMarkdownPath);
+        }
+        const discovery = await getAgentCapabilities();
+        // Cloudflare mounts its client output under `base`, then moves control
+        // files to the outer asset root. Discovery is origin-root, too.
+        const baseSegments = astroBaseForBuild.split("/").filter(Boolean);
+        const assetRoot = adapterNameForBuild === "@astrojs/cloudflare" && baseSegments.length
+          ? path.resolve(distDir, ...baseSegments.map(() => ".."))
+          : distDir;
+        if (assetRoot !== distDir) {
+          for (const filename of ["ard.json", "ai-catalog.json"]) {
+            const source = path.join(distDir, ".well-known", filename);
+            if (fs.existsSync(source)) {
+              fs.mkdirSync(path.join(assetRoot, ".well-known"), { recursive: true });
+              fs.copyFileSync(source, path.join(assetRoot, ".well-known", filename));
+            }
+          }
+        }
+        const headersPath = path.join(assetRoot, "_headers");
+        const ownerHeadersPath = fs.existsSync(headersPath) ? headersPath : path.join(distDir, "_headers");
+        const ownerHeaders = fs.existsSync(ownerHeadersPath)
+          ? fs.readFileSync(ownerHeadersPath, "utf8")
+          : "";
+        fs.writeFileSync(
+          headersPath,
+          appendAgentDiscoveryHeaders(
+            ownerHeaders,
+            agentDiscoveryHeaderRules(
+              discovery.capabilities,
+              discovery.options,
+            ),
+          ),
+        );
+        if (assetRoot !== distDir && fs.existsSync(path.join(distDir, "_headers"))) {
+          // Also support hook ordering where the adapter moves this file later.
+          fs.copyFileSync(headersPath, path.join(distDir, "_headers"));
+        }
+        if (assetRoot === distDir && astroBaseForBuild && astroBaseForBuild !== "/") {
+          logger.info(
+            "Agent discovery uses origin-root /.well-known URLs. Mount the emitted .well-known directory at the origin root when deploying this site under a base.",
           );
         }
 

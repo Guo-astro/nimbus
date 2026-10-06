@@ -923,7 +923,7 @@ test("omitted rendering policy leaves existing route decisions untouched", async
 
   assert.equal(docs.prerender, false);
   assert.equal(blog.prerender, true);
-  assert.equal(integration.injectedRoutes.length, 1);
+  assert.equal(integration.injectedRoutes.length, 3);
 
   integration.configDone({
     injectTypes: () => new URL("file:///noop"),
@@ -1348,7 +1348,9 @@ test("opaque registrations cannot silently absorb request policy", async (t) => 
   const docs = { component: "src/pages/[...slug].astro", prerender: true };
   await knownOverride.routeSetup({ route: docs } as never);
   assert.equal(docs.prerender, false);
-  const injected = knownOverride.injectedRoutes[0] as {
+  const injected = knownOverride.injectedRoutes.find((route) =>
+    (route as { pattern: string }).pattern.includes("request-route-inventory"),
+  ) as {
     entrypoint: URL;
   };
   assert.equal(injected.entrypoint.protocol, "file:");

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "deploy",
+      "type": "archive",
+      "description": "Deploy the site with Wrangler.",
+      "url": "/.well-known/agent-skills/deploy.tar.gz",
+      "digest": "sha256:<archive>"
+    },
+    {
+      "name": "git-workflow",
+      "type": "skill-md",
+      "description": "Follow team Git conventions for branching and commits.",
+      "url": "/.well-known/agent-skills/git-workflow/SKILL.md",
+      "digest": "sha256:6e0da285b11fca61bbe6b6dc35db66b086fcb972a0e33bfb46749419615c8916"
+    }
+  ]
+}

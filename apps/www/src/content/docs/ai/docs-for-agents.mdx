@@ -48,6 +48,18 @@ On server output, a request-rendered page answers `Accept: text/markdown` with t
 
 Prerendered pages and static sites return HTML: the host serves the file before any middleware runs. For those, Cloudflare's [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/) negotiates at the platform level and converts the HTML. Assets, API endpoints, and unknown routes pass through unchanged.
 
+## Agent Skills
+
+Add `skills/<name>/SKILL.md` folders at the project root, in the [Agent Skills](https://agentskills.io/specification) format, and Nimbus publishes them at `/.well-known/agent-skills/`: an index per the discovery RFC v0.2.0, each single-file skill as its `SKILL.md`, and each multi-file skill as a `.tar.gz` with `SKILL.md` at the root, every entry with a SHA-256 digest. The index is listed in the discovery manifest.
+
+A skill whose frontmatter breaks the spec is skipped with a build warning that names the folder and the rule. Dotfiles are left out of archives and symlinks are skipped. Without a `skills/` folder nothing is published.
+
+## Browser-agent search
+
+The starter registers a `search_documentation` tool with `document.modelContext` ([WebMCP](https://webmachinelearning.github.io/webmcp/), an experimental browser API). It searches the site's Pagefind index and returns section titles, anchored URLs, and plain-text excerpts, with the same visibility rules as site search. Nothing loads until an agent calls the tool, and browsers without the API do nothing.
+
+Sites with `search: false` or a custom provider register no tool. The index comes from a production build, so in development the tool returns `index_unavailable`. Pagefind 1.5.2 or newer is required. Existing sites copy `WebMCP.astro` from the starter and render it inside `<head>` in `BaseLayout.astro`.
+
 ## How pages are indexed
 
 Indexing is multi-collection by default and schema-tolerant — every prepared collection registered in `src/content.config.ts` (except `partials` and reserved names) is walked, reading `title` and `description` when present. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.

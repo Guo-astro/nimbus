@@ -40,6 +40,7 @@ test("on server output a request-rendered page and the homepage negotiate; every
     "---\ntitle: Root entry\n---\nHome body.",
     "docs",
     false,
+    undefined,
     { rendering: { default: "request" } },
   );
   const index = pathToFileURL(path.resolve(import.meta.dirname, "../src/index.ts")).href;
@@ -85,12 +86,12 @@ test("on server output a request-rendered page and the homepage negotiate; every
     }
   } finally {
     await server.stop();
-    await rm(site.root, { recursive: true, force: true });
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
 test("under server output, build-rendered pages and the homepage of an all-build site stay HTML", async () => {
-  const site = await fixture("---\ntitle: Root entry\n---\nHome body.", "docs", false, {
+  const site = await fixture("---\ntitle: Root entry\n---\nHome body.", "docs", false, undefined, {
     rendering: { collections: { docs: "build" } },
   });
   const index = pathToFileURL(path.resolve(import.meta.dirname, "../src/index.ts")).href;
@@ -108,7 +109,7 @@ test("under server output, build-rendered pages and the homepage of an all-build
     }
   } finally {
     await server.stop();
-    await rm(site.root, { recursive: true, force: true });
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -122,6 +123,6 @@ test("a static site never negotiates", async () => {
     assert.doesNotMatch(home.headers.get("Vary") ?? "", /Accept/);
   } finally {
     await server.stop();
-    await rm(site.root, { recursive: true, force: true });
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });

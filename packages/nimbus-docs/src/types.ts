@@ -10,10 +10,14 @@ export interface AgentApiPublication {
 }
 
 export interface AgentCapabilities {
+  search: "pagefind" | "unavailable";
+  versions: string[];
   apis: AgentApiPublication[];
   homepageMarkdownUrl?: string;
   homepageDiscoverable?: boolean;
   llmsUrl?: string;
+  /** The Agent Skills discovery index, when the site publishes skills. */
+  skillsIndexUrl?: string;
 }
 
 // ---------------------------------------------------------------------------

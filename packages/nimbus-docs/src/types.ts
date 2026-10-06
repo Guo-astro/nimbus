@@ -16,6 +16,8 @@ export interface AgentCapabilities {
   homepageMarkdownUrl?: string;
   homepageDiscoverable?: boolean;
   llmsUrl?: string;
+  /** The Agent Skills discovery index, when the site publishes skills. */
+  skillsIndexUrl?: string;
 }
 
 // ---------------------------------------------------------------------------

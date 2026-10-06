@@ -12,8 +12,10 @@ export function createAgentCapabilities(input: {
   homepageMarkdownUrl?: string;
   homepageDiscoverable?: boolean;
   llmsUrl?: string;
+  skillsIndexUrl?: string;
 }): AgentCapabilities {
   return {
+    ...(input.skillsIndexUrl ? { skillsIndexUrl: input.skillsIndexUrl } : {}),
     search:
       input.search !== false && input.search?.provider !== "custom"
         ? "pagefind"

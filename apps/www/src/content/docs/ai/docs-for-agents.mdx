@@ -42,6 +42,12 @@ Discovery files belong at the origin root. With a `base`, the Cloudflare adapter
 
 The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
+## Agent Skills
+
+Add `skills/<name>/SKILL.md` folders at the project root, in the [Agent Skills](https://agentskills.io/specification) format, and Nimbus publishes them at `/.well-known/agent-skills/`: an index per the discovery RFC v0.2.0, each single-file skill as its `SKILL.md`, and each multi-file skill as a `.tar.gz` with `SKILL.md` at the root, every entry with a SHA-256 digest. The index is listed in the discovery manifest.
+
+A skill whose frontmatter breaks the spec is skipped with a build warning that names the folder and the rule. Dotfiles are left out of archives and symlinks are skipped. Without a `skills/` folder nothing is published.
+
 ## Browser-agent search
 
 The starter registers a `search_documentation` tool with `document.modelContext` ([WebMCP](https://webmachinelearning.github.io/webmcp/), an experimental browser API). It searches the site's Pagefind index and returns section titles, anchored URLs, and plain-text excerpts, with the same visibility rules as site search. Nothing loads until an agent calls the tool, and browsers without the API do nothing.

@@ -3,10 +3,13 @@ import type { AgentDiscoveryOptions } from "./agent-discovery.js";
 import type { ViteDevServer } from "vite";
 import type { VitePluginLike } from "./virtual-config.js";
 import { agentDiscoveryManifest } from "./agent-discovery.js";
+import { AGENT_SKILLS_PATH } from "./agent-skills.js";
+import type { AgentSkillsPublication } from "./agent-skills.js";
 export function virtualAgentCapabilitiesPlugin(
   get: () => Promise<{
     capabilities: AgentCapabilities;
     options: AgentDiscoveryOptions;
+    skills?: AgentSkillsPublication;
   }>,
 ): Omit<VitePluginLike, "load"> & {
   load(source: string): Promise<string | undefined>;
@@ -18,9 +21,34 @@ export function virtualAgentCapabilitiesPlugin(
     configureServer(server) {
       // Runs before Vite's base middleware: well-known discovery belongs to
       // the origin, including when the documentation lives under /docs/.
+      const warned = new Set<string>();
       server.middlewares.use((request, response, next) => {
         const pathname = new URL(request.url ?? "/", "http://nimbus.local")
           .pathname;
+        if (
+          ["GET", "HEAD"].includes(request.method ?? "") &&
+          pathname.startsWith(`${AGENT_SKILLS_PATH}/`)
+        ) {
+          void get()
+            .then(({ skills }) => {
+              for (const warning of skills?.warnings ?? []) {
+                if (warned.has(warning)) continue;
+                warned.add(warning);
+                console.warn(warning);
+              }
+              // Not ours: let Astro serve public/ files or its own 404.
+              const artifact = skills?.artifacts.find(
+                (item) => item.pathname === pathname,
+              );
+              if (!artifact) return next();
+              response.setHeader("Content-Type", artifact.type);
+              response.setHeader("Content-Length", artifact.bytes.length);
+              response.setHeader("Access-Control-Allow-Origin", "*");
+              response.end(request.method === "HEAD" ? undefined : artifact.bytes);
+            })
+            .catch(next);
+          return;
+        }
         if (
           !["GET", "HEAD"].includes(request.method ?? "") ||
           !["/.well-known/ard.json", "/.well-known/ai-catalog.json"].includes(

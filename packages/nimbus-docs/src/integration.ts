@@ -90,6 +90,10 @@ import {
   appendAgentDiscoveryHeaders,
 } from "./_internal/agent-discovery.js";
 import { virtualAgentCapabilitiesPlugin } from "./_internal/virtual-agent-capabilities.js";
+import {
+  AGENT_SKILLS_INDEX_PATH,
+  publishAgentSkills,
+} from "./_internal/agent-skills.js";
 import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
@@ -541,7 +545,11 @@ export function nimbus(
       publicHomepage ||
       sharedHomepage ||
       (owner !== undefined && owner.shared !== "markdown");
+    // Skills live at the origin root like the rest of .well-known, so their
+    // URL ignores `base`.
+    const skills = publishAgentSkills(path.join(projectRootForBuild, "skills"));
     return {
+      skills,
       options: {
         site: config.site,
         title: config.title,
@@ -564,6 +572,9 @@ export function nimbus(
             }
           : {}),
         ...(hasLlms ? { llmsUrl: absolute("/llms.txt") } : {}),
+        ...(skills?.index
+          ? { skillsIndexUrl: new URL(AGENT_SKILLS_INDEX_PATH, config.site).href }
+          : {}),
         apis: resolveAllApiCollections(config.api).map((api) => ({
           collection: api.family,
           ...(api.version ? { version: api.version } : {}),
@@ -1085,6 +1096,24 @@ export function nimbus(
             owner: "infrastructure",
             rendering: "build",
           });
+        }
+        {
+          // Every path Nimbus will write for skills, never silently overwritten.
+          const skills = publishAgentSkills(path.join(projectRoot, "skills"));
+          const collision = (skills?.artifacts ?? [])
+            .flatMap((artifact) => [
+              path.join(publicDir, artifact.pathname),
+              ...(artifact.pathname === AGENT_SKILLS_INDEX_PATH
+                ? ["ts", "js"].map((ext) =>
+                    path.join(srcDir, "pages", `${artifact.pathname}.${ext}`),
+                  )
+                : []),
+            ])
+            .find((file) => fs.existsSync(file));
+          if (collision)
+            throw authorError(
+              `Nimbus publishes /.well-known/agent-skills/ from the skills/ folder. Move your existing file at ${path.relative(projectRoot, collision)}, or remove skills/ to keep publishing it yourself.`,
+            );
         }
         params.addMiddleware?.({
           entrypoint: new URL(
@@ -2186,6 +2215,14 @@ export function nimbus(
               fs.mkdirSync(path.join(assetRoot, ".well-known"), { recursive: true });
               fs.copyFileSync(source, path.join(assetRoot, ".well-known", filename));
             }
+          }
+        }
+        if (discovery.skills) {
+          for (const warning of discovery.skills.warnings) logger.warn(warning);
+          for (const artifact of discovery.skills.artifacts) {
+            const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, artifact.bytes);
           }
         }
         const headersPath = path.join(assetRoot, "_headers");

@@ -340,6 +340,21 @@
       ]
     },
     {
+      "id": "publish-agent-skills",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "bright-agent-skills",
+      "summary": "Optionally publish Agent Skills from a skills/ folder.",
+      "affected": "Sites that want to publish Agent Skills, and sites that already serve /.well-known/agent-skills/index.json themselves.",
+      "instructions": [
+        "To publish skills, add skills/<name>/SKILL.md folders at the project root in the Agent Skills format. Nimbus emits the discovery index, artifacts and digests.",
+        "If you already publish files under /.well-known/agent-skills/ yourself, keep doing so: Nimbus only publishes when a skills/ folder exists, and fails the build rather than overwrite any file it would also write."
+      ],
+      "verify": [
+        "Build the site and check /.well-known/agent-skills/index.json lists every intended skill with no skipped-skill warnings."
+      ]
+    },
+    {
       "id": "agent-discovery-content-signals",
       "introducedIn": "0.17.0",
       "mode": "optional",

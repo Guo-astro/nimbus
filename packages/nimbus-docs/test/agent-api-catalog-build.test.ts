@@ -138,20 +138,41 @@ test("a version-level publishSpec overrides the collection and a site without AP
   }
 });
 
-test("the dev server serves the catalog with its profile and Link header on GET and HEAD, and specs under the base", async () => {
+test("the dev server serves the catalog, specs, discovery, and skills together with GET and HEAD", async () => {
   const site = await apiSite([{ collection: "pets", spec: path.join(fixtures, "multi/openapi.yaml") }], ["pets"]);
   await pages(site, ["pets"]);
+  await site.write(
+    "skills/catalog-helper/SKILL.md",
+    "---\nname: catalog-helper\ndescription: Read the API catalog.\n---\n# Catalog\n",
+  );
   const server = await dev({ ...site.config, server: { host: "127.0.0.1", port: 0 } });
   try {
     const origin = `http://127.0.0.1:${server.address.port}`;
     for (const method of ["GET", "HEAD"]) {
       const response = await fetch(`${origin}/.well-known/api-catalog`, { method });
-      assert.equal(response.status, 200);
+      assert.equal(response.status, 200, await response.clone().text());
       assert.equal(response.headers.get("Content-Type"), CATALOG_TYPE);
       assert.equal(response.headers.get("Link"), '<https://example.test/.well-known/api-catalog>; rel="api-catalog"');
       assert.equal(response.headers.get("Access-Control-Allow-Origin"), "*");
       if (method === "GET") assert.equal((await response.json()).linkset[0].anchor, "https://example.test/docs/pets/");
       else assert.equal(await response.text(), "");
+      for (const [pathname, type] of [
+        ["/.well-known/ard.json", "application/json"],
+        ["/.well-known/ai-catalog.json", "application/json"],
+        ["/.well-known/agent-skills/index.json", "application/json"],
+        ["/.well-known/agent-skills/catalog-helper/SKILL.md", "text/markdown"],
+        ["/docs/pets/openapi.json", "application/vnd.oai.openapi+json"],
+      ]) {
+        const resource = await fetch(origin + pathname, { method });
+        assert.equal(resource.status, 200, pathname);
+        assert.ok(resource.headers.get("Content-Type")?.includes(type), pathname);
+        if (method === "HEAD") assert.equal(await resource.text(), "");
+        else if (pathname === "/.well-known/ard.json") {
+          const urls = (await resource.json()).entries.map((entry: { url: string }) => entry.url);
+          assert.ok(urls.includes("https://example.test/docs/pets/openapi.json"));
+          assert.ok(urls.includes("https://example.test/.well-known/agent-skills/index.json"));
+        }
+      }
     }
     const spec = await fetch(`${origin}/docs/pets/openapi.json`);
     assert.equal(spec.status, 200);
@@ -159,6 +180,6 @@ test("the dev server serves the catalog with its profile and Link header on GET 
     assert.equal((await spec.json()).info.title, "Multi-file API");
   } finally {
     await server.stop();
-    await rm(site.root, { recursive: true, force: true });
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });

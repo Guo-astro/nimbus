@@ -98,6 +98,17 @@ export function agentDiscoveryManifest(
       ],
     );
   }
+  if (capabilities.skillsIndexUrl)
+    add(
+      "skills",
+      `${options.title} agent skills`,
+      "application/json",
+      capabilities.skillsIndexUrl,
+      [
+        `Find agent skills published by ${options.title}`,
+        `Install a skill for working with ${options.title}`,
+      ],
+    );
   return {
     specVersion: "1.0",
     host: {
@@ -179,6 +190,15 @@ export function agentDiscoveryHeaderRules(
   }
   for (const file of files)
     rules.push(`${file.pathname}\n  Content-Type: ${file.type}\n  Access-Control-Allow-Origin: *`);
+  if (capabilities.skillsIndexUrl) {
+    // Static hosts infer SKILL.md and .tar.gz types from the extension; the
+    // RFC wants CORS on everything and application/json on the index.
+    rules.push(
+      "/.well-known/agent-skills/*\n  Access-Control-Allow-Origin: *",
+      "/.well-known/agent-skills/index.json\n  Content-Type: application/json",
+      "/.well-known/agent-skills/*.tar.gz\n  Content-Type: application/gzip",
+    );
+  }
   return `# Nimbus agent discovery (generated)\n${rules.join("\n\n")}\n# End Nimbus agent discovery\n`;
 }
 

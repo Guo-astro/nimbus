@@ -10,12 +10,15 @@ import {
   apiCatalogLink,
 } from "./agent-api-catalog.js";
 import { withBase } from "./url.js";
+import { AGENT_SKILLS_PATH } from "./agent-skills.js";
+import type { AgentSkillsPublication } from "./agent-skills.js";
 export function virtualAgentCapabilitiesPlugin(
   get: () => Promise<{
     capabilities: AgentCapabilities;
     options: AgentDiscoveryOptions;
     specFiles?: { file: string; type: string; contents: string }[];
     specWarnings?: string[];
+    skills?: AgentSkillsPublication;
   }>,
 ): Omit<VitePluginLike, "load"> & {
   load(source: string): Promise<string | undefined>;
@@ -32,7 +35,8 @@ export function virtualAgentCapabilitiesPlugin(
         const pathname = new URL(request.url ?? "/", "http://nimbus.local")
           .pathname;
         const method = request.method ?? "";
-        if (["GET", "HEAD"].includes(method) && pathname === API_CATALOG_PATH) {
+        if (!["GET", "HEAD"].includes(method)) return next();
+        if (pathname === API_CATALOG_PATH) {
           void get()
             .then(({ capabilities, options }) => {
               const catalog = apiCatalog(capabilities);
@@ -47,46 +51,60 @@ export function virtualAgentCapabilitiesPlugin(
             .catch(next);
           return;
         }
-        if (["GET", "HEAD"].includes(method)) {
+        if (pathname.startsWith(`${AGENT_SKILLS_PATH}/`)) {
           void get()
-            .then(({ options, specFiles, specWarnings }) => {
-              for (const warning of specWarnings ?? []) {
+            .then(({ skills }) => {
+              for (const warning of skills?.warnings ?? []) {
                 if (warned.has(warning)) continue;
                 warned.add(warning);
                 console.warn(warning);
               }
-              // Astro's base middleware has already stripped the base.
-              const spec = specFiles?.find(
-                (item) => pathname === item.file || pathname === withBase(item.file, options.base),
+              // Not ours: let Astro serve public/ files or its own 404.
+              const artifact = skills?.artifacts.find(
+                (item) => item.pathname === pathname,
               );
-              if (!spec) return next();
-              response.setHeader("Content-Type", spec.type);
+              if (!artifact) return next();
+              response.setHeader("Content-Type", artifact.type);
+              response.setHeader("Content-Length", artifact.bytes.length);
               response.setHeader("Access-Control-Allow-Origin", "*");
-              response.end(method === "HEAD" ? undefined : spec.contents);
+              response.end(method === "HEAD" ? undefined : artifact.bytes);
             })
             .catch(next);
           return;
         }
-        if (
-          !["GET", "HEAD"].includes(request.method ?? "") ||
-          !["/.well-known/ard.json", "/.well-known/ai-catalog.json"].includes(
-            pathname,
-          )
-        )
-          return next();
+        if (["/.well-known/ard.json", "/.well-known/ai-catalog.json"].includes(pathname)) {
+          void get()
+            .then(({ capabilities, options }) => {
+              response.setHeader("Content-Type", "application/json");
+              response.setHeader("Access-Control-Allow-Origin", "*");
+              response.end(
+                method === "HEAD"
+                  ? undefined
+                  : JSON.stringify(
+                      agentDiscoveryManifest(capabilities, options),
+                      null,
+                      2,
+                    ) + "\n",
+              );
+            })
+            .catch(next);
+          return;
+        }
         void get()
-          .then(({ capabilities, options }) => {
-            response.setHeader("Content-Type", "application/json");
-            response.setHeader("Access-Control-Allow-Origin", "*");
-            response.end(
-              request.method === "HEAD"
-                ? undefined
-                : JSON.stringify(
-                    agentDiscoveryManifest(capabilities, options),
-                    null,
-                    2,
-                  ) + "\n",
+          .then(({ options, specFiles, specWarnings }) => {
+            for (const warning of specWarnings ?? []) {
+              if (warned.has(warning)) continue;
+              warned.add(warning);
+              console.warn(warning);
+            }
+            // Astro's base middleware has already stripped the base.
+            const spec = specFiles?.find(
+              (item) => pathname === item.file || pathname === withBase(item.file, options.base),
             );
+            if (!spec) return next();
+            response.setHeader("Content-Type", spec.type);
+            response.setHeader("Access-Control-Allow-Origin", "*");
+            response.end(method === "HEAD" ? undefined : spec.contents);
           })
           .catch(next);
       });

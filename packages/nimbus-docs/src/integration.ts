@@ -94,6 +94,10 @@ import { API_CATALOG_PATH } from "./_internal/agent-api-catalog.js";
 import { publishOpenApiSpec } from "./_internal/api/publish-spec.js";
 import type { PublishSpecResult } from "./_internal/api/publish-spec.js";
 import type { AgentApiPublication } from "./types.js";
+import {
+  AGENT_SKILLS_INDEX_PATH,
+  publishAgentSkills,
+} from "./_internal/agent-skills.js";
 import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
@@ -590,15 +594,28 @@ export function nimbus(
         hidden: api.hidden,
       });
     }
+    // Skills live at the origin root like the rest of .well-known, so their
+    // URL ignores `base`.
+    const skills = publishAgentSkills(path.join(projectRootForBuild, "skills"));
     return {
       specFiles,
       specWarnings,
+      skills,
       options: {
         site: config.site,
         title: config.title,
         base: astroBaseForBuild,
       },
       capabilities: createAgentCapabilities({
+        search: config.search,
+        versions: config.versions
+          ? [config.versions.current, ...config.versions.others].map(
+              (name) => ({
+                name,
+                hidden: config.versions?.hidden?.includes(name),
+              }),
+            )
+          : [],
         ...(hasHomepageMarkdown
           ? {
               homepageMarkdownUrl: absolute("/index.md"),
@@ -607,6 +624,9 @@ export function nimbus(
           : {}),
         ...(hasLlms ? { llmsUrl: absolute("/llms.txt") } : {}),
         apis,
+        ...(skills?.index
+          ? { skillsIndexUrl: new URL(AGENT_SKILLS_INDEX_PATH, config.site).href }
+          : {}),
       }),
     };
   };
@@ -1132,6 +1152,24 @@ export function nimbus(
           if (api.publishSpec && fs.existsSync(owned))
             throw authorError(
               `Nimbus publishes ${api.mountPath}/openapi.json from the "${api.label}" spec. Move ${path.relative(projectRoot, owned)}, or set publishSpec: false to keep serving your own file.`,
+            );
+        }
+        {
+          // Every path Nimbus will write for skills, never silently overwritten.
+          const skills = publishAgentSkills(path.join(projectRoot, "skills"));
+          const collision = (skills?.artifacts ?? [])
+            .flatMap((artifact) => [
+              path.join(publicDir, artifact.pathname),
+              ...(artifact.pathname === AGENT_SKILLS_INDEX_PATH
+                ? ["ts", "js"].map((ext) =>
+                    path.join(srcDir, "pages", `${artifact.pathname}.${ext}`),
+                  )
+                : []),
+            ])
+            .find((file) => fs.existsSync(file));
+          if (collision)
+            throw authorError(
+              `Nimbus publishes /.well-known/agent-skills/ from the skills/ folder. Move your existing file at ${path.relative(projectRoot, collision)}, or remove skills/ to keep publishing it yourself.`,
             );
         }
         params.addMiddleware?.({
@@ -2210,7 +2248,14 @@ export function nimbus(
 
         const homepageMarkdownPath = path.join(distDir, "index.md");
         const llmsPath = path.join(distDir, "llms.txt");
-        if (!fs.existsSync(homepageMarkdownPath) && fs.existsSync(llmsPath)) {
+        const homepageMarkdownRoute = markdownRouteRecords.find((route) =>
+          route.regex.test("/index.md"),
+        );
+        if (
+          homepageMarkdownRoute?.prerendered !== false &&
+          !fs.existsSync(homepageMarkdownPath) &&
+          fs.existsSync(llmsPath)
+        ) {
           fs.copyFileSync(llmsPath, homepageMarkdownPath);
         }
         const discovery = await getAgentCapabilities();
@@ -2233,6 +2278,14 @@ export function nimbus(
               fs.mkdirSync(path.join(assetRoot, ".well-known"), { recursive: true });
               fs.copyFileSync(source, path.join(assetRoot, ".well-known", filename));
             }
+          }
+        }
+        if (discovery.skills) {
+          for (const warning of discovery.skills.warnings) logger.warn(warning);
+          for (const artifact of discovery.skills.artifacts) {
+            const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, artifact.bytes);
           }
         }
         const headersPath = path.join(assetRoot, "_headers");

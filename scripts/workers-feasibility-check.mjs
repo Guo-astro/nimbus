@@ -330,7 +330,7 @@ function assertDiscoverySurfaces(site, base = "") {
   );
 }
 
-async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
+async function assertAgentDiscovery(origin, base = "", { ownerLink = false, requestRendered = false } = {}) {
   const home = await request(origin, `${base}/`);
   assert(home.response.status === 200, "discovery homepage was not 200");
   const links = home.response.headers.get("Link") ?? "";
@@ -339,7 +339,7 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
   const markdown = await fetch(`${origin}${base}/`, {
     headers: { Accept: "text/markdown, text/html;q=0.9" },
   });
-  if (ownerLink) {
+  if (requestRendered) {
     assert(
       markdown.headers.get("Content-Type")?.includes("text/markdown"),
       `negotiated homepage served as ${markdown.headers.get("Content-Type")}`,
@@ -433,7 +433,7 @@ async function assertAgentDiscovery(origin, base = "", ownerLink = false) {
 }
 
 async function assertStaticSurfaces(origin) {
-  await assertAgentDiscovery(origin);
+  await assertAgentDiscovery(origin, "", { requestRendered: true });
   for (const [route, evidence] of [
     ["/runtime/index.md", "This content rendered from a reusable partial."],
     ["/runtime/index.mdx", '<Aside type="note"'],
@@ -1251,7 +1251,7 @@ for (const base of ["", "/docs"]) {
     ),
   );
   build(site, { docs: "request", api: "request" }, base);
-  await withWorkerd(site, (origin) => assertAgentDiscovery(origin, base, true));
+  await withWorkerd(site, (origin) => assertAgentDiscovery(origin, base, { ownerLink: true, requestRendered: true }));
 }
 
 console.log(`${PREFIX} preserving 404 when SSR cannot rewrite to prerendered llms.txt`);

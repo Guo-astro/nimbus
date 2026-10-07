@@ -94,9 +94,10 @@ async function availablePort() {
   });
 }
 
-async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
+async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = "") {
   port ??= await availablePort();
   const origin = `http://127.0.0.1:${port}`;
+  const siteUrl = `${origin}${base}`;
   const command =
     lane === "node"
       ? {
@@ -148,7 +149,7 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
         throw new Error(`runtime exited with status ${child.exitCode}`);
       }
       try {
-        const response = await fetch(`${origin}${routes[0][0]}`, {
+        const response = await fetch(`${siteUrl}${routes[0][0]}`, {
           signal: AbortSignal.timeout(1_000),
         });
         if (response.ok) break;
@@ -156,7 +157,7 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
     for (const [route, expected, expectedStatus = 200, unexpected] of routes) {
-      const response = await fetch(`${origin}${route}`, {
+      const response = await fetch(`${siteUrl}${route}`, {
         signal: AbortSignal.timeout(5_000),
       });
       const body = await response.text();
@@ -171,14 +172,14 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
       }
     }
     for (const route of ["/", "/owned-by-slug/"]) {
-      const markdown = await fetch(`${origin}${route}`, {
+      const markdown = await fetch(`${siteUrl}${route}`, {
         headers: { Accept: "text/markdown, text/html;q=0.9" },
         signal: AbortSignal.timeout(5_000),
       });
       assert.equal(markdown.status, 200);
-      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/, route);
+      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route}`);
       assert.match(markdown.headers.get("Vary") ?? "", /Accept/);
-      const alternate = await fetch(`${origin}${route}index.md`);
+      const alternate = await fetch(`${siteUrl}${route}index.md`);
       assert.equal(alternate.status, 200, `${route}index.md`);
       assert.match(alternate.headers.get("Content-Type") ?? "", /text\/markdown/, `${route}index.md`);
       const expected = await alternate.text();
@@ -186,7 +187,7 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
       assert.equal(await markdown.text(), expected);
       if (lane === "node") {
         const spoofed = await new Promise((resolveResponse, reject) => {
-          const request = httpRequest(`${origin}${route}`, {
+          const request = httpRequest(`${siteUrl}${route}`, {
             headers: { Host: "untrusted.invalid", Accept: "text/markdown" },
           }, (response) => {
             const chunks = [];
@@ -205,14 +206,16 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
         assert.match(spoofed.headers.get("Content-Type") ?? "", /text\/markdown/);
         assert.equal(await spoofed.text(), expected, "Node request Host changed the asset origin");
       }
-      const head = await fetch(`${origin}${route}`, {
+      const head = await fetch(`${siteUrl}${route}`, {
         method: "HEAD",
         headers: { Accept: "text/markdown" },
         signal: AbortSignal.timeout(5_000),
       });
-      assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/);
+      assert.equal(head.status, 200);
+      assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route} HEAD`);
+      assert.match(head.headers.get("Vary") ?? "", /Accept/);
       assert.equal(await head.text(), "");
-      const html = await fetch(`${origin}${route}`);
+      const html = await fetch(`${siteUrl}${route}`);
       assert.match(html.headers.get("Content-Type") ?? "", /text\/html/);
     }
     if (lane === "cloudflare") {
@@ -234,12 +237,13 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
           site,
           "dist",
           "client",
+          base,
           "_nimbus",
           "agent-endpoint-assets",
           asset.path,
         ),
       );
-      const missingAsset = await fetch(`${origin}/runtime-section/llms.txt`, {
+      const missingAsset = await fetch(`${siteUrl}/runtime-section/llms.txt`, {
         signal: AbortSignal.timeout(5_000),
       });
       const missingAssetBody = await missingAsset.text();
@@ -252,7 +256,7 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
           `known missing asset returned ${missingAsset.status}: ${JSON.stringify(missingAssetBody.slice(0, 300))}`,
         );
       }
-      const unknown = await fetch(`${origin}/missing/index.md`, {
+      const unknown = await fetch(`${siteUrl}/missing/index.md`, {
         signal: AbortSignal.timeout(5_000),
       });
       if (unknown.status !== 404) {
@@ -554,6 +558,15 @@ if (LANE === "cloudflare") {
   run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
   await verifyRuntime(site, LANE, undefined, ownerMarkdown);
   ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner");
+  const configPath = join(site, "astro.config.ts");
+  const config = readFileSync(configPath, "utf8");
+  const based = config.replace('output: "server",', 'output: "server",\n  base: "/docs",');
+  assert.notEqual(based, config, "missing base-path fixture seam");
+  writeFileSync(configPath, based);
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown, "/docs");
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner under /docs");
+  writeFileSync(configPath, config);
   rmSync(join(site, "src", "pages", "[...slug].astro"));
   const missingCanonical = spawnCommandSync(
     SCAFFOLD_PM_BIN,

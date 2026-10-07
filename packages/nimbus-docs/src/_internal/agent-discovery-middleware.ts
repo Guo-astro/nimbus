@@ -48,7 +48,7 @@ async function publishedMarkdown(context: APIContext, pathname: string): Promise
     const asset = await fetchAgentEndpointAsset(path, context.request);
     if (asset?.status === 404) {
       if (pathname === "/index.md" && options.homepageMarkdownFallback) return await homepageMarkdownFallback(context);
-      const route = await context.rewrite(path);
+      const route = await context.rewrite(pathname);
       return route.ok && route.headers.get("Content-Type")?.includes("text/markdown") ? route : undefined;
     }
     if (asset) return asset.ok ? asset : undefined;

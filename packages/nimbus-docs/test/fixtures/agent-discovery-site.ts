@@ -8,10 +8,18 @@ import { runningNimbusVersion } from "../../src/_internal/upgrades.js";
 export async function discoveryFixture(
   rootContent?: string,
   collection = "docs",
-  withApi = false,
+  withApi: boolean | { collections: string[]; api: unknown[] } = false,
   skills?: Record<string, string>,
   nimbusOverrides: Record<string, unknown> = {},
 ) {
+  const apiCollections =
+    withApi === true ? ["pets"] : withApi ? withApi.collections : [];
+  const apiConfig =
+    withApi === true
+      ? [{ collection: "pets", spec: path.resolve(import.meta.dirname, "api/smallco.yaml") }]
+      : withApi
+        ? withApi.api
+        : [];
   const root = await mkdtemp(path.join(tmpdir(), "nimbus-discovery-"));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
@@ -35,7 +43,7 @@ export async function discoveryFixture(
   );
   await write(
     "src/content.config.ts",
-    `import { defineCollection } from "astro:content"; import { docsCollection, apiCollection } from ${JSON.stringify(content)};\nexport const collections = { ${collection}: defineCollection(docsCollection({ base: "${collection}" }))${withApi ? ", pets: defineCollection(apiCollection())" : ""} };`,
+    `import { defineCollection } from "astro:content"; import { docsCollection, apiCollection } from ${JSON.stringify(content)};\nexport const collections = { ${collection}: defineCollection(docsCollection({ base: "${collection}" }))${apiCollections.map((name) => `, "${name}": defineCollection(apiCollection())`).join("")} };`,
   );
   await write(
     `src/content/${collection}/guide.mdx`,
@@ -73,16 +81,7 @@ export async function discoveryFixture(
           site: "https://example.test",
           title: "Example",
           search: false,
-          ...(withApi
-            ? {
-                api: [
-                  {
-                    collection: "pets",
-                    spec: path.resolve(import.meta.dirname, "api/smallco.yaml"),
-                  },
-                ],
-              }
-            : {}),
+          ...(apiConfig.length ? { api: apiConfig as never } : {}),
           ...nimbusOverrides,
         },
         { sitemap: false, icons: false, validateMdx: false },

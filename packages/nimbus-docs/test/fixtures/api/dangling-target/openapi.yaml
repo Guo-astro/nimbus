@@ -1,0 +1,15 @@
+openapi: 3.1.0
+info:
+  title: Dangling target API
+  version: 1.0.0
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        "200":
+          description: Things
+          content:
+            application/json:
+              schema:
+                $ref: "./dangling-schema.json#/Nope"

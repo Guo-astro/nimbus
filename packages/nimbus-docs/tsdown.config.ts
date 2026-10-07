@@ -25,6 +25,7 @@ export default defineConfig({
     "lib/pkgm": "src/lib/pkgm.ts",
     "cli/index": "src/cli/index.ts",
     "_internal/agent-discovery-route": "src/_internal/agent-discovery-route.ts",
+    "_internal/agent-api-catalog-route": "src/_internal/agent-api-catalog-route.ts",
     "_internal/agent-discovery-middleware": "src/_internal/agent-discovery-middleware.ts",
     "_internal/request-route-inventory":
       "src/_internal/request-route-inventory.ts",

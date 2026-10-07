@@ -175,6 +175,9 @@ importers:
       '@iconify/utils':
         specifier: ^3.1.4
         version: 3.1.4
+      '@scalar/json-magic':
+        specifier: 0.12.20
+        version: 0.12.20
       '@shikijs/transformers':
         specifier: ^4.4.1
         version: 4.4.1

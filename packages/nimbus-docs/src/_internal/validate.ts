@@ -297,6 +297,9 @@ const apiVersionSpecShape = {
   status: z.enum(["ga", "beta", "deprecated"]).optional(),
   hidden: z.boolean().optional(),
   label: z.string().optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].versions[].publishSpec" must be a boolean' })
+    .optional(),
   routes: routePolicySchema.optional(),
 };
 const apiVersionSpecKeys = new Set(Object.keys(apiVersionSpecShape));
@@ -332,6 +335,9 @@ const apiSpecShape = {
     .optional(),
   schemaPages: z
     .boolean({ error: '"api[].schemaPages" must be a boolean' })
+    .optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].publishSpec" must be a boolean' })
     .optional(),
   samples: samplesSchema.optional(),
   routes: routePolicySchema.optional(),

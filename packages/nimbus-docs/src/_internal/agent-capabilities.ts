@@ -28,6 +28,7 @@ export function createAgentCapabilities(input: {
       ),
     ],
     ...(input.llmsUrl ? { llmsUrl: input.llmsUrl } : {}),
+    // Hidden versions stay addressable but leave every discovery surface.
     apis:
       input.apis
         ?.filter((api) => !api.hidden)

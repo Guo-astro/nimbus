@@ -1,5 +1,11 @@
 import type { AgentCapabilities } from "../types.js";
 import { safeDecode, withBase } from "./url.js";
+import {
+  API_CATALOG_MEDIA_TYPE,
+  API_CATALOG_PATH,
+  apiCatalogLink,
+  apiCatalogUrl,
+} from "./agent-api-catalog.js";
 
 export interface AgentDiscoveryOptions {
   site: string;
@@ -80,6 +86,20 @@ export function agentDiscoveryManifest(
         `Read an overview of ${options.title}`,
       ],
     );
+  for (const api of capabilities.apis) {
+    if (!api.spec) continue;
+    const name = api.version ? `${api.collection} ${api.version}` : api.collection;
+    add(
+      `api-${token(api.collection)}${api.version ? `-${token(api.version)}` : ""}`,
+      `${options.title} ${name} API specification`,
+      api.spec.type,
+      api.spec.url,
+      [
+        `Call the ${options.title} ${name} API`,
+        `List the operations of the ${options.title} ${name} API`,
+      ],
+    );
+  }
   if (capabilities.skillsIndexUrl)
     add(
       "skills",
@@ -127,14 +147,22 @@ export function agentHomepageLinks(
     links.push(
       link(capabilities.homepageMarkdownUrl, "alternate", "text/markdown"),
     );
+  if (capabilities.apis.length)
+    links.push(link(apiCatalogUrl(options.site), "api-catalog"));
   for (const api of capabilities.apis)
     links.push(link(api.docsUrl, "service-doc", "text/html"));
+  for (const api of capabilities.apis)
+    if (api.spec) links.push(link(api.spec.url, "service-desc", api.spec.type));
   return links;
 }
 
 export function agentDiscoveryHeaderRules(
   capabilities: AgentCapabilities,
   options: AgentDiscoveryOptions,
+  /** Published files needing a media type, hidden versions' included. */
+  files: { pathname: string; type: string }[] = capabilities.apis.flatMap((api) =>
+    api.spec ? [{ pathname: new URL(api.spec.url).pathname, type: api.spec.type }] : [],
+  ),
 ): string {
   const home = withBase("/", options.base).replace(/\/$/, "");
   const homePaths = new Set([home || "/", `${home}/`]);
@@ -156,6 +184,14 @@ export function agentDiscoveryHeaderRules(
     rules.push(
       `${new URL(capabilities.homepageMarkdownUrl).pathname}\n  Content-Type: text/markdown; charset=utf-8`,
     );
+  if (capabilities.apis.length) {
+    // Extensionless, so no host can infer its type; HEAD carries the Link too.
+    rules.push(
+      `${API_CATALOG_PATH}\n  Content-Type: ${API_CATALOG_MEDIA_TYPE}\n  Access-Control-Allow-Origin: *\n  Link: ${apiCatalogLink(options.site)}`,
+    );
+  }
+  for (const file of files)
+    rules.push(`${file.pathname}\n  Content-Type: ${file.type}\n  Access-Control-Allow-Origin: *`);
   if (capabilities.skillsIndexUrl) {
     // Static hosts infer SKILL.md and .tar.gz types from the extension; the
     // RFC wants CORS on everything and application/json on the index.

@@ -6,7 +6,12 @@
 export interface AgentApiPublication {
   collection: string;
   version?: string;
+  /** The HTML reference. */
   docsUrl: string;
+  /** The reference's Markdown representation. */
+  markdownUrl: string;
+  /** The published self-contained spec, when publishing is on and bundling succeeded. */
+  spec?: { url: string; type: string };
 }
 
 export interface AgentCapabilities {
@@ -284,6 +289,13 @@ export interface ApiSpec {
   /** Code sample policy. Applies to every version of a family. */
   samples?: ApiSamples;
   /**
+   * Publish this collection's spec as one self-contained JSON file at
+   * `/<collection>/openapi.json` (each version at its own mount path) and
+   * list it in the API catalog. Default `true`. A version can override it.
+   * Opting out keeps the catalog entry with documentation links only.
+   */
+  publishSpec?: boolean;
+  /**
    * Publish a page for each `components/schemas` entry, at
    * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
    * of a family.
@@ -367,6 +379,8 @@ export interface ApiVersionSpec {
   hidden?: boolean;
   /** Display label override for the picker (defaults to `version`). */
   label?: string;
+  /** Override the family's {@link ApiSpec.publishSpec} for this version. */
+  publishSpec?: boolean;
   /**
    * Route convention for this version's pages. Each version carries its own
    * policy; a shared route map may be imported into several versions, but every

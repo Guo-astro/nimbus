@@ -1049,15 +1049,29 @@ test("production request rendering requires server output and an adapter", async
     } as never),
   );
 
-  assert.throws(
-    () =>
+  for (const name of ["node", "@astrojs/netlify", "@astrojs/vercel", "test:adapter"]) {
+    assert.doesNotThrow(() =>
       serverBuild.configDone({
         injectTypes: () => new URL("file:///noop"),
-        config: { output: "server", adapter: { name: "node" } },
+        config: { output: "server", adapter: { name } },
         buildOutput: "server",
       } as never),
-    /currently requires `@astrojs\/cloudflare`/,
-  );
+    );
+  }
+});
+
+test("generated API request rendering retains its adapter compatibility guard", async (t) => {
+  const api = [{ collection: "api", spec: { openapi: "3.1.0", info: { title: "Example", version: "1" }, paths: { "/ping": { get: { operationId: "ping", responses: { "200": { description: "OK" } } } } } } }];
+  for (const mode of ["build", "request"] as const) {
+    const integration = await setupIntegration(t, { collections: { docs: "request", api: mode } }, "build", 'export const collections = { docs: {}, "docs-v1": {}, api: {} };\n', api);
+    const configure = () => integration.configDone({
+      injectTypes: () => new URL("file:///noop"),
+      config: { output: "server", adapter: { name: "@astrojs/node" } },
+      buildOutput: "server",
+    } as never);
+    if (mode === "request") assert.throws(configure, /generated API rendering.*currently requires `@astrojs\/cloudflare`/);
+    else assert.doesNotThrow(configure);
+  }
 });
 
 test("required canonical routes retain rendering policy when their file is missing", async (t) => {

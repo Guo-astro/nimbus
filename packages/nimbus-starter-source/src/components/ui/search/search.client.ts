@@ -103,7 +103,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
       initialized = true;
       return true;
     } catch {
-      emptyState.textContent = "Search is available after a production build.";
+      emptyState.textContent = "Search could not load. Check your connection and reload the page. If it persists, ask the site owner to rebuild and deploy the search index.";
       return false;
     }
   }

@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,8 +94,8 @@ async function availablePort() {
   });
 }
 
-async function verifyRuntime(site, lane) {
-  const port = await availablePort();
+async function verifyRuntime(site, lane, port) {
+  port ??= await availablePort();
   const origin = `http://127.0.0.1:${port}`;
   const command =
     lane === "node"
@@ -167,6 +168,48 @@ async function verifyRuntime(site, lane) {
           `${route} returned ${response.status} without ${JSON.stringify(expected)}: ${JSON.stringify(body.slice(0, 300))}`,
         );
       }
+    }
+    for (const route of ["/", "/owned-by-slug/"]) {
+      const markdown = await fetch(`${origin}${route}`, {
+        headers: { Accept: "text/markdown, text/html;q=0.9" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.equal(markdown.status, 200);
+      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/);
+      assert.match(markdown.headers.get("Vary") ?? "", /Accept/);
+      const alternate = await fetch(`${origin}${route}index.md`);
+      const expected = await alternate.text();
+      assert.equal(await markdown.text(), expected);
+      if (lane === "node") {
+        const spoofed = await new Promise((resolveResponse, reject) => {
+          const request = httpRequest(`${origin}${route}`, {
+            headers: { Host: "untrusted.invalid", Accept: "text/markdown" },
+          }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("error", reject);
+            response.on("end", () => resolveResponse(new Response(Buffer.concat(chunks), {
+              status: response.statusCode,
+              headers: { "Content-Type": response.headers["content-type"] ?? "" },
+            })));
+          });
+          request.on("error", reject);
+          request.setTimeout(5_000, () => request.destroy(new Error("spoofed Host request timed out")));
+          request.end();
+        });
+        assert.equal(spoofed.status, 200);
+        assert.match(spoofed.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.equal(await spoofed.text(), expected, "Node request Host changed the asset origin");
+      }
+      const head = await fetch(`${origin}${route}`, {
+        method: "HEAD",
+        headers: { Accept: "text/markdown" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/);
+      assert.equal(await head.text(), "");
+      const html = await fetch(`${origin}${route}`);
+      assert.match(html.headers.get("Content-Type") ?? "", /text\/html/);
     }
     if (lane === "cloudflare") {
       const manifest = JSON.parse(
@@ -374,6 +417,25 @@ if (requestRendering !== (LANE === "cloudflare")) {
   fail(`${LANE} scaffold has an unexpected request-rendering default`);
 }
 ok(`scaffolded the ${LANE} lane via --template-dir`);
+if (LANE !== "static" && LANE !== "cloudflare") {
+  const fixtureConfig = astroConfig.replace(
+    "const nimbusConfig = defineNimbusConfig({",
+    'const nimbusConfig = defineNimbusConfig({\n  rendering: { default: "request" },',
+  );
+  assert.notEqual(fixtureConfig, astroConfig, "missing prose request-rendering fixture seam");
+  writeFileSync(join(site, "astro.config.ts"), fixtureConfig);
+}
+const nodeRuntimePort = LANE === "node" ? await availablePort() : undefined;
+if (nodeRuntimePort !== undefined) {
+  const configPath = join(site, "astro.config.ts");
+  const source = readFileSync(configPath, "utf8");
+  const configured = source.replace(
+    'site: "https://example.com"',
+    `site: "http://127.0.0.1:${nodeRuntimePort}"`,
+  );
+  assert.notEqual(configured, source, "missing trusted site-origin fixture seam");
+  writeFileSync(configPath, configured);
+}
 
 // 4. Point nimbus-docs at the packed workspace bits, install + build.
 const pkgPath = join(site, "package.json");
@@ -391,6 +453,11 @@ writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 // Keep the scaffold's workspace configuration active so dependency build
 // permissions are honored.
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "install", "--no-frozen-lockfile"], { cwd: site });
+assert.equal(
+  readFileSync(join(site, "node_modules", NIMBUS_NAME, "dist/docs-for-agents.md"), "utf8"),
+  readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),
+);
+assert.match(readFileSync(join(site, "AGENT.md"), "utf8"), /dist\/docs-for-agents\.md/);
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "typecheck"], { cwd: site });
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
 
@@ -463,7 +530,7 @@ if (LANE === "node" || LANE === "cloudflare") {
     });
   }
   try {
-    await verifyRuntime(site, LANE);
+    await verifyRuntime(site, LANE, nodeRuntimePort);
   } catch (error) {
     fail(`${LANE} runtime verification failed: ${error.message}`);
   }

@@ -31,24 +31,23 @@ async function pageEntry(context: APIContext) {
 
 /**
  * The Markdown alternate is a published file. On Cloudflare it comes from the
- * assets binding, which works on every hostname; the dev server has no
- * binding, so there it is read back from the server itself.
+ * assets binding; other adapters fetch it from the configured site origin.
  */
 async function publishedMarkdown(context: APIContext, pathname: string): Promise<Response | undefined> {
   const path = withBase(pathname, options.base);
   try {
     // Loaded on demand: the binding module exists only where the Worker runs.
     const { fetchAgentEndpointAsset } = await import("virtual:nimbus/agent-endpoint-asset-loader");
-    let file = await fetchAgentEndpointAsset(path, context.request);
-    if (!file && import.meta.env.DEV) file = await loopbackMarkdownInDev(context, path);
-    return file?.ok ? file : undefined;
+    const asset = await fetchAgentEndpointAsset(path, context.request);
+    if (asset) return asset.ok ? asset : undefined;
+    const origin = import.meta.env.DEV ? context.url.origin : new URL(options.site).origin;
+    const url = new URL(path, origin);
+    if (url.origin !== origin) return undefined;
+    const file = await fetch(url, { method: context.request.method, redirect: "error" });
+    return file.ok ? file : undefined;
   } catch {
     return undefined;
   }
-}
-
-function loopbackMarkdownInDev(context: APIContext, path: string): Promise<Response> {
-  return fetch(new URL(path, context.url), { method: context.request.method });
 }
 
 export const onRequest: MiddlewareHandler = async (context, next) => {

@@ -1668,7 +1668,6 @@ export function nimbus(
         // The homepage renders on request only when some collection already
         // does: a Worker that holds no content store keeps a static homepage.
         if (
-          outputModeForBuild === "server" &&
           routeComponentKeys(projectRootForBuild, path.join(srcDirForBuild, "pages", "index.astro")).includes(component) &&
           ![...renderingRoutes.values()].includes("request")
         ) {
@@ -1768,12 +1767,14 @@ export function nimbus(
         }
         if (
           building &&
-          requestRenderingConfigured &&
+          apiCollectionsForBuild.some((collection) =>
+            requestRenderingCollections.has(collection),
+          ) &&
           adapterNameForBuild?.replace(/^@astrojs\//, "") !== "cloudflare"
         ) {
           throw new Error(
-            'nimbus-docs: rendering mode "request" currently requires `@astrojs/cloudflare`. ' +
-              `Received adapter=${adapterNameForBuild}. Use the Cloudflare adapter or set the affected collections to "build".`,
+            'nimbus-docs: generated API rendering mode "request" currently requires `@astrojs/cloudflare`. ' +
+              `Received adapter=${adapterNameForBuild}. Use the Cloudflare adapter or set the affected API collections to "build".`,
           );
         }
         redirectsForBuild = (astroConfig.redirects ?? {}) as Record<

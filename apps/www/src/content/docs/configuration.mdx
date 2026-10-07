@@ -57,13 +57,13 @@ export default defineConfig({
 | Mode | Behavior | Deployment requirement |
 | --- | --- | --- |
 | `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
-| `"request"` | Renders the route when a visitor requests it. | Astro server output with a Nimbus-supported adapter. |
+| `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
 
 Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
 #### Enable request rendering
 
-Request rendering requires three things: `output: "server"` in the Astro config, an adapter supported by Nimbus, and at least one collection set to `"request"` in the Nimbus config. Provider-specific setup is listed below.
+Request rendering requires three things: `output: "server"` in the Astro config, a compatible Astro adapter, and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
 
 Set the default when most or all canonical collection routes should render on request:
 
@@ -112,7 +112,7 @@ Request-rendered routes are still added to the sitemap and Pagefind search index
 
 ##### Cloudflare
 
-Cloudflare is currently the supported provider for request-rendered Nimbus collection routes. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
+Cloudflare supports request-rendered prose and generated API collections. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
@@ -151,6 +151,10 @@ export default defineConfig({
 Cloudflare deployments also require a server-compatible `wrangler.jsonc`. Run `pnpm build` after setup to verify the adapter and Wrangler configuration together.
 
 See [Server adapters](/cli#server-adapters) for installer behavior and safety checks.
+
+##### Other Astro adapters
+
+For prose collections, use the official [Node](https://docs.astro.build/en/guides/integrations-guide/node/), [Netlify](https://docs.astro.build/en/guides/integrations-guide/netlify/), or [Vercel](https://docs.astro.build/en/guides/integrations-guide/vercel/) adapter with `output: "server"` and the same Nimbus rendering policy. Follow the adapter's deployment instructions, serve the generated static assets alongside the server, and verify the production HTTP responses. [Docs for agents](/ai/docs-for-agents#markdown-negotiation) includes a Node example and explains how static Markdown is retrieved on each target.
 
 ## Links and trailing slashes
 

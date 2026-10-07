@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { dev } from "astro";
+import { build, dev } from "astro";
 import { prefersMarkdown } from "../src/_internal/markdown-negotiation.js";
 import { discoveryFixture as fixture } from "./fixtures/agent-discovery-site.js";
+import { siteApp, srcModule, testAdapter } from "./fixtures/agent-site.js";
 
 test("Markdown is chosen only when it outranks every HTML and wildcard range", () => {
   for (const [accept, expected] of [
@@ -46,7 +48,7 @@ test("on server output a request-rendered page and the homepage negotiate; every
   const index = pathToFileURL(path.resolve(import.meta.dirname, "../src/index.ts")).href;
   await site.write(
     "src/pages/[...slug].astro",
-    `---\nimport { getDocsStaticPaths } from ${JSON.stringify(index)};\nexport const getStaticPaths = getDocsStaticPaths("docs");\nAstro.response.headers.set("Vary", "Cookie");\nAstro.response.headers.set("X-Owner", "page");\n---\n<html><body>Page</body></html>`,
+    `---\nimport { getDocsStaticPaths } from ${JSON.stringify(index)};\nexport const getStaticPaths = getDocsStaticPaths;\nAstro.response.headers.set("Vary", "Cookie");\nAstro.response.headers.set("X-Owner", "page");\n---\n<html><body>Page</body></html>`,
   );
   await site.write("src/content/docs/café.mdx", "---\ntitle: Café\n---\nAccents too.");
   const server = await dev({ ...site.config, output: "server", server: { host: "127.0.0.1", port: 0 } });
@@ -97,7 +99,7 @@ test("under server output, build-rendered pages and the homepage of an all-build
   const index = pathToFileURL(path.resolve(import.meta.dirname, "../src/index.ts")).href;
   await site.write(
     "src/pages/[...slug].astro",
-    `---\nimport { getDocsStaticPaths } from ${JSON.stringify(index)};\nexport const getStaticPaths = getDocsStaticPaths("docs");\n---\n<html><body>Page</body></html>`,
+    `---\nimport { getDocsStaticPaths } from ${JSON.stringify(index)};\nexport const getStaticPaths = getDocsStaticPaths;\n---\n<html><body>Page</body></html>`,
   );
   const server = await dev({ ...site.config, output: "server", server: { host: "127.0.0.1", port: 0 } });
   try {
@@ -113,6 +115,26 @@ test("under server output, build-rendered pages and the homepage of an all-build
   }
 });
 
+test("production all-build homepages are prerendered without a source export", async () => {
+  for (const rendering of [undefined, { collections: { docs: "build" } }]) {
+    const site = await fixture(undefined, "docs", false, undefined, { rendering });
+    try {
+      await site.write("src/pages/[...slug].astro", `---\nimport { getDocsStaticPaths } from ${srcModule("index.ts")};\nexport const prerender = true;\nexport const getStaticPaths = getDocsStaticPaths;\n---\n<html><body>Page</body></html>`);
+      await site.write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+      await build({
+        ...site.config,
+        output: "server",
+        adapter: testAdapter(path.join(site.root, "server-entry.mjs")),
+        build: { client: path.join(site.root, "dist"), server: path.join(site.root, ".server") },
+      });
+      assert.match(await site.read("dist/index.html"), /Owner homepage/);
+      assert.equal((await site.read("dist/_headers")).match(/^\/docs\/$/gm)?.length, 1);
+    } finally {
+      await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+    }
+  }
+});
+
 test("a static site never negotiates", async () => {
   const site = await fixture("---\ntitle: Root entry\n---\nHome body.");
   const server = await dev({ ...site.config, server: { host: "127.0.0.1", port: 0 } });
@@ -124,5 +146,110 @@ test("a static site never negotiates", async () => {
   } finally {
     await server.stop();
     await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("production HTTP negotiation trusts the configured origin, not the request Host or asset redirects", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  let app: Awaited<ReturnType<typeof siteApp>>;
+  let root = "";
+  let base = "";
+  let redirectMarkdownTo: string | undefined;
+  let untrustedRequests = 0;
+  const untrusted = createServer((_request, response) => {
+    untrustedRequests++;
+    response.writeHead(200, { "Content-Type": "text/markdown" });
+    response.end("Untrusted origin body");
+  });
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url!, `http://${request.headers.host}`);
+    if (url.pathname.endsWith(".md")) {
+      if (redirectMarkdownTo) {
+        response.writeHead(302, { Location: redirectMarkdownTo });
+        response.end();
+        return;
+      }
+      try {
+        const bytes = await readFile(path.join(root, "dist", url.pathname.slice(base.length)));
+        response.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
+        response.end(request.method === "HEAD" ? undefined : bytes);
+      } catch {
+        response.writeHead(404);
+        response.end();
+      }
+      return;
+    }
+    const rendered = await app.render(new Request(url, { method: request.method, headers: { Accept: request.headers.accept ?? "*/*" } }));
+    response.writeHead(rendered.status, Object.fromEntries(rendered.headers));
+    response.end(Buffer.from(await rendered.arrayBuffer()));
+  });
+  try {
+    process.env.NODE_ENV = "production";
+    await Promise.all([server, untrusted].map((host) =>
+      new Promise<void>((resolve) => host.listen(0, "127.0.0.1", resolve)),
+    ));
+    const address = server.address();
+    const untrustedAddress = untrusted.address();
+    assert.ok(address && typeof address !== "string");
+    assert.ok(untrustedAddress && typeof untrustedAddress !== "string");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const untrustedOrigin = `http://127.0.0.1:${untrustedAddress.port}`;
+    const site = await fixture("---\ntitle: Root entry\n---\nHome body.", "docs", false, undefined, {
+      site: origin,
+      rendering: { default: "request" },
+    });
+    root = site.root;
+    await site.write("src/pages/[...slug].astro", `---\nimport { getDocsStaticPaths } from ${srcModule("index.ts")};\nexport const getStaticPaths = getDocsStaticPaths;\nAstro.response.headers.set("X-Owner", "page");\n---\n<html><body>Page</body></html>`);
+    await site.write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+    for (base of ["", "/docs"]) {
+      await build({ ...site.config, base: base || "/", output: "server", adapter: testAdapter(path.join(site.root, "server-entry.mjs")), build: { client: path.join(site.root, "dist"), server: path.join(site.root, `.server${base ? "-base" : ""}`) } });
+      const { app: built } = await import(pathToFileURL(path.join(site.root, `.server${base ? "-base" : ""}`, "entry.mjs")).href);
+      app = built;
+      for (const route of ["/", "/guide/"]) {
+        const response = await fetch(`${origin}${base}${route}`, { headers: { Accept: "text/markdown" } });
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.match(response.headers.get("Vary") ?? "", /Accept/);
+        if (route !== "/") assert.equal(response.headers.get("X-Owner"), "page");
+        const alternate = `${origin}${base}${route === "/" ? "/index.md" : `${route}index.md`}`;
+        const expected = await (await fetch(alternate)).text();
+        assert.equal(await response.text(), expected);
+        for (const method of ["GET", "HEAD"]) {
+          const spoofed = await app.render(new Request(`${untrustedOrigin}${base}${route}`, {
+            method,
+            headers: { Accept: "text/markdown" },
+          }));
+          assert.match(spoofed.headers.get("Content-Type") ?? "", /text\/markdown/);
+          assert.equal(await spoofed.text(), method === "HEAD" ? "" : expected);
+          assert.equal(untrustedRequests, 0, "incoming Host selected the asset origin");
+        }
+        const head = await fetch(`${origin}${base}${route}`, { method: "HEAD", headers: { Accept: "text/markdown" } });
+        assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.equal(await head.text(), "");
+        assert.match((await fetch(`${origin}${base}${route}`)).headers.get("Content-Type") ?? "", /text\/html/);
+      }
+      for (const location of [`${untrustedOrigin}/redirected.md`, `${origin}${base}/guide/index.md`]) {
+        redirectMarkdownTo = location;
+        for (const method of ["GET", "HEAD"]) {
+          const redirected = await fetch(`${origin}${base}/guide/`, {
+            method,
+            headers: { Accept: "text/markdown" },
+          });
+          assert.equal(redirected.status, 200);
+          assert.match(redirected.headers.get("Content-Type") ?? "", /text\/html/);
+          assert.equal(redirected.headers.get("X-Owner"), "page");
+          assert.match(redirected.headers.get("Vary") ?? "", /Accept/);
+          assert.equal(untrustedRequests, 0, "asset redirect reached an untrusted origin");
+        }
+      }
+      redirectMarkdownTo = undefined;
+    }
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    await Promise.all([server, untrusted].map((host) =>
+      new Promise<void>((resolve, reject) => host.close((error) => error ? reject(error) : resolve())),
+    ));
+    if (root) await rm(root, { recursive: true, force: true, maxRetries: 5 });
   }
 });

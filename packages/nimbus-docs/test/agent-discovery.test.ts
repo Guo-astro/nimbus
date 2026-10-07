@@ -148,6 +148,45 @@ test("regenerating headers does not duplicate Nimbus's block or lose owner lines
   }
 });
 
+test("discovery headers share existing exact-path rules without replacing owner fields", () => {
+  for (const base of ["/", "/docs"]) {
+    for (const newline of ["\n", "\r\n"]) {
+      const home = base === "/" ? "/" : "/docs/";
+      const owner = [
+        "# Owner policy",
+        "/*",
+        "  X-Global: retained",
+        home,
+        '  Link: <https://owner.example/policy>; rel="author"',
+        "  X-Owner: retained",
+        "",
+        "/custom",
+        "  Cache-Control: private",
+        "",
+      ].join(newline);
+      const settings = { ...options, base };
+      const generated = agentDiscoveryHeaderRules(minimal, settings);
+      const merged = appendAgentDiscoveryHeaders(owner, generated);
+      const paths = merged.split(/\r?\n/).filter((line) => line === home);
+      assert.equal(paths.length, 1);
+      const block = merged.slice(merged.indexOf(`${home}${newline}`), merged.indexOf("/custom"));
+      assert.match(block, /rel="author"/);
+      assert.match(block, /rel="ard"/);
+      assert.match(block, /X-Owner: retained/);
+      assert.match(merged, /X-Global: retained/);
+      assert.match(merged, /Cache-Control: private/);
+      assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged);
+      const updated = appendAgentDiscoveryHeaders(
+        merged,
+        agentDiscoveryHeaderRules({ ...minimal, homepageDiscoverable: false }, settings),
+      );
+      assert.match(updated, /rel="author"/);
+      assert.doesNotMatch(updated, /rel="alternate"/);
+      assert.equal(updated.split(/\r?\n/).filter((line) => line === home).length, 1);
+    }
+  }
+});
+
 test("many API versions get separate bounded Link lines with unchanged header values", () => {
   const capabilities = createAgentCapabilities({
     ...minimal,

@@ -1,12 +1,16 @@
 ---
 title: Docs for agents
-description: Make documentation available to AI tools through alternate Markdown/MDX versions, llms.txt indexes, and structured metadata.
+description: Publish discoverable documentation, Agent Skills, browser-agent search, and alternate Markdown for AI tools.
 aiGenerated: true
 sidebar:
   order: 1
 ---
 
 Nimbus serves documentation through endpoints that AI tools can read without parsing the HTML site.
+
+## Release-matched guide
+
+Every framework package includes this guide at `node_modules/@cloudflare/nimbus-docs/dist/docs-for-agents.md`. For a preview release, use that installed copy: it matches the package you are testing even when the public website describes an older stable release. The starter's `AGENT.md` points coding agents to it.
 
 ## What ships
 
@@ -30,13 +34,30 @@ A way to build documentation sites on top of Astro.
 
 ## Agent discovery
 
-Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt` and the homepage Markdown at `/index.md`. The homepage also sends `Link` headers for those files and for each visible API reference, through `_headers` on static builds and through middleware when the homepage is request-rendered. Owner `_headers` rules are kept.
+Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt` and the homepage Markdown at `/index.md`. Request-rendered homepages advertise these files and each visible API reference through HTTP `Link` headers. Static builds emit `_headers` rules for hosts that support that format, including Cloudflare; generated fields share existing exact-path rules so owner headers survive. On other static hosts, configure equivalent HTTP headers in the host's native configuration.
 
 `/index.md` is the root content entry when there is one, otherwise the `llms.txt` content. A root entry with `noindex: true` is served but left out of discovery.
 
 If your site already has a file or route at either `.well-known` path, the build fails so you can move your entries first.
 
 Discovery files belong at the origin root. With a `base`, the Cloudflare adapter puts them there for you; on other hosts, deploy the emitted `.well-known` directory at the root alongside the site. Static output with the Cloudflare adapter and a `base` needs `wrangler deploy --assets ./dist/client`.
+
+For a static host serving a site under `/docs`, the public layout is:
+
+```text
+host-root/
+├── .well-known/        # emitted discovery and Skills files
+├── docs/               # the site's HTML, Markdown, indexes, and Pagefind files
+└── _headers            # when the host supports this format
+```
+
+Use your host's mounting or deployment configuration to produce that layout. Serve discovery JSON as `application/json` with `Access-Control-Allow-Origin: *`, and apply the same CORS header to Skills artifacts. Homepage Markdown uses `text/markdown; charset=utf-8`; Skills archives use `application/gzip`. Verify the actual deployed responses, rather than only checking the emitted file:
+
+```sh
+curl -I https://docs.example.com/.well-known/ard.json
+curl -I https://docs.example.com/docs/
+curl -I https://docs.example.com/docs/index.md
+```
 
 ### Content Signals
 
@@ -46,6 +67,33 @@ The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, 
 
 On server output, a request-rendered page answers `Accept: text/markdown` with the same prepared Markdown as its `index.md`, at the canonical URL, with `Vary: Accept` on both forms and the page's other response headers kept. Markdown is chosen only when it outranks every HTML and wildcard range in the header; a browser's `*/*` keeps HTML, and so does `text/plain`. The homepage negotiates to its homepage Markdown, with the same Link headers, once a collection renders on request; on an all-build site it stays a static file.
 
+Negotiation uses standard HTTP responses across deployment targets. Cloudflare reads published Markdown through its assets binding; other adapters fetch the alternate from the trusted origin configured in Nimbus's `site`, without following redirects. The incoming request's Host does not select the production asset origin. Deploy the generated static Markdown alongside the server and keep those files reachable at the configured origin. Set `site` to the deployment's origin for non-Cloudflare previews; development reads from the local dev server instead. Prose collection request rendering uses Astro server output and its adapter; generated API collection request rendering currently requires Cloudflare. On other adapters, keep API collections set to `"build"` while prose collections use `"request"`.
+
+For example, a Node deployment uses the official [Astro Node adapter](https://docs.astro.build/en/guides/integrations-guide/node/):
+
+```ts title="astro.config.ts"
+import node from "@astrojs/node";
+import { defineConfig } from "astro/config";
+import nimbus, { defineConfig as defineNimbusConfig } from "@cloudflare/nimbus-docs";
+
+export default defineConfig({
+  output: "server",
+  adapter: node({ mode: "standalone" }),
+  integrations: [nimbus(defineNimbusConfig({
+    site: "https://docs.example.com",
+    title: "Example",
+    rendering: { collections: { docs: "request" } },
+  }))],
+});
+```
+
+Use the same Nimbus rendering policy with the official Netlify or Vercel adapter, following that adapter's deployment instructions. Static output, discovery assets, Skills, and browser search do not require a server adapter.
+
+```sh
+curl -i -H 'Accept: text/markdown, text/html;q=0.9' https://docs.example.com/guide/
+curl -I -H 'Accept: text/markdown' https://docs.example.com/guide/
+```
+
 Prerendered pages and static sites return HTML: the host serves the file before any middleware runs. For those, Cloudflare's [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/) negotiates at the platform level and converts the HTML. Assets, API endpoints, and unknown routes pass through unchanged.
 
 ## Agent Skills
@@ -54,11 +102,48 @@ Add `skills/<name>/SKILL.md` folders at the project root, in the [Agent Skills](
 
 A skill whose frontmatter breaks the spec is skipped with a build warning that names the folder and the rule. Dotfiles are left out of archives and symlinks are skipped. Without a `skills/` folder nothing is published.
 
+For example, create `skills/getting-started/SKILL.md`:
+
+```md
+---
+name: getting-started
+description: Help a user install and configure the example project.
+---
+
+# Getting started
+
+Read the installation guide before changing project configuration.
+```
+
+Run the production build, then inspect `/.well-known/agent-skills/index.json` and fetch each advertised artifact. Removing a skill folder removes its publication on the next build. Existing public files or routes at the generated discovery and Skills paths cause a build error with move/remove guidance.
+
 ## Browser-agent search
 
 The starter registers a `search_documentation` tool with `document.modelContext` ([WebMCP](https://webmachinelearning.github.io/webmcp/), an experimental browser API). It searches the site's Pagefind index and returns section titles, anchored URLs, and plain-text excerpts, with the same visibility rules as site search. Nothing loads until an agent calls the tool, and browsers without the API do nothing.
 
 Sites with `search: false` or a custom provider register no tool. The index comes from a production build, so in development the tool returns `index_unavailable`. Pagefind 1.5.2 or newer is required. Existing sites copy `WebMCP.astro` from the starter and render it inside `<head>` in `BaseLayout.astro`.
+
+The browser tool is independent of the deployment provider. It uses the experimental `Document.modelContext` API, not `Navigator.modelContext`, and is not a remote MCP server or a browser polyfill. A browser without that API keeps ordinary search and registers no agent tool. Tests using a registration facade do not establish native browser interoperability.
+
+An agent invokes the registered tool with JSON such as:
+
+```json
+{ "query": "installation", "limit": 5 }
+```
+
+`query` must contain non-whitespace text and be at most 500 Unicode characters. `limit` defaults to 5 and accepts integers from 1 to 20. On versioned sites, the schema also advertises the visible `version` names: an explicit deprecated version is searchable, while the default excludes deprecated pages. Hidden versions and drafts are excluded from search. Noindex pages are excluded by default; `searchable: true` intentionally overrides that default. Results contain `title`, `heading`, an anchored `url`, and a plain-text `excerpt` of at most 1,000 Unicode characters.
+
+### Search failures and recovery
+
+| Code | Meaning and action |
+|---|---|
+| `invalid_input` | Correct the query, limit, or visible version before retrying. |
+| `index_unavailable` | Search assets could not load, or Pagefind is incompatible. Check the connection and reload. Site owners should verify that a production build's complete Pagefind output is deployed; upgrade to Pagefind 1.5.2 or newer when instructed. |
+| `search_failed` | Search execution, result loading, or the lazy search-code import failed. Retry an execution failure after assets recover; if code still cannot load, reload the page. |
+
+Nimbus destroys only its isolated agent-search instance after observable execution or fragment-loading failures, including when cancellation overlaps a genuine failure. The next call creates a fresh instance, including when calls are queued concurrently. Cancellation alone retains the healthy instance. Ordinary search's default instance remains independent. Browsers may cache failed JavaScript imports for the life of a document, so restoring a missing module can still require a reload.
+
+**Known Pagefind 1.5.2 limitation:** a missing or interrupted `.pf_index` chunk can be logged internally and returned as an empty successful result. Further calls can remain empty after assets recover until reload. Nimbus cannot distinguish that swallowed failure from a legitimate no-match result through Pagefind's current public API. This remains a failing error-handling acceptance case pending an upstream correction; an empty result is not automatically classified as an error. Publish Pagefind assets consistently and reload after a known chunk-loading failure.
 
 ## How pages are indexed
 

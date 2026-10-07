@@ -38,7 +38,7 @@ test("real Astro builds reuse llms bytes and preserve owner headers under a base
     await build(site.config);
     assert.match(await site.read("dist/index.md"), /New title/);
     assert.equal(
-      (await site.read("dist/_headers")).match(/# Nimbus agent discovery/g)
+      (await site.read("dist/_headers")).match(/^\/docs\/$/gm)
         ?.length,
       1,
     );

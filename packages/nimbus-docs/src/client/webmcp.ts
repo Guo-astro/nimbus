@@ -58,12 +58,16 @@ export function registerDocumentationWebMcp(
   const base = `/${(options.base ?? "/").split("/").filter(Boolean).join("/")}`;
   const baseUrl = base === "/" ? "/" : `${base}/`;
 
+  const resetIndex = async () => {
+    loading = undefined;
+    const current = instance;
+    instance = undefined;
+    if (current) await current.destroy().catch(() => {});
+  };
   const destroy = () => {
     lifetime.abort();
     if (registrations.get(context) === lifetime) registrations.delete(context);
-    const current = instance;
-    instance = undefined;
-    if (current) void current.destroy().catch(() => {});
+    void resetIndex();
   };
 
   const load = () =>
@@ -95,7 +99,7 @@ export function registerDocumentationWebMcp(
       } catch (error) {
         if (candidate && instance === candidate) {
           instance = undefined;
-          void candidate.destroy().catch(() => {});
+          await candidate.destroy().catch(() => {});
         }
         loading = undefined;
         throw error;
@@ -123,7 +127,7 @@ export function registerDocumentationWebMcp(
             execution.signal.throwIfAborted();
             search ??= import("../_internal/agent-search.js")
               .then(({ createDocumentationSearch }) =>
-                createDocumentationSearch(load, options),
+                createDocumentationSearch(load, options, resetIndex),
               )
               .catch((error) => {
                 search = undefined;
@@ -132,7 +136,11 @@ export function registerDocumentationWebMcp(
             const run = await search.catch(() => undefined);
             lifetime.signal.throwIfAborted();
             execution.signal.throwIfAborted();
-            if (!run) return searchFailure("search_failed");
+            if (!run)
+              return searchFailure(
+                "search_failed",
+                "Documentation search code could not be loaded. Check your connection and reload the page.",
+              );
             const result = await run(input, execution.signal);
             lifetime.signal.throwIfAborted();
             execution.signal.throwIfAborted();

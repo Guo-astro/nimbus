@@ -75,13 +75,78 @@ function outputText(path) {
     .join("\n");
 }
 
-function directorySnapshot(directory) {
+function normalizedWorkerAssetOrder(contents, path) {
+  if (!/^chunks\/entrypoints_[\w-]+\.mjs$/.test(path)) return contents;
+  return contents.toString("utf8").replace(
+    /^(var _manifest = deserializeManifest\()(\{.*\})(\);)$/m,
+    (source, prefix, json, suffix) => {
+      const { assets } = JSON.parse(json);
+      if (
+        !Array.isArray(assets) ||
+        !assets.every((asset) => typeof asset === "string")
+      ) {
+        return source;
+      }
+      // Astro deserializes this list as a Set; prerender completion can reorder it.
+      return (
+        prefix +
+        json.replace(
+          `"assets":${JSON.stringify(assets)}`,
+          `"assets":${JSON.stringify([...assets].sort())}`,
+        ) +
+        suffix
+      );
+    },
+  );
+}
+
+function assertWorkerAssetOrderNormalizerSafety() {
+  const path = "chunks/entrypoints_fixture.mjs";
+  const source = (assets, routes = ["/", "/docs"]) =>
+    `var _manifest = deserializeManifest(${JSON.stringify({ assets, routes })});\nexport { _manifest };`;
+  const original = source(["/b.js", "/a.js"]);
+  const normalized = normalizedWorkerAssetOrder(Buffer.from(original), path);
+  assert(
+    normalized ===
+      normalizedWorkerAssetOrder(
+        Buffer.from(source(["/a.js", "/b.js"])),
+        path,
+      ),
+    "Worker normalization did not ignore Astro asset-set ordering",
+  );
+  for (const changed of [
+    source(["/a.js"]),
+    source(["/a.js", "/c.js"]),
+    source(["/a.js", "/b.js", "/b.js"]),
+    source(["/a.js", "/b.js"], ["/docs", "/"]),
+    `${original}\nexport const changed = true;`,
+  ]) {
+    assert(
+      normalized !== normalizedWorkerAssetOrder(Buffer.from(changed), path),
+      "Worker normalization hid an asset, route, or code change",
+    );
+  }
+  assert(
+    normalizedWorkerAssetOrder(
+      Buffer.from(original),
+      "chunks/other.mjs",
+    ).toString() === original,
+    "Worker normalization changed a non-manifest chunk",
+  );
+}
+
+function directorySnapshot(directory, normalize = (contents) => contents) {
   return Object.fromEntries(
     filesUnder(directory)
-      .map((file) => [
-        relative(directory, file).split(sep).join("/"),
-        createHash("sha256").update(readFileSync(file)).digest("hex"),
-      ])
+      .map((file) => {
+        const path = relative(directory, file).split(sep).join("/");
+        return [
+          path,
+          createHash("sha256")
+            .update(normalize(readFileSync(file), path))
+            .digest("hex"),
+        ];
+      })
       .sort(([left], [right]) => left.localeCompare(right)),
   );
 }
@@ -371,6 +436,19 @@ async function assertAgentDiscovery(origin, base = "", { ownerLink = false, requ
     assert(links.includes(`rel="${rel}"`), `homepage omitted ${rel} Link`);
   if (ownerLink)
     assert(links.includes('rel="help"'), "owner homepage Link was lost");
+  if (!requestRendered) {
+    const head = await fetch(`${origin}${base}/`, { method: "HEAD" });
+    for (const response of [home.response, head]) {
+      assert(
+        response.headers.get("X-Owner") === "static-owner",
+        "owner static homepage header was lost",
+      );
+      assert(
+        response.headers.get("Link")?.includes('rel="author"'),
+        "owner static homepage Link was lost",
+      );
+    }
+  }
   const ard = await request(origin, "/.well-known/ard.json");
   const alias = await request(origin, "/.well-known/ai-catalog.json");
   assert(
@@ -890,6 +968,7 @@ function writeRenderingPolicy(site, policy) {
 }
 
 assertNormalizerSafety();
+assertWorkerAssetOrderNormalizerSafety();
 assertWorkerPurityScanner();
 console.log(`${PREFIX} building packages and generating the starter`);
 const nimbusPackage = JSON.parse(readFileSync(NIMBUS_PACKAGE, "utf8"));
@@ -949,6 +1028,13 @@ run(
 );
 
 const site = join(workRoot, "site");
+mkdirSync(join(site, "public"), { recursive: true });
+writeFileSync(
+  join(site, "public", "_headers"),
+  ["/", "/docs/"].map((path) =>
+    `${path}\n  Link: <https://example.net/policy>; rel="author"\n  X-Owner: static-owner\n`,
+  ).join("\n"),
+);
 rmSync(join(site, "src", "content", "docs"), { recursive: true, force: true });
 rmSync(join(site, "src", "content", "partials"), {
   recursive: true,
@@ -993,6 +1079,11 @@ console.log(
   `${PREFIX} installing the packed consumer with npm and typechecking`,
 );
 run("npm", ["install", "--package-lock=false"], { cwd: site });
+assert(
+  readFileSync(join(site, "node_modules/@cloudflare/nimbus-docs/dist/docs-for-agents.md"), "utf8") ===
+    readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),
+  "packed consumer is missing the release-matched agent guide",
+);
 writeRenderingPolicy(site, { docs: "build", api: "build" });
 run("pnpm", ["typecheck"], { cwd: site });
 
@@ -1001,7 +1092,15 @@ for (const output of ["dist", ".astro", join("node_modules", ".vite")]) {
   rmSync(join(site, output), { recursive: true, force: true });
 }
 build(site, { docs: "build", api: "build" });
-const firstWorkerBuild = directorySnapshot(join(site, "dist", "server"));
+const firstWorkerBuild = directorySnapshot(
+  join(site, "dist", "server"),
+  normalizedWorkerAssetOrder,
+);
+if (process.env.NIMBUS_KEEP_WORKERS_FIXTURE === "1") {
+  cpSync(join(site, "dist", "server"), join(workRoot, "first-worker-build"), {
+    recursive: true,
+  });
+}
 const firstAgentEndpointAssetBuild = directorySnapshot(
   join(site, ".astro", "nimbus", "agent-endpoint-assets"),
 );
@@ -1009,7 +1108,10 @@ for (const output of ["dist", ".astro", join("node_modules", ".vite")]) {
   rmSync(join(site, output), { recursive: true, force: true });
 }
 build(site, { docs: "build", api: "build" });
-const secondWorkerBuild = directorySnapshot(join(site, "dist", "server"));
+const secondWorkerBuild = directorySnapshot(
+  join(site, "dist", "server"),
+  normalizedWorkerAssetOrder,
+);
 const secondAgentEndpointAssetBuild = directorySnapshot(
   join(site, ".astro", "nimbus", "agent-endpoint-assets"),
 );
@@ -1048,6 +1150,7 @@ assert(
   staticKinds.get("operation").html.includes("nb-shiki-"),
   "build-rendered operation page rendered no classed code tokens",
 );
+await withWorkerd(site, (origin) => assertAgentDiscovery(origin));
 for (const [kind, { html }] of staticKinds) {
   assertTokenClassesDefined(html, shikiCss, `build-rendered ${kind} API page`);
 }

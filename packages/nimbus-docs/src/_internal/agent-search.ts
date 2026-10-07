@@ -55,6 +55,7 @@ function sectionUrl(
 export function createDocumentationSearch(
   loadIndex: () => Promise<DocumentationPagefind>,
   options: DocumentationSearchOptions,
+  resetIndex?: () => Promise<void>,
 ): (
   input: unknown,
   signal?: AbortSignal,
@@ -126,14 +127,15 @@ export function createDocumentationSearch(
       }
       return { results };
     } catch (error) {
-      if (signal?.aborted) throw error;
+      if (!signal?.aborted || error !== signal.reason) await resetIndex?.();
+      signal?.throwIfAborted();
       return failure("search_failed");
     }
   };
   // Pagefind mutates cached fragments while constructing query-specific excerpts.
   // Keep search + data hydration atomic relative to other calls on this instance.
   // A call cancelled while queued never runs; one cancelled mid-flight stops
-  // hydrating and rejects, leaving the shared index for later calls.
+  // hydrating and rejects. Cancellation alone keeps the shared index intact.
   let pending: Promise<unknown> = Promise.resolve();
   return (input, signal) => {
     const response = pending.then(() => {

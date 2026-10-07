@@ -6,6 +6,7 @@ export interface AgentDiscoveryOptions {
   title: string;
   base: string;
   output: "static" | "server";
+  homepageMarkdownFallback?: boolean;
 }
 export interface ArdEntry {
   identifier: string;

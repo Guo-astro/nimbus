@@ -149,6 +149,35 @@ test("a static site never negotiates", async () => {
   }
 });
 
+test("production homepage Markdown reuses on-demand llms without shadowing an owner", async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const site = await fixture(undefined, "docs", false, undefined, { rendering: { default: "request" } });
+  try {
+    process.env.NODE_ENV = "production";
+    await site.write("src/pages/[...slug].astro", `---\nimport { getDocsStaticPaths } from ${srcModule("index.ts")};\nexport const getStaticPaths = getDocsStaticPaths;\n---\n<html><body>Page</body></html>`);
+    await site.write("src/pages/llms.txt.ts", 'export const prerender = false;\nexport function GET() { return new Response("Owner documentation index.", { headers: { "Content-Type": "text/plain", "X-Owner": "index" } }); }\n');
+    await site.write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+    for (const owner of [false, true]) {
+      if (owner) await site.write("src/pages/index.md.ts", 'export const prerender = false;\nexport function GET() { return new Response("Owner homepage Markdown.", { headers: { "Content-Type": "text/markdown", "X-Owner": "home" } }); }\n');
+      const server = path.join(site.root, owner ? ".server-owner" : ".server");
+      await build({ ...site.config, output: "server", adapter: testAdapter(path.join(site.root, "server-entry.mjs")), build: { client: path.join(site.root, "dist"), server } });
+      await assert.rejects(site.read("dist/index.md"), { code: "ENOENT" });
+      const { app } = await import(pathToFileURL(path.join(server, "entry.mjs")).href);
+      for (const method of ["GET", "HEAD"]) {
+        const response = await app.render(new Request("https://example.test/docs/index.md", { method }));
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.equal(response.headers.get("X-Owner"), owner ? "home" : "index", `${method}: ${await response.clone().text()}`);
+        assert.equal(await response.text(), method === "HEAD" ? "" : owner ? "Owner homepage Markdown." : "Owner documentation index.");
+      }
+    }
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 test("production HTTP negotiation trusts the configured origin, not the request Host or asset redirects", async () => {
   const previousNodeEnv = process.env.NODE_ENV;
   let app: Awaited<ReturnType<typeof siteApp>>;

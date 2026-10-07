@@ -555,6 +555,7 @@ export function nimbus(
         title: config.title,
         base: astroBaseForBuild,
         output: outputModeForBuild,
+        homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
       },
       capabilities: createAgentCapabilities({
         search: config.search,

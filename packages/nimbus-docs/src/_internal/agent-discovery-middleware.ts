@@ -29,9 +29,16 @@ async function pageEntry(context: APIContext) {
   return (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
 }
 
+async function homepageMarkdownFallback(context: APIContext): Promise<Response | undefined> {
+  const summary = await context.rewrite("/llms.txt");
+  return summary.status === 200
+    ? withHeaders(summary, (headers) => headers.set("Content-Type", "text/markdown; charset=utf-8"))
+    : undefined;
+}
+
 /**
- * The Markdown alternate is a published file. On Cloudflare it comes from the
- * assets binding; other adapters fetch it from the configured site origin.
+ * Cloudflare reads assets first, then resolves request-rendered alternates
+ * through Astro. Other adapters fetch from the configured site origin.
  */
 async function publishedMarkdown(context: APIContext, pathname: string): Promise<Response | undefined> {
   const path = withBase(pathname, options.base);
@@ -39,6 +46,11 @@ async function publishedMarkdown(context: APIContext, pathname: string): Promise
     // Loaded on demand: the binding module exists only where the Worker runs.
     const { fetchAgentEndpointAsset } = await import("virtual:nimbus/agent-endpoint-asset-loader");
     const asset = await fetchAgentEndpointAsset(path, context.request);
+    if (asset?.status === 404) {
+      if (pathname === "/index.md" && options.homepageMarkdownFallback) return await homepageMarkdownFallback(context);
+      const route = await context.rewrite(path);
+      return route.ok && route.headers.get("Content-Type")?.includes("text/markdown") ? route : undefined;
+    }
     if (asset) return asset.ok ? asset : undefined;
     const origin = import.meta.env.DEV ? context.url.origin : new URL(options.site).origin;
     const url = new URL(path, origin);
@@ -51,24 +63,20 @@ async function publishedMarkdown(context: APIContext, pathname: string): Promise
 }
 
 export const onRequest: MiddlewareHandler = async (context, next) => {
-  const response = await next();
-  if (!["GET", "HEAD"].includes(context.request.method)) return response;
+  if (!["GET", "HEAD"].includes(context.request.method)) return next();
   // Static builds copy the site's emitted llms.txt after prerendering. In dev
   // and for request-rendered llms.txt routes, reuse the owner's existing route.
   if (
-    response.status === 404 &&
+    options.homepageMarkdownFallback &&
     context.url.pathname === withBase("/index.md", options.base) &&
     capabilities.llmsUrl
   ) {
-    let summary: Response;
     try {
-      summary = await context.rewrite("/llms.txt");
-    } catch {
-      return response;
-    }
-    if (summary.status !== 200) return response;
-    return withHeaders(summary, (headers) => headers.set("Content-Type", "text/markdown; charset=utf-8"));
+      const markdown = await homepageMarkdownFallback(context);
+      if (markdown) return markdown;
+    } catch {}
   }
+  const response = await next();
   if (response.status !== 200) return response;
   const atHome = isHome(context.url.pathname);
   // Only a request-rendered page on server output negotiates: a static host

@@ -94,7 +94,7 @@ async function availablePort() {
   });
 }
 
-async function verifyRuntime(site, lane, port) {
+async function verifyRuntime(site, lane, port, expectedHomepageMarkdown) {
   port ??= await availablePort();
   const origin = `http://127.0.0.1:${port}`;
   const command =
@@ -123,6 +123,7 @@ async function verifyRuntime(site, lane, port) {
   const child = spawnCommand(command.bin, command.args, {
     cwd: site,
     env: { ...process.env, ...command.env },
+    detached: process.platform !== "win32",
     stdio: "inherit",
   });
   const routes = [
@@ -175,10 +176,13 @@ async function verifyRuntime(site, lane, port) {
         signal: AbortSignal.timeout(5_000),
       });
       assert.equal(markdown.status, 200);
-      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/);
+      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/, route);
       assert.match(markdown.headers.get("Vary") ?? "", /Accept/);
       const alternate = await fetch(`${origin}${route}index.md`);
+      assert.equal(alternate.status, 200, `${route}index.md`);
+      assert.match(alternate.headers.get("Content-Type") ?? "", /text\/markdown/, `${route}index.md`);
       const expected = await alternate.text();
+      if (route === "/" && expectedHomepageMarkdown !== undefined) assert.equal(expected, expectedHomepageMarkdown);
       assert.equal(await markdown.text(), expected);
       if (lane === "node") {
         const spoofed = await new Promise((resolveResponse, reject) => {
@@ -256,7 +260,12 @@ async function verifyRuntime(site, lane, port) {
       }
     }
   } finally {
-    child.kill("SIGTERM");
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
     await Promise.race([
       new Promise((resolveClose) => child.once("close", resolveClose)),
       new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
@@ -537,6 +546,14 @@ if (LANE === "node" || LANE === "cloudflare") {
   ok(`${LANE} serves custom, scaffolded, and dynamic request routes`);
 }
 if (LANE === "cloudflare") {
+  const ownerMarkdown = "Owner homepage Markdown.";
+  writeFileSync(
+    join(site, "src", "pages", "index.md.ts"),
+    `export const prerender = false;\nexport function GET() { return new Response(${JSON.stringify(ownerMarkdown)}, { headers: { "Content-Type": "text/markdown" } }); }\n`,
+  );
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown);
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner");
   rmSync(join(site, "src", "pages", "[...slug].astro"));
   const missingCanonical = spawnCommandSync(
     SCAFFOLD_PM_BIN,

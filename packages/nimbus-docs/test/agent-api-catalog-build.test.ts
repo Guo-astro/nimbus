@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -82,6 +82,41 @@ test("a real build publishes specs at their mount paths, a catalog without hidde
     await rm(site.root, { recursive: true, force: true });
   }
 });
+
+for (const base of ["", "/docs"]) {
+  test(`a dangling serialized reference is omitted from publication and discovery under ${base || "/"}`, async () => {
+    const site = await apiSite([
+      { collection: "pets", spec: path.join(fixtures, "smallco.yaml") },
+      { collection: "broken", spec: path.join(fixtures, "dangling-target/openapi.yaml") },
+    ], ["pets", "broken"]);
+    await pages(site, ["pets", "broken"]);
+    const output: string[] = [];
+    const restore = [process.stdout, process.stderr].map((stream) => {
+      const original = stream.write.bind(stream);
+      stream.write = ((chunk: string | Uint8Array) => (output.push(String(chunk)), true)) as typeof stream.write;
+      return () => (stream.write = original);
+    });
+    try {
+      await build({ ...site.config, base, logLevel: "warn" });
+      assert.match(output.join(""), /not publishing the spec for "broken": .*Nope/);
+      await assert.rejects(site.read("dist/broken/openapi.json"));
+      assert.equal(JSON.parse(await site.read("dist/pets/openapi.json")).info.title, "SmallCo API");
+      const catalog = JSON.parse(await site.read("dist/.well-known/api-catalog"));
+      assert.equal(catalog.linkset[0]["service-desc"].length, 1);
+      assert.equal(catalog.linkset[1].anchor, `https://example.test${base}/broken/`);
+      assert.equal(catalog.linkset[1]["service-desc"], undefined);
+      assert.equal(catalog.linkset[1]["service-doc"].length, 2);
+      for (const file of ["dist/.well-known/ard.json", "dist/.well-known/ai-catalog.json", "dist/_headers"]) {
+        const contents = await site.read(file);
+        assert.match(contents, /pets\/openapi\.json/);
+        assert.doesNotMatch(contents, /broken\/openapi\.json/);
+      }
+    } finally {
+      for (const reset of restore) reset();
+      await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+}
 
 test("every collection opted out still yields a catalog with documentation links only", async () => {
   const site = await apiSite(
@@ -183,3 +218,74 @@ test("the dev server serves the catalog, specs, discovery, and skills together w
     await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
+
+for (const base of ["", "/docs"]) {
+  test(`dev spec publication recovers after a nested referenced file is restored under ${base || "/"}`, async () => {
+    const site = await apiSite([{ collection: "pets", spec: "specs/openapi.json" }], ["pets"]);
+    await pages(site, ["pets"]);
+    await site.write("specs/openapi.json", JSON.stringify({
+      openapi: "3.1.0",
+      info: { title: "Recovery API", version: "1.0.0" },
+      paths: {
+        "/pets": {
+          get: {
+            operationId: "listPets",
+            responses: {
+              "200": {
+                description: "Pets",
+                content: { "application/json": { schema: { $ref: "./schemas.json#/Pet" } } },
+              },
+            },
+          },
+        },
+      },
+    }));
+    await site.write("specs/schemas.json", JSON.stringify({
+      Pet: { type: "object", properties: { metadata: { $ref: "./parts/meta.json#/Meta" } } },
+    }));
+    const metadata = JSON.stringify({ Meta: { type: "string", description: "Restored metadata" } });
+    await site.write("specs/parts/meta.json", metadata);
+    const rootSpec = path.join(site.root, "specs/openapi.json");
+    const rootMtime = (await stat(rootSpec)).mtimeMs;
+    const server = await dev({
+      ...site.config,
+      base,
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        // Test the publication cache without a watcher-triggered restart.
+        watch: { ignored: ["**/specs/**"] },
+      },
+    });
+    try {
+      const origin = `http://127.0.0.1:${server.address.port}`;
+      const specUrl = `${origin}${base}/pets/openapi.json`;
+      const catalogEntry = async () => {
+        const response = await fetch(`${origin}/.well-known/api-catalog`);
+        assert.equal(response.status, 200);
+        return (await response.json()).linkset[0];
+      };
+      const initial = await fetch(specUrl);
+      assert.equal(initial.status, 200);
+      assert.match(await initial.text(), /Restored metadata/);
+      assert.equal((await catalogEntry())["service-desc"].length, 1);
+
+      await rm(path.join(site.root, "specs/parts/meta.json"));
+      assert.equal((await fetch(specUrl)).status, 404);
+      assert.equal((await catalogEntry())["service-desc"], undefined);
+
+      await site.write("specs/parts/meta.json", metadata);
+      const restored = await fetch(specUrl);
+      assert.equal(restored.status, 200, await restored.clone().text());
+      assert.match(await restored.text(), /Restored metadata/);
+      assert.equal((await catalogEntry())["service-desc"].length, 1);
+      const head = await fetch(specUrl, { method: "HEAD" });
+      assert.equal(head.status, 200);
+      assert.equal(await head.text(), "");
+      assert.equal((await stat(rootSpec)).mtimeMs, rootMtime);
+    } finally {
+      await server.stop();
+      await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+    }
+  });
+}

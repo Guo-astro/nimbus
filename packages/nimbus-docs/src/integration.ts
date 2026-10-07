@@ -518,13 +518,17 @@ export function nimbus(
     files.map((file) => (fs.existsSync(file) ? fs.statSync(file).mtimeMs : "missing")).join(",");
   const publishSpec = async (target: { versionKey: string; spec: string | Record<string, unknown> }) => {
     const cached = publishedSpecs.get(target.versionKey);
-    if (cached && typeof target.spec === "string" && cached.stamp === stampOf(cached.result.spec?.files ?? [path.resolve(projectRootForBuild, target.spec)]))
+    if (cached?.result.spec && typeof target.spec === "string" && cached.stamp === stampOf(cached.result.spec.files))
       return cached.result;
     const result = await publishOpenApiSpec(target.spec, projectRootForBuild);
-    publishedSpecs.set(target.versionKey, {
-      stamp: stampOf(result.spec?.files ?? (typeof target.spec === "string" ? [path.resolve(projectRootForBuild, target.spec)] : [])),
-      result,
-    });
+    if (result.spec) {
+      publishedSpecs.set(target.versionKey, {
+        stamp: stampOf(result.spec.files),
+        result,
+      });
+    } else {
+      publishedSpecs.delete(target.versionKey);
+    }
     return result;
   };
 

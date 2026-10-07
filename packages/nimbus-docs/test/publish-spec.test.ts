@@ -41,3 +41,9 @@ test("a reference that cannot be bundled is reported by name instead of publishe
   const inline = await publishOpenApiSpec({ openapi: "3.1.0", paths: { "/x": { $ref: "./x.yaml" } } }, fixtures);
   assert.match(inline.error ?? "", /x\.yaml/);
 });
+
+test("a missing external JSON pointer is rejected in the serialized publication", async () => {
+  const result = await publishOpenApiSpec("dangling-target/openapi.yaml", fixtures);
+  assert.match(result.error ?? "", /Nope/);
+  assert.equal(result.spec, undefined);
+});

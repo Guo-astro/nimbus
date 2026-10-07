@@ -74,8 +74,10 @@ export async function publishOpenApiSpec(
   delete embedded["x-ext-urls"];
   const leftover = [...externalRefs(document), ...unresolved];
   if (leftover.length) return { error: `cannot resolve ${[...new Set(leftover)].join(", ")}` };
+  const contents = JSON.stringify(document, null, 2) + "\n";
   try {
-    const { errors } = await dereference(structuredClone(document) as never);
+    // Validate the published JSON: bundling can leave undefined reference targets.
+    const { errors } = await dereference(JSON.parse(contents) as never);
     if (errors?.length) return { error: errors.map((item) => item.message).join("; ") };
   } catch (error) {
     return { error: (error as Error).message };
@@ -84,7 +86,7 @@ export async function publishOpenApiSpec(
     spec: {
       fileName: "openapi.json",
       mediaType: OPENAPI_MEDIA_TYPE,
-      contents: JSON.stringify(document, null, 2) + "\n",
+      contents,
       files: [...new Set(files)],
     },
   };

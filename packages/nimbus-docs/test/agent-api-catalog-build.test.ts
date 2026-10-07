@@ -219,10 +219,14 @@ test("the dev server serves the catalog, specs, discovery, and skills together w
   }
 });
 
-for (const base of ["", "/docs"]) {
-  test(`dev spec publication recovers after a nested referenced file is restored under ${base || "/"}`, async () => {
+for (const watchSpecs of [true, false]) for (const base of ["", "/docs"]) {
+  test(`dev publication and homepage discovery recover under ${base || "/"} with ${watchSpecs ? "default" : "ignored spec"} watching`, async () => {
     const site = await apiSite([{ collection: "pets", spec: "specs/openapi.json" }], ["pets"]);
     await pages(site, ["pets"]);
+    await site.write("src/pages/index.astro", `---
+Astro.response.headers.set("Link", '<https://example.net/help>; rel="help"');
+---
+<html><body>{Astro.locals.owner}</body></html>`);
     await site.write("specs/openapi.json", JSON.stringify({
       openapi: "3.1.0",
       info: { title: "Recovery API", version: "1.0.0" },
@@ -250,11 +254,23 @@ for (const base of ["", "/docs"]) {
     const server = await dev({
       ...site.config,
       base,
+      vite: {
+        plugins: [{
+          name: "test:owner-locals",
+          enforce: "pre",
+          configureServer(server) {
+            server.middlewares.use((request, _response, next) => {
+              Reflect.set(request, Symbol.for("astro.locals"), { owner: "Owner locals preserved" });
+              next();
+            });
+          },
+        }],
+      },
       server: {
         host: "127.0.0.1",
         port: 0,
-        // Test the publication cache without a watcher-triggered restart.
-        watch: { ignored: ["**/specs/**"] },
+        // Also exercise the publication cache without a watcher-triggered restart.
+        ...(!watchSpecs ? { watch: { ignored: ["**/specs/**"] } } : {}),
       },
     });
     try {
@@ -265,16 +281,42 @@ for (const base of ["", "/docs"]) {
         assert.equal(response.status, 200);
         return (await response.json()).linkset[0];
       };
+      const checkDiscovery = async (published: boolean) => {
+        for (const method of ["GET", "HEAD"]) {
+          const response = await fetch(`${origin}${base}/`, { method });
+          assert.equal(response.status, 200);
+          const links = response.headers.get("Link") ?? "";
+          assert.match(links, /<https:\/\/example.net\/help>; rel="help"/);
+          assert.match(links, /rel="api-catalog"/);
+          assert.ok(links.includes(`<https://example.test${base}/pets/>; rel="service-doc"`), links);
+          assert.equal(links.includes(`<https://example.test${base}/pets/openapi.json>; rel="service-desc"`), published, links);
+          if (method === "HEAD") assert.equal(await response.text(), "");
+          else assert.match(await response.text(), /Owner locals preserved/);
+        }
+        assert.equal(!!(await catalogEntry())["service-desc"], published);
+        for (const pathname of ["/.well-known/ard.json", "/.well-known/ai-catalog.json"]) {
+          const response = await fetch(origin + pathname);
+          assert.equal(response.status, 200);
+          const manifest = await response.json();
+          assert.equal(manifest.entries.some((entry: { url: string }) => entry.url === `https://example.test${base}/pets/openapi.json`), published);
+        }
+      };
+      await checkDiscovery(true);
       const initial = await fetch(specUrl);
       assert.equal(initial.status, 200);
       assert.match(await initial.text(), /Restored metadata/);
       assert.equal((await catalogEntry())["service-desc"].length, 1);
 
       await rm(path.join(site.root, "specs/parts/meta.json"));
+      await checkDiscovery(false);
       assert.equal((await fetch(specUrl)).status, 404);
+      const missingHead = await fetch(specUrl, { method: "HEAD" });
+      assert.equal(missingHead.status, 404);
+      assert.equal(await missingHead.text(), "");
       assert.equal((await catalogEntry())["service-desc"], undefined);
 
       await site.write("specs/parts/meta.json", metadata);
+      await checkDiscovery(true);
       const restored = await fetch(specUrl);
       assert.equal(restored.status, 200, await restored.clone().text());
       assert.match(await restored.text(), /Restored metadata/);

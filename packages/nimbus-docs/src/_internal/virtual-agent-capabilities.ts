@@ -91,7 +91,7 @@ export function virtualAgentCapabilitiesPlugin(
           return;
         }
         void get()
-          .then(({ options, specFiles, specWarnings }) => {
+          .then(({ capabilities, options, specFiles, specWarnings }) => {
             for (const warning of specWarnings ?? []) {
               if (warned.has(warning)) continue;
               warned.add(warning);
@@ -101,7 +101,14 @@ export function virtualAgentCapabilitiesPlugin(
             const spec = specFiles?.find(
               (item) => pathname === item.file || pathname === withBase(item.file, options.base),
             );
-            if (!spec) return next();
+            if (!spec) {
+              // Astro carries dev-server request locals into its middleware.
+              const key = Symbol.for("astro.locals");
+              const locals = Reflect.get(request, key) ?? {};
+              Reflect.set(locals, Symbol.for("nimbus.agent-capabilities"), capabilities);
+              Reflect.set(request, key, locals);
+              return next();
+            }
             response.setHeader("Content-Type", spec.type);
             response.setHeader("Access-Control-Allow-Origin", "*");
             response.end(method === "HEAD" ? undefined : spec.contents);

@@ -96,7 +96,10 @@ export const onRequest: MiddlewareHandler = async (context, next) => {
     headers.set("Content-Type", markdown.headers.get("Content-Type") ?? "text/markdown; charset=utf-8");
   }
   if (negotiates) varyOnAccept(headers);
-  if (atHome) for (const value of agentHomepageLinks(capabilities, options)) headers.append("Link", value);
+  if (atHome) {
+    const current: typeof capabilities = Reflect.get(context.locals, Symbol.for("nimbus.agent-capabilities")) ?? capabilities;
+    for (const value of agentHomepageLinks(current, options)) headers.append("Link", value);
+  }
   return new Response(markdown ? (context.request.method === "HEAD" ? null : markdown.body) : response.body, {
     status: response.status,
     statusText: response.statusText,

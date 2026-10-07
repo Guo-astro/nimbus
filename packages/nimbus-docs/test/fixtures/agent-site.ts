@@ -35,7 +35,7 @@ export function srcModule(relative: string): string {
 export const SMALLCO_SPEC = path.resolve(import.meta.dirname, "api/smallco.yaml");
 
 /** A minimal on-demand adapter: Astro's generated App behind the entrypoint. */
-function testAdapter(entrypoint: string): AstroIntegration {
+export function testAdapter(entrypoint: string): AstroIntegration {
   return {
     name: "test:adapter",
     hooks: {

@@ -99,7 +99,7 @@ test("the dev server leaves owner files under the skills prefix to Astro when it
     assert.equal(await owner.text(), '{"skills":[]}');
   } finally {
     await server.stop();
-    await rm(site.root, { recursive: true, force: true });
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 

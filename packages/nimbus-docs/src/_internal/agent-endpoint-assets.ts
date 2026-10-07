@@ -957,7 +957,7 @@ export function agentEndpointAssetLoaderPlugin(
         return (
           'import { env } from "cloudflare:workers";\n' +
           "export function fetchAgentEndpointAsset(path, request) {\n" +
-          "  return env.ASSETS?.fetch(new Request(new URL(path, request.url))) ?? null;\n" +
+          "  return env.ASSETS?.fetch(new Request(new URL(path, request.url), { method: request.method })) ?? null;\n" +
           "}\n"
         );
       }

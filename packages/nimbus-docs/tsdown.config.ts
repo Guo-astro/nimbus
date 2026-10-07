@@ -37,6 +37,12 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
+  copy: [
+    {
+      from: "../../apps/www/src/content/docs/ai/docs-for-agents.mdx",
+      rename: "docs-for-agents.md",
+    },
+  ],
   target: "node20",
   platform: "node",
   // Externals: virtual modules are resolved at runtime in the consumer's

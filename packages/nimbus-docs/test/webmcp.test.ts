@@ -173,7 +173,7 @@ test("invalid input, missing indexes, and query failures keep the shared error c
   assert.deepEqual(await model.tool!.execute({ query: "test" }, execution()), {
     error: {
       code: "index_unavailable",
-      message: "Search index unavailable; run a build first.",
+      message: "Documentation search index could not be loaded. Check your connection and reload the page. If it persists, ask the site owner to rebuild and deploy the search index.",
     },
   });
   fail = false;
@@ -183,7 +183,7 @@ test("invalid input, missing indexes, and query failures keep the shared error c
   assert.deepEqual(await model.tool!.execute({ query: "test" }, execution()), {
     error: {
       code: "search_failed",
-      message: "Documentation search failed. Try again.",
+      message: "Documentation search failed. Retry the search; if it still fails, check your connection and reload the page.",
     },
   });
   dispose();
@@ -213,6 +213,80 @@ test("an index-readiness failure is unavailable, cleans up, and can retry", asyn
       ((await model.tool!.execute({ query: "test" }, execution())) as object),
   );
   assert.equal(engine.imports, 2);
+  dispose();
+});
+
+for (const cancelled of [false, true]) {
+  test(`a rejected fragment${cancelled ? " during cancellation" : ""} is destroyed before queued searches initialize a replacement`, async () => {
+    const model = context();
+    const searches: string[] = [];
+    let instances = 0;
+    let destroyed = 0;
+    let release!: () => void;
+    const destruction = new Promise<void>((resolve) => { release = resolve; });
+    let rejectFragment!: (error: Error) => void;
+    const fragment = new Promise<never>((_resolve, reject) => { rejectFragment = reject; });
+    let hydrating!: () => void;
+    const hydration = new Promise<void>((resolve) => { hydrating = resolve; });
+    const dispose = registerDocumentationWebMcp(model, options, async () => ({
+      createInstance() {
+        const number = ++instances;
+        return {
+          async init() {},
+          async filters() {},
+          async destroy() {
+            destroyed++;
+            await destruction;
+          },
+          async search(query: string) {
+            searches.push(query);
+            if (number === 1)
+              return { results: [{ data: async () => { hydrating(); return fragment; } }] };
+            assert.equal(destroyed, 1);
+            return { results: [{ data: async () => ({ url: "/guide/", meta: { title: query }, excerpt: query }) }] };
+          },
+        };
+      },
+    }));
+    await model.ready;
+    const controller = new AbortController();
+    const failed = model.tool!.execute({ query: "first" }, { signal: controller.signal });
+    const firstResult = failed.then((value) => ({ value }), (error) => ({ error }));
+    const queued = model.tool!.execute({ query: "second" }, execution());
+    await hydration;
+    if (cancelled) controller.abort();
+    rejectFragment(Error("cached fragment failure"));
+    await tick();
+    assert.equal(instances, 1);
+    assert.equal(destroyed, 1);
+    assert.deepEqual(searches, ["first"], "queued search ran before failed-instance destruction completed");
+    release();
+    const result = await firstResult;
+    if (cancelled) {
+      assert.ok("error" in result);
+      assert.equal(result.error, controller.signal.reason);
+    } else {
+      assert.ok("value" in result);
+      assert.equal((result.value as { error: { code: string } }).error.code, "search_failed");
+    }
+    assert.equal(((await queued) as { results: { title: string }[] }).results[0]?.title, "second");
+    assert.equal(instances, 2);
+    await model.tool!.execute({ query: "third" }, execution());
+    assert.equal(instances, 2);
+    dispose();
+  });
+}
+
+test("a legitimate empty search retains its initialized instance", async () => {
+  const model = context();
+  const engine = pagefind();
+  engine.index.search = async () => ({ results: [] });
+  const dispose = registerDocumentationWebMcp(model, options, engine.load);
+  await model.ready;
+  assert.deepEqual(await model.tool!.execute({ query: "missing" }, execution()), { results: [] });
+  assert.deepEqual(await model.tool!.execute({ query: "missing" }, execution()), { results: [] });
+  assert.equal(engine.instances, 1);
+  assert.equal(engine.destroyed, 0);
   dispose();
 });
 

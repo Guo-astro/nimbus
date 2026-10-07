@@ -87,8 +87,10 @@ export function searchFailure(
   const messages = {
     invalid_input:
       "Provide a non-empty query of at most 500 characters, a limit from 1 to 20, and a visible version if supported.",
-    index_unavailable: "Search index unavailable; run a build first.",
-    search_failed: "Documentation search failed. Try again.",
+    index_unavailable:
+      "Documentation search index could not be loaded. Check your connection and reload the page. If it persists, ask the site owner to rebuild and deploy the search index.",
+    search_failed:
+      "Documentation search failed. Retry the search; if it still fails, check your connection and reload the page.",
   };
   return { error: { code, message: message ?? messages[code] } };
 }

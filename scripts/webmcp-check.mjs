@@ -437,7 +437,7 @@ try {
   const chunkFailure = {
     error: {
       code: "search_failed",
-      message: "Documentation search failed. Try again.",
+      message: "Documentation search code could not be loaded. Check your connection and reload the page.",
     },
   };
   assert.deepEqual(await offline.evaluate(() => window.__chunkResults), [
@@ -468,6 +468,55 @@ try {
   assert.deepEqual(chunkErrors, []);
   await broken.close();
 
+  for (const [name, pattern, code] of [
+    ["fragment", "**/*.pf_fragment", "search_failed"],
+    ["metadata", "**/*.pf_meta", "index_unavailable"],
+    ["module", "**/pagefind/pagefind.js", "index_unavailable"],
+  ]) {
+    const faults = await browser.newContext();
+    await faults.addInitScript(() => Object.defineProperty(document, "modelContext", {
+      value: { async registerTool(tool) { window.__tool = tool; } },
+    }));
+    const page = await faults.newPage();
+    await page.goto(origin + "/docs/");
+    await page.waitForFunction(() => !!window.__tool);
+    let intercepted = 0;
+    await page.route(pattern, (route) => {
+      intercepted++;
+      return route.fulfill({ status: 404, body: "missing search asset" });
+    });
+    const execute = () => page.evaluate(() => window.__tool.execute(
+      { query: "Nimbus" }, { signal: new AbortController().signal },
+    ));
+    const failed = await execute();
+    assert.ok(intercepted > 0, `${name} fault was not exercised`);
+    assert.equal(failed.error?.code, code, JSON.stringify(failed));
+    await page.unroute(pattern);
+    const retried = await execute();
+    if (name === "module" && retried.error) {
+      assert.equal(retried.error.code, "index_unavailable");
+      assert.match(retried.error.message, /connection.*reload/);
+      await page.keyboard.press("Control+k");
+      await page.locator("[data-search-input]").fill("Nimbus");
+      await page.waitForFunction(() =>
+        document.querySelector("[data-search-results]")?.textContent?.includes("Check your connection and reload"),
+      );
+      await page.keyboard.press("Escape");
+      await page.reload();
+      await page.waitForFunction(() => !!window.__tool);
+      assert.ok((await execute()).results?.length);
+    } else {
+      assert.ok(retried.results?.length, `${name} failed to recover: ${JSON.stringify(retried)}`);
+    }
+    const ordinary = await page.evaluate(async () => {
+      const module = await import("/docs/pagefind/pagefind.js");
+      return (await module.search("Nimbus")).results.length;
+    });
+    assert.ok(ordinary > 0, `${name} recovery disturbed ordinary search`);
+    console.log(`Search ${name} failure: typed error, ${name === "module" ? "reload guidance" : "same-document recovery"}, ordinary search intact`);
+    await faults.close();
+  }
+
   missingIndex = true;
   const absent = await browser.newContext();
   await absent.addInitScript(() =>
@@ -491,7 +540,7 @@ try {
   assert.equal(failure.error?.code, "index_unavailable");
   await absent.close();
   console.log(
-    "WebMCP browser checks passed: inert fallback, deferred parser, typed chunk failure and recovery, lazy isolated index, real version filters, concurrent results, base, real view transition, missing index.",
+    "WebMCP browser checks passed: inert fallback, deferred parser, typed chunk failure and recovery, fragment/metadata retries, module reload guidance, lazy isolated index, real version filters, concurrent results, base, real view transition, missing index. Pagefind's silent index-chunk failure remains an upstream limitation.",
   );
 } finally {
   await browser?.close();

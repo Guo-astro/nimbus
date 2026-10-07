@@ -133,7 +133,7 @@ test("errors hide exceptions; page-top results keep a valid top fragment", async
   assert.deepEqual(await unavailable({ query: "x" }), {
     error: {
       code: "index_unavailable",
-      message: "Search index unavailable; run a build first.",
+      message: "Documentation search index could not be loaded. Check your connection and reload the page. If it persists, ask the site owner to rebuild and deploy the search index.",
     },
   });
   for (const index of [
@@ -156,7 +156,7 @@ test("errors hide exceptions; page-top results keep a valid top fragment", async
       {
         error: {
           code: "search_failed",
-          message: "Documentation search failed. Try again.",
+          message: "Documentation search failed. Retry the search; if it still fails, check your connection and reload the page.",
         },
       },
     );
@@ -211,6 +211,7 @@ test("concurrent calls do not cross-contaminate Pagefind fragment excerpts", asy
 test("a call cancelled while queued never runs; one cancelled mid-flight stops hydrating", async () => {
   const searches: string[] = [];
   let hydrated = 0;
+  let resets = 0;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   const search = createDocumentationSearch(
@@ -237,6 +238,7 @@ test("a call cancelled while queued never runs; one cancelled mid-flight stops h
       },
     }),
     { site: "https://example.com" },
+    async () => { resets++; },
   );
   const first = new AbortController();
   const queued = new AbortController();
@@ -246,11 +248,12 @@ test("a call cancelled while queued never runs; one cancelled mid-flight stops h
   assert.deepEqual(searches, ["a"]);
   assert.equal(hydrated, 1);
   queued.abort();
-  first.abort();
+  first.abort(new Error("Cancelled by caller"));
   release();
-  await assert.rejects(a, { name: "AbortError" });
+  await assert.rejects(a, (error) => error === first.signal.reason);
   await assert.rejects(b, { name: "AbortError" });
   assert.deepEqual(searches, ["a"]);
   assert.equal(hydrated, 1);
   assert.ok("results" in (await search({ query: "c" })));
+  assert.equal(resets, 0, "cancellation alone reset a healthy index");
 });

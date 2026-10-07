@@ -5,6 +5,8 @@ export interface AgentDiscoveryOptions {
   site: string;
   title: string;
   base: string;
+  output: "static" | "server";
+  homepageMarkdownFallback?: boolean;
 }
 export interface ArdEntry {
   identifier: string;
@@ -170,15 +172,50 @@ export function appendAgentDiscoveryHeaders(
   ownerHeaders: string,
   generated: string,
 ): string {
-  const owner = ownerHeaders.replace(
-    /# Nimbus agent discovery \(generated\)\n[\s\S]*?# End Nimbus agent discovery\n?/g,
-    "",
+  let owner = ownerHeaders
+    .replace(
+      /\r?\n# Nimbus agent discovery headers \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery headers/g,
+      "",
+    )
+    .replace(
+      /^# Nimbus agent discovery \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery\r?\n?/gm,
+      "",
+    );
+  const rules = new Map(
+    generated
+      .replace(/^#.*\r?\n?/gm, "")
+      .trim()
+      .split(/\r?\n\r?\n/)
+      .filter(Boolean)
+      .map((rule) => {
+        const [path, ...headers] = rule.split(/\r?\n/);
+        return [path!, headers.join("\n")] as const;
+      }),
   );
+  const paths = [...owner.matchAll(/^[^\s#][^\r\n]*/gm)];
+  for (let index = paths.length - 1; index >= 0; index--) {
+    const match = paths[index]!;
+    const headers = rules.get(match[0].trimEnd());
+    if (!headers) continue;
+    const end = paths[index + 1]?.index ?? owner.length;
+    const offset = match.index + owner.slice(match.index, end).trimEnd().length;
+    const newline = owner.includes("\r\n") ? "\r\n" : "\n";
+    const block = [
+      "",
+      "# Nimbus agent discovery headers (generated)",
+      headers.replace(/\n/g, newline),
+      "# End Nimbus agent discovery headers",
+    ].join(newline);
+    owner = owner.slice(0, offset) + block + owner.slice(offset);
+    rules.delete(match[0].trimEnd());
+  }
+  if (!rules.size) return owner;
+  const remaining = `# Nimbus agent discovery (generated)\n${[...rules].map(([path, headers]) => `${path}\n${headers}`).join("\n\n")}\n# End Nimbus agent discovery\n`;
   const separator =
     !owner || owner.endsWith("\n\n")
       ? ""
       : owner.endsWith("\n")
         ? "\n"
         : "\n\n";
-  return `${owner}${separator}${generated}`;
+  return `${owner}${separator}${remaining}`;
 }

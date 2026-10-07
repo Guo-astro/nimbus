@@ -10,6 +10,7 @@ export async function discoveryFixture(
   collection = "docs",
   withApi = false,
   skills?: Record<string, string>,
+  nimbusOverrides: Record<string, unknown> = {},
 ) {
   const root = await mkdtemp(path.join(tmpdir(), "nimbus-discovery-"));
   const write = async (file: string, body: string) => {
@@ -50,11 +51,12 @@ export async function discoveryFixture(
   );
   await write(
     "src/pages/llms.txt.ts",
-    `import { llmsRoute } from ${JSON.stringify(endpoints)}; export const prerender = true; export const { GET } = llmsRoute();`,
+    // Astro reads `export const prerender` only at the start of a line.
+    `import { llmsRoute } from ${JSON.stringify(endpoints)};\nexport const prerender = true;\nexport const { GET } = llmsRoute();\n`,
   );
   await write(
     "src/pages/[...slug]/index.md.ts",
-    `import { markdownRoute } from ${JSON.stringify(endpoints)}; export const prerender = true; export const { GET, getStaticPaths } = markdownRoute();`,
+    `import { markdownRoute } from ${JSON.stringify(endpoints)};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = markdownRoute();\n`,
   );
   await write(
     "public/_headers",
@@ -81,6 +83,7 @@ export async function discoveryFixture(
                 ],
               }
             : {}),
+          ...nimbusOverrides,
         },
         { sitemap: false, icons: false, validateMdx: false },
       ),

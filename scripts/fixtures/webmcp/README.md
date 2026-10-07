@@ -29,6 +29,35 @@ cancellation during a failed chunk load, recovery after reload, and
 real version filters (including explicit deprecated-version searches). The small
 visibility fixture runs as part of this harness without an external corpus.
 
+Fragment and metadata 404s must recover on the next call in the same document
+after the missing assets are restored. Failed JavaScript imports may require a
+reload; the errors explain that distinction. Ordinary search remains isolated.
+
+## Open Pagefind index-chunk failure
+
+Pagefind 1.5.2 swallows `.pf_index` loading failures and caches the failed load.
+This is an open acceptance failure, not a passing no-results case. To reproduce
+without Nimbus, serve a real Pagefind build and use browser request interception
+to return 404 for `**/*.pf_index`:
+
+```js
+const pagefind = await import("/pagefind/pagefind.js");
+const index = pagefind.createInstance({ basePath: "/pagefind/", baseUrl: "/" });
+await index.init();
+await index.filters();
+await index.search("a term known to be indexed");
+// Restore chunk requests, then repeat the search on the same instance.
+// Pagefind returns empty results; reload and a new instance restore matches.
+await index.destroy();
+```
+
+Expected: the failed search rejects and permits recovery after restoration.
+Observed: the failure is logged internally but the search resolves empty, and
+the same instance remains empty. Instance replacement cannot establish that an
+empty result was a failure. Do not intercept global fetch or classify all empty
+results as errors to work around this; pursue the correction through Pagefind's
+public API/upstream implementation.
+
 The installed Chromium does **not** expose the current `Document.modelContext`
 API. The supported-browser cases use a test-only facade of the pinned draft's
 registration and abort behavior. These are integration checks with real Pagefind

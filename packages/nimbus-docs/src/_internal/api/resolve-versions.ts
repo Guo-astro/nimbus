@@ -201,6 +201,42 @@ export function targetUrlFields(
   };
 }
 
+/** Query-mode routing for one family: its default and every valid id. */
+export interface ApiQueryRouting {
+  defaultVersion: string;
+  versions: ReadonlySet<string>;
+}
+
+/** `null` for a path-mode family or an unknown collection. */
+export function apiQueryRouting(
+  api: ApiSpec[] | undefined,
+  collection: string,
+): ApiQueryRouting | null {
+  const entry = (api ?? []).find((candidate) => candidate.collection === collection);
+  if (!entry || entry.versionMode !== "query" || !entry.versions) return null;
+  const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
+  return {
+    defaultVersion: fallback!.version,
+    versions: new Set(entry.versions.map((v) => v.version)),
+  };
+}
+
+/**
+ * The version a request selects, or `null` when it selects none: an unknown
+ * id, or the parameter given more than once (caches and query-sorting
+ * proxies may reorder repeats, so no value wins). Absent or empty selects the
+ * default.
+ */
+export function selectApiVersion(
+  params: URLSearchParams,
+  routing: ApiQueryRouting,
+): string | null {
+  const values = params.getAll(API_VERSION_PARAM);
+  if (values.length > 1) return null;
+  const selected = values[0] ? values[0] : routing.defaultVersion;
+  return routing.versions.has(selected) ? selected : null;
+}
+
 /** Every render target across every declared family. */
 export function resolveAllApiCollections(
   api: ApiSpec[] | undefined,

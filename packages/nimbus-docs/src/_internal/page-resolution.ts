@@ -8,6 +8,7 @@ import {
   type VersionInfo,
 } from "./collection-mount.js";
 import type { ProjectionContext } from "./projection.js";
+import { selectApiVersion } from "./api/resolve-versions.js";
 import { toRouteKey } from "./url.js";
 
 export interface PageIdentity {
@@ -231,12 +232,8 @@ export async function resolveApiPage(
     const queryRouting =
       (await dependencies.getApiQueryRouting?.(collection)) ?? null;
     if (queryRouting) {
-      const raw = context.url.searchParams.get("api-version");
-      const selected =
-        raw === null || raw === "" ? queryRouting.defaultVersion : raw;
-      if (!queryRouting.versions.has(selected)) {
-        return { status: "not-found" };
-      }
+      const selected = selectApiVersion(context.url.searchParams, queryRouting);
+      if (selected === null) return { status: "not-found" };
       const isDefault = selected === queryRouting.defaultVersion;
       const storeId = isDefault
         ? id

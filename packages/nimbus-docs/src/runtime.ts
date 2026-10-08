@@ -1559,27 +1559,6 @@ export function getApiRoute(
   return resolveApiRoute(astro);
 }
 
-/**
- * Query-mode routing info for an API family (`versionMode: "query"`): the
- * default version id and the set of valid ids. `null` for path mode or an
- * unknown collection. Read by the head (noindex/canonical for non-default
- * versions) and by request-time route resolution.
- */
-export async function getApiQueryVersionRouting(
-  collection: string,
-): Promise<{ defaultVersion: string; versions: ReadonlySet<string> } | null> {
-  const config = await loadNimbusConfig();
-  const entry = (config.api ?? []).find(
-    (candidate) => candidate.collection === collection,
-  );
-  if (!entry || entry.versionMode !== "query" || !entry.versions) return null;
-  const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
-  return {
-    defaultVersion: fallback!.version,
-    versions: new Set(entry.versions.map((v) => v.version)),
-  };
-}
-
 async function resolveApiRoute(
   astro: AstroGlobal,
 ): Promise<ApiRouteProps | Response> {
@@ -1588,7 +1567,10 @@ async function resolveApiRoute(
     {},
     {
       getApiCollections: loadApiCollections,
-      getApiQueryRouting: getApiQueryVersionRouting,
+      async getApiQueryRouting(collection) {
+        const { apiQueryRouting } = await import("./_internal/api/resolve-versions.js");
+        return apiQueryRouting((await loadNimbusConfig()).api, collection);
+      },
       getVisibleEntry: getVisibleEntry as (
         collection: string,
         id: string,
@@ -1640,7 +1622,7 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
-        const [{ applyApiSidebarMode }, { apiVersionQuery, resolveApiVersion }, config] =
+        const [{ applyApiSidebarMode }, { resolveApiVersion, targetUrlFields }, config] =
           await Promise.all([
             import("./_internal/api/nav-bounds.js"),
             import("./_internal/api/resolve-versions.js"),
@@ -1654,12 +1636,7 @@ async function resolveApiRoute(
             ? applyApiSidebarMode(nav, {
                 mode: target.sidebar,
                 mountPath: target.mountPath,
-                ...(target.versionMode === "query"
-                  ? { urlBasePath: `/${target.family}` }
-                  : {}),
-                ...(apiVersionQuery(target)
-                  ? { urlQuery: apiVersionQuery(target) }
-                  : {}),
+                ...targetUrlFields(target),
                 overview: prepared.page.kind === "api",
               })
             : nav,

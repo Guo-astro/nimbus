@@ -29,8 +29,8 @@
 import { build, trailingSlash } from "astro:config/client";
 import { config, headDefaults } from "virtual:nimbus/config";
 import {
-  getApiQueryVersionRouting,
   getApiVersionAlternates,
+  getApiVersions,
   getCollectionLlmsUrl,
   getVersionAlternates,
   getVersionStatus,
@@ -115,10 +115,12 @@ const versionCanonicalPath = versionRecord?.canonical?.url ?? null;
 // (from the alternates table, shape-fallback matches included). With no
 // counterpart there is no canonical at all — the page's own pathname would
 // be a 404 or another operation.
-const apiQueryRouting =
-  apiVersion && collection ? await getApiQueryVersionRouting(collection) : null;
+const isQueryFamily =
+  !!apiVersion &&
+  config.api?.find((entry) => entry.collection === collection)?.versionMode === "query";
 const isNonDefaultQueryVersion =
-  apiQueryRouting !== null && apiVersion !== apiQueryRouting.defaultVersion;
+  isQueryFamily &&
+  (await getApiVersions(collection!))?.find((v) => v.isDefault)?.version !== apiVersion;
 
 // Hidden-version suppression. Hidden versions are URL-reachable but
 // excluded from every agent-discovery and SEO surface. When the page

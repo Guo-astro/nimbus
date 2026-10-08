@@ -26,6 +26,7 @@ import {
   type ApiPageIndexEntry,
   type ApiRouteProvenance,
   type SpecSource,
+  operationShapes,
 } from "../_internal/api/view-model.js";
 
 export { apiSchemaVersion } from "../_internal/api/view-model.js";
@@ -220,6 +221,13 @@ export function getApiPageSlugs(
   model: ApiModel,
 ): Array<{ coordinate: string; slug: string }> {
   return pageSlugs(unwrap(model));
+}
+
+/** Coordinate → wire shape (lowercased method + parameter-name-blind path)
+ *  for every operation page. The version picker's fallback matcher pairs
+ *  operations whose `operationId` changed by this shape. */
+export function getApiOperationShapes(model: ApiModel): Map<string, string> {
+  return operationShapes(unwrap(model));
 }
 
 /** Coordinate → `resource-action-v1` route provenance for each operation page routed under

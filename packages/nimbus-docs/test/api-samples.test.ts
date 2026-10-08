@@ -264,6 +264,34 @@ describe("resilience — best-effort, never fatal", () => {
     assert.equal(page.kind === "operation" ? page.example?.value : undefined, "chosen");
   });
 
+  test("a conditional const pins the value even beside an authored object", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const extra = { properties: { extra: { type: "string", example: "unexpected" } } };
+    const members: [Record<string, unknown>, unknown][] = [
+      [{ default: { fixed: 1 }, if: {}, then: { const: { fixed: 1 } } }, { fixed: 1 }],
+      [{ examples: [{ fixed: 1 }], if: {}, then: { const: { fixed: 1 } } }, { fixed: 1 }],
+      [{ example: { fixed: 1 }, if: {}, then: { const: { fixed: 1 } } }, { fixed: 1 }],
+      [{ default: { fixed: 1 }, if: {}, then: { const: "x" } }, "x"],
+    ];
+    for (const [member, expected] of members) {
+      for (const role of ["request", "response"] as const) {
+        assert.deepEqual(resolveExampleValue({ schema: { allOf: [extra, member] } } as never, role, tools), expected, `${JSON.stringify(member)} ${role}`);
+      }
+    }
+    const model = await buildApiModel({
+      collection: "conditional-const",
+      spec: {
+        openapi: "3.1.0",
+        info: { title: "Conditional", version: "1" },
+        components: { schemas: { Fixed: { default: { fixed: 1 }, if: {}, then: { const: { fixed: 1 } } } } },
+        paths: { "/x": { post: { operationId: "x", requestBody: { content: { "application/json": { schema: { allOf: [extra, { $ref: "#/components/schemas/Fixed" }] } } } }, responses: { "200": { description: "OK" } } } } },
+      },
+    });
+    const page = getApiPageProps(model, "x");
+    assert.deepEqual(page.kind === "operation" ? page.example?.value : undefined, { fixed: 1 });
+  });
+
   test("a shared schema keeps its fields whichever schema reaches it first", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);

@@ -463,9 +463,10 @@ function mayBeNonObject(root: OpenApiSchema): boolean {
   while (stack.length > 0) {
     const schema = stack.pop()!;
     visited.push(schema);
-    const own = ownShape(schema);
-    if (own === "non-object") nonObjects.add(schema);
-    if (own !== "composed") continue;
+    if (nonObjectItself(schema)) {
+      nonObjects.add(schema);
+      continue;
+    }
     for (const part of sampledParts(schema)) {
       const answer = nonObject.get(part);
       if (answer !== undefined) {
@@ -494,16 +495,17 @@ function mayBeNonObject(root: OpenApiSchema): boolean {
   return nonObjects.has(root);
 }
 
-// A schema's own verdict: decided by a pinned or authored value (its parts
-// aren't read), non-object by its declared type, or decided by its parts.
-function ownShape(schema: OpenApiSchema): "non-object" | "object" | "composed" {
-  if (schema.const !== undefined || schema.enum !== undefined) return "non-object";
+// Non-object by a pinned value, a non-object authored value, or its declared
+// type; otherwise its parts decide. An object authored value doesn't end the
+// walk: a `const` or `enum` among its parts, such as in `then`, still pins
+// the value merged fields would break.
+function nonObjectItself(schema: OpenApiSchema): boolean {
+  if (schema.const !== undefined || schema.enum !== undefined) return true;
   const value = authoredValue(schema);
-  if (value !== undefined) return jsonType(value) === "object" ? "object" : "non-object";
+  if (value !== undefined && jsonType(value) !== "object") return true;
   const types = schema.type === undefined ? [] : [schema.type].flat();
   const keyword = keywordType(schema);
-  const nonObjectType = types.length > 0 ? types.some((type) => type !== "object") : keyword !== undefined && keyword !== "object";
-  return nonObjectType ? "non-object" : "composed";
+  return types.length > 0 ? types.some((type) => type !== "object") : keyword !== undefined && keyword !== "object";
 }
 
 function sampledParts(schema: OpenApiSchema): OpenApiSchema[] {

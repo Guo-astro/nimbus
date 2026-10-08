@@ -254,7 +254,7 @@
         "If either root route is customized, keep its behavior: switch it to markdownRoute() or markdownSourceRoute() only if the customization can be expressed by wrapping the returned GET (see the Override a default guide). Otherwise keep the custom route as it is.",
         "Delete per-collection Markdown and source routes only after the root routes use the shared factories, and only when they are unmodified recipe output. Keep routes that customize their output, such as the changelog recipe's .md route that adds date and tags.",
         "Deleting the api-reference recipe's src/pages/<api>/[...slug]/index.md.ts drops the Markdown versions of hidden API versions; the shared route skips hidden versions. Keep that route if those pages must stay published.",
-        "Before 0.17.0, keep the shared routes prerendered: the build fails if a route using markdownRoute() or markdownSourceRoute() is rendered on request. From 0.17.0, Nimbus sets those routes' rendering mode from the `rendering` policy, and the prerender export in the file is no longer the deciding switch."
+        "Keep the shared routes prerendered. The build fails if a route using markdownRoute() or markdownSourceRoute() is rendered on request."
       ],
       "verify": [
         "Build and compare the list of generated .md and .mdx files before and after the change.",
@@ -294,8 +294,7 @@
         "In page routes that call getDocsPage or getCollectionPage, add markdownUrl and ogImageUrl to the names read from the returned page, then delete the routeKey, markdownPath, and markdownUrl lines and write const socialImage = entry.data.socialImage ?? ogImageUrl;. Remove the entryRouteKey import if nothing else uses it.",
         "In src/pages/og/[...slug].ts, replace the entries and pages computation with pages: await getOgImagePages() from @cloudflare/nimbus-docs/runtime, and read page.title and page.description ?? \"\" in getImageOptions. Change it together with the page routes: collection and version root pages, such as /blog/, then link to /og/blog.png, the card that is actually written, instead of /og/blog/index.png. Pages whose ID contains a dot, such as v1.2/guide or an API webhook named payment.succeeded, get their own card instead of sharing a truncated file name. noindex pages linked to /og/<id>.png, but the old route skipped them and never wrote that card; now that card exists.",
         "Replace the bodies of src/pages/llms.txt.ts, src/pages/llms-full.txt.ts, and src/pages/[section]/llms.txt.ts with export const { GET } = llmsRoute();, export const { GET } = llmsFullRoute();, and export const { GET, getStaticPaths } = llmsSectionRoute(); from @cloudflare/nimbus-docs/agent-endpoints. Keep export const prerender in each file.",
-        "Delete src/utils/agent-endpoint-response.ts once no route imports it.",
-        "Keeping `export const prerender` in each file is still correct and harmless; from 0.17.0 the `rendering` policy decides each agent route's mode, and the export is overridden for routes that call a Nimbus agent factory."
+        "Delete src/utils/agent-endpoint-response.ts once no route imports it."
       ],
       "verify": [
         "Build before and after and compare dist: HTML, .md, .mdx, and llms.txt files are unchanged except the og:image URL of collection and version root pages, and OG files change only for those pages, for IDs containing a dot, and for noindex pages.",

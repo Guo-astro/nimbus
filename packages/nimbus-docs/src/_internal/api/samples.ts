@@ -436,41 +436,92 @@ function needsObjectType(schema: OpenApiSchema): boolean {
   if (!schema.allOf?.length || schema.type !== undefined || keywordType(schema) !== undefined) return false;
   if (authoredValue(schema) !== undefined || schema.oneOf || schema.anyOf || schema.if) return false;
   const members = schema.allOf.filter(isSchema);
-  if (members.some(mayBeNonObject)) return false;
+  if (members.some((member) => mayBeNonObject(member) || pinsValue(member))) return false;
   return members.some(
     (member) => member.type === undefined && keywordType(member) === "object" && authoredValue(member) === undefined,
   );
 }
 
-// Whether `schema` could sample as something other than an object, or pins
-// a value merged fields would break. `const` and `enum` allow only their
-// values; an authored value decides the sample; composition comes before the
-// declared type in openapi-sampler, and a type list may allow scalars.
-//
-// That is: the schema reaches, through the parts the sampler reads, a schema
-// that is non-object on its own. One walk answers it for every schema it
-// visits, cycles included, and each answer is cached, so the work is linear in
-// the graph however often it's asked.
+// Whether `schema` could sample as something other than an object. This
+// follows openapi-sampler's precedence: `example` decides first; on an
+// `allOf`, `oneOf`, `anyOf`, or plain schema a `const`, `examples`, `enum`, or
+// `default` decides next; `if`/`then` merge before those are read; otherwise
+// the first declared type or a type keyword decides, or the parts do.
 const nonObject = new WeakMap<OpenApiSchema, boolean>();
 function mayBeNonObject(root: OpenApiSchema): boolean {
-  const known = nonObject.get(root);
+  return reachesHit(root, nonObject, (schema) => {
+    const value = decidingValue(schema);
+    if (value !== undefined) return { hit: jsonType(value) !== "object", parts: [] };
+    return { hit: nonObjectType(schema) || nonObjectInferred(schema), parts: sampledParts(schema) };
+  });
+}
+
+// Whether a `const` or `enum` the sampler can reach pins the value, which
+// merged fields would break. Unlike the shape, this looks past authored
+// values: an `example` beside a `then.const` still pins the result.
+const pinned = new WeakMap<OpenApiSchema, boolean>();
+function pinsValue(root: OpenApiSchema): boolean {
+  return reachesHit(root, pinned, (schema) => ({
+    hit: schema.const !== undefined || schema.enum !== undefined,
+    parts: sampledParts(schema),
+  }));
+}
+
+// The value openapi-sampler takes before reading any parts, if any.
+function decidingValue(schema: OpenApiSchema): unknown {
+  if (schema.example !== undefined) return schema.example;
+  const mergesFirst = schema.allOf === undefined && !schema.oneOf?.length && !schema.anyOf?.length && schema.if && schema.then;
+  return mergesFirst ? undefined : inferredValue(schema);
+}
+
+// After an `if`/`then` merge, the schema's own value can still be what's read.
+function nonObjectInferred(schema: OpenApiSchema): boolean {
+  const value = inferredValue(schema);
+  return value !== undefined && jsonType(value) !== "object";
+}
+
+function nonObjectType(schema: OpenApiSchema): boolean {
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (type !== undefined) return type !== "object";
+  const keyword = keywordType(schema);
+  return keyword !== undefined && keyword !== "object";
+}
+
+function inferredValue(schema: OpenApiSchema): unknown {
+  if (schema.const !== undefined) return schema.const;
+  if (Array.isArray(schema.examples) && schema.examples.length > 0) return schema.examples[0];
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) return schema.enum[0];
+  return schema.default;
+}
+
+// Whether `root` reaches a schema `visit` marks as a hit, through the parts
+// `visit` returns. One walk answers it for every schema it visits, cycles
+// included, and each answer is cached, so the work is linear in the graph
+// however often it's asked.
+function reachesHit(
+  root: OpenApiSchema,
+  cache: WeakMap<OpenApiSchema, boolean>,
+  visit: (schema: OpenApiSchema) => { hit: boolean; parts: OpenApiSchema[] },
+): boolean {
+  const known = cache.get(root);
   if (known !== undefined) return known;
   const visited: OpenApiSchema[] = [];
   const parents = new Map<OpenApiSchema, OpenApiSchema[]>();
-  const nonObjects = new Set<OpenApiSchema>();
+  const hits = new Set<OpenApiSchema>();
   const seen = new Set([root]);
   const stack = [root];
   while (stack.length > 0) {
     const schema = stack.pop()!;
     visited.push(schema);
-    if (nonObjectItself(schema)) {
-      nonObjects.add(schema);
+    const { hit, parts } = visit(schema);
+    if (hit) {
+      hits.add(schema);
       continue;
     }
-    for (const part of sampledParts(schema)) {
-      const answer = nonObject.get(part);
+    for (const part of parts) {
+      const answer = cache.get(part);
       if (answer !== undefined) {
-        if (answer) nonObjects.add(schema);
+        if (answer) hits.add(schema);
         continue;
       }
       const list = parents.get(part);
@@ -482,30 +533,17 @@ function mayBeNonObject(root: OpenApiSchema): boolean {
       }
     }
   }
-  const queue = [...nonObjects];
+  const queue = [...hits];
   while (queue.length > 0) {
     for (const parent of parents.get(queue.pop()!) ?? []) {
-      if (!nonObjects.has(parent)) {
-        nonObjects.add(parent);
+      if (!hits.has(parent)) {
+        hits.add(parent);
         queue.push(parent);
       }
     }
   }
-  for (const schema of visited) nonObject.set(schema, nonObjects.has(schema));
-  return nonObjects.has(root);
-}
-
-// Non-object by a pinned value, a non-object authored value, or its declared
-// type; otherwise its parts decide. An object authored value doesn't end the
-// walk: a `const` or `enum` among its parts, such as in `then`, still pins
-// the value merged fields would break.
-function nonObjectItself(schema: OpenApiSchema): boolean {
-  if (schema.const !== undefined || schema.enum !== undefined) return true;
-  const value = authoredValue(schema);
-  if (value !== undefined && jsonType(value) !== "object") return true;
-  const types = schema.type === undefined ? [] : [schema.type].flat();
-  const keyword = keywordType(schema);
-  return types.length > 0 ? types.some((type) => type !== "object") : keyword !== undefined && keyword !== "object";
+  for (const schema of visited) cache.set(schema, hits.has(schema));
+  return hits.has(root);
 }
 
 function sampledParts(schema: OpenApiSchema): OpenApiSchema[] {
@@ -865,11 +903,15 @@ function encodeFormText(text: string): string {
   return new URLSearchParams([["", text]]).toString().slice(1);
 }
 
-function encodeFormValue(value: string, allowReserved = false): string {
+// Reserved expansion writes a space as `%20`, except inside a space-delimited
+// join, where `%20` is the separator and an item's space stays `+`.
+function encodeFormValue(value: string, allowReserved = false, spaceAsPlus = false): string {
   if (!allowReserved) return encodeFormText(value);
-  return value.replace(/%[0-9A-Fa-f]{2}|[^A-Za-z0-9\-._~:/?@!$'()*,;]/gu, (token) =>
-    token.startsWith("%") && token.length === 3 ? token : encodeFormText(token).replaceAll("+", "%20"),
-  );
+  return value.replace(/%[0-9A-Fa-f]{2}|[^A-Za-z0-9\-._~:/?@!$'()*,;]/gu, (token) => {
+    if (token.startsWith("%") && token.length === 3) return token;
+    const encoded = encodeFormText(token);
+    return spaceAsPlus ? encoded : encoded.replaceAll("+", "%20");
+  });
 }
 
 // A form body's fields: a string is read as an encoded form, an object
@@ -905,7 +947,7 @@ function formFields(
       const explode = rule.explode ?? style === "form";
       const addJoined = (parts: string[]) => fields.push({
         name: key,
-        value: parts.map((part) => encodeFormValue(part, rule.allowReserved)).join(separator),
+        value: parts.map((part) => encodeFormValue(part, rule.allowReserved, style === "spaceDelimited")).join(separator),
         encoded: true,
       });
       if (style === "deepObject") {

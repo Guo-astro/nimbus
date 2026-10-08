@@ -292,6 +292,39 @@ describe("resilience — best-effort, never fatal", () => {
     assert.deepEqual(page.kind === "operation" ? page.example?.value : undefined, { fixed: 1 });
   });
 
+  test("an authored object beside a branch or type the sampler skips keeps typeless allOf fields", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const extra = { properties: { extra: { type: "string", example: "required" } }, required: ["extra"] };
+    const members: Record<string, unknown>[] = [
+      { example: { fixed: 1 }, anyOf: [{ type: "string" }, { type: "object" }] },
+      { default: { fixed: 1 }, anyOf: [{ type: "string" }, { type: "object" }] },
+      { examples: [{ fixed: 1 }], anyOf: [{ type: "string" }, { type: "object" }] },
+      { default: { fixed: 1 }, type: ["object", "null"] },
+      { examples: [{ fixed: 1 }], type: ["object", "null"] },
+    ];
+    for (const member of members) {
+      for (const role of ["request", "response"] as const) {
+        assert.deepEqual(
+          resolveExampleValue({ schema: { allOf: [extra, member] } } as never, role, tools),
+          { extra: "required", fixed: 1 },
+          `${JSON.stringify(member)} ${role}`,
+        );
+      }
+    }
+    const model = await buildApiModel({
+      collection: "skipped-branch",
+      spec: {
+        openapi: "3.1.0",
+        info: { title: "Skipped branch", version: "1" },
+        components: { schemas: { Fixed: members[1]! } },
+        paths: { "/x": { post: { operationId: "x", requestBody: { content: { "application/json": { schema: { allOf: [extra, { $ref: "#/components/schemas/Fixed" }] } } } }, responses: { "200": { description: "OK" } } } } },
+      },
+    });
+    const page = getApiPageProps(model, "x");
+    assert.deepEqual(page.kind === "operation" ? page.example?.value : undefined, { extra: "required", fixed: 1 });
+  });
+
   test("a shared schema keeps its fields whichever schema reaches it first", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);

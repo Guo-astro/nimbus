@@ -71,10 +71,12 @@ describe("generated request bodies on the wire", () => {
       ["form", ["a", "b,c"], "tags=a,b%2Cc"],
       ["pipeDelimited", ["a|b", "c"], "tags=a%7Cb|c"],
       ["spaceDelimited", ["a b", "c"], "tags=a+b%20c"],
-    ] as const).map(([style, tags, wire]) => ({
-      name: `${style} array keeps a separator inside a value apart (${tags.join(" / ")})`,
+      ["spaceDelimited", ["a", "b c"], "tags=a%20b+c", true],
+      ["spaceDelimited", ["a b", "c"], "tags=a+b%20c", true],
+    ] as const).map(([style, tags, wire, allowReserved]) => ({
+      name: `${style}${allowReserved ? " with allowReserved" : ""} array keeps a separator inside a value apart (${tags.join(" / ")})`,
       mediaType: "application/x-www-form-urlencoded",
-      media: { example: { tags }, encoding: { tags: { style, explode: false } } },
+      media: { example: { tags }, encoding: { tags: { style, explode: false, ...(allowReserved ? { allowReserved } : {}) } } },
       value: { tags },
       wire,
     })),

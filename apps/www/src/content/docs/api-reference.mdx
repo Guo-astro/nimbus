@@ -393,6 +393,28 @@ For methods that support a request body, an explicit JSON `null` is sent as the 
 
 An `application/x-www-form-urlencoded` body is sent as form fields. A property with an entry in the media type's `encoding` follows it: `style`, `explode`, or `allowReserved` select query-style serialization, and an entry without them sends the value as its `contentType`, so an object is sent as JSON. A `deepObject` property indexes every array (`expand[0]=customer`). A property without an `encoding` entry uses the bracket convention common to form APIs, not OpenAPI's JSON default: nested objects in brackets (`metadata[plan]=pro`), the name repeated for each item of a scalar array (`tags=a&tags=b`), and arrays of objects indexed (`items[0][price]=p_1`). A string example is read as an encoded form. Empty objects and arrays send no fields, and any other example sends no body.
 
+For example, this media type sends `tags` joined with commas and `metadata` in brackets:
+
+```yaml
+application/x-www-form-urlencoded:
+  schema:
+    type: object
+    properties:
+      tags: { type: array, items: { type: string } }
+      metadata: { type: object, additionalProperties: { type: string } }
+  encoding:
+    tags: { style: form, explode: false }
+  example:
+    tags: ["a,b", "c"]
+    metadata: { plan: pro }
+```
+
+```text
+tags=a%2Cb,c&metadata%5Bplan%5D=pro
+```
+
+With `explode: false`, items are joined with `,` (`form`), `|` (`pipeDelimited`), or `%20` (`spaceDelimited`), and each item is encoded first, so a separator inside an item stays distinct from the one between items. With `explode: true`, or a JSON `contentType`, an array repeats the field once per item.
+
 An explicit JSON `contentType`, including a `+json` media type, JSON-serializes each field value before form encoding: a string such as `abc` is sent as `%22abc%22`. With `allowReserved: true`, valid percent-encoded triples and safe reserved characters pass through unchanged; form delimiters (`=`, `&`, `+`) and unsafe characters (`[`, `]`, `#`) stay encoded. Forms using reserved expansion are sent as pre-encoded text so the HTTP client does not encode them again.
 
 ```sh
@@ -404,6 +426,8 @@ curl --request GET \
 An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker and in the page's Markdown version. An entry without a `label` uses its `lang`, and a repeated name is numbered: `Python`, `Python (2)`.
 
 Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs add api-code-rail` and choose **Overwrite** for `ApiCodeRail.astro` and `code-rail.client.ts`, and **Skip** for the other components.
+
+If the installed httpsnippet writes a body in a layout Nimbus doesn't recognize, that language's sample is left out rather than shown with a wrong body; the other languages are unaffected. An operation with no samples at all, such as with `samples.generate: []` and no `x-codeSamples`, shows its request example on the page instead.
 
 Two settings on the `api` entry control generated samples. `samples.generate` picks the languages Nimbus generates, on every operation; it defaults to all three, and `[]` generates none. `samples.keepGenerated` keeps generated languages next to authored samples. For example, to generate only cURL, and show it next to any authored SDK samples:
 

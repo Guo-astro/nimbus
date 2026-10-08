@@ -24,6 +24,7 @@ import type {
   UnionShape,
   VariantRef,
 } from "./model.js";
+import { operationShape } from "./coordinates.js";
 import {
   apiSchemaVersion,
   type ApiAuthView,
@@ -870,6 +871,26 @@ export function projectNav(
  *  reads this to compare `derived` slugs only. */
 export function routeProvenance(model: DocsModel): Map<string, ApiRouteProvenance> {
   return model.pages.provenance ?? new Map();
+}
+
+/**
+ * Coordinate → wire shape (`operationShape`) for every operation page.
+ * The version-fallback matcher pairs operations whose `operationId` changed
+ * by this shape. Webhooks carry no path and are excluded.
+ */
+export function operationShapes(model: DocsModel): Map<string, string> {
+  const shapes = new Map<string, string>();
+  for (const coordinate of model.pages.pages) {
+    const node = model.nodes.get(coordinate);
+    if (!node || node.kind !== "operation") continue;
+    const facts = node.facts as OperationFacts;
+    const method = protocolString(facts.protocol, "method");
+    const path = protocolString(facts.protocol, "path");
+    const webhook = protocolString(facts.protocol, "webhook");
+    if (!method || !path || webhook) continue;
+    shapes.set(coordinate, operationShape(method, path));
+  }
+  return shapes;
 }
 
 export function pageSlugs(

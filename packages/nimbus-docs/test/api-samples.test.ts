@@ -239,6 +239,49 @@ describe("resilience — best-effort, never fatal", () => {
     assert.deepEqual(resolveExampleValue({ schema } as never, "request", tools), { visible: "keep", ignored: "chosen" });
   });
 
+  test("a recursive allOf graph with repeated references stays linear", async () => {
+    // Each level references the next twice and the last loops back: a walk
+    // that re-enters shared nodes doubles its work per level, about 30 s at
+    // 18 levels against milliseconds when each schema is visited once. The
+    // walk is synchronous, so the bound is checked after it rather than by a
+    // test timeout.
+    const ref = (i: number) => ({ $ref: `#/components/schemas/N${i}` });
+    const schemas = Object.fromEntries(
+      Array.from({ length: 19 }, (_, i) => [`N${i}`, { allOf: i === 18 ? [ref(0)] : [ref(i + 1), ref(i + 1)] }]),
+    );
+    const started = performance.now();
+    const model = await buildApiModel({
+      collection: "recursive-allof",
+      spec: {
+        openapi: "3.1.0",
+        info: { title: "Recursive", version: "1" },
+        components: { schemas },
+        paths: { "/x": { post: { operationId: "x", requestBody: { content: { "application/json": { schema: { oneOf: [{ type: "string", example: "chosen" }, ref(0)] } } } }, responses: { "200": { description: "OK" } } } } },
+      },
+    });
+    assert.ok(performance.now() - started < 5_000, "recursive allOf graph took over 5 s");
+    const page = getApiPageProps(model, "x");
+    assert.equal(page.kind === "operation" ? page.example?.value : undefined, "chosen");
+  });
+
+  test("a shared schema keeps its fields whichever schema reaches it first", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    // A long chain reaches `shared` first; depths straddle any depth limit.
+    for (let depth = 250; depth <= 260; depth++) {
+      const shared = { allOf: [{ properties: { shared: { type: "string", example: "present" } } }] };
+      let deep: Record<string, unknown> = shared;
+      for (let i = 0; i < depth; i++) deep = { allOf: [deep] };
+      resolveExampleValue({ schema: { oneOf: [{ type: "string", example: "chosen" }, deep] } } as never, "request", tools);
+      const target = { allOf: [{ properties: { first: { type: "string", example: "retain" } } }, shared] };
+      assert.deepEqual(
+        resolveExampleValue({ schema: target } as never, "request", tools),
+        { first: "retain", shared: "present" },
+        `depth ${depth}`,
+      );
+    }
+  });
+
   test("an un-encodable path param degrades to no samples, never throws", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);

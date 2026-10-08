@@ -436,7 +436,7 @@ function needsObjectType(schema: OpenApiSchema): boolean {
   if (!schema.allOf?.length || schema.type !== undefined || keywordType(schema) !== undefined) return false;
   if (authoredValue(schema) !== undefined || schema.oneOf || schema.anyOf || schema.if) return false;
   const members = schema.allOf.filter(isSchema);
-  if (members.some((member) => mayBeNonObject(member, new Set()))) return false;
+  if (members.some(mayBeNonObject)) return false;
   return members.some(
     (member) => member.type === undefined && keywordType(member) === "object" && authoredValue(member) === undefined,
   );
@@ -446,40 +446,69 @@ function needsObjectType(schema: OpenApiSchema): boolean {
 // a value merged fields would break. `const` and `enum` allow only their
 // values; an authored value decides the sample; composition comes before the
 // declared type in openapi-sampler, and a type list may allow scalars.
-// Memoized per schema, so a long `allOf` chain is walked once rather than once
-// per member; a schema already on the current path counts as an object, and
-// an answer that depended on that cut isn't kept. Past MAX_SHAPE_DEPTH the
-// answer is "maybe", which leaves those `allOf`s to the sampler unchanged.
+//
+// That is: the schema reaches, through the parts the sampler reads, a schema
+// that is non-object on its own. One walk answers it for every schema it
+// visits, cycles included, and each answer is cached, so the work is linear in
+// the graph however often it's asked.
 const nonObject = new WeakMap<OpenApiSchema, boolean>();
-const MAX_SHAPE_DEPTH = 256;
-let cycleCuts = 0;
-function mayBeNonObject(schema: OpenApiSchema, active: Set<OpenApiSchema>): boolean {
-  const known = nonObject.get(schema);
+function mayBeNonObject(root: OpenApiSchema): boolean {
+  const known = nonObject.get(root);
   if (known !== undefined) return known;
-  if (active.has(schema)) {
-    cycleCuts++;
-    return false;
+  const visited: OpenApiSchema[] = [];
+  const parents = new Map<OpenApiSchema, OpenApiSchema[]>();
+  const nonObjects = new Set<OpenApiSchema>();
+  const seen = new Set([root]);
+  const stack = [root];
+  while (stack.length > 0) {
+    const schema = stack.pop()!;
+    visited.push(schema);
+    const own = ownShape(schema);
+    if (own === "non-object") nonObjects.add(schema);
+    if (own !== "composed") continue;
+    for (const part of sampledParts(schema)) {
+      const answer = nonObject.get(part);
+      if (answer !== undefined) {
+        if (answer) nonObjects.add(schema);
+        continue;
+      }
+      const list = parents.get(part);
+      if (list) list.push(schema);
+      else parents.set(part, [schema]);
+      if (!seen.has(part)) {
+        seen.add(part);
+        stack.push(part);
+      }
+    }
   }
-  if (active.size >= MAX_SHAPE_DEPTH) return true;
-  active.add(schema);
-  const cutsBefore = cycleCuts;
-  const result = computeMayBeNonObject(schema, active);
-  active.delete(schema);
-  if (cycleCuts === cutsBefore) nonObject.set(schema, result);
-  return result;
+  const queue = [...nonObjects];
+  while (queue.length > 0) {
+    for (const parent of parents.get(queue.pop()!) ?? []) {
+      if (!nonObjects.has(parent)) {
+        nonObjects.add(parent);
+        queue.push(parent);
+      }
+    }
+  }
+  for (const schema of visited) nonObject.set(schema, nonObjects.has(schema));
+  return nonObjects.has(root);
 }
 
-function computeMayBeNonObject(schema: OpenApiSchema, active: Set<OpenApiSchema>): boolean {
-  if (schema.const !== undefined || schema.enum !== undefined) return true;
+// A schema's own verdict: decided by a pinned or authored value (its parts
+// aren't read), non-object by its declared type, or decided by its parts.
+function ownShape(schema: OpenApiSchema): "non-object" | "object" | "composed" {
+  if (schema.const !== undefined || schema.enum !== undefined) return "non-object";
   const value = authoredValue(schema);
-  if (value !== undefined) return jsonType(value) !== "object";
-  const branch = schema.oneOf?.length ? schema.oneOf[0] : schema.anyOf?.length ? schema.anyOf[0] : undefined;
-  const parts = [...(schema.allOf ?? []), branch, schema.if, schema.then].filter(isSchema);
-  if (parts.some((part) => mayBeNonObject(part, active))) return true;
+  if (value !== undefined) return jsonType(value) === "object" ? "object" : "non-object";
   const types = schema.type === undefined ? [] : [schema.type].flat();
-  if (types.length > 0) return types.some((type) => type !== "object");
   const keyword = keywordType(schema);
-  return keyword !== undefined && keyword !== "object";
+  const nonObjectType = types.length > 0 ? types.some((type) => type !== "object") : keyword !== undefined && keyword !== "object";
+  return nonObjectType ? "non-object" : "composed";
+}
+
+function sampledParts(schema: OpenApiSchema): OpenApiSchema[] {
+  const branch = schema.oneOf?.length ? schema.oneOf[0] : schema.anyOf?.length ? schema.anyOf[0] : undefined;
+  return [...(schema.allOf ?? []), branch, schema.if, schema.then].filter(isSchema);
 }
 
 // The value openapi-sampler takes from the schema itself, before any type.

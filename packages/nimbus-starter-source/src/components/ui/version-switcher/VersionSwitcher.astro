@@ -46,7 +46,10 @@ interface Entry {
 
 let entries: Entry[] = [];
 let activeLabel = "";
-const currentPath = stripBase(Astro.url.pathname, import.meta.env.BASE_URL);
+// The current URL including the query: on a query-versioned API page the
+// `?api-version=` IS the version, and the active item must keep it.
+const currentPath =
+  stripBase(Astro.url.pathname, import.meta.env.BASE_URL) + Astro.url.search;
 
 if (apiCollection) {
   const apiVersions = (await getApiVersions(apiCollection)) ?? [];

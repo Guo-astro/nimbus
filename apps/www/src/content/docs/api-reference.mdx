@@ -235,6 +235,28 @@ The version picker keeps readers on the same page when they switch versions. Nim
 
 Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
 
+#### Versions in the query
+
+A request-rendered family can keep one URL per operation and select the version with a query parameter instead of a path prefix:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    label: "Acme API",
+    versionMode: "query",
+    versions: [
+      { version: "v2", spec: "./src/api/openapi-v2.yaml", default: true },
+      { version: "v1", spec: "./src/api/openapi-v1.yaml" },
+    ],
+  },
+],
+```
+
+Every version serves from the family's own path: `/api/pets/` renders the default version, `/api/pets/?api-version=v1` renders `v1`, and an unknown id returns the 404 page. Version-prefixed paths such as `/api/v1/pets/` do not exist in this mode. Inside a non-default version, every generated same-version link — page body, navigation, breadcrumbs, citations, the picker's active item — carries that version's `api-version` query, so readers stay in the version they chose.
+
+Discovery stays version-free: the sitemap, alternate Markdown, `llms.txt`, and `llms-full.txt` describe the default version at the plain URLs, non-default pages are `noindex` with their default counterpart as canonical, and a hidden version is reachable only by its query. Query mode requires `versions` and an effective rendering mode of `request` for the family — a static site serves the same file whatever the query says. Sites that don't set `versionMode` keep path versions unchanged, and version ids may contain dots in both modes (`2026-11-30.air`).
+
 ### Sidebar for large APIs
 
 By default, every API page includes the whole navigation tree. For a large API, that tree can be most of each page's size. Set `sidebar` on the `api` entry to include less:

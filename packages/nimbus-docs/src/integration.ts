@@ -641,7 +641,12 @@ export function nimbus(
         docsUrl: absolute(toDocumentHref(api.mountPath)),
         markdownUrl: absolute(`${api.mountPath}/index.md`),
         ...(spec ? { spec } : {}),
-        hidden: api.hidden,
+        // Discovery is default-only for query-addressed versions: a
+        // non-default version has no version-free docs or Markdown URL, so
+        // it drops off every discovery surface the way hidden versions do
+        // (its spec file still publishes above).
+        hidden:
+          api.hidden || (api.versionMode === "query" && !api.isDefault),
       });
     }
     // Skills live at the origin root like the rest of .well-known, so their
@@ -976,6 +981,16 @@ export function nimbus(
                   hidden: boolean;
                 }> = [];
                 if (apiCollectionsForBuild.length === 0) return apiEntries;
+                // Query-mode families publish twins and index lines for the
+                // default version only, at version-free URLs; a non-default
+                // entry's store id is not a route.
+                const queryModeDefaults = new Map<string, string>();
+                for (const entry of config.api ?? []) {
+                  if (entry.versionMode !== "query" || !entry.versions) continue;
+                  const fallback =
+                    entry.versions.find((v) => v.default) ?? entry.versions[0];
+                  queryModeDefaults.set(entry.collection, fallback!.version);
+                }
                 const snapshot = getPreparedMarkdownSnapshot(projectRoot);
                 for (const collection of apiCollectionsForBuild) {
                   const entries =
@@ -990,7 +1005,15 @@ export function nimbus(
                       indexError ?? missingApiCollectionMessage(collection),
                     );
                   }
+                  const queryDefault = queryModeDefaults.get(collection);
                   for (const entry of entries.values()) {
+                    if (
+                      queryDefault !== undefined &&
+                      typeof entry.data.version === "string" &&
+                      entry.data.version !== queryDefault
+                    ) {
+                      continue;
+                    }
                     apiEntries.push({
                       collection,
                       id: entry.id,

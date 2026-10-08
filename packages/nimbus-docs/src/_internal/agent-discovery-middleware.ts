@@ -25,8 +25,21 @@ async function pageEntry(context: APIContext) {
   const pathname = context.url.pathname;
   if (prefix && !pathname.startsWith(`${prefix}/`)) return undefined;
   const route = toRouteKey(pathname.slice(prefix.length) || "/");
-  const { getIndexedEntries } = await import("../runtime.js");
-  return (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
+  const { getApiQueryVersionRouting, getIndexedEntries } = await import("../runtime.js");
+  const entry = (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
+  if (!entry) return undefined;
+  // Query-addressed versions: the index holds only the default version, so a
+  // pathname match under `?api-version=<non-default>` would negotiate the
+  // DEFAULT version's Markdown beneath another version's HTML. Those pages
+  // have no per-page Markdown affordance; don't negotiate. Path-mode
+  // collections return no routing and keep ignoring the parameter.
+  const routing = await getApiQueryVersionRouting(entry.collection);
+  if (routing) {
+    const raw = context.url.searchParams.get("api-version");
+    const selected = raw === null || raw === "" ? routing.defaultVersion : raw;
+    if (selected !== routing.defaultVersion) return undefined;
+  }
+  return entry;
 }
 
 async function homepageMarkdownFallback(context: APIContext): Promise<Response | undefined> {

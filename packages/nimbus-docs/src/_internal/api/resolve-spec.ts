@@ -23,6 +23,10 @@ export interface ApiSpecEntry {
   label?: string;
   /** Base URL for the resolved model's pages. Defaults to `/<collection>`. */
   mountPath?: string;
+  /** Public URL base when it differs from `mountPath` (query-mode versions). */
+  urlBasePath?: string;
+  /** Query string every same-version link carries (query mode, non-default). */
+  urlQuery?: string;
   requireOperationId?: boolean;
   schemaPages?: boolean;
   routes?: RoutePolicy;
@@ -35,6 +39,8 @@ export async function resolveSpecSource(
 ): Promise<SpecSource> {
   const label = entry.label ?? entry.collection;
   const mountPath = entry.mountPath ? { mountPath: entry.mountPath } : {};
+  const urlBase = entry.urlBasePath ? { urlBasePath: entry.urlBasePath } : {};
+  const urlQuery = entry.urlQuery ? { urlQuery: entry.urlQuery } : {};
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};
   const schemaPages = entry.schemaPages ? { schemaPages: true as const } : {};
@@ -46,6 +52,8 @@ export async function resolveSpecSource(
       spec: entry.spec as SpecSource["spec"],
       ...(entry.label ? { label: entry.label } : {}),
       ...mountPath,
+      ...urlBase,
+      ...urlQuery,
       ...strict,
       ...routes,
       ...schemaPages,
@@ -72,6 +80,8 @@ export async function resolveSpecSource(
     spec: contents,
     ...(entry.label ? { label: entry.label } : {}),
     ...mountPath,
+    ...urlBase,
+    ...urlQuery,
     ...strict,
     ...routes,
     ...schemaPages,

@@ -340,6 +340,16 @@ export async function getIndexedEntries(
   // `virtual:nimbus/config` — a site with none indexes nothing.
   const names = await loadIndexedCollections();
   const versions = await getVersions();
+  // Query-mode API families: discovery is default-only. Non-default entries
+  // have no URLs of their own (their store ids are not routes), so they stay
+  // out of llms indexes, social images, previous/next, and negotiation.
+  const config = await loadNimbusConfig();
+  const queryModeDefaults = new Map<string, string>();
+  for (const entry of config.api ?? []) {
+    if (entry.versionMode !== "query" || !entry.versions) continue;
+    const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
+    queryModeDefaults.set(entry.collection, fallback!.version);
+  }
 
   const indexed: IndexedEntry[] = [];
   for (const name of names) {
@@ -353,6 +363,14 @@ export async function getIndexedEntries(
     for (const entry of entries) {
       const data = (entry.data ?? {}) as Record<string, unknown>;
       if (data.draft === true) continue;
+      const queryDefault = queryModeDefaults.get(name);
+      if (
+        queryDefault !== undefined &&
+        typeof data.version === "string" &&
+        data.version !== queryDefault
+      ) {
+        continue;
+      }
 
       // A versioned API family stamps a per-entry `data.version`; prefer it over
       // the docs-axis `getCurrentVersion` (which is null for API collections).
@@ -1541,6 +1559,27 @@ export function getApiRoute(
   return resolveApiRoute(astro);
 }
 
+/**
+ * Query-mode routing info for an API family (`versionMode: "query"`): the
+ * default version id and the set of valid ids. `null` for path mode or an
+ * unknown collection. Read by the head (noindex/canonical for non-default
+ * versions) and by request-time route resolution.
+ */
+export async function getApiQueryVersionRouting(
+  collection: string,
+): Promise<{ defaultVersion: string; versions: ReadonlySet<string> } | null> {
+  const config = await loadNimbusConfig();
+  const entry = (config.api ?? []).find(
+    (candidate) => candidate.collection === collection,
+  );
+  if (!entry || entry.versionMode !== "query" || !entry.versions) return null;
+  const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
+  return {
+    defaultVersion: fallback!.version,
+    versions: new Set(entry.versions.map((v) => v.version)),
+  };
+}
+
 async function resolveApiRoute(
   astro: AstroGlobal,
 ): Promise<ApiRouteProps | Response> {
@@ -1549,6 +1588,7 @@ async function resolveApiRoute(
     {},
     {
       getApiCollections: loadApiCollections,
+      getApiQueryRouting: getApiQueryVersionRouting,
       getVisibleEntry: getVisibleEntry as (
         collection: string,
         id: string,
@@ -1600,7 +1640,7 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
-        const [{ applyApiSidebarMode }, { resolveApiVersion }, config] =
+        const [{ applyApiSidebarMode }, { apiVersionQuery, resolveApiVersion }, config] =
           await Promise.all([
             import("./_internal/api/nav-bounds.js"),
             import("./_internal/api/resolve-versions.js"),
@@ -1614,6 +1654,12 @@ async function resolveApiRoute(
             ? applyApiSidebarMode(nav, {
                 mode: target.sidebar,
                 mountPath: target.mountPath,
+                ...(target.versionMode === "query"
+                  ? { urlBasePath: `/${target.family}` }
+                  : {}),
+                ...(apiVersionQuery(target)
+                  ? { urlQuery: apiVersionQuery(target) }
+                  : {}),
                 overview: prepared.page.kind === "api",
               })
             : nav,
@@ -1674,14 +1720,17 @@ export async function getApiVersions(
   if (!entry || !entry.versions) return null;
   const { resolveApiFamily } =
     await import("./_internal/api/resolve-versions.js");
+  const { pageUrl } = await import("./_internal/api/resolve-versions.js");
   return resolveApiFamily(entry).map((t) => ({
     version: t.version!,
     label: t.label,
     isDefault: t.isDefault,
     status: t.status,
     hidden: t.hidden,
-    // Trailing-slashed; a bare `/family/v2` would 307-redirect under directory builds.
-    url: toDocumentHref(t.mountPath),
+    // Trailing-slashed; a bare `/family/v2` would 307-redirect under
+    // directory builds. In query mode this is the version-free landing with
+    // the version's query (`/<family>/?api-version=<id>` for non-defaults).
+    url: pageUrl(t, ""),
   }));
 }
 

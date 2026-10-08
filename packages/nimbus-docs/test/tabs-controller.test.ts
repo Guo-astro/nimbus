@@ -54,6 +54,37 @@ const cfg = {
   boundarySelector: "[data-nb-tabs]",
 } as const;
 
+for (const storage of ["local", "session"] as const) {
+  test(`synced tabs remain usable when ${storage} storage quota is exhausted`, () => {
+    const dom = new JSDOM("", { url: "https://example.test", storageQuota: 0 });
+    const name = storage === "local" ? "localStorage" : "sessionStorage";
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value: dom.window[name] });
+    const { outer } = setup();
+    const peer = outer.cloneNode(true) as HTMLElement;
+    peer.id = "peer";
+    peer.querySelectorAll<HTMLElement>("[id]").forEach((element) => { element.id += "-peer"; });
+    document.body.append(peer);
+    const instances: ReturnType<typeof initTabs>[] = [];
+    try {
+      for (const container of [outer, peer]) {
+        assert.doesNotThrow(() => {
+          instances.push(initTabs({ container, ...cfg, sync: { key: "tabs", storage } }));
+        });
+      }
+      assert.doesNotThrow(() => instances[0]!.activate(1));
+      assert.equal(instances[0]!.currentIndex, 1);
+      assert.equal(instances[1]!.currentIndex, 1);
+      assert.equal(peer.querySelector<HTMLElement>("#op1-peer")!.hidden, false);
+    } finally {
+      instances.forEach((instance) => instance.destroy());
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+      dom.window.close();
+    }
+  });
+}
+
 test("outer instance only controls its own panels (nested excluded)", () => {
   const { outer } = setup();
   initTabs({ container: outer, ...cfg });

@@ -28,6 +28,10 @@ export interface BoundApiNavOptions {
   mode: ApiSidebarMode;
   /** Where the API is mounted: its overview, at `mountPath`, lists every page-less group's rows. */
   mountPath: string;
+  /** Public URL base when it differs from `mountPath` (query mode). */
+  urlBasePath?: string;
+  /** Query string same-version links carry (query mode, non-default). */
+  urlQuery?: string;
   /** The page being rendered is the API overview. */
   overview?: boolean;
 }
@@ -35,7 +39,9 @@ export interface BoundApiNavOptions {
 /** Apply a `sidebar` mode to an activated nav. `"full"` returns `nav` itself. */
 export function applyApiSidebarMode(nav: ApiNav, options: BoundApiNavOptions): ApiNav {
   if (options.mode === "full") return nav;
-  const overviewHref = toDocumentHref(options.mountPath);
+  // Without the version's query, an old-version page would load the default
+  // version's navigation for a page-less group.
+  const overviewHref = `${toDocumentHref(options.urlBasePath ?? options.mountPath)}${options.urlQuery ?? ""}`;
   const bound = (items: ApiNavItem[]): ApiNavItem[] => items.map(boundItem);
   const boundItem = (item: ApiNavItem): ApiNavItem => {
     if (item.children.length === 0) return item;

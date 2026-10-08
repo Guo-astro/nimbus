@@ -54,6 +54,14 @@ export interface SpecSource {
   label?: string;
   /** Base URL for this model's pages. Defaults to `/<collection>` when absent. */
   mountPath?: string;
+  /**
+   * Public URL base, when it differs from `mountPath`: a query-mode version
+   * mounts its store at `mountPath` but its pages live at the version-free
+   * family base.
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
@@ -190,6 +198,8 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     );
     const model = walker.walk();
     if (source.mountPath !== undefined) model.mountPath = source.mountPath;
+    if (source.urlBasePath !== undefined) model.urlBasePath = source.urlBasePath;
+    if (source.urlQuery !== undefined) model.urlQuery = source.urlQuery;
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];

@@ -14,7 +14,12 @@ export function hiddenVersionPrefixes(
   const out: string[] = [];
   for (const slug of config.versions?.hidden ?? []) out.push(`${b}/${slug}`);
   for (const target of resolveAllApiCollections(config.api)) {
-    if (target.hidden) out.push(`${b}${target.mountPath}`);
+    // A query-mode hidden version has no version-free URLs to exclude —
+    // every version shares `/<family>`, so its mount prefix would remove
+    // the whole visible family from the sitemap.
+    if (target.hidden && target.versionMode !== "query") {
+      out.push(`${b}${target.mountPath}`);
+    }
   }
   return out;
 }

@@ -30,6 +30,7 @@ import { build, trailingSlash } from "astro:config/client";
 import { config, headDefaults } from "virtual:nimbus/config";
 import {
   getApiVersionAlternates,
+  getApiVersions,
   getCollectionLlmsUrl,
   getVersionAlternates,
   getVersionStatus,
@@ -108,6 +109,19 @@ const versionRecord = apiVersion
     : null;
 const versionCanonicalPath = versionRecord?.canonical?.url ?? null;
 
+// Query-mode versions: a non-default version renders at the version-free
+// URL plus `?api-version=`, so it is `noindex` the way hidden versions are,
+// and its canonical is the matched default counterpart's version-free URL
+// (from the alternates table, shape-fallback matches included). With no
+// counterpart there is no canonical at all — the page's own pathname would
+// be a 404 or another operation.
+const isQueryFamily =
+  !!apiVersion &&
+  config.api?.find((entry) => entry.collection === collection)?.versionMode === "query";
+const isNonDefaultQueryVersion =
+  isQueryFamily &&
+  (await getApiVersions(collection!))?.find((v) => v.isDefault)?.version !== apiVersion;
+
 // Hidden-version suppression. Hidden versions are URL-reachable but
 // excluded from every agent-discovery and SEO surface. When the page
 // belongs to a hidden version we strip:
@@ -158,7 +172,9 @@ const pagePath = barePath === "" ? "/" : appendsSlash ? `${barePath}/` : barePat
 const canonical = Astro.site
   ? versionCanonicalPath
     ? new URL(withBase(versionCanonicalPath, baseUrl), Astro.site).href
-    : new URL(pagePath, Astro.site).href
+    : isNonDefaultQueryVersion
+      ? null
+      : new URL(pagePath, Astro.site).href
   : null;
 const resolvedMarkdownUrl =
   markdownUrl
@@ -228,7 +244,7 @@ const shikiCssHref = withBase(
 
 <meta name="generator" content={Astro.generator} />
 {resolvedDescription && <meta name="description" content={resolvedDescription} />}
-{(noindex || isHiddenVersion) && <meta name="robots" content="noindex" />}
+{(noindex || isHiddenVersion || isNonDefaultQueryVersion) && <meta name="robots" content="noindex" />}
 
 <link rel="icon" type={faviconType} href={faviconHref} />
 <link rel="stylesheet" href={shikiCssHref} />

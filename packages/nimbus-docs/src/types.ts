@@ -279,6 +279,16 @@ export interface ApiSpec {
    */
   versions?: ApiVersionSpec[];
   /**
+   * How a version is addressed in URLs. `"path"` (the default) mounts each
+   * non-default version at `/<collection>/<version>`. `"query"` gives every
+   * operation one URL: `/<collection>/<slug>` with the version in
+   * `?api-version=<id>` — absent means the default, unknown or repeated is
+   * a 404, and a hidden version's pages are reachable only by query. `"query"`
+   * requires `versions` and the family's effective rendering mode to be
+   * `"request"`: a static site serves the same file whatever the query says.
+   */
+  versionMode?: "path" | "query";
+  /**
    * Require every operation to declare a stable `operationId`. When `false` (the
    * default), an operation missing one warns and falls back to a path-derived
    * coordinate so the spec still renders; that coordinate moves if the method,

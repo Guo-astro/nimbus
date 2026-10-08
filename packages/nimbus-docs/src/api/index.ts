@@ -101,7 +101,7 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
   // path, `requireOperationId`, `schemaPages`, the route policy, and the sample
   // policy are keyed too, since each changes the output — two versions with
   // identical spec bytes but different policies must never alias.
-  const key = `${source.collection}::${source.mountPath ?? ""}::${
+  const key = `${source.collection}::${source.mountPath ?? ""}::${source.urlBasePath ?? ""}::${source.urlQuery ?? ""}::${
     source.requireOperationId ? "strictOpId" : ""
   }::${source.schemaPages ? "schemaPages" : ""}::${stableStringify(source.routes)}::${stableStringify(source.samples)}::${specDigest(raw)}`;
   const cached = handleCache.get(key);
@@ -161,7 +161,7 @@ export async function getApiModel(
     await import("../_internal/api/runtime-build-config.js");
   const { resolveSpecSource } =
     await import("../_internal/api/resolve-spec.js");
-  const { resolveApiVersion } =
+  const { resolveApiVersion, targetUrlFields } =
     await import("../_internal/api/resolve-versions.js");
   const { api, root } = await loadApiBuildConfig();
   const resolved = resolveApiVersion(api, collection, version ?? null);
@@ -187,6 +187,7 @@ export async function getApiModel(
       spec: resolved.spec,
       label: resolved.label,
       mountPath: resolved.mountPath,
+      ...targetUrlFields(resolved),
       requireOperationId: resolved.requireOperationId,
       schemaPages: resolved.schemaPages,
       routes: resolved.routes,

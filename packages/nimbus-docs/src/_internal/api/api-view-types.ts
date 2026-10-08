@@ -31,6 +31,14 @@ export interface SpecSource {
   label?: string;
   /** Base URL for this model's pages. Defaults to `/<collection>` when absent. */
   mountPath?: string;
+  /**
+   * Public URL base, when it differs from `mountPath`: a query-mode version
+   * mounts its store at `mountPath` but its pages live at the version-free
+   * family base.
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
@@ -101,7 +109,9 @@ export interface ApiPageBase {
   collection: string;
   coordinate: string;
   href: string;
-  markdownHref: string;
+  /** The page's clean-Markdown URL, or `null` when the page has no per-page
+   *  Markdown affordance (a non-default query-mode version). */
+  markdownHref: string | null;
   tokenCount?: number;
   title: string;
   description?: string;

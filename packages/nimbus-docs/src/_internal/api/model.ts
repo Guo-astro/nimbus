@@ -404,6 +404,13 @@ export interface DocsModel {
    * shared coordinate.
    */
   mountPath?: string;
+  /**
+   * Public URL base when it differs from `mountPath` (query-mode versions
+   * share the version-free family base while their stores stay versioned).
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   nodes: Map<Coordinate, Node>;
   pages: PageGraph;
   nav: NavTree;

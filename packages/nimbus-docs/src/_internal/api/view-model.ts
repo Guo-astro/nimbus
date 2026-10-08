@@ -99,14 +99,16 @@ class ModelView {
     return this.apiFacts?.securitySchemes?.[name];
   }
 
-  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`. */
+  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`.
+   *  In query mode every same-version link carries the version's query. */
   href(coordinate: Coordinate): string {
-    return toDocumentHref(this.routePath(coordinate));
+    return `${toDocumentHref(this.routePath(coordinate))}${this.model.urlQuery ?? ""}`;
   }
 
   private routePath(coordinate: Coordinate): string {
     const slug = this.model.pages.slugs.get(coordinate);
-    const base = this.model.mountPath ?? `/${this.model.collection}`;
+    const base =
+      this.model.urlBasePath ?? this.model.mountPath ?? `/${this.model.collection}`;
     if (slug === undefined || slug === "") return base;
     return `${base}/${slug}`;
   }
@@ -117,7 +119,11 @@ class ModelView {
     return this.model.pages.pages.has(coordinate);
   }
 
-  markdownHref(coordinate: Coordinate): string {
+  markdownHref(coordinate: Coordinate): string | null {
+    // A non-default query-mode page has no per-page Markdown affordance:
+    // only default-version entries publish twins, and this page's
+    // version-free `.md` URL would be another version's content.
+    if (this.model.urlQuery) return null;
     return `${this.routePath(coordinate)}/index.md`;
   }
 }

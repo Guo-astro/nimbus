@@ -477,6 +477,57 @@
         "Open a built page: groups toggle with JavaScript off, every link is in the HTML, and the current page's groups are open.",
         "Check open-group and scroll persistence across pages, and the drawer on mobile (focus return, Escape, backdrop)."
       ]
+    },
+    {
+      "id": "api-query-version-mode",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "api-query-version-mode",
+      "summary": "Opt a request-rendered API family into query-addressed versions: one URL per operation, the version in ?api-version=.",
+      "affected": "Only families that set versionMode: \"query\". Path mode stays the default; see api-version-id-format for the version id rule that applies to both modes.",
+      "instructions": [
+        "Families that don't set versionMode keep path versions: existing routes, store ids, URLs, alternates, sitemaps, and agent files are unchanged.",
+        "To adopt query versions on a family, set versionMode: \"query\" on its api entry. It requires \"versions\" and the family's effective rendering mode to be \"request\" — a static site serves the same file whatever the query says.",
+        "In query mode: /<family>/<slug> renders the default version; ?api-version=<id> selects another; an unknown or version-prefixed path URL is a 404. Every generated same-version link carries the version's query; discovery (sitemap, Markdown twins, llms indexes) covers the default version at version-free URLs; non-default pages are noindex with the default counterpart as canonical and no per-page Markdown affordance.",
+        "Adopters must also update three copied files. The API catch-all route (src/pages/<family>/[...slug].astro from the api-reference recipe): derive the social image from the pathname and fall back to the shared image when the page URL carries a query, and pass markdownUrl={page.markdownHref ?? undefined} — the recipe's current form is the reference. A copied BaseLayout and AgentDirective: update with nimbus-docs diff src/layouts/BaseLayout.astro --apply and nimbus-docs diff src/components/AgentDirective.astro --apply, so a page without per-page Markdown still emits an index-only agent directive."
+      ],
+      "verify": [
+        "Request /<family>/x/, /<family>/x/?api-version=<default>, and ?api-version=<other> and confirm the right versions render; an unknown id returns the 404 page.",
+        "Confirm the sitemap lists each visible path once with no api-version, and llms.txt links only default-version pages.",
+        "On a non-default page, confirm og:image is the shared site image (no query inside the file name) and the agent directive links only the llms.txt index."
+      ]
+    },
+    {
+      "id": "api-version-id-format",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-query-version-mode",
+      "summary": "API version ids may contain dots, and must start and end with a lowercase letter or digit.",
+      "affected": "API families in either mode whose version ids start or end with a dash, such as -v1 or v1-. The build fails validation with a message naming the field.",
+      "instructions": [
+        "Rename each affected id in api[].versions[].version so it starts and ends with a letter or digit, for example v1-beta instead of v1-.",
+        "In path mode the id is the URL segment, so a rename moves that version's pages (/api/v1-/x/ becomes /api/v1/x/). Add redirects from the old paths if they were published."
+      ],
+      "verify": [
+        "Run the build: it passes config validation.",
+        "Request a renamed version's old and new paths and confirm the redirect and the new page."
+      ]
+    },
+    {
+      "id": "version-switcher-keeps-query",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-query-version-mode",
+      "summary": "The starter VersionSwitcher's active item keeps the page's API version.",
+      "affected": "Projects with a copied VersionSwitcher that adopt versionMode: \"query\" — the old copy drops ?api-version= from the active item, so clicking it would jump to the default version.",
+      "instructions": [
+        "If the project doesn't use versionMode: \"query\", no change is needed; the updated component is otherwise identical.",
+        "Update an unmodified copy with nimbus-docs diff src/components/ui/version-switcher/VersionSwitcher.astro --apply.",
+        "In a customized copy, take the active item's href from the page's own alternates record (record.self.url), and without one use the current pathname plus that version's ?api-version= query. Don't copy the whole query string: unrelated parameters such as utm_source don't belong in the link."
+      ],
+      "verify": [
+        "On a query-versioned API page with ?api-version= set, open the switcher and confirm the active item's link keeps the query."
+      ]
     }
   ]
 }

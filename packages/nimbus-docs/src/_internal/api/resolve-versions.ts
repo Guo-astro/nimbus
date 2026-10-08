@@ -30,6 +30,7 @@ import type {
   ApiVersionStatus,
 } from "../../types.js";
 import type { RoutePolicy } from "./route-policy.js";
+import { toDocumentHref } from "../url.js";
 
 /** One fully-resolved render target — a single version of one API family. */
 export interface ResolvedApiVersion {
@@ -65,6 +66,8 @@ export interface ResolvedApiVersion {
   routes?: RoutePolicy;
   /** How much navigation each page includes. Family-wide; default `"full"`. */
   sidebar: ApiSidebarMode;
+  /** How versions are addressed in URLs. Family-wide; default `"path"`. */
+  versionMode: "path" | "query";
 }
 
 /** An `ApiRoutePolicy` is structurally the engine's `RoutePolicy`; narrow once here. */
@@ -117,6 +120,7 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         samples: entry.samples,
         routes: asRoutePolicy(entry.routes),
         sidebar: entry.sidebar ?? "full",
+        versionMode: "path",
       },
     ];
   }
@@ -141,8 +145,96 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       samples: entry.samples,
       routes: asRoutePolicy(v.routes),
       sidebar: entry.sidebar ?? "full",
+      versionMode: entry.versionMode ?? "path",
     };
   });
+}
+
+/** The fixed query parameter that carries the version in query mode. */
+export const API_VERSION_PARAM = "api-version";
+
+/**
+ * The one URL builder every producer goes through. In path mode a page's URL
+ * is its mount path plus the slug, as always. In query mode every version
+ * shares the version-free `/<family>/<slug>` URL, and a non-default target
+ * appends `?api-version=<id>` — links whose job is to stay inside a
+ * non-default version carry it; the default's links carry none.
+ */
+export function pageUrl(
+  target: Pick<
+    ResolvedApiVersion,
+    "family" | "mountPath" | "versionMode" | "isDefault" | "version"
+  >,
+  slug: string,
+): string {
+  const base =
+    target.versionMode === "query" ? `/${target.family}` : target.mountPath;
+  const path = slug === "" ? base : `${base}/${slug}`;
+  return `${toDocumentHref(path)}${apiVersionQuery(target)}`;
+}
+
+/** The `?api-version=` suffix a non-default query-mode target's links carry. */
+export function apiVersionQuery(
+  target: Pick<ResolvedApiVersion, "versionMode" | "isDefault" | "version">,
+): string {
+  return target.versionMode === "query" && !target.isDefault && target.version
+    ? `?${API_VERSION_PARAM}=${encodeURIComponent(target.version)}`
+    : "";
+}
+
+/**
+ * The SpecSource/bounds URL fields a target contributes. Query-mode targets
+ * publish at the version-free family base with the version in the query;
+ * path-mode targets contribute nothing (mountPath already carries the URL).
+ */
+export function targetUrlFields(
+  target: Pick<
+    ResolvedApiVersion,
+    "family" | "versionMode" | "isDefault" | "version"
+  >,
+): { urlBasePath?: string; urlQuery?: string } {
+  if (target.versionMode !== "query") return {};
+  const query = apiVersionQuery(target);
+  return {
+    urlBasePath: `/${target.family}`,
+    ...(query ? { urlQuery: query } : {}),
+  };
+}
+
+/** Query-mode routing for one family: its default and every valid id. */
+export interface ApiQueryRouting {
+  defaultVersion: string;
+  versions: ReadonlySet<string>;
+}
+
+/** `null` for a path-mode family or an unknown collection. */
+export function apiQueryRouting(
+  api: ApiSpec[] | undefined,
+  collection: string,
+): ApiQueryRouting | null {
+  const entry = (api ?? []).find((candidate) => candidate.collection === collection);
+  if (!entry || entry.versionMode !== "query" || !entry.versions) return null;
+  const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
+  return {
+    defaultVersion: fallback!.version,
+    versions: new Set(entry.versions.map((v) => v.version)),
+  };
+}
+
+/**
+ * The version a request selects, or `null` when it selects none: an unknown
+ * id, or the parameter given more than once (caches and query-sorting
+ * proxies may reorder repeats, so no value wins). Absent or empty selects the
+ * default.
+ */
+export function selectApiVersion(
+  params: URLSearchParams,
+  routing: ApiQueryRouting,
+): string | null {
+  const values = params.getAll(API_VERSION_PARAM);
+  if (values.length > 1) return null;
+  const selected = values[0] ? values[0] : routing.defaultVersion;
+  return routing.versions.has(selected) ? selected : null;
 }
 
 /** Every render target across every declared family. */

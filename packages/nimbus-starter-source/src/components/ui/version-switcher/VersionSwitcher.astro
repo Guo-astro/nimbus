@@ -67,10 +67,13 @@ if (apiCollection) {
 
     entries = visible.map((v) => {
       const isActive = v.version === activeVersion;
-      // The sibling if the op exists in that version, else the version landing.
-      const href = isActive
-        ? currentPath
-        : (altByVersion.get(v.version) ?? v.url);
+      // The sibling if the op exists in that version, else the version
+      // landing. The active entry stays on this page: its own record, or
+      // without one the current path plus the version's `?api-version=`
+      // (taken from its landing URL; other query params are dropped).
+      const href =
+        altByVersion.get(v.version) ??
+        (isActive ? currentPath + new URL(v.url, "http://x").search : v.url);
       return {
         version: v.version,
         label: v.label,

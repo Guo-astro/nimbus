@@ -278,6 +278,13 @@ export interface ApiCollectionOptions {
    * one of `spec` or `versions`.
    */
   versions?: ApiVersionSpec[];
+  /**
+   * How versions are addressed in URLs: `"path"` (default) mounts each
+   * non-default version under `/<collection>/<version>`; `"query"` keeps one
+   * URL per operation and selects the version with `?api-version=<id>`.
+   * Mirrors the `api[].versionMode` entry in the Nimbus config.
+   */
+  versionMode?: "path" | "query";
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
@@ -343,6 +350,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
     spec: options.spec,
     label: options.label,
     versions: options.versions,
+    versionMode: options.versionMode,
     requireOperationId: options.requireOperationId,
     schemaPages: options.schemaPages,
     samples: options.samples,
@@ -368,7 +376,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, routes } =
+      const { collection, spec, label, versions, versionMode, requireOperationId, schemaPages, samples, routes } =
         explicit ?? registered!;
       // The sidebar mode always comes from the Nimbus config's `api` entry:
       // request rendering and the build's component check read it there too.
@@ -402,6 +410,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         registerConfiguredApiModel,
         resolveApiFamily,
         resolveSpecSource,
+        targetUrlFields,
       } = await loadApiLoader();
 
       const rootDir = fileURLToPath(astroConfig.root);
@@ -415,6 +424,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         spec,
         label,
         versions,
+        versionMode,
         requireOperationId,
         schemaPages,
         samples,
@@ -454,6 +464,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 spec: target.spec,
                 label: target.label,
                 mountPath: target.mountPath,
+                ...targetUrlFields(target),
                 requireOperationId: target.requireOperationId,
                 schemaPages: target.schemaPages,
                 routes: target.routes,
@@ -466,7 +477,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
               collection,
               target.version ?? null,
               model,
-              { sidebar: target.sidebar, mountPath: target.mountPath },
+              {
+                sidebar: target.sidebar,
+                mountPath: target.mountPath,
+                ...targetUrlFields(target),
+              },
             );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; surface

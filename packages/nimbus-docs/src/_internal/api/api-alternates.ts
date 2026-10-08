@@ -28,7 +28,6 @@
  */
 
 import type { ApiSpec } from "../../types.js";
-import { toDocumentHref } from "../url.js";
 import type {
   VersionAlternatesTable,
   VersionPageRef,
@@ -44,7 +43,7 @@ export async function buildApiVersionAlternates(
   );
   if (families.length === 0) return {};
 
-  const { resolveApiFamily } = await import("./resolve-versions.js");
+  const { pageUrl, resolveApiFamily, targetUrlFields } = await import("./resolve-versions.js");
   const { resolveSpecSource } = await import("./resolve-spec.js");
   const { buildApiModel, getApiPageSlugs } = await import("../../api/index.js");
   const { operationShapes } = await import("./view-model.js");
@@ -73,6 +72,7 @@ export async function buildApiVersionAlternates(
             spec: target.spec,
             label: target.label,
             mountPath: target.mountPath,
+            ...targetUrlFields(target),
             requireOperationId: target.requireOperationId,
             schemaPages: target.schemaPages,
             routes: target.routes,
@@ -90,13 +90,11 @@ export async function buildApiVersionAlternates(
       }
       shapesByVersion.set(target.version!, operationShapes(unwrapModel(model)));
       for (const { coordinate, slug } of getApiPageSlugs(model)) {
-        const path =
-          slug === "" ? target.mountPath : `${target.mountPath}/${slug}`;
         const ref: VersionPageRef = {
           collection: target.versionKey,
           version: target.version!,
           slug: coordinate,
-          url: toDocumentHref(path),
+          url: pageUrl(target, slug),
         };
         const bucket = byCoordinate.get(coordinate);
         if (bucket) bucket.push(ref);

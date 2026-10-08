@@ -21,7 +21,11 @@ import {
 import { registerConfiguredApiProjector } from "./api-projector.js";
 import { applyApiSidebarMode } from "./api/nav-bounds.js";
 import { resolveSpecSource } from "./api/resolve-spec.js";
-import { resolveApiFamily, resolveApiVersion } from "./api/resolve-versions.js";
+import {
+  resolveApiFamily,
+  resolveApiVersion,
+  targetUrlFields,
+} from "./api/resolve-versions.js";
 import type { ApiSidebarMode, ApiSpec } from "../types.js";
 
 export {
@@ -32,13 +36,21 @@ export {
   getApiRouteProvenance,
 } from "../api/index.js";
 export { buildApiModel, resolveSpecSource };
-export { apiPageRoute, resolveApiFamily } from "./api/resolve-versions.js";
+export {
+  apiPageRoute,
+  apiVersionQuery,
+  pageUrl,
+  resolveApiFamily,
+  targetUrlFields,
+} from "./api/resolve-versions.js";
 export { prepareApiNav, preparedApiVersion } from "./api/prepared.js";
 
 /** Where a projected page's navigation is bounded. Omitted = the full tree. */
 interface ApiNavBounds {
   sidebar: ApiSidebarMode;
   mountPath: string;
+  urlBasePath?: string;
+  urlQuery?: string;
 }
 
 const preparedNavCache = new WeakMap<ApiModel, PreparedApiNav>();
@@ -90,7 +102,13 @@ function projectedNav(
 ): ApiNav {
   const nav = activatePreparedApiNav(preparedNavOf(model), coordinate);
   return bounds
-    ? applyApiSidebarMode(nav, { mode: bounds.sidebar, mountPath: bounds.mountPath, overview })
+    ? applyApiSidebarMode(nav, {
+        mode: bounds.sidebar,
+        mountPath: bounds.mountPath,
+        urlBasePath: bounds.urlBasePath,
+        urlQuery: bounds.urlQuery,
+        overview,
+      })
     : nav;
 }
 
@@ -228,9 +246,14 @@ function configuredApiModel(
   let model = configuredModels.get(key);
   if (!model) {
     const target = configuredTarget(collection, version);
+    // Query-mode targets publish at the version-free family URL with the
+    // version in the query; the model's URL fields drive every generated
+    // same-version link (ModelView.href), so they must match the loader's.
+    const queryUrl = targetUrlFields(target);
     configuredBounds.set(key, {
       sidebar: target.sidebar,
       mountPath: target.mountPath,
+      ...queryUrl,
     });
     model = resolveSpecSource(
       {
@@ -238,6 +261,7 @@ function configuredApiModel(
         spec: target.spec,
         label: target.label,
         mountPath: target.mountPath,
+        ...queryUrl,
         requireOperationId: target.requireOperationId,
         schemaPages: target.schemaPages,
         routes: target.routes,

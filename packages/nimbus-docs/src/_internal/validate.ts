@@ -289,8 +289,8 @@ const apiVersionSpecShape = {
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
     .min(1, '"api[].versions[].version" must be a non-empty string')
     .regex(
-      /^[a-z0-9-]+$/,
-      '"api[].versions[].version" must be lowercase letters, digits, and dashes only (it becomes a URL segment)',
+      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
+      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and an api-version query value)',
     ),
   spec: specSourceSchema,
   default: z.boolean().optional(),
@@ -330,6 +330,11 @@ const apiSpecShape = {
   spec: specSourceSchema.optional(),
   label: z.string().optional(),
   versions: z.array(apiVersionSpecSchema).optional(),
+  versionMode: z
+    .enum(["path", "query"], {
+      error: '"api[].versionMode" must be "path" or "query"',
+    })
+    .optional(),
   requireOperationId: z
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
@@ -376,7 +381,16 @@ const apiSpecSchema = z
         message: `api collection "${entry.collection}" sets "routes" at the family level, but a version family carries no shared route policy — move "routes" onto each version entry.`,
       });
     }
-    if (!hasVersions) return;
+    if (!hasVersions) {
+      if (entry.versionMode === "query") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["versionMode"],
+          message: `api collection "${entry.collection}" sets versionMode: "query" without "versions" — the query carries a version id, so a single-spec collection has nothing to select`,
+        });
+      }
+      return;
+    }
 
     const versions = entry.versions!;
     if (versions.length === 0) {
@@ -542,6 +556,28 @@ const nimbusConfigSchema = withStrictKeys(
     contextLabel: "Config field",
   },
 ).superRefine((data, ctx) => {
+  // Query-mode versions need request rendering: a static site serves the
+  // same file whatever the query says. The effective mode uses the same
+  // precedence `compileRenderingPolicy` does — the collection override,
+  // else the default.
+  const shaped = data as {
+    api?: { collection?: string; versionMode?: string }[];
+    rendering?: { default?: string; collections?: Record<string, string> };
+  };
+  (shaped.api ?? []).forEach((entry, i) => {
+    if (entry.versionMode !== "query" || !entry.collection) return;
+    const effective =
+      shaped.rendering?.collections?.[entry.collection] ??
+      shaped.rendering?.default ??
+      "build";
+    if (effective !== "request") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["api", i, "versionMode"],
+        message: `api collection "${entry.collection}" sets versionMode: "query", but its effective rendering mode is "${effective}" — query versions need request rendering: a static site serves the same file whatever the query says`,
+      });
+    }
+  });
   // A remote reference must not shadow a locally-built collection.
   const cfg = data as { api?: { collection?: string }[]; apiReferences?: { collection?: string }[] };
   const local = new Set((cfg.api ?? []).map((e) => e.collection));

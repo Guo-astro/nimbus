@@ -25,8 +25,23 @@ async function pageEntry(context: APIContext) {
   const pathname = context.url.pathname;
   if (prefix && !pathname.startsWith(`${prefix}/`)) return undefined;
   const route = toRouteKey(pathname.slice(prefix.length) || "/");
+  // Separate destructured imports keep the Worker tree-shakable; a
+  // `Promise.all` of whole modules pulls in the Markdown renderer.
   const { getIndexedEntries } = await import("../runtime.js");
-  return (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
+  const entry = (await getIndexedEntries()).find((item) => toRouteKey(item.url) === route);
+  if (!entry) return undefined;
+  // Query-addressed versions: the index holds only the default version, so a
+  // pathname match under `?api-version=<non-default>` would negotiate the
+  // DEFAULT version's Markdown beneath another version's HTML. Those pages
+  // have no per-page Markdown affordance; don't negotiate. Path-mode
+  // collections return no routing and keep ignoring the parameter.
+  const { loadNimbusConfig } = await import("./runtime-config.js");
+  const { apiQueryRouting, selectApiVersion } = await import("./api/resolve-versions.js");
+  const routing = apiQueryRouting((await loadNimbusConfig()).api, entry.collection);
+  if (routing && selectApiVersion(context.url.searchParams, routing) !== routing.defaultVersion) {
+    return undefined;
+  }
+  return entry;
 }
 
 async function homepageMarkdownFallback(context: APIContext): Promise<Response | undefined> {

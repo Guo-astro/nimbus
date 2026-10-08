@@ -105,7 +105,6 @@ The collection name **must**:
 - Contain only `a-z`, `0-9`, `-`, `_`
 - Not collide with any existing collection in `content.config.ts`
 - Not be `docs` or `partials` (reserved)
-- Not start with `_` (the "loaded but excluded from indexing" prefix)
 
 If the user picks a `docs-<slug>` name, note that — see step 5 about
 versioning.

@@ -121,6 +121,9 @@ export interface PartialsCollectionOptions<
 
 const DEFAULT_PATTERN = "**/*.{md,mdx}";
 const NIMBUS_MARKDOWN_GENERATION = 1;
+// One cache across roles: wrapping an already-wrapped loader must return it
+// unchanged (whatever role it was wrapped with), or the nested wrappers would
+// queue the same collection transaction inside itself and deadlock the load.
 const wrappedMarkdownLoaders = new WeakMap<Loader, Loader>();
 
 type ApiLoaderModule = typeof import("./_internal/api-loader.js");
@@ -134,6 +137,21 @@ function loadApiLoader(): Promise<ApiLoaderModule> {
 }
 
 export function withNimbusMarkdown<T extends Loader>(loader: T): T {
+  return wrapNimbusMarkdown(loader, "page");
+}
+
+/**
+ * Shared implementation behind `withNimbusMarkdown()` (role `page`) and
+ * `partialsCollection()` (role `partials`). The role is recorded on the
+ * prepared-markdown registry commit and decides whether the collection's
+ * entries are pages. It is fixed when a loader is first wrapped: the helpers
+ * each wrap a fresh loader, so the only way to hit the cache with a different
+ * role is to re-wrap an existing wrapper, which stays a no-op.
+ */
+function wrapNimbusMarkdown<T extends Loader>(
+  loader: T,
+  role: "page" | "partials",
+): T {
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
 
@@ -143,6 +161,7 @@ export function withNimbusMarkdown<T extends Loader>(loader: T): T {
     const prepared = prepareMarkdownLoader(loader, {
       generation: NIMBUS_MARKDOWN_GENERATION,
       base,
+      role,
       transformRenderMarkdown: false,
       transform: (source, sourceId) =>
         normalizeAuthoredLinks(source, {
@@ -205,7 +224,7 @@ export function partialsCollection<
     : partialsSchema;
 
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: wrapNimbusMarkdown(glob({ base, pattern }), "partials"),
     schema,
   };
 }

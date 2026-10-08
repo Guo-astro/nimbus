@@ -323,26 +323,3 @@ function findStatementEnd(source: string, from: number): number {
   }
   return source.length;
 }
-
-// ---------------------------------------------------------------------------
-// Reserved-name filter
-// ---------------------------------------------------------------------------
-
-/**
- * Collection names that should never appear in the agent-facing index,
- * regardless of how they were registered. The rule pair is intentionally
- * minimal so the convention is easy to remember:
- *
- *   - `partials` — Nimbus's built-in factory for `<Render slug=…/>`
- *     snippets. They're component content, not pages.
- *   - any name starting with `_` — author-chosen "loaded but internal"
- *     marker (e.g. `_drafts`, `_archive`, `_legacy`).
- */
-const RESERVED_LITERAL = new Set(["partials"]);
-const RESERVED_PREFIX = "_";
-
-export function filterIndexableCollections(names: string[]): string[] {
-  return names.filter(
-    (name) => !RESERVED_LITERAL.has(name) && !name.startsWith(RESERVED_PREFIX),
-  );
-}

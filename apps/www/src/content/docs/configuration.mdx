@@ -80,7 +80,7 @@ Run the production build after changing output mode or rendering policy. It is t
 
 #### Mix build and request rendering
 
-`rendering.default` applies to every registered collection with a canonical catch-all route. `rendering.collections` overrides that mode by Astro collection name, not by URL or version.
+`rendering.default` applies to `docs`, version collections, and API collections. `rendering.collections` sets a mode by Astro collection name, not by URL or version — and it is how any other page collection with its own catch-all route (a `blog`, say) gets a mode: the build fails after content sync if `rendering` is set and such a collection isn't listed.
 
 Render most collections on request but keep an archive prerendered:
 

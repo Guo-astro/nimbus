@@ -69,11 +69,11 @@ import {
 } from "./lint/site-model.js";
 import { emittedFileRoutes } from "./_internal/emitted-routes.js";
 import { routeKey } from "./_internal/route-key.js";
+import { parseCollectionBases } from "./_internal/parse-content-collections.js";
 import {
-  filterIndexableCollections,
-  parseCollectionBases,
-  parseContentCollections,
-} from "./_internal/parse-content-collections.js";
+  pageCollectionsFilePath,
+  resolvePageCollections,
+} from "./_internal/page-collections.js";
 import { defaultCodeTransformers } from "./_internal/code-transformers.js";
 import {
   formatFailures,
@@ -153,10 +153,14 @@ import { resolveSite } from "./_internal/site-detect.js";
 import {
   canonicalCollectionRouteComponent,
   compileRenderingPolicy,
+  type CompiledRenderingPolicy,
   normalizeRouteComponent,
   routeComponentKeys,
 } from "./_internal/rendering-policy.js";
-import { collectionMountPrefix } from "./_internal/collection-mount.js";
+import {
+  collectionMountPrefix,
+  PRIMARY_COLLECTION,
+} from "./_internal/collection-mount.js";
 import {
   isRequiredCanonicalRouteComponent,
   normalizeRouteEntrypoint,
@@ -495,8 +499,37 @@ export function nimbus(
   // What `astro:build:setup` hashes into the sidebar's build id.
   let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
-  let indexedCollectionsForBuild: string[] = [];
   let apiCollectionsForBuild: string[] = [];
+  // The before-sync rendering policy, kept for the post-sync page checks.
+  let compiledPolicyForBuild: CompiledRenderingPolicy | null = null;
+  // Parsed MDX-validation inputs, run against the page and partials
+  // collections once the record exists. `null` when validation is off.
+  let mdxValidationForBuild: {
+    globals: Awaited<ReturnType<typeof parseComponentsRegistry>>;
+    contentDirs?: string[];
+    skip?: (filePath: string) => boolean;
+  } | null = null;
+  const getPageCollectionsForBuild = () =>
+    resolvePageCollections(projectRootForBuild, {
+      versionsOthers: config.versions?.others,
+      apiCollections: apiCollectionsForBuild,
+    });
+  // Project-relative `.mdx` paths of every page- and partials-role entry the
+  // registry recorded: what the build's MDX pass validates, and what the
+  // build publishes for `nimbus-docs check` to validate identically.
+  const recordedMdxFiles = (): string[] => {
+    const snapshot = getPreparedMarkdownSnapshot(projectRootForBuild);
+    const files = new Set<string>();
+    for (const value of snapshot?.collections.values() ?? []) {
+      if (value.role !== "page" && value.role !== "partials") continue;
+      for (const entry of value.entries.values()) {
+        if (entry.filePath && /\.mdx$/iu.test(entry.filePath)) {
+          files.add(entry.filePath.replaceAll("\\", "/"));
+        }
+      }
+    }
+    return [...files].sort();
+  };
   const markdownRoutes = markdownRoutesPlugin();
   let astroRootForBuild: URL | undefined;
   let prerenderConflictBehaviorForBuild: "error" | "warn" | "ignore" = "warn";
@@ -637,6 +670,149 @@ export function nimbus(
     };
   };
 
+  /**
+   * Checks that need the page-collection list, which exists only after
+   * content sync: `versions.others` coverage, the rendering policy's two
+   * post-sync cases, and the `nimbus/duplicate-slug` validator. Runs in
+   * `astro:build:start` and, in dev, `astro:server:start`. Skipped when the
+   * record is empty (nothing has synced — a site with no collections).
+   */
+  const runPostSyncPageChecks = async (logger: {
+    warn: (message: string) => void;
+    info: (message: string) => void;
+  }): Promise<void> => {
+    if (!getPreparedMarkdownSnapshot(projectRootForBuild)) return;
+    const pageCollections = await getPageCollectionsForBuild();
+    const pageSet = new Set(pageCollections);
+    const versionInfo = config.versions
+      ? { others: config.versions.others ?? [] }
+      : null;
+
+    // Every `docs-<v>` in `versions.others` must be a page collection.
+    const missingVersions = (config.versions?.others ?? []).filter(
+      (slug) => !pageSet.has(`docs-${slug}`),
+    );
+    if (missingVersions.length > 0) {
+      const lines = missingVersions.map(
+        (slug) =>
+          `  - "${slug}" → expected a page collection named "docs-${slug}" ` +
+          `(e.g. \`"docs-${slug}": docsCollection({ base: "docs-${slug}" })\`)`,
+      );
+      throw new Error(
+        `nimbus-docs: \`versions.others\` references versions without matching page collections:\n${lines.join("\n")}\n\n` +
+          `Every entry in \`versions.others\` must correspond to a collection made with a Nimbus ` +
+          `page helper in src/content.config.ts. Register the collection(s) above and try again.`,
+      );
+    }
+
+    if (config.rendering) {
+      // A `rendering.collections` key must name a page collection.
+      const unknown = Object.keys(config.rendering.collections ?? {}).filter(
+        (collection) => !pageSet.has(collection),
+      );
+      if (unknown.length > 0) {
+        throw new Error(
+          `nimbus-docs: rendering.collections names ${unknown.length === 1 ? "a collection that is not a Nimbus page collection" : "collections that are not Nimbus page collections"}:\n` +
+            unknown.map((collection) => `  - "${collection}"`).join("\n") +
+            "\n\nPage collections are made with docsCollection(), componentsCollection(), or " +
+            "withNimbusMarkdown(), plus version and API collections. A plain Astro data " +
+            "collection has no rendering mode.",
+        );
+      }
+      // A page collection with a catch-all route at its mount needs a mode.
+      const covered = new Set(
+        Object.keys(compiledPolicyForBuild?.collections ?? {}),
+      );
+      const uncovered = pageCollections.filter((collection) => {
+        if (covered.has(collection)) return false;
+        return fs.existsSync(
+          canonicalCollectionRouteComponent(
+            srcDirForBuild,
+            collection,
+            versionInfo,
+          ),
+        );
+      });
+      if (uncovered.length > 0) {
+        throw new Error(
+          `nimbus-docs: \`rendering\` is set, but it doesn't cover page collection${uncovered.length === 1 ? "" : "s"} ` +
+            `with a catch-all route:\n` +
+            uncovered.map((collection) => `  - "${collection}"`).join("\n") +
+            `\n\nAdd ${uncovered.map((collection) => `"${collection}"`).join(", ")} to rendering.collections ` +
+            "(\`rendering.default\` covers only docs, version, and API collections).",
+        );
+      }
+    }
+
+    // Pre-render MDX validation, scoped to what Nimbus renders: the page
+    // collections and every partials collection. A plain data collection's
+    // files are its own business — Nimbus doesn't check them or fail on
+    // them. Explicit `validateMdx.contentDirs` keep scanning exactly what
+    // the user listed. (A content pass, not a remark plugin: Sätteri
+    // replaces unified's pipeline and silently disables remark plugins.)
+    if (mdxValidationForBuild?.globals) {
+      // Exactly the files Nimbus renders: every page- and partials-role
+      // entry the registry recorded, whatever loader base or pattern
+      // produced it. Explicit `contentDirs` keep the walk-as-given mode.
+      const files = recordedMdxFiles().map((file) =>
+        path.resolve(projectRootForBuild, file),
+      );
+      const failures = await validateMdxContent({
+        globals: mdxValidationForBuild.globals,
+        ...(mdxValidationForBuild.contentDirs
+          ? { contentDirs: mdxValidationForBuild.contentDirs }
+          : { contentDirs: [], files }),
+        skip: mdxValidationForBuild.skip,
+        projectRoot: projectRootForBuild,
+      });
+      if (failures.length > 0) {
+        throw authorError(formatFailures(failures));
+      }
+      logger.info(
+        `MDX validation passed — ${mdxValidationForBuild.globals.length} global component${mdxValidationForBuild.globals.length === 1 ? "" : "s"} registered.`,
+      );
+    }
+
+    // Build validator `nimbus/duplicate-slug`: two sources that resolve to
+    // the same URL silently shadow each other during `astro build` (Astro
+    // dedupes colliding routes before the integration sees them). The check
+    // walks only page collections' source folders — the registry's store
+    // keeps one entry per id, so reading it would hide collisions inside one
+    // collection (`docs/foo.mdx` vs `docs/foo/index.mdx`). Each folder comes
+    // from `parseCollectionBases` (a `base:` lookup, not a classification),
+    // and falls back to the collection name.
+    const collectionBases = await parseCollectionBases(
+      path.join(srcDirForBuild, "content.config.ts"),
+    );
+    const pageBases = new Map<string, string>();
+    for (const key of pageCollections) {
+      pageBases.set(key, collectionBases?.get(key) ?? key);
+    }
+    const contentOwners: RouteOwner[] = enumerateEntriesByBase(
+      path.join(projectRootForBuild, "src/content"),
+      pageBases,
+    ).map((entry) => ({
+      url: contentEntryUrl(entry, versionInfo),
+      source: `src/content/${entry.relPath}`,
+      kind: "content" as const,
+    }));
+    const pageOwners: RouteOwner[] = enumerateStaticPageRoutes(
+      path.join(srcDirForBuild, "pages"),
+      projectRootForBuild,
+    ).map((route) => ({ ...route, kind: "page" as const }));
+    const duplicateRoutes = findDuplicateRoutes([
+      ...contentOwners,
+      ...pageOwners,
+    ]);
+    // Page-over-content shadows warn; ambiguous clashes fail the build.
+    const shadowed = duplicateRoutes.filter((d) => d.shadowedByPage);
+    const collisions = duplicateRoutes.filter((d) => !d.shadowedByPage);
+    if (shadowed.length > 0) logger.warn(formatShadowedRoutes(shadowed));
+    if (collisions.length > 0) {
+      throw authorError(formatDuplicateRoutes(collisions));
+    }
+  };
+
   return {
     name: "@cloudflare/nimbus-docs",
     hooks: {
@@ -707,8 +883,6 @@ export function nimbus(
               title: config.title,
               description: config.description,
               socialImage: config.socialImage,
-              indexedCollections: indexedCollectionsForBuild,
-              apiCollections: apiCollectionsForBuild,
               versions: config.versions,
               citationIndex,
               componentMap: options.markdown?.componentMap,
@@ -813,7 +987,6 @@ export function nimbus(
             agentEndpointAssets.bakePreparedHeadings({
               root: projectRoot,
               base: astroConfig.base || "/",
-              indexedCollections: indexedCollectionsForBuild,
               partialResolver,
             }),
           astroConfig.base || "/",
@@ -916,27 +1089,26 @@ export function nimbus(
 
           const globals = await parseComponentsRegistry(componentsPath);
           if (globals === null) {
+            mdxValidationForBuild = null;
             logger.warn(
               `MDX validation disabled: \`${path.relative(projectRoot, componentsPath)}\` is missing or does not export a parseable \`components\` object. ` +
                 `Create the file with \`export const components = { /* ... */ };\` or set \`validateMdx: false\` to silence this warning.`,
             );
           } else {
-            const contentDirs = (
-              validateOpts.contentDirs ?? ["src/content"]
-            ).map((d) => (path.isAbsolute(d) ? d : path.join(projectRoot, d)));
-            const failures = await validateMdxContent({
+            // The scan itself runs post-sync (see `runPostSyncPageChecks`):
+            // its default scope is the page and partials collections' source
+            // folders, and which collections those are is known only after
+            // content sync. Explicit `contentDirs` stay scanned as given.
+            mdxValidationForBuild = {
               globals,
-              contentDirs,
+              contentDirs: validateOpts.contentDirs?.map((d) =>
+                path.isAbsolute(d) ? d : path.join(projectRoot, d),
+              ),
               skip: validateOpts.skip,
-              projectRoot,
-            });
-            if (failures.length > 0) {
-              throw authorError(formatFailures(failures));
-            }
-            logger.info(
-              `MDX validation passed — ${globals.length} global component${globals.length === 1 ? "" : "s"} registered, ${contentDirs.length} content dir${contentDirs.length === 1 ? "" : "s"} scanned.`,
-            );
+            };
           }
+        } else {
+          mdxValidationForBuild = null;
         }
 
         // Parse user's content.config.ts to enumerate registered
@@ -991,45 +1163,23 @@ export function nimbus(
           await registerCodeBlockStyles(codeBlocks);
         }
 
-        // Parse `content.config.ts` up front: we need
-        //   - the registered collection set (for `virtual:nimbus/config`'s
-        //     indexable list);
-        //   - the (key → base) map (for the duplicate-slug walk, so a
-        //     `docsCollection({ base: "documentation" })` collection gets
-        //     scanned at the right on-disk location rather than being
-        //     silently skipped).
+        // Which collections are pages is decided by the prepared-markdown
+        // registry record (collections made with Nimbus's helpers), not by
+        // parsing `content.config.ts`. The record exists only after content
+        // sync, so anything decided before sync comes only from config:
+        // `docs` by convention, version collections from `versions`, and API
+        // collections from `api`. API collections carry no MDX body, but
+        // they DO reach the agent index: their `.md` versions are served by
+        // `renderApiPageMarkdown` (dispatched in `renderIndexedEntryMarkdown`),
+        // so llms.txt links resolve.
         const contentConfigPath = path.join(srcDir, "content.config.ts");
-        const parsedCollections =
-          await parseContentCollections(contentConfigPath);
-        const rawCollections = parsedCollections?.names ?? null;
-        const collectionBases = await parseCollectionBases(contentConfigPath);
-        // API collections carry no MDX body, but they DO reach the agent index:
-        // their `.md` versions are served by `renderApiPageMarkdown` (dispatched in
-        // `renderIndexedEntryMarkdown`), so llms.txt links resolve. The
-        // reserved-name filter still applies; `null` (no parseable config) falls
-        // back to `["docs"]`, matching `getIndexedEntries()`.
-        // Which of those are API collections — render-time dispatch (prose vs
-        // emitter) keys off this, and `getApiModel` resolves specs against
-        // `projectRoot` (declared above — the loader's base), not `process.cwd()`.
         const apiCollections = (config.api ?? []).map(
           (entry) => entry.collection,
         );
-        const parsedIndexedCollections =
-          rawCollections === null ||
-          (parsedCollections?.complete === false && rawCollections.length === 0)
-            ? ["docs"]
-            : filterIndexableCollections(rawCollections);
-        const indexedCollections = [
-          ...new Set([
-            ...parsedIndexedCollections,
-            ...(config.versions?.others ?? []).map(
-              (version) => `docs-${version}`,
-            ),
-            ...apiCollections,
-          ]),
-        ];
-        indexedCollectionsForBuild = indexedCollections;
         apiCollectionsForBuild = apiCollections;
+        // A failed or interrupted build must not leave a stale list for
+        // `nimbus-docs check` to trust (same rule as `routes.json`).
+        fs.rmSync(pageCollectionsFilePath(projectRoot), { force: true });
 
         renderingRoutes = new Map();
         requestRenderingConfigured = false;
@@ -1049,29 +1199,20 @@ export function nimbus(
         const versions = config.versions
           ? { others: config.versions.others ?? [] }
           : null;
+        // Anything decided before content sync comes only from config:
+        // `rendering` covers `docs`, version collections, API collections,
+        // and every key in `rendering.collections`. `rendering.default`
+        // can't reach collections the config doesn't name; after sync, a
+        // page collection with a catch-all route the policy doesn't cover
+        // fails the build (see `runPostSyncPageChecks`).
         const candidates = new Set([
-          ...indexedCollections,
+          PRIMARY_COLLECTION,
           ...(config.versions?.others ?? []).map(
             (version) => `docs-${version}`,
           ),
+          ...apiCollections,
+          ...Object.keys(config.rendering?.collections ?? {}),
         ]);
-        if (config.rendering) {
-          const unresolvedOverrides = Object.keys(
-            config.rendering.collections ?? {},
-          ).filter((collection) => !candidates.has(collection));
-          if (
-            parsedCollections?.complete === false &&
-            (config.rendering.default === "request" ||
-              unresolvedOverrides.length > 0)
-          ) {
-            throw new Error(
-              "nimbus-docs: rendering policy cannot safely enumerate collections because " +
-                "`src/content.config.ts` contains registrations Nimbus cannot identify statically. " +
-                "Use explicit top-level collection keys before applying a request default " +
-                "or overriding a collection Nimbus cannot statically identify.",
-            );
-          }
-        }
         const canonicalCollections = [...candidates].filter((collection) => {
           const component = canonicalCollectionRouteComponent(
             srcDir,
@@ -1092,6 +1233,7 @@ export function nimbus(
           config.rendering,
           canonicalCollections,
         );
+        compiledPolicyForBuild = policy;
         requestRenderingConfigured = Object.values(policy.collections).includes(
           "request",
         );
@@ -1221,111 +1363,10 @@ export function nimbus(
           coordinatesManifest = manifest;
         }
 
-        if (rawCollections === null) {
-          logger.warn(
-            `nimbus-docs: \`src/content.config.ts\` is missing. ` +
-              `Falling back to indexing the \`docs\` collection only.`,
-          );
-        } else if (parsedCollections?.complete === false) {
-          logger.warn(
-            "nimbus-docs: `src/content.config.ts` contains collection registrations " +
-              "that cannot be identified statically. Only explicit top-level keys " +
-              "are available to collection-aware tooling.",
-          );
-        }
-
-        // Build validator `nimbus/duplicate-slug`: two sources that resolve
-        // to the same URL silently shadow each other during `astro build`.
-        // Runs pre-build because Astro dedupes colliding routes before the
-        // integration sees them — by the time `astro:build:done` fires,
-        // one source has already won.
-        //
-        // Two URL sources feed the check:
-        //
-        //   1. Content entries from indexable collections, grouped by
-        //      *mounted URL* (collection prefix + canonical slug). Catches
-        //      cross-collection collisions (`docs/blog/post.mdx` vs
-        //      `blog/post.mdx`), version collisions (`docs/v1/x.mdx` vs
-        //      `docs-v1/x.mdx`), case-only, and folder-index-vs-leaf.
-        //      Non-routed collections like `partials` are excluded
-        //      (per `filterIndexableCollections`) since they aren't pages.
-        //
-        //   2. Static `src/pages/**` files (no dynamic segments). Catches
-        //      the page-vs-content collision — e.g. `pages/search.astro`
-        //      shadowing `content/docs/search.mdx` at `/search`. Dynamic
-        //      page routes are skipped: their emitted URLs come from
-        //      `getStaticPaths` at build time, so we can't know them
-        //      pre-build without invoking the same machinery Astro
-        //      silently dedupes through anyway.
-        const indexedSet = new Set(indexedCollections);
-        const versionInfo = config.versions
-          ? { others: config.versions.others ?? [] }
-          : null;
-
-        // Restrict the walk to *indexable* collections, and use the parsed
-        // `(key → base)` map so a custom `base: "documentation"` collection
-        // is scanned at `src/content/documentation/` and tagged with key
-        // `docs`. Falls back to `(key → key)` when content.config.ts wasn't
-        // parseable — the brand-new-project case where we already warned.
-        const indexedBases = new Map<string, string>();
-        if (collectionBases !== null) {
-          for (const [key, base] of collectionBases) {
-            if (indexedSet.has(key)) indexedBases.set(key, base);
-          }
-        } else {
-          for (const key of indexedCollections) indexedBases.set(key, key);
-        }
-
-        const contentOwners: RouteOwner[] = enumerateEntriesByBase(
-          path.join(projectRoot, "src/content"),
-          indexedBases,
-        ).map((entry) => ({
-          url: contentEntryUrl(entry, versionInfo),
-          source: `src/content/${entry.relPath}`,
-          kind: "content" as const,
-        }));
-        const pageOwners: RouteOwner[] = enumerateStaticPageRoutes(
-          path.join(srcDir, "pages"),
-          projectRoot,
-        ).map((route) => ({ ...route, kind: "page" as const }));
-
-        const duplicateRoutes = findDuplicateRoutes([
-          ...contentOwners,
-          ...pageOwners,
-        ]);
-        // Page-over-content shadows warn; ambiguous clashes fail the build.
-        const shadowed = duplicateRoutes.filter((d) => d.shadowedByPage);
-        const collisions = duplicateRoutes.filter((d) => !d.shadowedByPage);
-        if (shadowed.length > 0) logger.warn(formatShadowedRoutes(shadowed));
-        if (collisions.length > 0) {
-          throw authorError(formatDuplicateRoutes(collisions));
-        }
-
-        // Cross-check `versions.others` against registered collections.
-        // Zod validated the shape; this pass enforces the invariant that
-        // every non-current version slug `<v>` corresponds to a registered
-        // collection named `docs-<v>`. We can only check this when we
-        // actually parsed content.config.ts — if `rawCollections` is null
-        // the user is on a brand-new project and we already warned.
-        if (config.versions && parsedCollections?.complete === true) {
-          const registered = new Set(rawCollections);
-          const missing = config.versions.others.filter(
-            (slug) => !registered.has(`docs-${slug}`),
-          );
-          if (missing.length > 0) {
-            const lines = missing.map((slug) => {
-              return (
-                `  - "${slug}" → expected a collection named "docs-${slug}" ` +
-                `in src/content.config.ts (e.g. \`"docs-${slug}": docsCollection({ base: "docs-${slug}" })\`)`
-              );
-            });
-            throw new Error(
-              `nimbus-docs: \`versions.others\` references slugs without matching collections:\n${lines.join("\n")}\n\n` +
-                `Every entry in \`versions.others\` must correspond to a registered Astro content ` +
-                `collection. Register the collection(s) above in src/content.config.ts and try again.`,
-            );
-          }
-        }
+        // The duplicate-slug validator and the `versions.others` cross-check
+        // need the page-collection list, which exists only after content
+        // sync. Both run in `runPostSyncPageChecks` (build:start, and
+        // server:start in dev).
 
         // ----- Versioning: build the cross-version alternates table.
         //
@@ -1673,11 +1714,12 @@ export function nimbus(
               virtualLastUpdatedPlugin(lastUpdatedByPath),
               virtualAgentCapabilitiesPlugin(getAgentCapabilities),
               virtualConfigPlugin(config, {
-                indexedCollections,
+                getIndexedCollections: getPageCollectionsForBuild,
                 requestRenderingCollections: [...requestRenderingCollections],
                 versionAlternates,
                 apiCollections,
                 headDefaults: { favicon, socialImage: defaultSocialImage },
+                contentConfigPath,
               }),
               ...(options.icons !== false
                 ? [
@@ -1857,7 +1899,7 @@ export function nimbus(
             'declare module "virtual:nimbus/config" {',
             '  import type { NimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
             "  export const config: NimbusConfig;",
-            "  /** Build-time list of indexable collection names. See `getIndexedEntries()`. */",
+            "  /** The page-collection list: collections made with Nimbus's helpers, plus API collections. See `getIndexedEntries()`. */",
             "  export const indexedCollections: readonly string[];",
             "  /** Collections whose canonical routes render on request. Build-only. */",
             "  export const requestRenderingCollections: readonly string[];",
@@ -2029,7 +2071,11 @@ export function nimbus(
             ?.close();
         }
       },
-      "astro:build:start": async () => {
+      "astro:server:start": async ({ logger }) => {
+        // Dev's post-sync page checks: content sync has run by server start.
+        await runPostSyncPageChecks(logger);
+      },
+      "astro:build:start": async ({ logger }) => {
         // Content sync has run: every `api` entry must have been indexed by an
         // `apiCollection()` registered under the same key.
         if (apiCollectionsForBuild.length > 0) {
@@ -2043,6 +2089,27 @@ export function nimbus(
             if (indexError) throw new Error(indexError);
           }
         }
+        await runPostSyncPageChecks(logger);
+        // The build's page-collection list, for `nimbus-docs check`. A stale
+        // file is removed at `astro:config:setup`, so a failed build leaves
+        // none behind.
+        const pageCollections = await getPageCollectionsForBuild();
+        fs.mkdirSync(path.dirname(pageCollectionsFilePath(projectRootForBuild)), {
+          recursive: true,
+        });
+        fs.writeFileSync(
+          pageCollectionsFilePath(projectRootForBuild),
+          JSON.stringify(
+            {
+              version: 1,
+              collections: pageCollections,
+              mdxFiles: recordedMdxFiles(),
+            },
+            null,
+            2,
+          ) + "\n",
+          "utf8",
+        );
         const { clearNavCaches } = await import("./index.js");
         clearNavCaches();
         const agentEndpointAssets = await loadAgentEndpointAssets();

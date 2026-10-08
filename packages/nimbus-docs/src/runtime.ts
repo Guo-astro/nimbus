@@ -16,6 +16,7 @@ import {
   loadNimbusConfig,
   loadVersionAlternates,
 } from "./_internal/runtime-config.js";
+import { notAPageCollectionMessage } from "./_internal/page-collection-error.js";
 import { loadCollectionOrWarn } from "./_internal/load-collection.js";
 import { runtimeWarn } from "./_internal/runtime-warn.js";
 import {
@@ -334,12 +335,10 @@ export async function getIndexedEntries(
   const cached = indexedEntriesCache.get(cacheKey);
   if (cached) return cached;
   const { getCollection } = await import("astro:content");
-  const collectionNames = await loadIndexedCollections();
-  // Fall back to the primary collection name if the build-time parse
-  // came up empty. Belt-and-braces: the integration also defaults to
-  // ["docs"] when content.config.ts is missing.
-  const names =
-    collectionNames.length > 0 ? collectionNames : [PRIMARY_COLLECTION];
+  // The page-collection list: collections made with Nimbus's helpers, plus
+  // configured API collections. Read from the build's registry record via
+  // `virtual:nimbus/config` — a site with none indexes nothing.
+  const names = await loadIndexedCollections();
   const versions = await getVersions();
 
   const indexed: IndexedEntry[] = [];
@@ -1146,6 +1145,18 @@ function proseResolutionResponse(
   });
 }
 
+/**
+ * Routing a collection through Nimbus requires a page collection — one made
+ * with `docsCollection()`, `componentsCollection()`, `withNimbusMarkdown()`,
+ * or registered under `api`. Everything else is plain Astro data; routing it
+ * here fails the build (or the request-rendered route) with the fix.
+ */
+async function assertPageCollection(collection: string): Promise<void> {
+  const pageCollections = await loadIndexedCollections();
+  if (pageCollections.includes(collection)) return;
+  throw new Error(notAPageCollectionMessage(collection));
+}
+
 async function resolveProseRoute<C extends string>(
   astro: AstroGlobal,
   collection: string | undefined,
@@ -1162,6 +1173,7 @@ async function resolveProseRoute<C extends string>(
   const result = await resolveAstroProsePage(astro, collection);
   if (result.status !== "found") return proseResolutionResponse(astro, result);
   const { entry: found, Content, headings } = result.page;
+  await assertPageCollection(found.collection);
   const { markdownUrl, sourceUrl, ogImageUrl } = pageUrls(
     resolveCollectionPrefix(found.collection, await getVersions()),
     found,
@@ -1203,6 +1215,7 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
   // Docs-specific helper: always reads the `docs` collection. Other
   // collections require their own `pages/<name>/[...slug].astro` with
   // a one-line `getCollection("<name>")`-based getStaticPaths.
+  await assertPageCollection(PRIMARY_COLLECTION);
   const entries = await getVisibleEntries(["docs"]);
   return entries.map((entry) => ({
     params: { slug: entryRouteKey(entry.id) },
@@ -1312,6 +1325,7 @@ export async function getRouteFlags(entry: {
  */
 export function getCollectionStaticPaths(collection: string): GetStaticPaths {
   return async () => {
+    await assertPageCollection(collection);
     const entries = await getVisibleEntries([collection]);
     return entries.map((entry) => ({
       params: { slug: entryRouteKey(entry.id) },

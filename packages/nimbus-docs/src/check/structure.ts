@@ -19,8 +19,8 @@ import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
   parseContentCollections,
-  filterIndexableCollections,
 } from "../_internal/parse-content-collections.js";
+import { readPageCollectionsFile } from "../_internal/page-collections.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -57,7 +57,7 @@ export async function checkStructure(
   await checkApiCollections(cwd, findings, notes, parsed, config);
   await checkRequestRendering(cwd, findings, notes, parsed, config);
   await checkDuplicateRoutes(cwd, findings, parsed);
-  await checkMdxComponents(cwd, findings, notes);
+  await checkMdxComponents(cwd, findings, notes, parsed);
 
   return { scope: "structure", findings, notes, evaluated: true };
 }
@@ -173,21 +173,16 @@ async function checkRequestRendering(
   if (!config.rendering) return;
 
   const srcDir = path.join(cwd, "src");
-  const parsedCollections = await parseContentCollections(
-    path.join(srcDir, "content.config.ts"),
-  );
-  const rawCollections = parsedCollections?.names ?? null;
-  const parsedIndexedCollections =
-    rawCollections === null ||
-    (parsedCollections?.complete === false && rawCollections.length === 0)
-      ? ["docs"]
-      : filterIndexableCollections(rawCollections);
+  // The same before-sync candidate set the build uses: `docs`, version
+  // collections, API collections, and every key in `rendering.collections`.
+  // Which collections are pages is never parsed from content.config.ts.
   const apiCollections = (config.api ?? []).map((entry) => entry.collection);
   const candidates = [
     ...new Set([
-      ...parsedIndexedCollections,
+      "docs",
       ...(config.versions?.others ?? []).map((version) => `docs-${version}`),
       ...apiCollections,
+      ...Object.keys(config.rendering.collections ?? {}),
     ]),
   ];
   const versions = config.versions
@@ -204,25 +199,54 @@ async function checkRequestRendering(
       existsSync(component)
     );
   });
-  const overrides = config.rendering.collections ?? {};
-  const unresolvedOverrides = Object.keys(overrides).filter(
-    (collection) => !candidates.includes(collection),
-  );
-  if (
-    parsedCollections?.complete === false &&
-    (config.rendering.default === "request" || unresolvedOverrides.length > 0)
-  ) {
-    findings.push({
-      scope: "structure",
-      code: "nimbus/rendering-policy-invalid",
-      severity: "error",
-      file: relFile(parsed.location.file),
-      line: lineOf(parsed.location.source, parsed.location.objectStart),
-      message:
-        "nimbus-docs: rendering policy cannot safely enumerate collections because `src/content.config.ts` contains registrations Nimbus cannot identify statically. Use explicit top-level collection keys before applying a request default or overriding a collection Nimbus cannot statically identify.",
-      fixable: false,
+  // The build's page-collection list, when the last build wrote one. With
+  // it, `check` reports the same post-sync rendering errors the build does;
+  // without it, collections it can't confirm stay unchecked.
+  const pageCollections = readPageCollectionsFile(cwd)?.collections ?? null;
+  if (pageCollections !== null) {
+    const pageSet = new Set(pageCollections);
+    const unknown = Object.keys(config.rendering.collections ?? {}).filter(
+      (collection) => !pageSet.has(collection),
+    );
+    for (const collection of unknown) {
+      findings.push({
+        scope: "structure",
+        code: "nimbus/rendering-policy-invalid",
+        severity: "error",
+        file: relFile(parsed.location.file),
+        line: lineOf(parsed.location.source, parsed.location.objectStart),
+        message:
+          `nimbus-docs: rendering.collections names "${collection}", which is not a Nimbus page collection. ` +
+          "Page collections are made with docsCollection(), componentsCollection(), or withNimbusMarkdown(), " +
+          "plus version and API collections. A plain Astro data collection has no rendering mode.",
+        fixable: false,
+      });
+    }
+    const uncovered = pageCollections.filter((collection) => {
+      if (candidates.includes(collection)) return false;
+      return existsSync(
+        canonicalCollectionRouteComponent(srcDir, collection, versions),
+      );
     });
-    return;
+    for (const collection of uncovered) {
+      findings.push({
+        scope: "structure",
+        code: "nimbus/rendering-policy-invalid",
+        severity: "error",
+        file: relFile(parsed.location.file),
+        line: lineOf(parsed.location.source, parsed.location.objectStart),
+        message:
+          `nimbus-docs: \`rendering\` is set, but it doesn't cover page collection "${collection}", ` +
+          `which has a catch-all route at its mount. Add "${collection}" to rendering.collections ` +
+          "(\`rendering.default\` covers only docs, version, and API collections).",
+        fixable: false,
+      });
+    }
+  } else {
+    notes.push(skippedNote(
+      "nimbus/page-collections-unconfirmed",
+      "Page-collection rendering checks skipped: no `.nimbus/page-collections.json` from a completed build, so only docs, version, and API collections were verified.",
+    ));
   }
 
   let hasRequestRoute: boolean;
@@ -317,28 +341,38 @@ async function checkDuplicateRoutes(
   if (!existsSync(contentRoot)) return;
 
   const contentConfigPath = path.join(srcDir, "content.config.ts");
-  const parsedCollections = await parseContentCollections(contentConfigPath);
-  const rawCollections = parsedCollections?.names ?? null;
   const collectionBases = await parseCollectionBases(contentConfigPath);
-  const indexedCollections =
-    rawCollections === null ||
-    (parsedCollections?.complete === false && rawCollections.length === 0)
-      ? ["docs"]
-      : filterIndexableCollections(rawCollections);
-  const indexedSet = new Set(indexedCollections);
 
   const versions =
     parsed.ok && isVersionsObject(parsed.config.versions)
       ? { others: asStringArray(parsed.config.versions.others) }
       : null;
 
+  // The build's page-collection list when it exists; otherwise only the
+  // collections confirmable from config alone (docs, version, and API
+  // collections) are walked, and `check` stays silent about the rest.
+  const apiCollections =
+    parsed.ok && Array.isArray(parsed.config.api)
+      ? parsed.config.api
+          .map((entry) =>
+            entry && typeof entry === "object" && "collection" in entry
+              ? (entry as { collection?: unknown }).collection
+              : undefined,
+          )
+          .filter((name): name is string => typeof name === "string")
+      : [];
+  const pageCollections =
+    readPageCollectionsFile(cwd)?.collections ?? [
+      ...new Set([
+        "docs",
+        ...(versions?.others ?? []).map((version) => `docs-${version}`),
+        ...apiCollections,
+      ]),
+    ];
+
   const indexedBases = new Map<string, string>();
-  if (collectionBases !== null) {
-    for (const [key, base] of collectionBases) {
-      if (indexedSet.has(key)) indexedBases.set(key, base);
-    }
-  } else {
-    for (const key of indexedCollections) indexedBases.set(key, key);
+  for (const key of pageCollections) {
+    indexedBases.set(key, collectionBases?.get(key) ?? key);
   }
 
   const contentOwners: RouteOwner[] = enumerateEntriesByBase(
@@ -384,6 +418,7 @@ async function checkMdxComponents(
   cwd: string,
   findings: CheckFinding[],
   notes: Note[],
+  parsed: ConfigParseResult,
 ): Promise<void> {
   const srcDir = path.join(cwd, "src");
   const contentRoot = path.join(srcDir, "content");
@@ -400,11 +435,58 @@ async function checkMdxComponents(
     return;
   }
 
-  const failures = await validateMdxContent({
-    globals,
-    contentDirs: [contentRoot],
-    projectRoot: cwd,
-  });
+  // The same scope the build validates. The build records the exact `.mdx`
+  // file list its MDX pass checked (page and partials collections, from the
+  // registry) in `.nimbus/page-collections.json`; with it, check validates
+  // the identical set. Without it, only the folders confirmable from config
+  // alone (docs, version, and API collections) are walked, and check stays
+  // silent about the rest — nothing here classifies collections by parsing
+  // content.config.ts.
+  const recorded = readPageCollectionsFile(cwd);
+  let failures: Awaited<ReturnType<typeof validateMdxContent>>;
+  if (recorded !== null) {
+    failures = await validateMdxContent({
+      globals,
+      contentDirs: [],
+      files: recorded.mdxFiles.map((file) => path.join(cwd, file)),
+      projectRoot: cwd,
+    });
+  } else {
+    const bases = await parseCollectionBases(
+      path.join(srcDir, "content.config.ts"),
+    );
+    const versionsConfig =
+      parsed.ok && isVersionsObject(parsed.config.versions)
+        ? asStringArray(parsed.config.versions.others)
+        : [];
+    const apiNames =
+      parsed.ok && Array.isArray(parsed.config.api)
+        ? parsed.config.api
+            .map((entry) =>
+              entry && typeof entry === "object" && "collection" in entry
+                ? (entry as { collection?: unknown }).collection
+                : undefined,
+            )
+            .filter((name): name is string => typeof name === "string")
+        : [];
+    const confirmable = new Set([
+      "docs",
+      ...versionsConfig.map((version) => `docs-${version}`),
+      ...apiNames,
+    ]);
+    const contentDirs = [...confirmable]
+      .map((key) => path.join(contentRoot, bases?.get(key) ?? key))
+      .filter((dir) => existsSync(dir));
+    notes.push(skippedNote(
+      "nimbus/page-collections-unconfirmed",
+      "MDX component checks covered only the docs, version, and API collections: no `.nimbus/page-collections.json` from a completed build, so other page and partials collections weren't verified.",
+    ));
+    failures = await validateMdxContent({
+      globals,
+      contentDirs,
+      projectRoot: cwd,
+    });
+  }
   for (const f of failures) {
     findings.push({
       scope: "structure",

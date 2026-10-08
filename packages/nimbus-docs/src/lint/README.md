@@ -131,10 +131,10 @@ Three design calls hold this rule together:
     pre-build. This catches `pages/search.astro` shadowing
     `content/docs/search.mdx` at `/search`.
 
-- **Scoped to indexable collections, honors custom bases.** Only
-  collections that survive `filterIndexableCollections` (`partials`,
-  `_*`-prefixed names excluded) participate — non-routed collections
-  aren't pages. The walk uses `parseCollectionBases` to read each
+- **Scoped to page collections, honors custom bases.** Runs after
+  content sync, over the page collections the Nimbus helpers loaded
+  (partials and plain data collections aren't pages and don't
+  participate). The walk uses `parseCollectionBases` to read each
   collection's `base:` override from `content.config.ts`: a
   `docsCollection({ base: "documentation" })` collection gets scanned at
   `src/content/documentation/` and tagged with key `docs`, rather than

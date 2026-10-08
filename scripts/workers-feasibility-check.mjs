@@ -1160,8 +1160,10 @@ const { page, nav, collection, version, coordinate } = result;
     // Markdown negotiation never answers a non-default version with the default's Markdown.
     const markdown = (route) => fetch(`${origin}${route}`, { headers: { Accept: "text/markdown" } });
     const defaultMarkdown = await markdown(listPath);
-    assert(defaultMarkdown.headers.get("Content-Type")?.includes("text/markdown"),
-      `default ${listPath} should negotiate Markdown`);
+    assert(defaultMarkdown.status === 200 &&
+      defaultMarkdown.headers.get("Content-Type")?.includes("text/markdown") &&
+      (await defaultMarkdown.text()).includes("List pets in v-two"),
+      `default ${listPath} should negotiate the default version's Markdown`);
     const v1Markdown = await markdown(`${listPath}?api-version=v1`);
     assert(v1Markdown.headers.get("Content-Type")?.includes("text/html") &&
       (await v1Markdown.text()).includes("List pets in v-one"),

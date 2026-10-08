@@ -289,8 +289,8 @@ const apiVersionSpecShape = {
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
     .min(1, '"api[].versions[].version" must be a non-empty string')
     .regex(
-      /^[a-z0-9][a-z0-9.-]*$/,
-      '"api[].versions[].version" must start with a lowercase letter or digit and contain only lowercase letters, digits, dots, and dashes (it becomes a URL segment or an api-version query value)',
+      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
+      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and an api-version query value)',
     ),
   spec: specSourceSchema,
   default: z.boolean().optional(),

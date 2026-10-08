@@ -143,17 +143,17 @@ describe("versionMode config rules", () => {
         ]),
       ),
     );
-    // A version id still starts with a letter or digit.
-    assert.throws(() =>
-      validateNimbusConfig(
-        withApi([
-          {
-            collection: "api",
-            versions: [{ version: ".air", spec: "./a.yaml" }],
-          },
-        ]),
-      ),
-    );
+    // A version id starts and ends with a letter or digit.
+    for (const version of [".air", "-v1", "v1-", "v1."]) {
+      assert.throws(
+        () =>
+          validateNimbusConfig(
+            withApi([{ collection: "api", versions: [{ version, spec: "./a.yaml" }] }]),
+          ),
+        /start and end with a letter or digit/,
+        version,
+      );
+    }
   });
 });
 
@@ -459,6 +459,13 @@ describe("query-mode route resolution — (version, slug) → entry", () => {
   test("an unknown version id is a 404", async () => {
     const result = await resolve("/qv/list-pets/?api-version=nope", "list-pets");
     assert.equal(result.status, "not-found");
+  });
+
+  test("api-version given more than once is a 404, whatever the values", async () => {
+    for (const query of ["api-version=v1&api-version=v1", "api-version=v1&api-version=nope"]) {
+      const result = await resolve(`/qv/list-pets/?${query}`, "list-pets");
+      assert.equal(result.status, "not-found", query);
+    }
   });
 
   test("store ids are not routes: a version-prefixed path 404s without the query, hidden included", async () => {

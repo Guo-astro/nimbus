@@ -38,6 +38,31 @@ const SRC = "data-nb-nav-src";
 const TRIGGER = "[data-nb-collapsible-trigger]";
 const CONTENT = "[data-nb-collapsible-content]";
 
+/**
+ * Two markups share this module: the current starter's native
+ * `<details data-nb-nav-group>` whose panel is its own `<ul>`, and the older
+ * copied components' scripted collapsible (`data-nb-collapsible-trigger` +
+ * `data-nb-collapsible-content`). A newer `nimbus-docs` must keep driving the
+ * old markup, so every open-state read and panel lookup handles both.
+ */
+function groupIsOpen(group: Element): boolean {
+  // Tag check, not instanceof: the serialized restore runs in old browsers
+  // and tests run in DOM shims without the HTMLDetailsElement global.
+  if (group.tagName === "DETAILS") {
+    return (group as HTMLDetailsElement).open === true;
+  }
+  return group.querySelector(TRIGGER)?.getAttribute("data-nb-state") === "open";
+}
+
+function groupPanel(group: Element): HTMLElement | null {
+  return (
+    group.querySelector<HTMLElement>(CONTENT) ??
+    (group.tagName === "DETAILS"
+      ? group.querySelector<HTMLElement>(":scope > ul")
+      : null)
+  );
+}
+
 /** Upper bound on cached rows, well inside `sessionStorage` quotas. */
 const ROWS_CACHE_CHARS = 500_000;
 /** Fetched pages kept in memory, so sibling groups served by one page share it. */
@@ -144,12 +169,15 @@ function fetchPage(src: string, build: string): Promise<Document> {
 function rowsIn(page: Document, id: string): DocumentFragment | undefined {
   for (const group of page.querySelectorAll(`[${GROUP}]`)) {
     if (group.getAttribute(GROUP) !== id || group.hasAttribute(SRC)) continue;
-    const panel = group.querySelector(CONTENT);
+    const panel = groupPanel(group);
     if (!panel) continue;
     const rows = document.createDocumentFragment();
     for (const child of Array.from(panel.childNodes)) rows.append(document.importNode(child, true));
     // Inserted scripts never run; the page already has the ones it needs.
     rows.querySelectorAll("script").forEach((script) => script.remove());
+    // The fetched page's own current-page marker (its Overview row) must not
+    // masquerade as this page's: fetched rows are never the current page.
+    rows.querySelectorAll("[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
     return rows;
   }
   return undefined;
@@ -177,7 +205,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
     });
   };
 
-  const panelOf = (group: Element) => group.querySelector<HTMLElement>(CONTENT);
+  const panelOf = groupPanel;
   const prefetch = (group: Element) => {
     const url = pageUrl(group.getAttribute(SRC));
     if (url) void fetchPage(url, build).catch(() => {});
@@ -209,8 +237,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
       restoreNavState(NAV_STATE_KEYS, panel);
       remount();
     } catch {
-      const isOpen = group.querySelector(TRIGGER)?.getAttribute("data-nb-state") === "open";
-      if (follow && !destroyed && isOpen) window.location.assign(url);
+      if (follow && !destroyed && groupIsOpen(group)) window.location.assign(url);
     } finally {
       panel.removeAttribute("aria-busy");
     }
@@ -247,11 +274,36 @@ export function initNavSidebar(root: HTMLElement): () => void {
     attributeFilter: ["data-nb-state"],
   });
 
+  // Native `<details>` groups: `toggle` doesn't bubble, so capture on the
+  // root. Same bookkeeping as the observer — each change applies to the
+  // saved set on its own, and an opened deferred group loads its rows.
+  // The seed below makes a replayed no-change event (a parser-queued toggle
+  // for a group the page rendered open — its trail) a no-op, so the trail
+  // is never saved as if the reader opened it.
+  const lastOpen = new WeakMap<Element, boolean>();
+  root
+    .querySelectorAll(`details[${GROUP}]`)
+    .forEach((group) => lastOpen.set(group, groupIsOpen(group)));
+  const onToggle = (event: Event) => {
+    const group = event.target as HTMLElement | null;
+    if (!group || group.tagName !== "DETAILS" || !group.hasAttribute(GROUP)) {
+      return;
+    }
+    const isOpen = (group as HTMLDetailsElement).open === true;
+    if (lastOpen.get(group) === isOpen) return;
+    lastOpen.set(group, isOpen);
+    const id = group.getAttribute(GROUP)!;
+    const open = new Set(readState().open ?? []);
+    if (isOpen) open.add(id);
+    else open.delete(id);
+    updateState({ open: [...open] });
+    if (isOpen) void load(group, true);
+  };
+  root.addEventListener("toggle", onToggle, true);
+
   // Groups restored open whose rows were not cached.
   root.querySelectorAll<HTMLElement>(`[${SRC}]`).forEach((group) => {
-    if (group.querySelector(TRIGGER)?.getAttribute("data-nb-state") === "open") {
-      void load(group, false);
-    }
+    if (groupIsOpen(group)) void load(group, false);
   });
 
   // Prefetch on intent: pointer over or focus on a collapsed group's header.
@@ -286,9 +338,10 @@ export function initNavSidebar(root: HTMLElement): () => void {
   };
   root.addEventListener("click", onClick);
 
-  // A container restored while hidden (the closed mobile drawer) gets its
-  // scroll when it is first shown. Only its scroll: its disclosures have
-  // mounted, and own their state from here on.
+  // A container restored while hidden gets its scroll when it is shown: the
+  // one tree moving into the mobile drawer, or an older layout's separate
+  // drawer copy opening. Only scroll: disclosures have mounted and own
+  // their state from here on.
   let visible = root.clientHeight > 0;
   const resize =
     typeof ResizeObserver === "undefined"
@@ -306,6 +359,7 @@ export function initNavSidebar(root: HTMLElement): () => void {
     observer.disconnect();
     resize?.disconnect();
     cancelAnimationFrame(frame);
+    root.removeEventListener("toggle", onToggle, true);
     root.removeEventListener("click", onClick);
     root.removeEventListener("pointerover", onIntent);
     root.removeEventListener("focusin", onIntent);
@@ -358,6 +412,13 @@ export function restoreNavState(
     quiet.push(el);
   };
   const setOpen = (group: Element) => {
+    // Native <details> (current starter markup): opening is one property,
+    // with no transition to hush. The scripted collapsible (older copied
+    // components) keeps the attribute dance below.
+    if (group.tagName === "DETAILS") {
+      (group as HTMLDetailsElement).open = true;
+      return;
+    }
     group.setAttribute("data-nb-default-open", "true");
     const trigger = group.querySelector(triggerSel);
     const panel = group.querySelector(contentSel);
@@ -377,7 +438,9 @@ export function restoreNavState(
   // (the current page's trail, with its highlight) are never replaced.
   const fill = (root: Element, group: Element) => {
     const src = group.getAttribute("data-nb-nav-src");
-    const panel = group.querySelector(contentSel);
+    const panel =
+      group.querySelector(contentSel) ||
+      (group.tagName === "DETAILS" ? group.querySelector(":scope > ul") : null);
     if (!src || !panel) return false;
     const html = cachedRows(root, `${src} ${group.getAttribute("data-nb-nav-group")}`);
     if (!html) return false;

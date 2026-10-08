@@ -782,6 +782,22 @@ function assertSizeBudgets(site) {
     `Worker output is ${workerGzipBytes} gzip bytes; budget is ${SIZE_BUDGET.worker.maxGzipBytes}`,
   );
 
+  // The large-sidebar fixture page (~4,400 links, ~1,300 groups): CI fails
+  // when its HTML grows more than the budget past the recorded baseline.
+  // Server output bakes prerendered pages under dist/client.
+  const sidebarPage = readFileSync(
+    join(site, "dist", "client", "sidebar-budget", "index.html"),
+  );
+  assert(
+    sidebarPage.length <= SIZE_BUDGET.sidebarFixturePage.maxBytes,
+    `sidebar fixture page is ${sidebarPage.length} bytes; budget is ${SIZE_BUDGET.sidebarFixturePage.maxBytes}`,
+  );
+  const sidebarPageGzip = gzipSync(sidebarPage).length;
+  assert(
+    sidebarPageGzip <= SIZE_BUDGET.sidebarFixturePage.maxGzipBytes,
+    `sidebar fixture page is ${sidebarPageGzip} gzip bytes; budget is ${SIZE_BUDGET.sidebarFixturePage.maxGzipBytes}`,
+  );
+
   const agentEndpointAssetRoot = join(
     site,
     ".astro",

@@ -227,6 +227,18 @@ describe("derived example + code samples", () => {
 });
 
 describe("resilience — best-effort, never fatal", () => {
+  test("a deep allOf chain in an unused oneOf branch keeps the sampler's example", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    let deep: Record<string, unknown> = { properties: { leaf: { type: "string" } } };
+    for (let i = 0; i < 5000; i++) deep = { allOf: [deep] };
+    const schema = {
+      type: "object",
+      properties: { visible: { type: "string", example: "keep" }, ignored: { oneOf: [{ type: "string", example: "chosen" }, deep] } },
+    };
+    assert.deepEqual(resolveExampleValue({ schema } as never, "request", tools), { visible: "keep", ignored: "chosen" });
+  });
+
   test("an un-encodable path param degrades to no samples, never throws", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);
@@ -1285,6 +1297,7 @@ describe("generated request bodies", () => {
     "curl() {",
     "  while [ $# -gt 0 ]; do",
     `    if [ "$1" = --data ]; then if [ "$2" = @- ]; then cat; else printf '%s' "$2"; fi; fi`,
+    `    if [ "$1" = --data-raw ]; then printf '%s' "$2"; fi`,
     "    shift",
     "  done",
     "}",
@@ -1476,14 +1489,14 @@ describe("form request bodies", () => {
   const wire = {
     curl(source: string): string | undefined {
       if (!hasBash) return undefined;
-      const stub = `curl() { while [ $# -gt 0 ]; do case "$1" in --data-urlencode|--data) printf '%s\\0%s\\0' "$1" "$2"; shift;; esac; shift; done; }`;
+      const stub = `curl() { while [ $# -gt 0 ]; do case "$1" in --data-urlencode|--data|--data-raw) printf '%s\\0%s\\0' "$1" "$2"; shift;; esac; shift; done; }`;
       const run = spawnSync("bash", ["-c", `${stub}\n${source}`], { encoding: "utf8" });
       assert.equal(run.status, 0, `cURL is valid shell: ${run.stderr}\n${source}`);
       const args = run.stdout.split("\0");
       const fields: string[] = [];
       for (let i = 0; i < args.length - 1; i += 2) {
         const arg = args[i + 1]!;
-        if (args[i] === "--data") {
+        if (args[i] === "--data" || args[i] === "--data-raw") {
           fields.push(arg);
           continue;
         }
@@ -1754,7 +1767,7 @@ describe("form request bodies", () => {
   test("a form media type with parameters sends the same encoded body", async () => {
     const samples = await samplesFor({ name: "Jenny Rosen", metadata: { plan: "pro" } }, undefined, `${FORM}; charset=utf-8`);
     const encoded = "name=Jenny+Rosen&metadata%5Bplan%5D=pro";
-    assert.ok(samples.curl.includes(`--data '${encoded}'`), samples.curl);
+    assert.ok(samples.curl.includes(`--data-raw '${encoded}'`), samples.curl);
     assert.ok(samples.typescript.includes(`body: '${encoded}'`), samples.typescript);
     assert.ok(samples.python.includes(`payload = "${encoded}"`), samples.python);
   });

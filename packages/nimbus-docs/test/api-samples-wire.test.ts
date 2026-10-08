@@ -65,6 +65,20 @@ describe("generated request bodies on the wire", () => {
     { name: "first inline named null", media: { examples: { first: { value: null }, other: { value: { id: "other" } } }, schema }, value: null },
     { name: "OpenAPI 3.0 nullable null", media: { example: null, schema: { type: "object", nullable: true } }, value: null, openapi: "3.0.3" },
     ...[false, 0, "", "null", { nil: null }, [null]].map((value) => ({ name: `JSON ${JSON.stringify(value)}`, media: { example: value }, value })),
+    { name: "text starting with @ is sent, not read as a file", mediaType: "text/plain", media: { example: "@/etc/hosts" }, value: "@/etc/hosts", wire: "@/etc/hosts" },
+    ...([
+      ["form", ["a,b", "c"], "tags=a%2Cb,c"],
+      ["form", ["a", "b,c"], "tags=a,b%2Cc"],
+      ["pipeDelimited", ["a|b", "c"], "tags=a%7Cb|c"],
+      ["spaceDelimited", ["a b", "c"], "tags=a+b%20c"],
+    ] as const).map(([style, tags, wire]) => ({
+      name: `${style} array keeps a separator inside a value apart (${tags.join(" / ")})`,
+      mediaType: "application/x-www-form-urlencoded",
+      media: { example: { tags }, encoding: { tags: { style, explode: false } } },
+      value: { tags },
+      wire,
+    })),
+    { name: "empty form field name", mediaType: "application/x-www-form-urlencoded", media: { example: { "": "hello", ok: "x" } }, value: { "": "hello", ok: "x" }, wire: "=hello&ok=x" },
     { name: "JSON-encoded null form field", mediaType: "application/x-www-form-urlencoded", media: { example: { nil: null }, encoding: { nil: { contentType: "application/json" } } }, value: { nil: null }, wire: "nil=null" },
   ];
 

@@ -42,6 +42,8 @@ interface HarField {
 
 interface FormField extends HarField {
   allowReserved?: boolean;
+  /** The value is already percent-encoded: a joined list whose separators are structural. */
+  encoded?: boolean;
 }
 
 interface HarRequestInput {
@@ -418,8 +420,13 @@ const preparedForSampler = new WeakMap<OpenApiSchema, OpenApiSchema>();
 function forSampler(schema: OpenApiSchema): OpenApiSchema {
   let prepared = preparedForSampler.get(schema);
   if (!prepared) {
-    const used = authoredValue(schema) === undefined && reaches(schema, needsObjectType);
-    prepared = used ? copyWithObjectTypes(schema) : schema;
+    try {
+      const used = authoredValue(schema) === undefined && reaches(schema, needsObjectType);
+      prepared = used ? copyWithObjectTypes(schema) : schema;
+    } catch {
+      // Anything unexpected leaves the schema to the sampler, as before.
+      prepared = schema;
+    }
     preparedForSampler.set(schema, prepared);
   }
   return prepared;
@@ -439,15 +446,36 @@ function needsObjectType(schema: OpenApiSchema): boolean {
 // a value merged fields would break. `const` and `enum` allow only their
 // values; an authored value decides the sample; composition comes before the
 // declared type in openapi-sampler, and a type list may allow scalars.
-function mayBeNonObject(schema: OpenApiSchema, seen: Set<OpenApiSchema>): boolean {
-  if (seen.has(schema)) return false;
-  seen.add(schema);
+// Memoized per schema, so a long `allOf` chain is walked once rather than once
+// per member; a schema already on the current path counts as an object, and
+// an answer that depended on that cut isn't kept. Past MAX_SHAPE_DEPTH the
+// answer is "maybe", which leaves those `allOf`s to the sampler unchanged.
+const nonObject = new WeakMap<OpenApiSchema, boolean>();
+const MAX_SHAPE_DEPTH = 256;
+let cycleCuts = 0;
+function mayBeNonObject(schema: OpenApiSchema, active: Set<OpenApiSchema>): boolean {
+  const known = nonObject.get(schema);
+  if (known !== undefined) return known;
+  if (active.has(schema)) {
+    cycleCuts++;
+    return false;
+  }
+  if (active.size >= MAX_SHAPE_DEPTH) return true;
+  active.add(schema);
+  const cutsBefore = cycleCuts;
+  const result = computeMayBeNonObject(schema, active);
+  active.delete(schema);
+  if (cycleCuts === cutsBefore) nonObject.set(schema, result);
+  return result;
+}
+
+function computeMayBeNonObject(schema: OpenApiSchema, active: Set<OpenApiSchema>): boolean {
   if (schema.const !== undefined || schema.enum !== undefined) return true;
   const value = authoredValue(schema);
   if (value !== undefined) return jsonType(value) !== "object";
   const branch = schema.oneOf?.length ? schema.oneOf[0] : schema.anyOf?.length ? schema.anyOf[0] : undefined;
   const parts = [...(schema.allOf ?? []), branch, schema.if, schema.then].filter(isSchema);
-  if (parts.some((part) => mayBeNonObject(part, seen))) return true;
+  if (parts.some((part) => mayBeNonObject(part, active))) return true;
   const types = schema.type === undefined ? [] : [schema.type].flat();
   if (types.length > 0) return types.some((type) => type !== "object");
   const keyword = keywordType(schema);
@@ -599,7 +627,7 @@ function bodyRewrite(
     const markedHar = { ...har, postData: { mimeType: "text/plain", text: marker } };
     if (target === "python") return { har: markedHar, line: `payload = ${JSON.stringify(marker)}`, text: () => `payload = ${JSON.stringify(postData.text)}` };
     if (target === "node") return { har: markedHar, line: `'${marker}'`, text: () => jsString(postData.text) };
-    if (target === "shell") return { har: markedHar, line: `--data ${marker}`, text: () => `--data '${escapeForTarget("shell", postData.text)}'` };
+    if (target === "shell") return { har: markedHar, line: `--data ${marker}`, text: () => `--data-raw '${escapeForTarget("shell", postData.text)}'` };
     return undefined;
   }
   if (params) {
@@ -633,8 +661,11 @@ function bodyRewrite(
     if (target === "node") return { har: markedHar, line: `JSON.stringify('${marker}')`, text: (indent) => `JSON.stringify(${jsLiteral(body, indent)})` };
     return undefined;
   }
-  if (target !== "node" || !postData.text || SNIPPET_MULTIPART_TYPES.has(postData.mimeType)) return undefined;
+  if (!postData.text || SNIPPET_MULTIPART_TYPES.has(postData.mimeType)) return undefined;
   const text = postData.text;
+  // cURL's `--data` reads a file for a body starting with `@`; `--data-raw` never does.
+  if (target === "shell") return { har: { ...har, postData: { ...postData, text: marker } }, line: `--data ${marker}`, text: () => `--data-raw '${escapeForTarget("shell", text)}'` };
+  if (target !== "node") return undefined;
   return { har: { ...har, postData: { ...postData, text: marker } }, line: `'${marker}'`, text: () => jsString(text) };
 }
 
@@ -769,7 +800,10 @@ function buildHar(
       // httpsnippet builds a form from `params` only for the bare media type;
       // with parameters such as `charset`, every target sends the text.
       const text = serializeForm(fields);
-      har.postData = mediaType === "application/x-www-form-urlencoded" && !fields.some((field) => field.allowReserved)
+      // An empty name (cURL drops it) or a value that is already encoded must
+      // go as text, which every target sends unchanged.
+      har.postData = mediaType === "application/x-www-form-urlencoded" &&
+        !fields.some((field) => field.allowReserved || field.encoded || field.name === "")
         ? { mimeType: mediaType, text, params: fields }
         : { mimeType: mediaType, text };
     } else {
@@ -790,15 +824,21 @@ function isFormMediaType(mediaType: string): boolean {
 }
 
 function serializeForm(fields: FormField[]): string {
-  const encode = (text: string) => new URLSearchParams([["", text]]).toString().slice(1);
-  return fields.map(({ name, value, allowReserved }) => {
-    const encoded = allowReserved
-      ? value.replace(/%[0-9A-Fa-f]{2}|[^A-Za-z0-9\-._~:/?@!$'()*,;]/gu, (token) =>
-        token.startsWith("%") && token.length === 3 ? token : encode(token).replaceAll("+", "%20"),
-      )
-      : encode(value);
-    return `${encode(name)}=${encoded}`;
-  }).join("&");
+  return fields
+    .map(({ name, value, allowReserved, encoded }) =>
+      `${encodeFormText(name)}=${encoded ? value : encodeFormValue(value, allowReserved)}`)
+    .join("&");
+}
+
+function encodeFormText(text: string): string {
+  return new URLSearchParams([["", text]]).toString().slice(1);
+}
+
+function encodeFormValue(value: string, allowReserved = false): string {
+  if (!allowReserved) return encodeFormText(value);
+  return value.replace(/%[0-9A-Fa-f]{2}|[^A-Za-z0-9\-._~:/?@!$'()*,;]/gu, (token) =>
+    token.startsWith("%") && token.length === 3 ? token : encodeFormText(token).replaceAll("+", "%20"),
+  );
 }
 
 // A form body's fields: a string is read as an encoded form, an object
@@ -828,16 +868,23 @@ function formFields(
       else addContent(item);
     } else {
       const style = rule.style ?? "form";
-      const separator = style === "spaceDelimited" ? " " : style === "pipeDelimited" ? "|" : ",";
+      // Separators are written so a value can't produce one: a value's space
+      // encodes as `+` and its `|` and `,` as `%7C` and `%2C`.
+      const separator = style === "spaceDelimited" ? "%20" : style === "pipeDelimited" ? "|" : ",";
       const explode = rule.explode ?? style === "form";
+      const addJoined = (parts: string[]) => fields.push({
+        name: key,
+        value: parts.map((part) => encodeFormValue(part, rule.allowReserved)).join(separator),
+        encoded: true,
+      });
       if (style === "deepObject") {
         addNested(key, item, true, add);
       } else if (Array.isArray(item)) {
         if (explode) item.forEach((entry) => add(key, entry));
-        else add(key, item.map((entry) => formText(entry)).join(separator));
+        else addJoined(item.map((entry) => formText(entry)));
       } else if (isPlainObject(item)) {
         if (explode) Object.entries(item).forEach(([name, entry]) => add(name, entry));
-        else add(key, Object.entries(item).flatMap(([name, entry]) => [name, formText(entry)]).join(separator));
+        else addJoined(Object.entries(item).flatMap(([name, entry]) => [name, formText(entry)]));
       } else {
         add(key, item);
       }

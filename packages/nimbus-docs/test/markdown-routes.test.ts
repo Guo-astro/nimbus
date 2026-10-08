@@ -171,27 +171,25 @@ test("detects aliased, namespace, and dynamic factory imports, and ignores comme
   );
 });
 
-test("an aliased factory in a route that is not prerendered fails", () => {
-  assert.throws(
+test("an aliased factory in a route that is not prerendered is recorded, not an error", () => {
+  // Agent files follow the rendering policy, so a shared route may render on
+  // request; the record keeps its mode and the factory serves by URL.
+  const records = recordMarkdownRoutes(
+    [resolvedRoute("src/pages/[...slug]/index.md.ts", "/[...slug]/index.md", { prerendered: false })],
     () =>
-      recordMarkdownRoutes(
-        [resolvedRoute("src/pages/[...slug]/index.md.ts", "/[...slug]/index.md", { prerendered: false })],
-        () =>
-          'import { markdownRoute as route } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = false;\nexport const { GET, getStaticPaths } = route();\n',
-      ),
-    /uses markdownRoute\(\) but is not prerendered/,
+      'import { markdownRoute as route } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = false;\nexport const { GET, getStaticPaths } = route();\n',
   );
+  assert.equal(records[0]?.shared, "markdown");
+  assert.equal(records[0]?.prerendered, false);
 });
 
-test("a shared route that is not prerendered fails with a clear message", () => {
-  assert.throws(
-    () =>
-      recordMarkdownRoutes(
-        [resolvedRoute("src/pages/[...slug]/index.md.ts", "/[...slug]/index.md", { prerendered: false })],
-        () => SHARED_MD,
-      ),
-    /src\/pages\/\[\.\.\.slug\]\/index\.md\.ts uses markdownRoute\(\) but is not prerendered[\s\S]*export const prerender = true/,
+test("a shared route that is not prerendered keeps its record", () => {
+  const records = recordMarkdownRoutes(
+    [resolvedRoute("src/pages/[...slug]/index.md.ts", "/[...slug]/index.md", { prerendered: false })],
+    () => SHARED_MD,
   );
+  assert.equal(records[0]?.shared, "markdown");
+  assert.equal(records[0]?.prerendered, false);
 });
 
 test("a factory in a route of the other extension fails", () => {
@@ -436,17 +434,16 @@ test("a partial override fails the build when prerender conflicts are errors", a
   );
 });
 
-test("a shared route that is not prerendered fails the build", async () => {
-  await assert.rejects(
-    buildSite(
-      { "src/pages/[...slug]/index.md.ts": SHARED_MD.replace("prerender = true", "prerender = false") },
-      { server: true },
-    ),
-    /uses markdownRoute\(\) but is not prerendered/,
+test("a shared route rendered on request builds without Markdown files", async () => {
+  const site = await buildSite(
+    { "src/pages/[...slug]/index.md.ts": SHARED_MD.replace("prerender = true", "prerender = false") },
+    { server: true, logLevel: "warn" },
   );
+  assert.doesNotMatch(site.logs, /not prerendered/);
+  await assert.rejects(readFile(path.join(site.root, "dist/guide/index.md"), "utf8"));
 });
 
-test("a re-exported factory rendered on request warns, then serves by URL, 404s unknown paths, and 500s without details", async () => {
+test("a re-exported factory rendered on request serves by URL, 404s unknown paths, and 500s without details", async () => {
   const site = await buildSite(
     {
       "src/lib/markdown.ts": `import { markdownRoute } from ${moduleUrl("../src/agent-endpoints.ts")};
@@ -459,16 +456,9 @@ export const GET = route.GET;
     },
     { server: true, logLevel: "warn" },
   );
-  assert.match(
-    site.logs,
-    /src\/pages\/\[\.\.\.slug\]\/index\.md\.ts \(\/\[\.\.\.slug\]\/index\.md\) is rendered on request, so the build has no file for: \/api\/[^\n]*/,
-  );
-  const markdownCount = (await manifest(site.root)).markdownAssets.filter(
-    (asset) => asset.surface === "markdown",
-  ).length;
-  assert.match(site.logs, new RegExp(`nimbus-docs: ${markdownCount} Markdown or llms\\.txt pages were not prerendered`));
-  assert.match(site.logs, new RegExp(`and ${markdownCount - 10} more\\n`));
-  assert.match(site.logs, /Astro reads it only from the route file/);
+  // A request-rendered shared route is normal operation now — agent files
+  // follow the rendering policy — so the build warns about nothing.
+  assert.doesNotMatch(site.logs, /not prerendered/);
   const app = await siteApp(site);
 
   const guide = await app.render(new Request("https://example.test/docs/guide/index.md"));

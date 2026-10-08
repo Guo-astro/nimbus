@@ -438,6 +438,25 @@
         "Run the production build and confirm it passes; the build now verifies the rendering policy and versions.others against the collections the helpers actually loaded.",
         "Confirm data collections are absent from llms.txt and the sitemap, and that every intended page collection still appears."
       ]
+    },
+    {
+      "id": "agent-files-follow-rendering",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "agent-files-follow-rendering",
+      "summary": "Agent files render the same way as the pages they describe: request-rendered collections stop shipping prebuilt Markdown and llms.txt files.",
+      "affected": "Sites with a `rendering` policy that renders a collection on request. Static sites and all-build policies are unchanged.",
+      "instructions": [
+        "No action is needed: copied starter routes keep working because the policy wins over their `export const prerender`; URLs and response bytes don't change.",
+        "A page's index.md and index.mdx follow its collection's mode, a section's llms.txt follows the collection it lists, llms.txt and llms-full.txt follow rendering.default, and homepage Markdown follows the root collection's mode. Mounted collections get their own agent routes at their mount unless the project already has a route file at that pattern.",
+        "One behavior change: when /index.md renders on request, /llms.txt is prebuilt, and the site has no root content entry, /index.md now serves Nimbus's site llms.txt content (that combination returned 404 before). A site that wants its own homepage Markdown there adds a root content entry or its own /index.md route.",
+        "A customized root Markdown or source route keeps serving every collection that shares the root collection's rendering mode: the injected mounted route runs the project's own module behind a shim that supplies the same catch-all parameter a static build would (the full slug, mount segment included). A mounted collection in a different mode, and every per-mount llms.txt, is served by Nimbus's own route without root-route customization — add a route file at that mount (it owns the pattern and suppresses the injection) to customize there.",
+        "Custom routes that call no Nimbus agent factory keep their own `prerender` export and are never policy-managed."
+      ],
+      "verify": [
+        "Build and confirm request-rendered collections emit no dist/ files at their index.md, index.mdx, or llms.txt URLs, and that those URLs are served on request with the same bytes as a static build.",
+        "On a static or all-build site, confirm output is unchanged."
+      ]
     }
   ]
 }

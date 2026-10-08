@@ -1,5 +1,23 @@
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/**
+ * Resolve symlinks (macOS `/var` → `/private/var`) so an Astro-resolved
+ * entrypoint and a Nimbus-declared one relativize identically. Both sides
+ * resolve or neither does — a mixed pair would relativize across two
+ * different spellings of the same root.
+ */
+function realPair(root: string, target: string): [string, string] {
+  try {
+    return [
+      realpathSync(root.replaceAll("\\", "/")),
+      realpathSync(target.replaceAll("\\", "/")),
+    ];
+  } catch {
+    return [root, target];
+  }
+}
 
 import { normalizeRouteComponent } from "./rendering-policy.js";
 
@@ -109,8 +127,9 @@ export function normalizeRouteEntrypoint(
   const absolute = pathApi.isAbsolute(component)
     ? component
     : pathApi.resolve(projectRoot, component);
+  const [realRoot, realAbsolute] = realPair(projectRoot, absolute);
   return normalizeRouteComponent(
-    pathApi.relative(projectRoot, absolute),
+    pathApi.relative(realRoot, realAbsolute),
   );
 }
 

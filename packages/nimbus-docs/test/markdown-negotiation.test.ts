@@ -229,6 +229,29 @@ test("production HTTP negotiation trusts the configured origin, not the request 
     });
     root = site.root;
     await site.write("src/pages/[...slug].astro", `---\nimport { getDocsStaticPaths } from ${srcModule("index.ts")};\nexport const getStaticPaths = getDocsStaticPaths;\nAstro.response.headers.set("X-Owner", "page");\n---\n<html><body>Page</body></html>`);
+    // A fully custom, prebuilt Markdown route (no factory, so the policy
+    // never manages it): the request-rendered page negotiates by reading the
+    // deployed public file from the configured origin, which is the path
+    // whose trust properties this test verifies.
+    await site.write(
+      "src/pages/[...slug]/index.md.ts",
+      `import { getMarkdownStaticPaths, getMarkdownPayload } from ${srcModule("agent-endpoints.ts")};
+export const prerender = true;
+export async function getStaticPaths() {
+  return getMarkdownStaticPaths({ collection: "docs", surface: "markdown" });
+}
+export async function GET(context) {
+  const payload = await getMarkdownPayload({
+    collection: "docs",
+    surface: "markdown",
+    reference: context.props.reference,
+    context: { request: context.request },
+  });
+  if (!payload) return new Response("Not found", { status: 404 });
+  return new Response(payload.body, { headers: { "Content-Type": payload.mediaType } });
+}
+`,
+    );
     await site.write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
     for (base of ["", "/docs"]) {
       await build({ ...site.config, base: base || "/", output: "server", adapter: testAdapter(path.join(site.root, "server-entry.mjs")), build: { client: path.join(site.root, "dist"), server: path.join(site.root, `.server${base ? "-base" : ""}`) } });

@@ -29,7 +29,8 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AstroIntegration, ShikiConfig } from "astro";
 import mdx from "@astrojs/mdx";
 import type { HastPluginInput, MdastPluginInput } from "satteri";
@@ -175,6 +176,7 @@ import {
   markdownRoutesPlugin,
   readRouteSource,
   recordMarkdownRoutes,
+  sharedMarkdownRouteSurface,
 } from "./_internal/markdown-routes-plugin.js";
 import {
   findUnclaimedMarkdownPaths,
@@ -502,6 +504,17 @@ export function nimbus(
   let apiCollectionsForBuild: string[] = [];
   // The before-sync rendering policy, kept for the post-sync page checks.
   let compiledPolicyForBuild: CompiledRenderingPolicy | null = null;
+  // Agent routes follow the rendering policy ("agent files render the same
+  // way as the pages they describe"). Set when `rendering` is configured:
+  // the root agent routes take the root collection's mode, site-wide llms
+  // routes take the default, and mounted agent routes take their mount's
+  // mode (project-owned files via `astro:route:setup`, injected ones at
+  // injection).
+  let agentRenderingForBuild: {
+    rootMode: RenderingMode;
+    defaultMode: RenderingMode;
+    mountModes: Map<string, RenderingMode>;
+  } | null = null;
   // Parsed MDX-validation inputs, run against the page and partials
   // collections once the record exists. `null` when validation is off.
   let mdxValidationForBuild: {
@@ -811,6 +824,74 @@ export function nimbus(
     if (collisions.length > 0) {
       throw authorError(formatDuplicateRoutes(collisions));
     }
+  };
+
+  /**
+   * The rendering mode for a project-owned agent route file, or `undefined`
+   * when the route isn't one (wrong shape, no factory call, or an unknown
+   * mount). Shapes: the root routes (`[...slug]/index.md.ts`,
+   * `[...slug]/index.mdx.ts`, `[section]/llms.txt.ts`) take the root
+   * collection's mode; the site-wide `llms.txt.ts` and `llms-full.txt.ts`
+   * take the default; `<mount>/…` takes the mount's mode.
+   */
+  const agentRouteMode = (component: string): RenderingMode | undefined => {
+    const policy = agentRenderingForBuild;
+    if (!policy) return undefined;
+    let resolved = component;
+    if (resolved.startsWith("file:")) {
+      try {
+        resolved = fileURLToPath(resolved);
+      } catch {
+        return undefined;
+      }
+    }
+    const absolute = path.isAbsolute(resolved)
+      ? resolved
+      : path.join(projectRootForBuild, resolved);
+    const realOf = (target: string) => {
+      try {
+        return fs.realpathSync(target);
+      } catch {
+        return target;
+      }
+    };
+    const relative = path
+      .relative(realOf(path.join(srcDirForBuild, "pages")), realOf(absolute))
+      .replaceAll("\\", "/");
+    if (relative.startsWith("..")) return undefined;
+    const parts = relative.split("/");
+    const file = parts.at(-1) ?? "";
+    const isMarkdownFile = /^index\.mdx?\.[cm]?[jt]s$/u.test(file);
+    const isLlmsFile = /^llms(?:-full)?\.txt\.[cm]?[jt]s$/u.test(file);
+    if (!isMarkdownFile && !isLlmsFile) return undefined;
+    // The parameter name is the author's choice; only the shape matters.
+    const isSpread = (segment: string) => /^\[\.\.\..+\]$/u.test(segment);
+    const isParam = (segment: string) => /^\[.+\]$/u.test(segment);
+    let mode: RenderingMode | undefined;
+    if (parts.length === 1 && isLlmsFile) {
+      mode = policy.defaultMode;
+    } else if (parts.length === 2 && isMarkdownFile && isSpread(parts[0]!)) {
+      mode = policy.rootMode;
+    } else if (parts.length === 2 && file.startsWith("llms.txt.")) {
+      mode = isParam(parts[0]!)
+        ? policy.rootMode
+        : policy.mountModes.get(`/${parts[0]}`);
+    } else if (
+      parts.length === 3 &&
+      isMarkdownFile &&
+      isSpread(parts[1]!) &&
+      !isParam(parts[0]!)
+    ) {
+      mode = policy.mountModes.get(`/${parts[0]}`);
+    }
+    if (!mode) return undefined;
+    let source: string;
+    try {
+      source = fs.readFileSync(absolute, "utf8");
+    } catch {
+      return undefined;
+    }
+    return sharedMarkdownRouteSurface(source) ? mode : undefined;
   };
 
   return {
@@ -1260,6 +1341,322 @@ export function nimbus(
             owner: "canonical",
             rendering: mode,
           });
+        }
+        // Agent files follow the rendering policy. With `rendering` set,
+        // each mounted collection gets its own agent routes at its mount, in
+        // its mode — Astro ranks `/<mount>/[...slug]` above the root agent
+        // routes, so only a route at the mount can serve the mount's agent
+        // files in a different mode. A project route file at the pattern
+        // owns it and is policy-managed through `astro:route:setup` instead.
+        agentRenderingForBuild = null;
+        if (config.rendering) {
+          const mountModes = new Map<string, RenderingMode>();
+          for (const [collection, mode] of Object.entries(policy.collections)) {
+            const mount = collectionMountPrefix(collection, versions);
+            // The root collection's agent routes are the project's own root
+            // route files, handled through `astro:route:setup`.
+            if (mount && mount !== "/") mountModes.set(mount, mode);
+          }
+          agentRenderingForBuild = {
+            rootMode:
+              policy.collections[PRIMARY_COLLECTION] ?? policy.default,
+            defaultMode: policy.default,
+            mountModes,
+          };
+          const hiddenVersionMounts = new Set(
+            (config.versions?.hidden ?? []).map((version) => `/${version}`),
+          );
+          const agentExtension = import.meta.url.endsWith(".ts") ? "ts" : "js";
+          const routeFileExists = (pattern: string) =>
+            ["ts", "js", "mjs", "cjs", "mts", "cts"].some((ext) =>
+              fs.existsSync(path.join(srcDir, "pages", `${pattern}.${ext}`)),
+            );
+          // A mounted route is injected unless both the mount and the root
+          // render at build time — there the prerendered root route emits
+          // the mount's files exactly as today, bytes (and any root-route
+          // customization) included. On request, Astro ranks the mount's
+          // page route above the root agent routes, so only a route at the
+          // mount can serve its agent URLs; and a request-rendered root
+          // can't prebuild a build-mode mount's files. Each injected route
+          // mirrors a root route the project actually has.
+          // The parameter names are the author's choice: any spread directory
+          // can hold the root Markdown routes, any single-param directory the
+          // section index.
+          const pagesDir = path.join(srcDir, "pages");
+          const pageDirs = fs.existsSync(pagesDir)
+            ? fs
+                .readdirSync(pagesDir, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory())
+                .map((entry) => entry.name)
+            : [];
+          const dirHasRouteFile = (dir: string, base: string) =>
+            ["ts", "js", "mjs", "cjs", "mts", "cts"].some((ext) =>
+              fs.existsSync(path.join(pagesDir, dir, `${base}.${ext}`)),
+            );
+          const spreadDirs = pageDirs.filter((name) =>
+            /^\[\.\.\..+\]$/u.test(name),
+          );
+          const paramDirs = pageDirs.filter(
+            (name) => /^\[.+\]$/u.test(name) && !name.startsWith("[..."),
+          );
+          const routeFilePath = (dir: string, base: string) => {
+            for (const ext of ["ts", "js", "mjs", "cjs", "mts", "cts"]) {
+              const candidate = path.join(pagesDir, dir, `${base}.${ext}`);
+              if (fs.existsSync(candidate)) return candidate;
+            }
+            return undefined;
+          };
+          const findRootAgentFile = (
+            dirs: readonly string[],
+            base: string,
+            surface: "markdown" | "source" | "llms",
+          ): { file: string; dir: string; shared: boolean } | undefined => {
+            for (const dir of dirs) {
+              const file = routeFilePath(dir, base);
+              if (!file) continue;
+              let detected: string | undefined;
+              try {
+                detected = sharedMarkdownRouteSurface(
+                  fs.readFileSync(file, "utf8"),
+                );
+              } catch {
+                detected = undefined;
+              }
+              return { file, dir, shared: detected === surface };
+            }
+            return undefined;
+          };
+          const rootAgentFiles = {
+            markdown: findRootAgentFile(spreadDirs, "index.md", "markdown"),
+            source: findRootAgentFile(spreadDirs, "index.mdx", "source"),
+            llms: findRootAgentFile(paramDirs, "llms.txt", "llms"),
+          };
+          const rootMode =
+            agentRenderingForBuild.rootMode;
+          // The root agent routes are policy-managed now (the policy wins
+          // over their prerender export), so the build invariant needs their
+          // declared mode — and the mounted injections may reuse their
+          // module, which must stay consistent at every pattern.
+          for (const [record, pattern, mode] of [
+            [
+              rootAgentFiles.markdown,
+              rootAgentFiles.markdown
+                ? `/${rootAgentFiles.markdown.dir}/index.md`
+                : "",
+              rootMode,
+            ] as const,
+            [
+              rootAgentFiles.source,
+              rootAgentFiles.source
+                ? `/${rootAgentFiles.source.dir}/index.mdx`
+                : "",
+              rootMode,
+            ] as const,
+            [
+              rootAgentFiles.llms,
+              rootAgentFiles.llms
+                ? `/${rootAgentFiles.llms.dir}/llms.txt`
+                : "",
+              rootMode,
+            ] as const,
+          ]) {
+            if (!record?.shared) continue;
+            managedRoutesForBuild.push({
+              pattern,
+              entrypoint: normalizeRouteEntrypoint(projectRoot, record.file)!,
+              owner: "infrastructure",
+              rendering: mode,
+            });
+          }
+          for (const base of ["llms.txt", "llms-full.txt"] as const) {
+            const file = routeFilePath("", base);
+            if (!file) continue;
+            let detected: string | undefined;
+            try {
+              detected = sharedMarkdownRouteSurface(
+                fs.readFileSync(file, "utf8"),
+              );
+            } catch {
+              detected = undefined;
+            }
+            if (detected !== "llms") continue;
+            managedRoutesForBuild.push({
+              pattern: `/${base}`,
+              entrypoint: normalizeRouteEntrypoint(projectRoot, file)!,
+              owner: "infrastructure",
+              rendering: agentRenderingForBuild.defaultMode,
+            });
+          }
+          // A project route file at the mount owns the pattern whatever its
+          // parameter names: any spread directory with the Markdown file,
+          // or any llms.txt route file, suppresses injection there.
+          const mountOwns = (
+            mount: string,
+            kind: "index.md" | "index.mdx" | "llms.txt",
+          ): boolean => {
+            const mountDir = path.join(pagesDir, mount.slice(1));
+            if (kind === "llms.txt") {
+              return (
+                routeFileExists(`${mount.slice(1)}/llms.txt`) ||
+                routeFileExists(`${mount.slice(1)}/[llms].txt`)
+              );
+            }
+            if (!fs.existsSync(mountDir)) return false;
+            return fs
+              .readdirSync(mountDir, { withFileTypes: true })
+              .some(
+                (entry) =>
+                  entry.isDirectory() &&
+                  /^\[\.\.\..+\]$/u.test(entry.name) &&
+                  dirHasRouteFile(path.join(mount.slice(1), entry.name), kind),
+              );
+          };
+          for (const [mount, mode] of mountModes) {
+            if (mode === "build" && rootMode === "build") continue;
+            // When a mount shares the root's mode, the injected Markdown
+            // routes reuse the project's own root route module, so a wrapped
+            // route's customization reaches the mount's URLs in request mode
+            // exactly as a prerendered root route reaches them in a static
+            // build. With differing modes the root module can't run in the
+            // mount's mode, so the plain factory serves it; a route file at
+            // the mount owns the pattern either way.
+            const reuseRootModule = mode === rootMode;
+            // Reused modules keep the root route's own catch-all parameter
+            // name, and run behind a generated shim that prefixes the mount
+            // onto that parameter — the wrapped root module sees exactly the
+            // params a static build gives it, so even a wrapper that bakes
+            // the param into its bytes stays byte-identical.
+            const shimFor = (
+              userFile: string,
+              paramName: string,
+              fileName: string,
+            ): string => {
+              const shimDir = path.join(
+                projectRoot,
+                ".astro",
+                "nimbus",
+                "agent-route-shims",
+              );
+              fs.mkdirSync(shimDir, { recursive: true });
+              const shimPath = path.join(shimDir, fileName);
+              fs.writeFileSync(
+                shimPath,
+                [
+                  `import * as route from ${JSON.stringify(pathToFileURL(userFile).href)};`,
+                  `const MOUNT = ${JSON.stringify(mount.slice(1))};`,
+                  `const PARAM = ${JSON.stringify(paramName)};`,
+                  "const forward = (context) =>",
+                  "  new Proxy(context, {",
+                  "    get(target, key) {",
+                  "      if (key === \"params\") {",
+                  "        const value = target.params[PARAM];",
+                  "        return {",
+                  "          ...target.params,",
+                  "          [PARAM]: value ? `${MOUNT}/${value}` : MOUNT,",
+                  "        };",
+                  "      }",
+                  "      const result = Reflect.get(target, key, target);",
+                  "      return typeof result === \"function\" ? result.bind(target) : result;",
+                  "    },",
+                  "  });",
+                  "export const getStaticPaths = route.getStaticPaths;",
+                  "export const GET = (context) => route.GET(forward(context));",
+                  "",
+                ].join("\n"),
+                "utf8",
+              );
+              return shimPath;
+            };
+            const injections: Array<{
+              pattern: string;
+              name: string;
+              kind: "index.md" | "index.mdx" | "llms.txt";
+              userFile?: string;
+            }> = [
+              ...(rootAgentFiles.markdown?.shared
+                ? [
+                    {
+                      pattern: `${mount}/${
+                        reuseRootModule
+                          ? rootAgentFiles.markdown.dir
+                          : "[...slug]"
+                      }/index.md`,
+                      name: "mounted-markdown-route",
+                      kind: "index.md" as const,
+                      ...(reuseRootModule
+                        ? { userFile: rootAgentFiles.markdown.file }
+                        : {}),
+                    },
+                  ]
+                : []),
+              ...(rootAgentFiles.source?.shared
+                ? [
+                    {
+                      pattern: `${mount}/${
+                        reuseRootModule
+                          ? rootAgentFiles.source.dir
+                          : "[...slug]"
+                      }/index.mdx`,
+                      name: "mounted-source-route",
+                      kind: "index.mdx" as const,
+                      ...(reuseRootModule
+                        ? { userFile: rootAgentFiles.source.file }
+                        : {}),
+                    },
+                  ]
+                : []),
+              // A hidden version is absent from discovery, so it has no
+              // llms index to serve; its Markdown URLs 404 as today. The
+              // dynamic pattern lets a prebuilt mount with no discoverable
+              // pages emit nothing instead of a bogus file. The section
+              // factory's static paths are keyed by [section], so this one
+              // never reuses the project module.
+              ...(rootAgentFiles.llms?.shared && !hiddenVersionMounts.has(mount)
+                ? [
+                    {
+                      pattern: `${mount}/[llms].txt`,
+                      name: "mounted-llms-route",
+                      kind: "llms.txt" as const,
+                    },
+                  ]
+                : []),
+            ];
+            for (const { pattern, name, kind, userFile } of injections) {
+              if (mountOwns(mount, kind)) continue;
+              const paramName = pattern
+                .split("/")
+                .find((segment) => segment.startsWith("[..."))
+                ?.slice(4, -1);
+              const entrypoint = userFile
+                ? pathToFileURL(
+                    shimFor(
+                      userFile,
+                      paramName ?? "slug",
+                      // Collision-free per mount: distinct mounts must never
+                      // share a shim ("/v1.0" vs "/v1_0").
+                      `${mount.slice(1).replaceAll(/[^A-Za-z0-9_-]/gu, "_")}-${createHash("sha256").update(mount).digest("hex").slice(0, 8)}-${kind.replaceAll(".", "-")}.mjs`,
+                    ),
+                  )
+                : new URL(
+                    `./_internal/${name}.${agentExtension}`,
+                    import.meta.url,
+                  );
+              injectRoute({
+                pattern,
+                entrypoint,
+                prerender: mode === "build",
+              });
+              managedRoutesForBuild.push({
+                pattern,
+                entrypoint: normalizeRouteEntrypoint(
+                  projectRoot,
+                  entrypoint.href,
+                )!,
+                owner: "infrastructure",
+                rendering: mode,
+              });
+            }
+          }
         }
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw authorError(outdatedSidebar);
@@ -1779,8 +2176,18 @@ export function nimbus(
           return;
         }
         const mode = renderingRoutes.get(component);
-        if (!mode) return;
-        route.prerender = mode === "build";
+        if (mode) {
+          route.prerender = mode === "build";
+          return;
+        }
+        // Project-owned agent route files are policy-managed when they call
+        // a Nimbus agent factory: the policy wins over their `prerender`
+        // export, the same way it wins for page routes, so copied starter
+        // files keep working unchanged. Custom routes that call no factory
+        // keep their own `prerender`.
+        if (!agentRenderingForBuild) return;
+        const agentMode = agentRouteMode(component);
+        if (agentMode) route.prerender = agentMode === "build";
       },
       "astro:config:done": ({
         injectTypes,

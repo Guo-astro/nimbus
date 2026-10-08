@@ -73,15 +73,14 @@ test("prerendered factories write every baked llms.txt payload and warn about no
   assert.doesNotMatch(site.logs, /not prerendered/);
 });
 
-test("factories rendered on request warn, serve by URL, 404 unknown sections, and 500 without details", async () => {
+test("factories rendered on request serve by URL, 404 unknown sections, and 500 without details", async () => {
   const site = await sites.buildSite(
     { ...CONTENT, ...routes(false) },
     { server: true, logLevel: "warn" },
   );
-  assert.match(
-    site.logs,
-    /nimbus-docs: 3 Markdown or llms\.txt pages were not prerendered:\n {2}- src\/pages\/\[section\]\/llms\.txt\.ts \(\/\[section\]\/llms\.txt\) is rendered on request, so the build has no file for: \/changelog\/llms\.txt\n {2}- src\/pages\/llms-full\.txt\.ts \(\/llms-full\.txt\) is rendered on request, so the build has no file for: \/llms-full\.txt\n {2}- src\/pages\/llms\.txt\.ts \(\/llms\.txt\) is rendered on request, so the build has no file for: \/llms\.txt\n/,
-  );
+  // Request-rendered llms routes are normal operation now — agent files
+  // follow the rendering policy — so the build warns about nothing.
+  assert.doesNotMatch(site.logs, /not prerendered/);
   const app = await siteApp(site);
   const baked = await bakedLlms(site.root);
   for (const [url, body] of baked) {

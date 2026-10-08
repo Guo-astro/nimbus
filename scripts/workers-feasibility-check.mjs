@@ -1391,21 +1391,29 @@ for (const base of ["", "/docs"]) {
   await withWorkerd(site, (origin) => assertAgentDiscovery(origin, base, { ownerLink: true, requestRendered: true }));
 }
 
-console.log(`${PREFIX} preserving 404 when SSR cannot rewrite to prerendered llms.txt`);
-const missingHomepagePath = join(site, "dist/client/docs/index.md");
-const homepageBytes = readFileSync(missingHomepagePath);
-rmSync(missingHomepagePath);
-try {
-  await withWorkerd(site, async (origin) => {
-    assert((await request(origin, "/docs/llms.txt")).response.status === 200,
-      "prerendered llms.txt must still exist");
-    const missing = await request(origin, "/docs/index.md");
-    assert(missing.response.status === 404,
-      "missing homepage copy must remain a 404, not an SSR rewrite failure");
-  });
-} finally {
-  writeFileSync(missingHomepagePath, homepageBytes);
-}
+console.log(`${PREFIX} request-rendered homepage Markdown serves the site llms payload`);
+// Agent files follow the rendering policy: with `docs: "request"` the
+// homepage Markdown is no public file (nothing to bake, nothing to delete),
+// and a rewrite to the prebuilt /docs/llms.txt is impossible from a
+// request-rendered route — the root Markdown route serves the site llms
+// payload itself instead of failing into an SSR rewrite error.
+assert(
+  !existsSync(join(site, "dist/client/docs/index.md")),
+  "request-rendered homepage Markdown must not be baked as a public file",
+);
+await withWorkerd(site, async (origin) => {
+  const llms = await request(origin, "/docs/llms.txt");
+  assert(llms.response.status === 200, "prerendered llms.txt must still exist");
+  const homepage = await request(origin, "/docs/index.md");
+  assert(homepage.response.status === 200,
+    "request-rendered homepage Markdown must resolve");
+  assert(
+    homepage.response.headers.get("Content-Type")?.includes("text/markdown"),
+    `homepage Markdown served as ${homepage.response.headers.get("Content-Type")}`,
+  );
+  assert(homepage.html === llms.html,
+    "homepage Markdown must serve the site llms payload");
+});
 
 console.log(`${PREFIX} proving static-output Cloudflare discovery under a base`);
 writeFileSync(

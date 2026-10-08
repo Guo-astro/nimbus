@@ -111,9 +111,9 @@ export interface ApiPageBase {
   collection: string;
   coordinate: string;
   href: string;
-  /** The page's clean-Markdown URL, or `null` when the page has no per-page
+  /** The page's clean-Markdown URL, absent when the page has no per-page
    *  Markdown affordance (a non-default query-mode version). */
-  markdownHref: string | null;
+  markdownHref?: string;
   tokenCount?: number;
   title: string;
   description?: string;

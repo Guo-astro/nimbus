@@ -345,7 +345,7 @@
       "mode": "review-required",
       "changeset": "calm-api-catalog",
       "summary": "API specs are now published and listed in an API catalog.",
-      "affected": "Sites with api collections. Each visible spec is served at /<collection>/openapi.json (versions at their mount path) and listed at /.well-known/api-catalog.",
+      "affected": "Sites with api collections. Every spec is served at /<collection>/openapi.json (versions at their mount path), hidden versions included; visible ones are also listed at /.well-known/api-catalog.",
       "instructions": [
         "Decide per collection and version whether the spec may be public. Set publishSpec: false on the collection, or on a version, to keep it unpublished; the catalog entry then carries documentation links only.",
         "If you already serve /.well-known/api-catalog or a <collection>/openapi.json route yourself, move it: Nimbus fails the build rather than overwrite the catalog, and its spec files take the mount path."
@@ -379,7 +379,7 @@
       "summary": "Optionally publish Agent Skills from a skills/ folder.",
       "affected": "Sites that want to publish Agent Skills, and sites that already serve /.well-known/agent-skills/index.json themselves.",
       "instructions": [
-        "To publish skills, add skills/<name>/SKILL.md folders at the project root in the Agent Skills format. Nimbus emits the discovery index, artifacts and digests.",
+        "To publish skills, add skills/<name>/SKILL.md folders at the project root in the Agent Skills format. Nimbus emits the discovery index, artifacts and digests. Every file in a skill's folder is published, so a root skills/ folder you already have goes live on upgrade.",
         "If you already publish files under /.well-known/agent-skills/ yourself, keep doing so: Nimbus only publishes when a skills/ folder exists, and fails the build rather than overwrite any file it would also write."
       ],
       "verify": [
@@ -467,7 +467,7 @@
       "affected": "Sites with copied sidebar components (Sidebar, SidebarGroup, SidebarGroupHeader, SidebarLink, sidebar.client.ts, ApiSidebarItem), the layouts that host them (DocsLayout, ApiLayout), or styling that targets the old per-row Tailwind strings.",
       "instructions": [
         "No action is needed: the framework's state scripts drive both the old scripted-collapsible markup and the new native details markup, so existing copied components keep working.",
-        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference also updates src/components/ui/api-sidebar/ApiSidebarItem.astro and src/components/ui/api-layout/ApiLayout.astro in the same step. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
+        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference also reinstalls the api-sidebar and api-layout registry components in the same step: nimbus-docs add api-sidebar --overwrite and nimbus-docs add api-layout --overwrite, then review the change with git diff and reapply your own edits. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
         "Page HTML for a large sidebar drops by roughly 80%, and each page renders one sidebar tree shared by the rail and the drawer.",
         "Row styling is three classes (nb-sidebar-link, nb-sidebar-row, nb-sidebar-list) in the \"Sidebar rows\" section of src/styles/globals.css, in Tailwind's components layer, so utilities on a row still win. If you edited globals.css, copy that section in by hand. The data-nb-sidebar-* attributes are unchanged.",
         "One visible change: a group with a landing page now lists it as the group's first child, labelled \"Overview\" — the summary row is label-only, so keyboard and screen-reader users get one disclosure control and one link.",
@@ -486,7 +486,7 @@
       "summary": "The starter ApiBody shows an operation's request example when it has no code samples.",
       "affected": "Projects with a copied src/components/ui/api-layout/ApiBody.astro that use samples.generate to drop generated languages: an operation left without samples showed no request body example in HTML.",
       "instructions": [
-        "Update an unmodified copy with nimbus-docs diff src/components/ui/api-layout/ApiBody.astro --apply.",
+        "Reinstall the api-layout registry component with nimbus-docs add api-layout --overwrite, then review the change with git diff and reapply your own edits.",
         "In a customized copy, when page.requestExamples is empty and page.samples is empty, render page.example (its highlightedHtml) as the request example."
       ],
       "verify": [
@@ -504,7 +504,7 @@
         "Families that don't set versionMode keep path versions: existing routes, store ids, URLs, alternates, sitemaps, and agent files are unchanged.",
         "To adopt query versions on a family, set versionMode: \"query\" on its api entry. It requires \"versions\" and the family's effective rendering mode to be \"request\" — a static site serves the same file whatever the query says.",
         "In query mode: /<family>/<slug> renders the default version; ?api-version=<id> selects another; an unknown or version-prefixed path URL is a 404. Every generated same-version link carries the version's query; discovery (sitemap, Markdown twins, llms indexes) covers the default version at version-free URLs; non-default pages are noindex with the default counterpart as canonical and no per-page Markdown affordance.",
-        "Adopters must also update three copied files. The API catch-all route (src/pages/<family>/[...slug].astro from the api-reference recipe): derive the social image from the pathname and fall back to the shared image when the page URL carries a query, and pass markdownUrl={page.markdownHref ?? undefined} — the recipe's current form is the reference. A copied BaseLayout and AgentDirective: update with nimbus-docs diff src/layouts/BaseLayout.astro --apply and nimbus-docs diff src/components/AgentDirective.astro --apply, so a page without per-page Markdown still emits an index-only agent directive."
+        "Adopters must also update three copied files. The API catch-all route (src/pages/<family>/[...slug].astro from the api-reference recipe): derive the social image from the pathname and fall back to the shared image when the page URL carries a query; the recipe's current form is the reference. A copied BaseLayout and AgentDirective: update with nimbus-docs diff src/layouts/BaseLayout.astro --apply and nimbus-docs diff src/components/AgentDirective.astro --apply, so a page without per-page Markdown still emits an index-only agent directive."
       ],
       "verify": [
         "Request /<family>/x/, /<family>/x/?api-version=<default>, and ?api-version=<other> and confirm the right versions render; an unknown id returns the 404 page.",
@@ -537,7 +537,7 @@
       "affected": "Projects with a copied VersionSwitcher that adopt versionMode: \"query\" — the old copy drops ?api-version= from the active item, so clicking it would jump to the default version.",
       "instructions": [
         "If the project doesn't use versionMode: \"query\", no change is needed; the updated component is otherwise identical.",
-        "Update an unmodified copy with nimbus-docs diff src/components/ui/version-switcher/VersionSwitcher.astro --apply.",
+        "Reinstall the version-switcher registry component with nimbus-docs add version-switcher --overwrite, then review the change with git diff and reapply your own edits.",
         "In a customized copy, take the active item's href from the page's own alternates record (record.self.url), and without one use the current pathname plus that version's ?api-version= query. Don't copy the whole query string: unrelated parameters such as utm_source don't belong in the link."
       ],
       "verify": [

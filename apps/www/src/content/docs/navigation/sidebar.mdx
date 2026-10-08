@@ -214,6 +214,6 @@ Upgrading from the scripted-collapsible markup: run `nimbus-docs outdated` to se
 - `src/components/ui/sidebar/*`
 - `src/layouts/DocsLayout.astro`
 - `src/styles/globals.css` (if you edited it, copy in the "Sidebar rows" section by hand)
-- With an API reference: `src/components/ui/api-sidebar/ApiSidebarItem.astro` and `src/components/ui/api-layout/ApiLayout.astro`
+- With an API reference: the `api-sidebar` and `api-layout` registry components. These come from the registry, not the starter, so reinstall them with `nimbus-docs add api-sidebar --overwrite` and `nimbus-docs add api-layout --overwrite`, then review the change with `git diff`
 
 If you edited these files, you can keep your copies: the framework's state scripts drive both the old and the new markup. Port your edits when convenient. Groups with a landing page now show it as an "Overview" child row instead of a split label/caret header.

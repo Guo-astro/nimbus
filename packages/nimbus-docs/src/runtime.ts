@@ -45,7 +45,7 @@ import {
 } from "./_internal/sidebar.js";
 import { entryRouteKey } from "./_internal/astro-slug.js";
 import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
-import { stripBase, toDocumentHref, withBase, withoutHtmlExtension } from "./_internal/url.js";
+import { stripBase, withBase, withoutHtmlExtension } from "./_internal/url.js";
 import {
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,

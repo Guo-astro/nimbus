@@ -398,7 +398,6 @@ export function apiCollection(options?: ApiCollectionOptions): {
 
       const {
         apiPageRoute,
-        apiVersionQuery,
         buildApiModel,
         clearApiModelCache,
         getApiNav,

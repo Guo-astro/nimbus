@@ -6,6 +6,7 @@
  * payload). Version lives in the path via `mountPath`, never in the coordinate.
  */
 
+import { apiVersionQuery, targetUrlFields } from "./resolve-versions.js";
 import {
   buildApiModel,
   getApiFieldCitations,
@@ -63,8 +64,23 @@ function pagelessSchemaCoordinates(model: DocsModel): Map<Coordinate, string> {
   return out;
 }
 
-function pageUrl(mountPath: string, slug: string): string {
-  return slug === "" ? mountPath : `${mountPath}/${slug}`;
+function pageUrl(
+  target: {
+    family: string;
+    mountPath: string;
+    versionMode: "path" | "query";
+    isDefault: boolean;
+    version: string | null;
+  },
+  slug: string,
+): string {
+  // Query mode: one version-free path per operation; a non-default version's
+  // citations carry its `?api-version=` (`resolveCitation` shapes only the
+  // pathname, so the query survives `toDocumentHref`).
+  const base =
+    target.versionMode === "query" ? `/${target.family}` : target.mountPath;
+  const path = slug === "" ? base : `${base}/${slug}`;
+  return `${path}${apiVersionQuery(target)}`;
 }
 
 /**
@@ -91,9 +107,11 @@ export async function buildCitationIndex(
         spec: target.spec,
         label: target.label,
         mountPath: target.mountPath,
+        ...targetUrlFields(target),
         requireOperationId: target.requireOperationId,
         schemaPages: target.schemaPages,
         routes: target.routes,
+        samples: target.samples,
       },
       root,
     );
@@ -117,20 +135,20 @@ export async function buildCitationIndex(
 
     const targets: Array<{ coordinate: string; url: string }> = [];
     for (const { coordinate, slug } of getApiPageSlugs(model)) {
-      targets.push({ coordinate, url: pageUrl(target.mountPath, slug) });
+      targets.push({ coordinate, url: pageUrl(target, slug) });
       const page = getApiPageProps(model, coordinate);
       if (page.kind === "operation") {
         for (const response of page.responses) {
           targets.push({
             coordinate: response.coordinate,
-            url: `${pageUrl(target.mountPath, slug)}#${response.anchor}`,
+            url: `${pageUrl(target, slug)}#${response.anchor}`,
           });
         }
       }
     }
 
     for (const { coordinate, slug, anchor } of getApiFieldCitations(model)) {
-      targets.push({ coordinate, url: `${pageUrl(target.mountPath, slug)}#${anchor}` });
+      targets.push({ coordinate, url: `${pageUrl(target, slug)}#${anchor}` });
     }
 
     const validTargets = targets.filter(({ url }) => isSafeCitationPath(url));

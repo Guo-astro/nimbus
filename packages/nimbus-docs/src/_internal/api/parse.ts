@@ -34,6 +34,7 @@ import type {
   RouteProvenance,
 } from "./model.js";
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSamples } from "../../types.js";
 import { collectSecuritySchemes } from "./facts.js";
 import { loadSampleTools } from "./samples.js";
 import type { SampleTools } from "./samples.js";
@@ -51,14 +52,26 @@ export interface SpecSource {
   spec: string | Record<string, unknown>;
   /** Human label for diagnostics (e.g. the file path). */
   label?: string;
+  /** The project-relative file the spec was read from, for diagnostics. */
+  path?: string;
   /** Base URL for this model's pages. Defaults to `/<collection>` when absent. */
   mountPath?: string;
+  /**
+   * Public URL base, when it differs from `mountPath`: a query-mode version
+   * mounts its store at `mountPath` but its pages live at the version-free
+   * family base.
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
   schemaPages?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
+  samples?: ApiSamples;
 }
 
 export interface ParseResult {
@@ -75,6 +88,8 @@ interface ScalarParserModule {
   validate: (input: string | Record<string, unknown>) => Promise<{
     valid?: boolean;
     errors?: ScalarValidationError[];
+    /** The detected specification version: `"2.0"`, `"3.0"`, or `"3.1"`. */
+    version?: string;
   }>;
   dereference: (input: string | Record<string, unknown>) => Promise<{
     schema?: OpenApiDocument;
@@ -125,6 +140,17 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     // walkability gate below does that — so validation issues become warnings,
     // never a build-abort.
     const validation = await parser.validate(source.spec);
+    // The walker reads OpenAPI 3.x only; a Swagger 2.0 document would render
+    // without servers, parameter types, or response schemas.
+    if (validation.version === "2.0") {
+      throw new ApiBuildError([
+        {
+          level: "error",
+          message: "Swagger 2.0 isn't supported. Convert it to OpenAPI 3.x first.",
+          source: source.path ?? label,
+        },
+      ]);
+    }
     for (const e of validation.errors ?? []) {
       preDiagnostics.push({
         level: "warning",
@@ -183,9 +209,12 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       source.requireOperationId ?? false,
       source.routes,
       source.schemaPages ?? false,
+      source.samples,
     );
     const model = walker.walk();
     if (source.mountPath !== undefined) model.mountPath = source.mountPath;
+    if (source.urlBasePath !== undefined) model.urlBasePath = source.urlBasePath;
+    if (source.urlQuery !== undefined) model.urlQuery = source.urlQuery;
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];
@@ -365,6 +394,7 @@ class Walker implements ParseContext {
     readonly requireOperationId: boolean = false,
     readonly routePolicy?: RoutePolicy,
     readonly schemaPages: boolean = false,
+    readonly samples: ApiSamples = {},
   ) {
     this.registry = new CoordinateRegistry(collection);
     // Schema tables are captured once here — the walk never reassigns them on `doc`.

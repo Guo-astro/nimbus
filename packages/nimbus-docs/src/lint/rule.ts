@@ -31,6 +31,8 @@ export interface RuleContext {
    * unit tests parsing a fixture directly.
    */
   site?: string;
+  /** Another rule's resolved options for this file, so related rules agree. */
+  optionsOf?(code: AuthoringRuleCode): Record<string, unknown>;
   report(report: RuleReport): void;
 }
 

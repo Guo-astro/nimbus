@@ -11,5 +11,11 @@
     "baselineGzipBytes": 768,
     "maxBytes": 4096,
     "maxGzipBytes": 3072
+  },
+  "sidebarFixturePage": {
+    "baselineBytes": 687126,
+    "baselineGzipBytes": 32537,
+    "maxBytes": 721482,
+    "maxGzipBytes": 34164
   }
 }

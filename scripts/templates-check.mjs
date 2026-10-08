@@ -22,6 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,9 +94,10 @@ async function availablePort() {
   });
 }
 
-async function verifyRuntime(site, lane) {
-  const port = await availablePort();
+async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = "") {
+  port ??= await availablePort();
   const origin = `http://127.0.0.1:${port}`;
+  const siteUrl = `${origin}${base}`;
   const command =
     lane === "node"
       ? {
@@ -122,6 +124,7 @@ async function verifyRuntime(site, lane) {
   const child = spawnCommand(command.bin, command.args, {
     cwd: site,
     env: { ...process.env, ...command.env },
+    detached: process.platform !== "win32",
     stdio: "inherit",
   });
   const routes = [
@@ -146,7 +149,7 @@ async function verifyRuntime(site, lane) {
         throw new Error(`runtime exited with status ${child.exitCode}`);
       }
       try {
-        const response = await fetch(`${origin}${routes[0][0]}`, {
+        const response = await fetch(`${siteUrl}${routes[0][0]}`, {
           signal: AbortSignal.timeout(1_000),
         });
         if (response.ok) break;
@@ -154,7 +157,7 @@ async function verifyRuntime(site, lane) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
     for (const [route, expected, expectedStatus = 200, unexpected] of routes) {
-      const response = await fetch(`${origin}${route}`, {
+      const response = await fetch(`${siteUrl}${route}`, {
         signal: AbortSignal.timeout(5_000),
       });
       const body = await response.text();
@@ -167,6 +170,53 @@ async function verifyRuntime(site, lane) {
           `${route} returned ${response.status} without ${JSON.stringify(expected)}: ${JSON.stringify(body.slice(0, 300))}`,
         );
       }
+    }
+    for (const route of ["/", "/owned-by-slug/"]) {
+      const markdown = await fetch(`${siteUrl}${route}`, {
+        headers: { Accept: "text/markdown, text/html;q=0.9" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.equal(markdown.status, 200);
+      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route}`);
+      assert.match(markdown.headers.get("Vary") ?? "", /Accept/);
+      const alternate = await fetch(`${siteUrl}${route}index.md`);
+      assert.equal(alternate.status, 200, `${route}index.md`);
+      assert.match(alternate.headers.get("Content-Type") ?? "", /text\/markdown/, `${route}index.md`);
+      const expected = await alternate.text();
+      if (route === "/" && expectedHomepageMarkdown !== undefined) assert.equal(expected, expectedHomepageMarkdown);
+      assert.equal(await markdown.text(), expected);
+      if (lane === "node") {
+        const spoofed = await new Promise((resolveResponse, reject) => {
+          const request = httpRequest(`${siteUrl}${route}`, {
+            headers: { Host: "untrusted.invalid", Accept: "text/markdown" },
+          }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("error", reject);
+            response.on("end", () => resolveResponse(new Response(Buffer.concat(chunks), {
+              status: response.statusCode,
+              headers: { "Content-Type": response.headers["content-type"] ?? "" },
+            })));
+          });
+          request.on("error", reject);
+          request.setTimeout(5_000, () => request.destroy(new Error("spoofed Host request timed out")));
+          request.end();
+        });
+        assert.equal(spoofed.status, 200);
+        assert.match(spoofed.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.equal(await spoofed.text(), expected, "Node request Host changed the asset origin");
+      }
+      const head = await fetch(`${siteUrl}${route}`, {
+        method: "HEAD",
+        headers: { Accept: "text/markdown" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.equal(head.status, 200);
+      assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route} HEAD`);
+      assert.match(head.headers.get("Vary") ?? "", /Accept/);
+      assert.equal(await head.text(), "");
+      const html = await fetch(`${siteUrl}${route}`);
+      assert.match(html.headers.get("Content-Type") ?? "", /text\/html/);
     }
     if (lane === "cloudflare") {
       const manifest = JSON.parse(
@@ -187,12 +237,13 @@ async function verifyRuntime(site, lane) {
           site,
           "dist",
           "client",
+          base,
           "_nimbus",
           "agent-endpoint-assets",
           asset.path,
         ),
       );
-      const missingAsset = await fetch(`${origin}/runtime-section/llms.txt`, {
+      const missingAsset = await fetch(`${siteUrl}/runtime-section/llms.txt`, {
         signal: AbortSignal.timeout(5_000),
       });
       const missingAssetBody = await missingAsset.text();
@@ -205,7 +256,7 @@ async function verifyRuntime(site, lane) {
           `known missing asset returned ${missingAsset.status}: ${JSON.stringify(missingAssetBody.slice(0, 300))}`,
         );
       }
-      const unknown = await fetch(`${origin}/missing/index.md`, {
+      const unknown = await fetch(`${siteUrl}/missing/index.md`, {
         signal: AbortSignal.timeout(5_000),
       });
       if (unknown.status !== 404) {
@@ -213,7 +264,12 @@ async function verifyRuntime(site, lane) {
       }
     }
   } finally {
-    child.kill("SIGTERM");
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
     await Promise.race([
       new Promise((resolveClose) => child.once("close", resolveClose)),
       new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
@@ -374,6 +430,25 @@ if (requestRendering !== (LANE === "cloudflare")) {
   fail(`${LANE} scaffold has an unexpected request-rendering default`);
 }
 ok(`scaffolded the ${LANE} lane via --template-dir`);
+if (LANE !== "static" && LANE !== "cloudflare") {
+  const fixtureConfig = astroConfig.replace(
+    "const nimbusConfig = defineNimbusConfig({",
+    'const nimbusConfig = defineNimbusConfig({\n  rendering: { default: "request" },',
+  );
+  assert.notEqual(fixtureConfig, astroConfig, "missing prose request-rendering fixture seam");
+  writeFileSync(join(site, "astro.config.ts"), fixtureConfig);
+}
+const nodeRuntimePort = LANE === "node" ? await availablePort() : undefined;
+if (nodeRuntimePort !== undefined) {
+  const configPath = join(site, "astro.config.ts");
+  const source = readFileSync(configPath, "utf8");
+  const configured = source.replace(
+    'site: "https://example.com"',
+    `site: "http://127.0.0.1:${nodeRuntimePort}"`,
+  );
+  assert.notEqual(configured, source, "missing trusted site-origin fixture seam");
+  writeFileSync(configPath, configured);
+}
 
 // 4. Point nimbus-docs at the packed workspace bits, install + build.
 const pkgPath = join(site, "package.json");
@@ -391,6 +466,11 @@ writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 // Keep the scaffold's workspace configuration active so dependency build
 // permissions are honored.
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "install", "--no-frozen-lockfile"], { cwd: site });
+assert.equal(
+  readFileSync(join(site, "node_modules", NIMBUS_NAME, "dist/docs-for-agents.md"), "utf8"),
+  readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),
+);
+assert.match(readFileSync(join(site, "AGENT.md"), "utf8"), /dist\/docs-for-agents\.md/);
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "typecheck"], { cwd: site });
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
 
@@ -463,13 +543,30 @@ if (LANE === "node" || LANE === "cloudflare") {
     });
   }
   try {
-    await verifyRuntime(site, LANE);
+    await verifyRuntime(site, LANE, nodeRuntimePort);
   } catch (error) {
     fail(`${LANE} runtime verification failed: ${error.message}`);
   }
   ok(`${LANE} serves custom, scaffolded, and dynamic request routes`);
 }
 if (LANE === "cloudflare") {
+  const ownerMarkdown = "Owner homepage Markdown.";
+  writeFileSync(
+    join(site, "src", "pages", "index.md.ts"),
+    `export const prerender = false;\nexport function GET() { return new Response(${JSON.stringify(ownerMarkdown)}, { headers: { "Content-Type": "text/markdown" } }); }\n`,
+  );
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown);
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner");
+  const configPath = join(site, "astro.config.ts");
+  const config = readFileSync(configPath, "utf8");
+  const based = config.replace('output: "server",', 'output: "server",\n  base: "/docs",');
+  assert.notEqual(based, config, "missing base-path fixture seam");
+  writeFileSync(configPath, based);
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown, "/docs");
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner under /docs");
+  writeFileSync(configPath, config);
   rmSync(join(site, "src", "pages", "[...slug].astro"));
   const missingCanonical = spawnCommandSync(
     SCAFFOLD_PM_BIN,

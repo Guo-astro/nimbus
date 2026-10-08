@@ -226,7 +226,11 @@ test("unknown rendering collection is blocked before the production build", asyn
   }
 });
 
-test("opaque collections cannot hide a request-default build blocker", async () => {
+test("opaque collections no longer block a request default; a build confirms pages", async () => {
+  // Which collections are pages comes from the registry record (and, for
+  // `check`, the build's .nimbus/page-collections.json) — never from parsing
+  // content.config.ts. An opaque registration is not a blocker; without a
+  // completed build, check notes what it could not confirm.
   const dir = project(
     `{ site: "https://docs.example.com", title: "X", search: false, rendering: { default: "request" } }`,
     (d) => {
@@ -240,9 +244,15 @@ test("opaque collections cannot hide a request-default build blocker", async () 
   );
   try {
     const j = jsonOf(await runChecks(dir, ENV_STRUCT));
-    assert.equal(j.readiness, "blocked");
+    assert.notEqual(j.readiness, "blocked");
     assert.ok(
-      j.findings.some((f) => f.code === "nimbus/rendering-policy-invalid"),
+      !j.findings.some((f) => f.code === "nimbus/rendering-policy-invalid"),
+    );
+    const structure = j.scopes.find((s) => s.scope === "structure");
+    assert.ok(
+      structure?.notes.some(
+        (n) => n.code === "nimbus/page-collections-unconfirmed",
+      ),
     );
   } finally {
     cleanup(dir);
@@ -324,5 +334,87 @@ test("before the first install, check says to install instead of listing each pa
     assert.doesNotMatch(pretty, /→ run `pnpm nimbus-docs check --fix`/);
   } finally {
     cleanup(dir);
+  }
+});
+
+// The MDX pass scans what the helpers load: a partialsCollection() under any
+// key (default base "partials"), never a data collection that merely shares
+// the name.
+test("check scans partials by helper, not by collection name", async () => {
+  const components = "export const components = {};\n";
+  const badMdx = "---\ntitle: X\n---\n<NotRegistered />\n";
+
+  const renamedPartials = project(
+    `{ site: "https://docs.example.com", title: "X", search: false }`,
+    (d) => {
+      addDocsRoute(d);
+      fs.mkdirSync(path.join(d, "src", "content", "partials"), { recursive: true });
+      fs.writeFileSync(path.join(d, "src", "components.ts"), components);
+      fs.writeFileSync(
+        path.join(d, "src", "content.config.ts"),
+        'import { defineCollection } from "astro:content";\n' +
+          'import { docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";\n' +
+          "export const collections = { docs: defineCollection(docsCollection()), snippets: defineCollection(partialsCollection()) };\n",
+      );
+      fs.writeFileSync(path.join(d, "src", "content", "partials", "bad.mdx"), badMdx);
+    },
+  );
+  try {
+    // Without a completed build, the partials collection can't be confirmed:
+    // no finding, and a note says what was skipped.
+    const before = jsonOf(await runChecks(renamedPartials, ENV_STRUCT));
+    assert.ok(
+      !before.findings.some((f) => f.code === "nimbus/component-pascalcase"),
+      "unconfirmed collections are not validated before a build",
+    );
+    assert.ok(
+      before.scopes.some((s) =>
+        s.notes.some((n) => n.code === "nimbus/page-collections-unconfirmed"),
+      ),
+    );
+    // With the build's recorded file list, check validates the same files
+    // the build did — the renamed partials collection included.
+    fs.mkdirSync(path.join(renamedPartials, ".nimbus"), { recursive: true });
+    fs.writeFileSync(
+      path.join(renamedPartials, ".nimbus", "page-collections.json"),
+      JSON.stringify({
+        version: 1,
+        collections: ["docs"],
+        mdxFiles: ["src/content/partials/bad.mdx"],
+      }),
+    );
+    const after = jsonOf(await runChecks(renamedPartials, ENV_STRUCT));
+    assert.ok(
+      after.findings.some((f) => f.code === "nimbus/component-pascalcase"),
+      "the build's recorded file list is validated identically",
+    );
+  } finally {
+    cleanup(renamedPartials);
+  }
+
+  const dataNamedPartials = project(
+    `{ site: "https://docs.example.com", title: "X", search: false }`,
+    (d) => {
+      addDocsRoute(d);
+      fs.mkdirSync(path.join(d, "src", "content", "partials"), { recursive: true });
+      fs.writeFileSync(path.join(d, "src", "components.ts"), components);
+      fs.writeFileSync(
+        path.join(d, "src", "content.config.ts"),
+        'import { defineCollection } from "astro:content";\n' +
+          'import { glob } from "astro/loaders";\n' +
+          'import { docsCollection } from "@cloudflare/nimbus-docs/content";\n' +
+          'export const collections = { docs: defineCollection(docsCollection()), partials: defineCollection({ loader: glob({ base: "./src/content/partials", pattern: "**/*.mdx" }) }) };\n',
+      );
+      fs.writeFileSync(path.join(d, "src", "content", "partials", "bad.mdx"), badMdx);
+    },
+  );
+  try {
+    const j = jsonOf(await runChecks(dataNamedPartials, ENV_STRUCT));
+    assert.ok(
+      !j.findings.some((f) => f.code === "nimbus/component-pascalcase"),
+      "a data collection named partials is not validated",
+    );
+  } finally {
+    cleanup(dataNamedPartials);
   }
 });

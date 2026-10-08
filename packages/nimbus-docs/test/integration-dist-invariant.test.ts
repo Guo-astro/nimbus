@@ -1,13 +1,8 @@
 /**
- * Dist-output invariant: with no adapter installed, the integration adds nothing
- * to `dist` beyond what it shipped before deploy-correctness — the new build
- * diagnostics go to the logger (stdout) and `.nimbus/` (project root), never to
- * `dist`. The single sanctioned dist artifact is `_redirects`, a deploy file
- * emitted only in the static lane when a deploy target is detected AND there is
- * at least one concrete redirect to write; otherwise dist stays identical to
- * baseline.
- *
- * Baseline = `_nimbus/shiki.css`, which predates this work and is always emitted.
+ * Deploy diagnostics go to the logger and `.nimbus/`, never to `dist`.
+ * Besides the normal discovery and code-style outputs, `_redirects` is added
+ * only for a detected static deployment with at least one concrete redirect.
+ * Prerendered discovery endpoints are covered by the real Astro build tests.
  */
 
 import assert from "node:assert/strict";
@@ -33,7 +28,7 @@ import { readRouteTruth } from "../src/lint/route-truth.js";
 
 const dirUrl = (p: string) => pathToFileURL(p + path.sep);
 
-const BASELINE_DIST = ["_nimbus/shiki.css"];
+const BASELINE_DIST = ["_headers", "_nimbus/shiki.css"];
 
 const CONTENT_CONFIG = `import { docsCollection } from "@cloudflare/nimbus-docs/content";
 export const collections = { docs: docsCollection({ base: "docs" }) };
@@ -494,7 +489,7 @@ test("route truth records every emitted file except the final assets dir, search
     },
   });
   const truth = await readRouteTruthFile(projectRoot);
-  assert.equal(truth.version, 2);
+  assert.equal(truth.version, 3);
   assert.deepEqual(truth.knownRoutes, [
     "/",
     "/.well-known/security.txt",
@@ -502,6 +497,7 @@ test("route truth records every emitted file except the final assets dir, search
     "/_astro/manual.pdf",
     "/files/doc.pdf",
     "/foo",
+    "/index.md",
     "/keys/key.pem",
     "/llms.txt",
     "/rss.xml",
@@ -630,4 +626,24 @@ test("a route truth failure is a warning and leaves no routes.json", { skip: asR
     readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
     { code: "ENOENT" },
   );
+});
+
+test("route truth keeps platform rules and Astro's redirect pages apart", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    signal: "netlify",
+    redirects: { "/old": "/missing" },
+    seedDist: { "old/index.html": "", _redirects: "/old /good 301\n" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.equal(truth.redirectRules, "netlify");
+  assert.deepEqual(truth.redirectPages, [{ from: "/old", to: "/missing", status: 301 }]);
+  assert.deepEqual(
+    truth.redirects.filter((r: { from: string }) => r.from === "/old").map((r: { to: string }) => r.to),
+    ["/good"],
+  );
+});
+
+test("without a netlify.toml, redirect rules are Cloudflare's", async (t) => {
+  const { projectRoot } = await driveBuild(t, { signal: "cloudflare" });
+  assert.equal((await readRouteTruthFile(projectRoot)).redirectRules, "cloudflare");
 });

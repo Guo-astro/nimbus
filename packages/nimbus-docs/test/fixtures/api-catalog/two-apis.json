@@ -1,0 +1,24 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://docs.example.com/docs/pets/",
+      "service-desc": [
+        {
+          "href": "https://docs.example.com/docs/pets/openapi.json",
+          "type": "application/vnd.oai.openapi+json"
+        }
+      ],
+      "service-doc": [
+        { "href": "https://docs.example.com/docs/pets/", "type": "text/html" },
+        { "href": "https://docs.example.com/docs/pets/index.md", "type": "text/markdown" }
+      ]
+    },
+    {
+      "anchor": "https://docs.example.com/docs/billing/",
+      "service-doc": [
+        { "href": "https://docs.example.com/docs/billing/", "type": "text/html" },
+        { "href": "https://docs.example.com/docs/billing/index.md", "type": "text/markdown" }
+      ]
+    }
+  ]
+}

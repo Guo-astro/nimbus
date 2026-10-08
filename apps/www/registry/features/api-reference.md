@@ -61,8 +61,10 @@ Before prompting the user or writing anything, inspect the project:
 ### Q1. Where is the OpenAPI spec?
 
 A local file path relative to the project root (e.g. `./src/api/openapi.yaml`).
-YAML or JSON in OpenAPI 3.x format. Convert Swagger 2.0 documents to OpenAPI
-3.x first. Remote URLs are not supported in v1 —
+YAML or JSON in OpenAPI 3.x format. A Swagger 2.0 document (`swagger: "2.0"`)
+fails the build: keep it as the source, and follow "Convert a Swagger 2.0
+document" in the API reference docs (https://nimbus-docs.com/api-reference) to
+generate the OpenAPI 3.x file Nimbus reads. Remote URLs are not supported in v1 —
 if the user only has a URL, have them save it into the repo first.
 
 ### Q2. Confirm the collection name + URL prefix (default: `api`).
@@ -218,13 +220,21 @@ export const getStaticPaths = getApiStaticPaths("api");
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate } = result;
-const socialImage = `/og${page.href.replace(/\/$/, "")}.png`;
+// The generated per-page card exists for the default version's version-free
+// URL; a non-default query-mode page (its href carries ?api-version=) uses
+// the site's shared social image instead. The card path derives from the
+// documentation pathname, never from `page.href` verbatim — the query would
+// land inside the file name.
+const pagePathname = new URL(page.href, Astro.url).pathname;
+const socialImage = new URL(page.href, Astro.url).search
+  ? undefined
+  : `/og${pagePathname.replace(/\/$/, "")}.png`;
 ---
 
 <BaseLayout
   title={page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
-  markdownUrl={page.markdownHref}
+  markdownUrl={page.markdownHref ?? undefined}
   socialImage={socialImage}
   collection={collection}
   apiVersion={version ?? undefined}

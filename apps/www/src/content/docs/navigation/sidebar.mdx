@@ -192,3 +192,28 @@ Use frontmatter for local changes:
 | `external_link` | Rewrites the sidebar destination to another internal path or an external URL. |
 
 Set `features.sidebar: false` in `astro.config.ts` to disable the rail site-wide. See [Frontmatter](/writing/frontmatter) for complete field shapes and badge variants.
+
+## Markup and styling hooks
+
+Sidebar groups are native `<details>`/`<summary>` elements: opening and closing needs no JavaScript, links in closed groups stay in the HTML for find-in-page and crawlers, and closed lists carry `display: none` so large trees stay fast. A group with a landing page lists it as the group's first child, labelled "Overview" — the summary row is label-only.
+
+Each row type has one class, defined once in the "Sidebar rows" section of `src/styles/globals.css`. Edit those rules to restyle every row. They sit in Tailwind's `components` layer, so a Tailwind utility on a row still overrides them:
+
+| Hook | Element |
+|---|---|
+| `nb-sidebar-link` | A leaf row: `<a class="nb-sidebar-link" href>Label</a>`. The current page carries `aria-current="page"`. |
+| `nb-sidebar-row` | A group's `<summary>`. The caret is its `::after` mask, rotated by `details[open]`; the active trail carries `data-nb-active`. |
+| `nb-sidebar-list` | A group's child `<ul>`. |
+
+The `data-nb-sidebar-*` attributes (`data-nb-sidebar-group`, `data-nb-sidebar-group-label`, `data-nb-sidebar-link`) are unchanged, so selectors in your own code keep matching. The API reference rail composes the same atoms, so these hooks style both rails.
+
+Each page renders one sidebar tree: the mobile drawer borrows the rail's tree while it is open and returns it on close, so open groups, the filter, and scroll position stay with you across the breakpoint.
+
+Upgrading from the scripted-collapsible markup: run `nimbus-docs outdated` to see which files changed, and `nimbus-docs diff <file> --apply` to update them. Update these together, since a partial update breaks the sidebar's styling or its saved open groups:
+
+- `src/components/ui/sidebar/*`
+- `src/layouts/DocsLayout.astro`
+- `src/styles/globals.css` (if you edited it, copy in the "Sidebar rows" section by hand)
+- With an API reference: `src/components/ui/api-sidebar/ApiSidebarItem.astro` and `src/components/ui/api-layout/ApiLayout.astro`
+
+If you edited these files, you can keep your copies: the framework's state scripts drive both the old and the new markup. Port your edits when convenient. Groups with a landing page now show it as an "Overview" child row instead of a split label/caret header.

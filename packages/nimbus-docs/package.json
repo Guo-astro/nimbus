@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/nimbus-docs",
-	"version": "0.15.2",
+	"version": "0.16.0",
 	"private": false,
 	"publishConfig": {
 		"access": "public"
@@ -141,6 +141,7 @@
 		"@astrojs/mdx": "~8.0.0",
 		"@astrojs/sitemap": "3.7.2",
 		"@clack/prompts": "^0.9.1",
+		"@scalar/json-magic": "0.12.20",
 		"@iconify/tools": "^5.0.12",
 		"@iconify/types": "^2.0.0",
 		"@iconify/utils": "^3.1.4",
@@ -188,6 +189,8 @@
 		"@types/react": "^19.2.6",
 		"@types/react-dom": "^19.2.3",
 		"@types/semver": "^7.7.1",
+		"ajv": "8.20.0",
+		"ajv-formats": "3.0.1",
 		"astro": "7.3.1",
 		"jsdom": "^29.1.1",
 		"openapi-sampler": "^1.7.4",

@@ -30,7 +30,9 @@ export function llmsAssetUrl(reference: LlmsEndpointReference): string {
 /**
  * Expected URLs with no generated file, each with the endpoint route that
  * serves it: the first in Astro's priority order whose pattern matches. A URL
- * no endpoint matches is one the site chose not to serve and is skipped.
+ * no endpoint matches is one the site chose not to serve and is skipped, and
+ * so is one whose owning route renders on request — agent files follow the
+ * rendering policy, so a request-rendered owner serves the URL itself.
  */
 export function findUngeneratedAgentPages(
   routes: readonly EndpointRouteRecord[],
@@ -41,7 +43,7 @@ export function findUngeneratedAgentPages(
   for (const url of urls) {
     if (missing.has(url) || generated.has(url)) continue;
     const owner = routes.find((route) => route.regex.test(url));
-    if (owner) missing.set(url, { url, owner });
+    if (owner?.prerendered) missing.set(url, { url, owner });
   }
   return [...missing.values()].sort((a, b) => a.url.localeCompare(b.url));
 }
@@ -59,18 +61,13 @@ export function formatUngeneratedAgentPages(
       urls.length > LISTED_PER_ROUTE
         ? ` and ${urls.length - LISTED_PER_ROUTE} more`
         : "";
-    const state = owner.prerendered
-      ? "is prerendered but did not generate"
-      : "is rendered on request, so the build has no file for";
-    return `  - ${owner.entrypoint} (${owner.pattern}) ${state}: ${listed}${more}`;
+    return `  - ${owner.entrypoint} (${owner.pattern}) is prerendered but did not generate: ${listed}${more}`;
   });
   return (
     `nimbus-docs: ${missing.length} Markdown or llms.txt page${missing.length === 1 ? " was" : "s were"} ` +
     "not prerendered:\n" +
     `${lines.join("\n")}\n` +
-    "If the site serves these on request, ignore this warning. Otherwise add " +
-    "`export const prerender = true;` to the route file itself (Astro reads it only " +
-    "from the route file, not from a module the route re-exports), or generate these " +
-    "paths from the route's getStaticPaths."
+    "Generate these paths from the route's getStaticPaths, or set the collection's " +
+    "rendering mode to \"request\" so the route serves them on request."
   );
 }

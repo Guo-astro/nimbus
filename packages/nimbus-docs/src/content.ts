@@ -31,7 +31,7 @@ import {
   definePartialsSchema,
   partialsSchema,
 } from "./schemas.js";
-import type { ApiRoutePolicy, ApiVersionSpec } from "./types.js";
+import type { ApiRoutePolicy, ApiSamples, ApiVersionSpec } from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
@@ -121,6 +121,9 @@ export interface PartialsCollectionOptions<
 
 const DEFAULT_PATTERN = "**/*.{md,mdx}";
 const NIMBUS_MARKDOWN_GENERATION = 1;
+// One cache across roles: wrapping an already-wrapped loader must return it
+// unchanged (whatever role it was wrapped with), or the nested wrappers would
+// queue the same collection transaction inside itself and deadlock the load.
 const wrappedMarkdownLoaders = new WeakMap<Loader, Loader>();
 
 type ApiLoaderModule = typeof import("./_internal/api-loader.js");
@@ -134,6 +137,21 @@ function loadApiLoader(): Promise<ApiLoaderModule> {
 }
 
 export function withNimbusMarkdown<T extends Loader>(loader: T): T {
+  return wrapNimbusMarkdown(loader, "page");
+}
+
+/**
+ * Shared implementation behind `withNimbusMarkdown()` (role `page`) and
+ * `partialsCollection()` (role `partials`). The role is recorded on the
+ * prepared-markdown registry commit and decides whether the collection's
+ * entries are pages. It is fixed when a loader is first wrapped: the helpers
+ * each wrap a fresh loader, so the only way to hit the cache with a different
+ * role is to re-wrap an existing wrapper, which stays a no-op.
+ */
+function wrapNimbusMarkdown<T extends Loader>(
+  loader: T,
+  role: "page" | "partials",
+): T {
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
 
@@ -143,6 +161,7 @@ export function withNimbusMarkdown<T extends Loader>(loader: T): T {
     const prepared = prepareMarkdownLoader(loader, {
       generation: NIMBUS_MARKDOWN_GENERATION,
       base,
+      role,
       transformRenderMarkdown: false,
       transform: (source, sourceId) =>
         normalizeAuthoredLinks(source, {
@@ -205,7 +224,7 @@ export function partialsCollection<
     : partialsSchema;
 
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: wrapNimbusMarkdown(glob({ base, pattern }), "partials"),
     schema,
   };
 }
@@ -259,10 +278,19 @@ export interface ApiCollectionOptions {
    * one of `spec` or `versions`.
    */
   versions?: ApiVersionSpec[];
+  /**
+   * How versions are addressed in URLs: `"path"` (default) mounts each
+   * non-default version under `/<collection>/<version>`; `"query"` keeps one
+   * URL per operation and selects the version with `?api-version=<id>`.
+   * Mirrors the `api[].versionMode` entry in the Nimbus config.
+   */
+  versionMode?: "path" | "query";
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
   schemaPages?: boolean;
+  /** Code sample policy. See {@link ApiSamples}. */
+  samples?: ApiSamples;
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */
   routes?: ApiRoutePolicy;
@@ -322,8 +350,10 @@ export function apiCollection(options?: ApiCollectionOptions): {
     spec: options.spec,
     label: options.label,
     versions: options.versions,
+    versionMode: options.versionMode,
     requireOperationId: options.requireOperationId,
     schemaPages: options.schemaPages,
+    samples: options.samples,
     routes: options.routes,
   };
 
@@ -346,7 +376,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, requireOperationId, schemaPages, routes } =
+      const { collection, spec, label, versions, versionMode, requireOperationId, schemaPages, samples, routes } =
         explicit ?? registered!;
       // The sidebar mode always comes from the Nimbus config's `api` entry:
       // request rendering and the build's component check read it there too.
@@ -380,6 +410,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         registerConfiguredApiModel,
         resolveApiFamily,
         resolveSpecSource,
+        targetUrlFields,
       } = await loadApiLoader();
 
       const rootDir = fileURLToPath(astroConfig.root);
@@ -393,8 +424,10 @@ export function apiCollection(options?: ApiCollectionOptions): {
         spec,
         label,
         versions,
+        versionMode,
         requireOperationId,
         schemaPages,
+        samples,
         routes,
         sidebar,
       });
@@ -431,9 +464,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 spec: target.spec,
                 label: target.label,
                 mountPath: target.mountPath,
+                ...targetUrlFields(target),
                 requireOperationId: target.requireOperationId,
                 schemaPages: target.schemaPages,
                 routes: target.routes,
+                samples: target.samples,
               },
               rootDir,
             );
@@ -442,7 +477,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
               collection,
               target.version ?? null,
               model,
-              { sidebar: target.sidebar, mountPath: target.mountPath },
+              {
+                sidebar: target.sidebar,
+                mountPath: target.mountPath,
+                ...targetUrlFields(target),
+              },
             );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; surface

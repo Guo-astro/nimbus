@@ -9,6 +9,7 @@ import { z } from "astro/zod";
 import type { NimbusConfig } from "../types.js";
 import { withStrictKeys, reportUnknownKeys } from "./strict-keys.js";
 import { prefixEntryFault, routeSlugFault } from "./api/route-policy.js";
+import { GENERATED_SAMPLE_LANGS } from "./api/samples.js";
 
 // `new URL("https:example.com")` does NOT throw (protocol `https:`, host
 // `example.com`), so a bare `.url()`/`new URL()` check waves through a missing
@@ -261,19 +262,61 @@ const routePolicySchema = z
     }
   });
 
+const sampleLangList = GENERATED_SAMPLE_LANGS.map((l) => `"${l}"`).join(", ");
+const samplesShape = {
+  generate: z
+    .array(
+      z.enum(GENERATED_SAMPLE_LANGS, {
+        error: `"api[].samples.generate" entries must be one of ${sampleLangList}`,
+      }),
+    )
+    .optional(),
+  keepGenerated: z
+    .array(
+      z.enum(GENERATED_SAMPLE_LANGS, {
+        error: `"api[].samples.keepGenerated" entries must be one of ${sampleLangList}`,
+      }),
+    )
+    .optional(),
+};
+const samplesKeys = new Set(Object.keys(samplesShape));
+const samplesSchema = z
+  .object(samplesShape)
+  .passthrough()
+  .superRefine((samples, ctx) => {
+    reportUnknownKeys(samples, ctx, samplesKeys, {
+      removedKeys: {},
+      contextLabel: "api samples field",
+      unknownHint: () => 'Valid keys are "generate" and "keepGenerated".',
+    });
+    const { generate, keepGenerated } = samples;
+    for (const lang of generate ? (keepGenerated ?? []) : []) {
+      if (!generate!.includes(lang)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["keepGenerated"],
+          message: `"api[].samples.keepGenerated" lists "${lang}", which "api[].samples.generate" doesn't include`,
+        });
+      }
+    }
+  });
+
 const apiVersionSpecShape = {
   version: z
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
     .min(1, '"api[].versions[].version" must be a non-empty string')
     .regex(
-      /^[a-z0-9-]+$/,
-      '"api[].versions[].version" must be lowercase letters, digits, and dashes only (it becomes a URL segment)',
+      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
+      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and an api-version query value)',
     ),
   spec: specSourceSchema,
   default: z.boolean().optional(),
   status: z.enum(["ga", "beta", "deprecated"]).optional(),
   hidden: z.boolean().optional(),
   label: z.string().optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].versions[].publishSpec" must be a boolean' })
+    .optional(),
   routes: routePolicySchema.optional(),
 };
 const apiVersionSpecKeys = new Set(Object.keys(apiVersionSpecShape));
@@ -304,12 +347,21 @@ const apiSpecShape = {
   spec: specSourceSchema.optional(),
   label: z.string().optional(),
   versions: z.array(apiVersionSpecSchema).optional(),
+  versionMode: z
+    .enum(["path", "query"], {
+      error: '"api[].versionMode" must be "path" or "query"',
+    })
+    .optional(),
   requireOperationId: z
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
   schemaPages: z
     .boolean({ error: '"api[].schemaPages" must be a boolean' })
     .optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].publishSpec" must be a boolean' })
+    .optional(),
+  samples: samplesSchema.optional(),
   routes: routePolicySchema.optional(),
   sidebar: z
     .enum(["full", "on-demand"], {
@@ -346,7 +398,16 @@ const apiSpecSchema = z
         message: `api collection "${entry.collection}" sets "routes" at the family level, but a version family carries no shared route policy — move "routes" onto each version entry.`,
       });
     }
-    if (!hasVersions) return;
+    if (!hasVersions) {
+      if (entry.versionMode === "query") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["versionMode"],
+          message: `api collection "${entry.collection}" sets versionMode: "query" without "versions" — the query carries a version id, so a single-spec collection has nothing to select`,
+        });
+      }
+      return;
+    }
 
     const versions = entry.versions!;
     if (versions.length === 0) {
@@ -512,6 +573,28 @@ const nimbusConfigSchema = withStrictKeys(
     contextLabel: "Config field",
   },
 ).superRefine((data, ctx) => {
+  // Query-mode versions need request rendering: a static site serves the
+  // same file whatever the query says. The effective mode uses the same
+  // precedence `compileRenderingPolicy` does — the collection override,
+  // else the default.
+  const shaped = data as {
+    api?: { collection?: string; versionMode?: string }[];
+    rendering?: { default?: string; collections?: Record<string, string> };
+  };
+  (shaped.api ?? []).forEach((entry, i) => {
+    if (entry.versionMode !== "query" || !entry.collection) return;
+    const effective =
+      shaped.rendering?.collections?.[entry.collection] ??
+      shaped.rendering?.default ??
+      "build";
+    if (effective !== "request") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["api", i, "versionMode"],
+        message: `api collection "${entry.collection}" sets versionMode: "query", but its effective rendering mode is "${effective}" — query versions need request rendering: a static site serves the same file whatever the query says`,
+      });
+    }
+  });
   // A remote reference must not shadow a locally-built collection.
   const cfg = data as { api?: { collection?: string }[]; apiReferences?: { collection?: string }[] };
   const local = new Set((cfg.api ?? []).map((e) => e.collection));

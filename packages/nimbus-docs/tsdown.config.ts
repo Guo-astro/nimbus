@@ -24,6 +24,12 @@ export default defineConfig({
     api: "src/api/index.ts",
     "lib/pkgm": "src/lib/pkgm.ts",
     "cli/index": "src/cli/index.ts",
+    "_internal/agent-discovery-route": "src/_internal/agent-discovery-route.ts",
+    "_internal/agent-api-catalog-route": "src/_internal/agent-api-catalog-route.ts",
+    "_internal/mounted-markdown-route": "src/_internal/mounted-markdown-route.ts",
+    "_internal/mounted-source-route": "src/_internal/mounted-source-route.ts",
+    "_internal/mounted-llms-route": "src/_internal/mounted-llms-route.ts",
+    "_internal/agent-discovery-middleware": "src/_internal/agent-discovery-middleware.ts",
     "_internal/request-route-inventory":
       "src/_internal/request-route-inventory.ts",
     "_internal/git-last-updated": "src/_internal/git-last-updated.ts",
@@ -34,6 +40,12 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
+  copy: [
+    {
+      from: "../../apps/www/src/content/docs/ai/docs-for-agents.mdx",
+      rename: "docs-for-agents.md",
+    },
+  ],
   target: "node20",
   platform: "node",
   // Externals: virtual modules are resolved at runtime in the consumer's

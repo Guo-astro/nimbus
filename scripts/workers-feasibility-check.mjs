@@ -75,13 +75,78 @@ function outputText(path) {
     .join("\n");
 }
 
-function directorySnapshot(directory) {
+function normalizedWorkerAssetOrder(contents, path) {
+  if (!/^chunks\/entrypoints_[\w-]+\.mjs$/.test(path)) return contents;
+  return contents.toString("utf8").replace(
+    /^(var _manifest = deserializeManifest\()(\{.*\})(\);)$/m,
+    (source, prefix, json, suffix) => {
+      const { assets } = JSON.parse(json);
+      if (
+        !Array.isArray(assets) ||
+        !assets.every((asset) => typeof asset === "string")
+      ) {
+        return source;
+      }
+      // Astro deserializes this list as a Set; prerender completion can reorder it.
+      return (
+        prefix +
+        json.replace(
+          `"assets":${JSON.stringify(assets)}`,
+          `"assets":${JSON.stringify([...assets].sort())}`,
+        ) +
+        suffix
+      );
+    },
+  );
+}
+
+function assertWorkerAssetOrderNormalizerSafety() {
+  const path = "chunks/entrypoints_fixture.mjs";
+  const source = (assets, routes = ["/", "/docs"]) =>
+    `var _manifest = deserializeManifest(${JSON.stringify({ assets, routes })});\nexport { _manifest };`;
+  const original = source(["/b.js", "/a.js"]);
+  const normalized = normalizedWorkerAssetOrder(Buffer.from(original), path);
+  assert(
+    normalized ===
+      normalizedWorkerAssetOrder(
+        Buffer.from(source(["/a.js", "/b.js"])),
+        path,
+      ),
+    "Worker normalization did not ignore Astro asset-set ordering",
+  );
+  for (const changed of [
+    source(["/a.js"]),
+    source(["/a.js", "/c.js"]),
+    source(["/a.js", "/b.js", "/b.js"]),
+    source(["/a.js", "/b.js"], ["/docs", "/"]),
+    `${original}\nexport const changed = true;`,
+  ]) {
+    assert(
+      normalized !== normalizedWorkerAssetOrder(Buffer.from(changed), path),
+      "Worker normalization hid an asset, route, or code change",
+    );
+  }
+  assert(
+    normalizedWorkerAssetOrder(
+      Buffer.from(original),
+      "chunks/other.mjs",
+    ).toString() === original,
+    "Worker normalization changed a non-manifest chunk",
+  );
+}
+
+function directorySnapshot(directory, normalize = (contents) => contents) {
   return Object.fromEntries(
     filesUnder(directory)
-      .map((file) => [
-        relative(directory, file).split(sep).join("/"),
-        createHash("sha256").update(readFileSync(file)).digest("hex"),
-      ])
+      .map((file) => {
+        const path = relative(directory, file).split(sep).join("/");
+        return [
+          path,
+          createHash("sha256")
+            .update(normalize(readFileSync(file), path))
+            .digest("hex"),
+        ];
+      })
       .sort(([left], [right]) => left.localeCompare(right)),
   );
 }
@@ -279,8 +344,8 @@ function assertEquivalent(actual, expected, label) {
   );
 }
 
-function assertDiscoverySurfaces(site) {
-  const client = join(site, "dist", "client");
+function assertDiscoverySurfaces(site, base = "") {
+  const client = join(site, "dist", "client", base);
   const sitemap = filesUnder(client)
     .filter((file) => /sitemap.*\.xml$/.test(file))
     .map((file) => readFileSync(file, "utf8"))
@@ -289,7 +354,7 @@ function assertDiscoverySurfaces(site) {
     [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)]
       .map((match) => new URL(match[1]))
       .filter((url) => url.origin === "https://workers-feasibility.test")
-      .map((url) => url.pathname.replace(/\/$/, "") || "/"),
+      .map((url) => url.pathname.slice(base.length).replace(/\/$/, "") || "/"),
   );
   assert(sitemapPaths.has("/runtime"), "sitemap omitted prose");
   assert(sitemapPaths.has("/api/Health/ping"), "sitemap omitted API operation");
@@ -330,7 +395,157 @@ function assertDiscoverySurfaces(site) {
   );
 }
 
+async function assertAgentDiscovery(origin, base = "", { ownerLink = false, requestRendered = false } = {}) {
+  const home = await request(origin, `${base}/`);
+  assert(home.response.status === 200, "discovery homepage was not 200");
+  const links = home.response.headers.get("Link") ?? "";
+  // Markdown negotiation: a request-rendered homepage answers with the
+  // homepage Markdown and the same Link headers; a prerendered one stays HTML.
+  const markdown = await fetch(`${origin}${base}/`, {
+    headers: { Accept: "text/markdown, text/html;q=0.9" },
+  });
+  if (requestRendered) {
+    assert(
+      markdown.headers.get("Content-Type")?.includes("text/markdown"),
+      `negotiated homepage served as ${markdown.headers.get("Content-Type")}`,
+    );
+    assert(markdown.headers.get("Vary") === "Accept", "negotiated homepage omitted Vary: Accept");
+    assert(markdown.headers.get("Link") === links, "negotiated homepage changed its Link headers");
+    assert(
+      (await markdown.text()) === (await request(origin, `${base}/index.md`)).html,
+      "negotiated homepage differs from /index.md",
+    );
+    const page = await fetch(`${origin}${base}/runtime/`, {
+      headers: { Accept: "text/markdown, text/html;q=0.9" },
+    });
+    assert(
+      page.headers.get("Content-Type")?.includes("text/markdown") && page.headers.get("Vary") === "Accept",
+      "request-rendered page did not negotiate to Markdown",
+    );
+    assert(
+      (await page.text()) === (await request(origin, `${base}/runtime/index.md`)).html,
+      "negotiated page differs from its index.md",
+    );
+  } else {
+    assert(
+      markdown.headers.get("Content-Type")?.includes("text/html"),
+      "prerendered homepage negotiated although assets serve it",
+    );
+  }
+  for (const rel of ["ard", "describedby", "alternate", "service-doc"])
+    assert(links.includes(`rel="${rel}"`), `homepage omitted ${rel} Link`);
+  if (ownerLink)
+    assert(links.includes('rel="help"'), "owner homepage Link was lost");
+  if (!requestRendered) {
+    const head = await fetch(`${origin}${base}/`, { method: "HEAD" });
+    for (const response of [home.response, head]) {
+      assert(
+        response.headers.get("X-Owner") === "static-owner",
+        "owner static homepage header was lost",
+      );
+      assert(
+        response.headers.get("Link")?.includes('rel="author"'),
+        "owner static homepage Link was lost",
+      );
+    }
+  }
+  const ard = await request(origin, "/.well-known/ard.json");
+  const alias = await request(origin, "/.well-known/ai-catalog.json");
+  assert(
+    ard.response.status === 200 && alias.response.status === 200,
+    "discovery aliases were not 200",
+  );
+  assert(ard.html === alias.html, "discovery aliases differ");
+  for (const response of [ard.response, alias.response]) {
+    assert(
+      response.headers.get("Content-Type")?.includes("application/json"),
+      "discovery MIME type missing",
+    );
+    assert(
+      response.headers.get("Access-Control-Allow-Origin") === "*",
+      "discovery CORS missing",
+    );
+  }
+  // RFC 9727: the catalog at the origin root, its profile, and the Link on HEAD.
+  assert(links.includes('rel="api-catalog"'), "homepage omitted the api-catalog Link");
+  for (const method of ["GET", "HEAD"]) {
+    const catalog = await fetch(`${origin}/.well-known/api-catalog`, { method });
+    assert(catalog.status === 200, `api-catalog ${method} was ${catalog.status}`);
+    assert(
+      catalog.headers.get("Content-Type") ===
+        'application/linkset+json; profile="https://www.rfc-editor.org/info/rfc9727"',
+      `api-catalog ${method} Content-Type was ${catalog.headers.get("Content-Type")}`,
+    );
+    assert(
+      catalog.headers.get("Link")?.includes('rel="api-catalog"'),
+      `api-catalog ${method} omitted its Link header`,
+    );
+    if (method === "GET") {
+      const { linkset } = await catalog.json();
+      assert(Array.isArray(linkset) && linkset.length > 0, "api-catalog is empty");
+      for (const context of linkset) {
+        assert(context.anchor && context["service-doc"]?.length === 2, "catalog entry shape");
+        for (const target of [...(context["service-desc"] ?? []), ...context["service-doc"]]) {
+          const resource = await request(origin, new URL(target.href).pathname);
+          assert(resource.response.status === 200, `catalog link ${target.href} was not 200`);
+          assert(
+            resource.response.headers.get("Content-Type")?.includes(target.type.split(";")[0]),
+            `catalog link ${target.href} served as ${resource.response.headers.get("Content-Type")}, not ${target.type}`,
+          );
+        }
+      }
+    }
+  }
+  const entries = JSON.parse(ard.html).entries;
+  assert(
+    entries.some((entry) => entry.url.endsWith("/.well-known/agent-skills/index.json")),
+    "discovery omitted the agent skills index",
+  );
+  for (const entry of entries) {
+    const url = new URL(entry.url);
+    // .well-known lives at the origin root; everything else sits under the base.
+    assert(
+      url.pathname.startsWith("/.well-known/") || url.pathname.startsWith(`${base}/`),
+      "discovery link omitted the base",
+    );
+    const resource = await request(origin, url.pathname);
+    assert(
+      resource.response.status === 200,
+      `advertised ${url.pathname} was not 200`,
+    );
+    assert(
+      resource.response.headers.get("Content-Type")?.includes(entry.type.split(";")[0]),
+      `advertised ${url.pathname} served as ${resource.response.headers.get("Content-Type")}, not ${entry.type}`,
+    );
+    if (entry.type === "text/markdown")
+      assert(
+        resource.response.headers
+          .get("Content-Type")
+          ?.includes("text/markdown"),
+        "homepage Markdown MIME type missing",
+      );
+    if (url.pathname.endsWith("/agent-skills/index.json")) {
+      assert(
+        resource.response.headers.get("Access-Control-Allow-Origin") === "*",
+        "skills index CORS missing",
+      );
+      for (const skill of JSON.parse(resource.html).skills) {
+        const artifact = await request(origin, skill.url);
+        assert(artifact.response.status === 200, `skill ${skill.url} was not 200`);
+        const expected = skill.type === "archive" ? "application/gzip" : "text/markdown";
+        assert(
+          artifact.response.headers.get("Content-Type")?.includes(expected),
+          `skill ${skill.url} served as ${artifact.response.headers.get("Content-Type")}`,
+        );
+        const head = await fetch(`${origin}${skill.url}`, { method: "HEAD" });
+        assert(head.status === 200, `HEAD ${skill.url} was not 200`);
+      }
+    }
+  }
+}
+
 async function assertStaticSurfaces(origin) {
+  await assertAgentDiscovery(origin, "", { requestRendered: true });
   for (const [route, evidence] of [
     ["/runtime/index.md", "This content rendered from a reusable partial."],
     ["/runtime/index.mdx", '<Aside type="note"'],
@@ -495,7 +710,7 @@ async function stop(child) {
   ]);
 }
 
-async function withWorkerd(site, check) {
+async function withWorkerd(site, check, assetsDirectory) {
   const port = await freePort();
   const child = spawn(
     join(
@@ -504,7 +719,12 @@ async function withWorkerd(site, check) {
       ".bin",
       process.platform === "win32" ? "wrangler.cmd" : "wrangler",
     ),
-    ["dev", "--port", String(port)],
+    [
+      "dev",
+      "--port",
+      String(port),
+      ...(assetsDirectory ? ["--assets", assetsDirectory] : []),
+    ],
     {
       cwd: site,
       detached: process.platform !== "win32",
@@ -562,6 +782,22 @@ function assertSizeBudgets(site) {
     `Worker output is ${workerGzipBytes} gzip bytes; budget is ${SIZE_BUDGET.worker.maxGzipBytes}`,
   );
 
+  // The large-sidebar fixture page (~4,400 links, ~1,300 groups): CI fails
+  // when its HTML grows more than the budget past the recorded baseline.
+  // Server output bakes prerendered pages under dist/client.
+  const sidebarPage = readFileSync(
+    join(site, "dist", "client", "sidebar-budget", "index.html"),
+  );
+  assert(
+    sidebarPage.length <= SIZE_BUDGET.sidebarFixturePage.maxBytes,
+    `sidebar fixture page is ${sidebarPage.length} bytes; budget is ${SIZE_BUDGET.sidebarFixturePage.maxBytes}`,
+  );
+  const sidebarPageGzip = gzipSync(sidebarPage).length;
+  assert(
+    sidebarPageGzip <= SIZE_BUDGET.sidebarFixturePage.maxGzipBytes,
+    `sidebar fixture page is ${sidebarPageGzip} gzip bytes; budget is ${SIZE_BUDGET.sidebarFixturePage.maxGzipBytes}`,
+  );
+
   const agentEndpointAssetRoot = join(
     site,
     ".astro",
@@ -600,10 +836,10 @@ async function request(origin, route, probe) {
   return { response, html: await response.text() };
 }
 
-function build(site, policy) {
+function build(site, policy, base = "") {
   writeRenderingPolicy(site, policy);
   run("pnpm", ["build"], { cwd: site, env: { ASTRO_KEY } });
-  assertDiscoverySurfaces(site);
+  assertDiscoverySurfaces(site, base);
   assertWorkerPurity(join(site, "dist", "server"));
 }
 
@@ -727,7 +963,10 @@ function assertWorkerPurityScanner() {
     ["/server/chunks/build-markdown-CX42.js", "build helper"],
     ["/node_modules/@cloudflare/nimbus-docs/src/build.ts", "build helper"],
     ["/node_modules/@cloudflare/nimbus-docs/dist/build.js", "build helper"],
-    [".astro/nimbus/agent-endpoint-assets/manifest.json", "agent-endpoint asset"],
+    [
+      ".astro/nimbus/agent-endpoint-assets/manifest.json",
+      "agent-endpoint asset",
+    ],
     ['require("binding.node")', "native binding"],
     ["/server/binding.node", "native binding"],
     ['WebAssembly.instantiate(atob("AGFzbAAAA"))', "embedded wasm"],
@@ -770,6 +1009,171 @@ function assertWorkerPurityScanner() {
   );
 }
 
+/** The picker's links on a page: href plus whether it is the active entry. */
+function pickerLinks(html, marker = "data-feasibility-picker") {
+  const start = html.search(new RegExp(`${marker}[\\s>]`));
+  assert(start !== -1, "query-mode page is missing the version picker");
+  const region = html.slice(start, html.indexOf("</nav>", start));
+  return [...region.matchAll(/<a\b[^>]*>/g)].map(([tag]) => ({
+    href: tag.match(/href="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
+    active: /aria-current="page"/.test(tag),
+  }));
+}
+
+/**
+ * A query-mode family (`versionMode: "query"`) served by workerd, with the
+ * starter's real VersionSwitcher mounted: each version renders at the one
+ * version-free URL, the picker keeps the reader's version, a renamed
+ * operation pairs by method and path, and duplicate or unknown versions 404.
+ */
+async function verifyQueryVersions(site, baseConfig) {
+  const spec = (operations) => JSON.stringify({
+    openapi: "3.0.0",
+    info: { title: "Query versions", version: "1.0.0" },
+    paths: Object.fromEntries(operations.map(([id, path, summary]) => [path, {
+      get: {
+        operationId: id,
+        ...(summary ? { summary } : {}),
+        ...(path.includes("{") ? {
+          parameters: [{ name: path.match(/\{([^}]+)\}/)[1], in: "path", required: true, schema: { type: "string" } }],
+        } : {}),
+        responses: { 200: { description: "ok" } },
+      },
+    }])),
+  });
+  mkdirSync(join(site, "src/content/qapi"), { recursive: true });
+  writeFileSync(join(site, "src/content/qapi/v2.json"), spec([["listPets", "/pets", "List pets in v-two"], ["getPet", "/pets/{id}"]]));
+  writeFileSync(join(site, "src/content/qapi/v1.json"), spec([["listPets", "/pets", "List pets in v-one"], ["fetchPet", "/pets/{petId}"], ["legacyOnly", "/legacy"]]));
+  for (const component of ["popover", "version-switcher"]) {
+    cpSync(join(STARTER, "components", "ui", component), join(site, "src", "components", "ui", component), { recursive: true });
+  }
+  mkdirSync(join(site, "src/pages/qapi"), { recursive: true });
+  writeFileSync(join(site, "src/pages/qapi/[...slug].astro"), `---
+import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { ApiLayout } from "@/components/ui/api-layout";
+import { VersionSwitcher } from "@/components/ui/version-switcher";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+export const prerender = true;
+export const getStaticPaths = getApiStaticPaths("qapi");
+
+const result = await getApiRoute(Astro);
+if (result instanceof Response) return result;
+const { page, nav, collection, version, coordinate } = result;
+---
+
+<BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref ?? undefined}>
+  <nav data-feasibility-picker>
+    <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
+  </nav>
+  <nav data-feasibility-picker-no-coordinate>
+    <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
+  </nav>
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+</BaseLayout>
+`);
+  const contentConfig = join(site, "src/content.config.ts");
+  const baseContent = readFileSync(contentConfig, "utf8");
+  writeFileSync(contentConfig, baseContent.replace(
+    "api: defineCollection(apiCollection()),",
+    "api: defineCollection(apiCollection()),\n  qapi: defineCollection(apiCollection()),",
+  ));
+  const configPath = join(site, "astro.config.ts");
+  writeFileSync(configPath, baseConfig.replace(
+    "  api: [\n",
+    `  api: [
+    {
+      collection: "qapi",
+      label: "Query API",
+      versionMode: "query",
+      versions: [
+        { version: "v2", spec: "src/content/qapi/v2.json", default: true },
+        { version: "v1", spec: "src/content/qapi/v1.json" },
+      ],
+    },
+`,
+  ));
+  // Built directly: the shared discovery assertions count the base fixture's pages.
+  writeRenderingPolicy(site, { docs: "request", api: "request", qapi: "request" });
+  run("pnpm", ["build"], { cwd: site, env: { ASTRO_KEY } });
+  assertWorkerPurity(join(site, "dist", "server"));
+  const sitemap = filesUnder(join(site, "dist", "client"))
+    .filter((file) => /sitemap.*\.xml$/.test(file))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  assert(sitemap.includes("/qapi/"), "sitemap omitted the query-mode family");
+  assert(!sitemap.includes("api-version"), "sitemap advertised a non-default query version");
+
+  await withWorkerd(site, async (origin) => {
+    const page = async (route) => {
+      const { response, html } = await request(origin, route);
+      assert(response.status === 200, `${route} returned ${response.status}`);
+      return { html, links: pickerLinks(html) };
+    };
+    const landing = (await page("/qapi/")).links;
+    const v1Landing = landing.find((link) => link.href.includes("api-version=v1"));
+    assert(v1Landing, `default landing has no v1 picker entry: ${JSON.stringify(landing)}`);
+
+    // Find v1's renamed operation through its landing's sidebar.
+    const v1Html = (await page(v1Landing.href)).html;
+    const fetchHref = v1Html.match(/href="([^"]*fetchPet[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
+    assert(fetchHref?.includes("?api-version=v1"), `v1 sidebar link to fetchPet lost its version: ${fetchHref}`);
+
+    const v1Op = await page(fetchHref);
+    const active = v1Op.links.find((link) => link.active);
+    assert(active?.href === fetchHref, `v1 picker active entry ${active?.href} should stay on ${fetchHref}`);
+    const toDefault = v1Op.links.find((link) => !link.active);
+    assert(
+      toDefault && /getPet/.test(toDefault.href) && !toDefault.href.includes("api-version"),
+      `v1 fetchPet should pair with the default getPet: ${toDefault?.href}`,
+    );
+    assert(/<meta name="robots" content="noindex/.test(v1Op.html), "non-default version page must be noindex");
+    const canonical = v1Op.html.match(/<link rel="canonical" href="([^"]*)"/)?.[1];
+    const expectedCanonical = new URL(toDefault.href, "https://workers-feasibility.test").href;
+    assert(canonical === expectedCanonical, `v1 canonical ${canonical} should be ${expectedCanonical}`);
+
+    // Unrelated params stay out of the active link; a picker with no
+    // coordinate keeps the reader on this page and version too.
+    const tracked = await page(`${fetchHref}&utm_source=x`);
+    assert(tracked.links.find((link) => link.active)?.href === fetchHref,
+      "picker active entry should keep the version and drop unrelated params");
+    const noCoordinate = pickerLinks(v1Op.html, "data-feasibility-picker-no-coordinate");
+    assert(noCoordinate.find((link) => link.active)?.href === fetchHref,
+      `picker without a coordinate should stay on ${fetchHref}: ${JSON.stringify(noCoordinate)}`);
+
+    const defaultOp = await page(toDefault.href);
+    assert(defaultOp.links.find((link) => link.active)?.href === toDefault.href,
+      "default picker active entry should stay on the default page");
+
+    // One shared path renders each version's own content.
+    const listHref = v1Html.match(/href="([^"]*listPets[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
+    const listPath = new URL(listHref, origin).pathname;
+    for (const [query, marker] of [["", "v-two"], ["?api-version=v2", "v-two"], ["?api-version=", "v-two"], ["?api-version=v1", "v-one"]]) {
+      const { html } = await page(`${listPath}${query}`);
+      assert(html.includes(`List pets in ${marker}`), `${listPath}${query} should render ${marker}`);
+    }
+    for (const query of ["?api-version=nope", "?api-version=v1&api-version=v1", "?api-version=v1&api-version=v2"]) {
+      const { response } = await request(origin, `${listPath}${query}`);
+      assert(response.status === 404, `${listPath}${query} returned ${response.status}, expected 404`);
+    }
+
+    // Markdown negotiation never answers a non-default version with the default's Markdown.
+    const markdown = (route) => fetch(`${origin}${route}`, { headers: { Accept: "text/markdown" } });
+    const defaultMarkdown = await markdown(listPath);
+    assert(defaultMarkdown.status === 200 &&
+      defaultMarkdown.headers.get("Content-Type")?.includes("text/markdown") &&
+      (await defaultMarkdown.text()).includes("List pets in v-two"),
+      `default ${listPath} should negotiate the default version's Markdown`);
+    const v1Markdown = await markdown(`${listPath}?api-version=v1`);
+    assert(v1Markdown.headers.get("Content-Type")?.includes("text/html") &&
+      (await v1Markdown.text()).includes("List pets in v-one"),
+      "a non-default version must answer Markdown requests with its own HTML");
+  });
+  writeFileSync(configPath, baseConfig);
+  writeFileSync(contentConfig, baseContent);
+  rmSync(join(site, "src/pages/qapi"), { recursive: true, force: true });
+}
+
 function writeRenderingPolicy(site, policy) {
   mkdirSync(join(site, ".nimbus"), { recursive: true });
   writeFileSync(
@@ -779,6 +1183,7 @@ function writeRenderingPolicy(site, policy) {
 }
 
 assertNormalizerSafety();
+assertWorkerAssetOrderNormalizerSafety();
 assertWorkerPurityScanner();
 console.log(`${PREFIX} building packages and generating the starter`);
 const nimbusPackage = JSON.parse(readFileSync(NIMBUS_PACKAGE, "utf8"));
@@ -838,6 +1243,13 @@ run(
 );
 
 const site = join(workRoot, "site");
+mkdirSync(join(site, "public"), { recursive: true });
+writeFileSync(
+  join(site, "public", "_headers"),
+  ["/", "/docs/"].map((path) =>
+    `${path}\n  Link: <https://example.net/policy>; rel="author"\n  X-Owner: static-owner\n`,
+  ).join("\n"),
+);
 rmSync(join(site, "src", "content", "docs"), { recursive: true, force: true });
 rmSync(join(site, "src", "content", "partials"), {
   recursive: true,
@@ -882,6 +1294,11 @@ console.log(
   `${PREFIX} installing the packed consumer with npm and typechecking`,
 );
 run("npm", ["install", "--package-lock=false"], { cwd: site });
+assert(
+  readFileSync(join(site, "node_modules/@cloudflare/nimbus-docs/dist/docs-for-agents.md"), "utf8") ===
+    readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),
+  "packed consumer is missing the release-matched agent guide",
+);
 writeRenderingPolicy(site, { docs: "build", api: "build" });
 run("pnpm", ["typecheck"], { cwd: site });
 
@@ -890,7 +1307,15 @@ for (const output of ["dist", ".astro", join("node_modules", ".vite")]) {
   rmSync(join(site, output), { recursive: true, force: true });
 }
 build(site, { docs: "build", api: "build" });
-const firstWorkerBuild = directorySnapshot(join(site, "dist", "server"));
+const firstWorkerBuild = directorySnapshot(
+  join(site, "dist", "server"),
+  normalizedWorkerAssetOrder,
+);
+if (process.env.NIMBUS_KEEP_WORKERS_FIXTURE === "1") {
+  cpSync(join(site, "dist", "server"), join(workRoot, "first-worker-build"), {
+    recursive: true,
+  });
+}
 const firstAgentEndpointAssetBuild = directorySnapshot(
   join(site, ".astro", "nimbus", "agent-endpoint-assets"),
 );
@@ -898,7 +1323,10 @@ for (const output of ["dist", ".astro", join("node_modules", ".vite")]) {
   rmSync(join(site, output), { recursive: true, force: true });
 }
 build(site, { docs: "build", api: "build" });
-const secondWorkerBuild = directorySnapshot(join(site, "dist", "server"));
+const secondWorkerBuild = directorySnapshot(
+  join(site, "dist", "server"),
+  normalizedWorkerAssetOrder,
+);
 const secondAgentEndpointAssetBuild = directorySnapshot(
   join(site, ".astro", "nimbus", "agent-endpoint-assets"),
 );
@@ -937,6 +1365,7 @@ assert(
   staticKinds.get("operation").html.includes("nb-shiki-"),
   "build-rendered operation page rendered no classed code tokens",
 );
+await withWorkerd(site, (origin) => assertAgentDiscovery(origin));
 for (const [kind, { html }] of staticKinds) {
   assertTokenClassesDefined(html, shikiCss, `build-rendered ${kind} API page`);
 }
@@ -1024,7 +1453,11 @@ await withWorkerd(site, async (origin) => {
       `${kind} API route ${route} returned ${first.response.status}/${second.response.status}: ${first.html.slice(0, 500)}`,
     );
     assertPreparedApi(first.html, kind);
-    assertTokenClassesDefined(first.html, styles.html, `request-rendered ${kind} API page`);
+    assertTokenClassesDefined(
+      first.html,
+      styles.html,
+      `request-rendered ${kind} API page`,
+    );
     assertGeneratedAssetsExist(site, first.html, `request API ${route}`);
     assertProbe(first.html, `${kind}-one`);
     assertProbe(second.html, `${kind}-two`);
@@ -1114,6 +1547,86 @@ for (const manager of [
   await verifyPackageManagerConsumer(site, manager);
 }
 
+console.log(
+  `${PREFIX} proving request homepage discovery with and without a base`,
+);
+const discoveryConfigPath = join(site, "astro.config.ts");
+const discoveryConfig = readFileSync(discoveryConfigPath, "utf8");
+writeFileSync(
+  join(site, "src/pages/index.astro"),
+  `---
+export const prerender = false;
+Astro.response.headers.set("Link", '<https://example.net/help>; rel="help"');
+---
+<html><head><title>Discovery</title></head><body>Request homepage</body></html>`,
+);
+for (const base of ["", "/docs"]) {
+  writeFileSync(
+    discoveryConfigPath,
+    discoveryConfig.replace(
+      'output: "server",',
+      `output: "server", base: ${JSON.stringify(base || "/")},`,
+    ),
+  );
+  build(site, { docs: "request", api: "request" }, base);
+  await withWorkerd(site, (origin) => assertAgentDiscovery(origin, base, { ownerLink: true, requestRendered: true }));
+}
+
+console.log(`${PREFIX} request-rendered homepage Markdown serves the site llms payload`);
+// Agent files follow the rendering policy: with `docs: "request"` the
+// homepage Markdown is no public file (nothing to bake, nothing to delete),
+// and a rewrite to the prebuilt /docs/llms.txt is impossible from a
+// request-rendered route — the root Markdown route serves the site llms
+// payload itself instead of failing into an SSR rewrite error.
+assert(
+  !existsSync(join(site, "dist/client/docs/index.md")),
+  "request-rendered homepage Markdown must not be baked as a public file",
+);
+await withWorkerd(site, async (origin) => {
+  const llms = await request(origin, "/docs/llms.txt");
+  assert(llms.response.status === 200, "prerendered llms.txt must still exist");
+  const homepage = await request(origin, "/docs/index.md");
+  assert(homepage.response.status === 200,
+    "request-rendered homepage Markdown must resolve");
+  assert(
+    homepage.response.headers.get("Content-Type")?.includes("text/markdown"),
+    `homepage Markdown served as ${homepage.response.headers.get("Content-Type")}`,
+  );
+  assert(homepage.html === llms.html,
+    "homepage Markdown must serve the site llms payload");
+});
+
+console.log(`${PREFIX} proving static-output Cloudflare discovery under a base`);
+writeFileSync(
+  discoveryConfigPath,
+  discoveryConfig.replace('output: "server",', 'output: "static", base: "/docs",'),
+);
+writeFileSync(
+  join(site, "src/pages/index.astro"),
+  '<html><head><title>Discovery</title></head><body>Static homepage</body></html>',
+);
+build(site, { docs: "build", api: "build" }, "/docs");
+// Cloudflare 14.3.3 corrects the base asset root only for server output.
+// Its static Wrangler config stays inside dist/client/docs with directory ".".
+// Exercise the documented CLI override rather than rewriting adapter output.
+await withWorkerd(
+  site,
+  (origin) => assertAgentDiscovery(origin, "/docs"),
+  "./dist/client",
+);
+run(
+  "pnpm",
+  [
+    "exec", "wrangler", "deploy", "--dry-run",
+    "--assets", "./dist/client",
+    "--outdir", join(workRoot, "static-wrangler-output"),
+  ],
+  { cwd: site },
+);
+// Restore server output for the final production bundle measurement.
+writeFileSync(discoveryConfigPath, discoveryConfig);
+build(site, { docs: "request", api: "request" });
+
 console.log(`${PREFIX} validating the production deployment bundle`);
 const deployOutput = join(workRoot, "wrangler-output");
 run(
@@ -1122,5 +1635,8 @@ run(
   { cwd: site },
 );
 assertWorkerPurity(deployOutput);
+
+console.log(`${PREFIX} proving query-versioned API pages and the real picker on workerd`);
+await verifyQueryVersions(site, discoveryConfig);
 
 console.log(`${PREFIX} OK - technical build/request matrix passed on workerd`);

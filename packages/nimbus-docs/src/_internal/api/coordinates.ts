@@ -106,6 +106,27 @@ export function fallbackOperationCoordinate(method: string, path: string): Coord
   return [method.toLowerCase(), ...segments].join("/");
 }
 
+/**
+ * Wire shape for cross-version pairing: the lowercased method joined to the
+ * path split on `/` with every `{name}` segment replaced by `{}` — parameter
+ * names are the author's choice and can be renamed between versions, so the
+ * shape is parameter-name-blind. Distinct from `fallbackOperationCoordinate`,
+ * which keeps parameter names (it mints a page identity) and so can't be
+ * reused here.
+ */
+export function operationShape(method: string, path: string): string {
+  // Segments are kept verbatim — empty ones included, so `/a//b` never
+  // equates to `/a/b` — and only a segment that is exactly one placeholder
+  // normalizes. A composite segment (`{name}.{format}`) keeps its text: its
+  // parameter names stay significant, and an uncertain pairing must stay
+  // unmatched rather than guessed.
+  const segments = path
+    .replace(/^\//u, "")
+    .split("/")
+    .map((segment) => (/^\{[^{}]*\}$/u.test(segment) ? "{}" : segment));
+  return [method.toLowerCase(), ...segments].join("/");
+}
+
 /** Webhook = the `webhooks` map key, always (even if an operationId exists). */
 export function webhookCoordinate(key: string): Coordinate {
   return key;

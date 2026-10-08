@@ -8,6 +8,7 @@ import {
   type VersionInfo,
 } from "./collection-mount.js";
 import type { ProjectionContext } from "./projection.js";
+import { selectApiVersion } from "./api/resolve-versions.js";
 import { toRouteKey } from "./url.js";
 
 export interface PageIdentity {
@@ -61,8 +62,17 @@ interface ProseResolutionDependencies {
   }>;
 }
 
+export interface ApiQueryVersionRouting {
+  defaultVersion: string;
+  versions: ReadonlySet<string>;
+}
+
 interface ApiResolutionDependencies {
   getApiCollections(): Promise<readonly string[]>;
+  /** Query-mode routing info for a family, or `null` for path mode. */
+  getApiQueryRouting?(
+    collection: string,
+  ): Promise<ApiQueryVersionRouting | null>;
   getVisibleEntry(
     collection: string,
     id: string,
@@ -214,22 +224,56 @@ export async function resolveApiPage(
     if (id === "index" && context.params.slug !== undefined) {
       return { status: "not-found" };
     }
-    entry =
-      (await dependencies.getVisibleEntry(
-        collection,
-        id,
-        context.projection,
-      )) ?? undefined;
-    if (!entry) return { status: "not-found" };
 
-    coordinate =
-      typeof entry.data.coordinate === "string"
-        ? entry.data.coordinate
-        : undefined;
-    version =
-      typeof entry.data.version === "string" ? entry.data.version : null;
-    if (!coordinate) {
-      return { status: "not-found" };
+    // Query mode: resolution is `(version, slug) → entry`, and the found
+    // entry must belong to the selected version. Store ids are not routes:
+    // `/family/v2/foo` with no query selects the default version, looks up
+    // the id "v2/foo", finds the v2 entry, sees the mismatch, and 404s.
+    const queryRouting =
+      (await dependencies.getApiQueryRouting?.(collection)) ?? null;
+    if (queryRouting) {
+      const selected = selectApiVersion(context.url.searchParams, queryRouting);
+      if (selected === null) return { status: "not-found" };
+      const isDefault = selected === queryRouting.defaultVersion;
+      const storeId = isDefault
+        ? id
+        : id === "index"
+          ? selected
+          : `${selected}/${id}`;
+      entry =
+        (await dependencies.getVisibleEntry(
+          collection,
+          storeId,
+          context.projection,
+        )) ?? undefined;
+      if (!entry) return { status: "not-found" };
+      const entryVersion =
+        typeof entry.data.version === "string" ? entry.data.version : null;
+      if (entryVersion !== selected) return { status: "not-found" };
+      coordinate =
+        typeof entry.data.coordinate === "string"
+          ? entry.data.coordinate
+          : undefined;
+      version = selected;
+      if (!coordinate) return { status: "not-found" };
+    } else {
+      entry =
+        (await dependencies.getVisibleEntry(
+          collection,
+          id,
+          context.projection,
+        )) ?? undefined;
+      if (!entry) return { status: "not-found" };
+
+      coordinate =
+        typeof entry.data.coordinate === "string"
+          ? entry.data.coordinate
+          : undefined;
+      version =
+        typeof entry.data.version === "string" ? entry.data.version : null;
+      if (!coordinate) {
+        return { status: "not-found" };
+      }
     }
   }
 

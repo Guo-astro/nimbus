@@ -18,6 +18,8 @@
  */
 
 import fs from "node:fs";
+
+import type { NormalizedRedirect } from "../_internal/redirect-emitters.js";
 import path from "node:path";
 
 import { canonicalEntryUrl, canonicalSlug, entryRouteUrl } from "../_internal/astro-slug.js";
@@ -330,9 +332,9 @@ export function contentEntryUrl(
 
 /**
  * Version 2: `knownRoutes` covers every emitted file, and lint no longer
- * strips `base` from links.
+ * strips `base` from links. Version 3 adds redirects.
  */
-export const ROUTE_TRUTH_VERSION = 2;
+export const ROUTE_TRUTH_VERSION = 3;
 
 /**
  * Written over `.nimbus/routes.json` when a build can't delete the previous
@@ -358,6 +360,11 @@ export interface RouteTruth {
    * routes. The lint rule resolves internal links against this set.
    */
   knownRoutes: string[];
+  /** Rules from the output's `_redirects`, then `redirectsFile`. */
+  redirects: NormalizedRedirect[];
+  /** Astro's `redirects`, which a static build writes as meta-refresh pages. */
+  redirectPages: NormalizedRedirect[];
+  redirectRules: "cloudflare" | "netlify";
   /**
    * Reserved for future SSR-route handling — URL prefixes that can't be
    * statically enumerated. Empty in the current all-prerendered path.

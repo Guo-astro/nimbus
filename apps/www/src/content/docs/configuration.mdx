@@ -57,13 +57,13 @@ export default defineConfig({
 | Mode | Behavior | Deployment requirement |
 | --- | --- | --- |
 | `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
-| `"request"` | Renders the route when a visitor requests it. | Astro server output with a Nimbus-supported adapter. |
+| `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
 
 Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
 #### Enable request rendering
 
-Request rendering requires three things: `output: "server"` in the Astro config, an adapter supported by Nimbus, and at least one collection set to `"request"` in the Nimbus config. Provider-specific setup is listed below.
+Request rendering requires three things: `output: "server"` in the Astro config, a compatible Astro adapter, and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
 
 Set the default when most or all canonical collection routes should render on request:
 
@@ -80,7 +80,7 @@ Run the production build after changing output mode or rendering policy. It is t
 
 #### Mix build and request rendering
 
-`rendering.default` applies to every registered collection with a canonical catch-all route. `rendering.collections` overrides that mode by Astro collection name, not by URL or version.
+`rendering.default` applies to `docs`, version collections, and API collections. `rendering.collections` sets a mode by Astro collection name, not by URL or version — and it is how any other page collection with its own catch-all route (a `blog`, say) gets a mode: the build fails after content sync if `rendering` is set and such a collection isn't listed.
 
 Render most collections on request but keep an archive prerendered:
 
@@ -112,7 +112,7 @@ Request-rendered routes are still added to the sitemap and Pagefind search index
 
 ##### Cloudflare
 
-Cloudflare is currently the supported provider for request-rendered Nimbus collection routes. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
+Cloudflare supports request-rendered prose and generated API collections. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
@@ -152,6 +152,10 @@ Cloudflare deployments also require a server-compatible `wrangler.jsonc`. Run `p
 
 See [Server adapters](/cli#server-adapters) for installer behavior and safety checks.
 
+##### Other Astro adapters
+
+For prose collections, use the official [Node](https://docs.astro.build/en/guides/integrations-guide/node/), [Netlify](https://docs.astro.build/en/guides/integrations-guide/netlify/), or [Vercel](https://docs.astro.build/en/guides/integrations-guide/vercel/) adapter with `output: "server"` and the same Nimbus rendering policy. Follow the adapter's deployment instructions, serve the generated static assets alongside the server, and verify the production HTTP responses. [Docs for agents](/ai/docs-for-agents#markdown-negotiation) includes a Node example and explains how static Markdown is retrieved on each target.
+
 ## Links and trailing slashes
 
 Nimbus reads Astro's [`trailingSlash`](https://docs.astro.build/en/reference/configuration-reference/#trailingslash) and [`build.format`](https://docs.astro.build/en/reference/configuration-reference/#buildformat) and gives every page URL it generates the shape Astro serves: sidebar and breadcrumb links, previous and next links, sidebar `link` values, canonical URLs, the sitemap, and `llms.txt`. With the defaults (`trailingSlash: "ignore"` and `build.format: "directory"`), page URLs end in a slash, such as `/guides/`. With `trailingSlash: "never"`, or `build.format: "file"` under the default `"ignore"`, they don't, such as `/guides`.
@@ -171,6 +175,7 @@ The second argument to `nimbus()` controls build behavior:
 | `mdx`                | —                       | Options forwarded to Astro's MDX integration. Their behavior remains processor-owned.                                                                                                                                                                                                        |
 | `icons`              | `true`                  | Built-in icon system. `true` auto-detects `@iconify-json/*` packages (Phosphor, Material Icons, etc.) and local `src/icons/*.svg`. `false` to disable. Object for explicit config (`iconDir`, `include`, `svgoOptions`). See [Icon](/components/icon). |
 | `rules`              | `off` (opt-in)          | Authoring-lint severities — each rule is off until you enable it. See [Linting](/writing/linting).                                                                                                                                                     |
+| `redirectsFile`      | —                       | A redirects file in `_redirects` syntax that your deployment reads under another name. Link checking follows it. See [Linting](/writing/linting). |
 | `collections`        | —                       | Per-collection lint overrides.                                                                                                                                                                                                                         |
 
 ```ts

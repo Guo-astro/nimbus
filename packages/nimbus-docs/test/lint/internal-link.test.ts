@@ -7,7 +7,7 @@
  * against an `absPath` under that root, and asserts the diagnostics.
  *
  * Tests reset the rule's process-level cache between cases via the
- * test-only `_resetInternalLinkCacheForTests` export.
+ * test-only `_resetLinkEnvCacheForTests` export (imported under its old name).
  */
 
 import assert from "node:assert/strict";
@@ -18,7 +18,7 @@ import { test } from "node:test";
 
 import { lintFile } from "../../src/lint/engine.js";
 import { parseSource } from "../../src/lint/parse.js";
-import { _resetInternalLinkCacheForTests } from "../../src/lint/rules/internal-link.js";
+import { _resetLinkEnvCacheForTests as _resetInternalLinkCacheForTests } from "../../src/lint/link-env.js";
 import { ROUTE_TRUTH_VERSION, type RouteTruth } from "../../src/lint/site-model.js";
 
 interface Setup {
@@ -66,6 +66,9 @@ function baseTruth(overrides: Partial<RouteTruth> = {}): RouteTruth {
     version: ROUTE_TRUTH_VERSION,
     base: "",
     knownRoutes: ["/", "/workers", "/r2", "/guides/setup", "/search"],
+    redirects: [],
+    redirectPages: [],
+    redirectRules: "cloudflare",
     opaqueNamespaces: [],
     ...overrides,
   };

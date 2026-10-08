@@ -15,6 +15,7 @@ import path from "node:path";
 
 import type { SpecSource } from "./view-model.js";
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSamples } from "../../types.js";
 
 export interface ApiSpecEntry {
   collection: string;
@@ -22,9 +23,14 @@ export interface ApiSpecEntry {
   label?: string;
   /** Base URL for the resolved model's pages. Defaults to `/<collection>`. */
   mountPath?: string;
+  /** Public URL base when it differs from `mountPath` (query-mode versions). */
+  urlBasePath?: string;
+  /** Query string every same-version link carries (query mode, non-default). */
+  urlQuery?: string;
   requireOperationId?: boolean;
   schemaPages?: boolean;
   routes?: RoutePolicy;
+  samples?: ApiSamples;
 }
 
 export async function resolveSpecSource(
@@ -33,9 +39,12 @@ export async function resolveSpecSource(
 ): Promise<SpecSource> {
   const label = entry.label ?? entry.collection;
   const mountPath = entry.mountPath ? { mountPath: entry.mountPath } : {};
+  const urlBase = entry.urlBasePath ? { urlBasePath: entry.urlBasePath } : {};
+  const urlQuery = entry.urlQuery ? { urlQuery: entry.urlQuery } : {};
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};
   const schemaPages = entry.schemaPages ? { schemaPages: true as const } : {};
+  const samples = entry.samples?.keepGenerated?.length || entry.samples?.generate ? { samples: entry.samples } : {};
 
   if (typeof entry.spec !== "string") {
     return {
@@ -43,9 +52,12 @@ export async function resolveSpecSource(
       spec: entry.spec as SpecSource["spec"],
       ...(entry.label ? { label: entry.label } : {}),
       ...mountPath,
+      ...urlBase,
+      ...urlQuery,
       ...strict,
       ...routes,
       ...schemaPages,
+      ...samples,
     };
   }
 
@@ -67,9 +79,13 @@ export async function resolveSpecSource(
     collection: entry.collection,
     spec: contents,
     ...(entry.label ? { label: entry.label } : {}),
+    path: entry.spec,
     ...mountPath,
+    ...urlBase,
+    ...urlQuery,
     ...strict,
     ...routes,
     ...schemaPages,
+    ...samples,
   };
 }

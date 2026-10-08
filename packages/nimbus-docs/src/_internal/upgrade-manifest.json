@@ -263,6 +263,25 @@
       ]
     },
     {
+      "id": "api-code-sample-ids",
+      "introducedIn": "0.16.0",
+      "mode": "optional",
+      "changeset": "api-sample-placeholders",
+      "summary": "Optionally update the registry api-code-rail component, so several samples in one language each get their own option.",
+      "affected": "Sites with the api-code-rail registry component whose specs list more than one x-codeSamples entry with the same lang. Nimbus now keeps all of them instead of only the first.",
+      "instructions": [
+        "No action is needed if no operation has two x-codeSamples entries with the same lang. Without the update, choosing that language shows its samples one after another.",
+        "api-code-rail is a registry component, not part of the scaffolded template, so nimbus-docs diff does not cover it. Run nimbus-docs add api-code-rail.",
+        "When add asks about src/components/ui/api-code-rail/ApiCodeRail.astro and code-rail.client.ts, choose Overwrite if you haven't edited them. Choose Skip for other components to keep your copies. Don't pass --yes: it keeps every existing file, so the rail isn't updated. --overwrite updates it without asking, but also replaces every component the rail uses, including sidebar and api-sidebar; use it only if you haven't edited any of them.",
+        "If you have edited the rail, merge by hand. In ApiCodeRail.astro, use sample.id, or sample.lang when a sample has no id, for the option value and data-nb-lang-value, and add data-nb-sample-lang={sample.lang} to each panel. In code-rail.client.ts, keep the selection by id, but save and sync the panel's language, open a saved language as that language's first sample, and resolve ?lang= as an exact id first, then a language."
+      ],
+      "verify": [
+        "Open an operation with two samples in one language and confirm the picker lists both labels and shows one sample at a time.",
+        "Choose the second sample in a language, open another operation with one sample in that language, and confirm it opens that sample.",
+        "Confirm ?lang=curl and a link to a second sample, such as ?lang=python-2, open the expected sample."
+      ]
+    },
+    {
       "id": "page-urls-and-llms-routes",
       "introducedIn": "0.15.0",
       "mode": "optional",
@@ -301,6 +320,228 @@
         "Build and confirm no api.ref: citation error mentions schemaPages.",
         "With schemaPages: true, compare dist before and after the upgrade: the API output should be unchanged.",
         "With schema pages off, confirm dist has no /<collection>/schemas/ pages and no page links to one."
+      ]
+    },
+    {
+      "id": "generated-agent-discovery-routes",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "clear-agent-discovery",
+      "summary": "Nimbus now generates agent discovery documents and homepage discovery headers.",
+      "affected": "Sites that already own /.well-known/ard.json or /.well-known/ai-catalog.json, or manage discovery at a shared origin.",
+      "instructions": [
+        "Inspect publicDir and src/pages for either discovery path. Nimbus fails the build on a collision rather than overwriting owner content; ordinary starter sites need no route edits.",
+        "Preserve custom entries before moving or removing an owner discovery file or route. If the origin has a shared discovery document, combine the generated entries with it in the origin deployment configuration.",
+        "With a base path, publish the generated .well-known directory at the origin root and apply its _headers rules there. Consult the docs-for-agents deployment guidance for static Cloudflare output."
+      ],
+      "verify": [
+        "Build the site and confirm both discovery documents describe the intended public resources.",
+        "Check the served homepage Link header and origin-root discovery URLs, preserving custom entries and owner header rules."
+      ]
+    },
+    {
+      "id": "api-catalog-published-specs",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "calm-api-catalog",
+      "summary": "API specs are now published and listed in an API catalog.",
+      "affected": "Sites with api collections. Each visible spec is served at /<collection>/openapi.json (versions at their mount path) and listed at /.well-known/api-catalog.",
+      "instructions": [
+        "Decide per collection and version whether the spec may be public. Set publishSpec: false on the collection, or on a version, to keep it unpublished; the catalog entry then carries documentation links only.",
+        "If you already serve /.well-known/api-catalog or a <collection>/openapi.json route yourself, move it: Nimbus fails the build rather than overwrite the catalog, and its spec files take the mount path."
+      ],
+      "verify": [
+        "Build the site and read /.well-known/api-catalog: every listed spec URL should be one you intend to publish, and no hidden version should appear.",
+        "Check a bundling warning names a reference you can fix or opt out of."
+      ]
+    },
+    {
+      "id": "homepage-renders-on-request",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "soft-markdown-negotiation",
+      "summary": "Optionally let the homepage render on request under server output so it negotiates Markdown.",
+      "affected": "Existing sites on server output whose src/pages/index.astro still exports prerender = true.",
+      "instructions": [
+        "Remove `export const prerender = true` from src/pages/index.astro. Under server output the homepage then renders on request when a collection already does, and answers Accept: text/markdown with the homepage Markdown; on an all-build site and on static output it stays a static file.",
+        "A request-rendered homepage is served by the Worker: public/_headers rules for / no longer apply (set them in the page or middleware) and the page is rendered per request rather than cached as an asset.",
+        "Keep the export if the homepage must stay a static asset."
+      ],
+      "verify": [
+        "On a server-output build, request / with Accept: text/markdown and confirm the homepage Markdown with Vary: Accept and the homepage Link headers."
+      ]
+    },
+    {
+      "id": "publish-agent-skills",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "bright-agent-skills",
+      "summary": "Optionally publish Agent Skills from a skills/ folder.",
+      "affected": "Sites that want to publish Agent Skills, and sites that already serve /.well-known/agent-skills/index.json themselves.",
+      "instructions": [
+        "To publish skills, add skills/<name>/SKILL.md folders at the project root in the Agent Skills format. Nimbus emits the discovery index, artifacts and digests.",
+        "If you already publish files under /.well-known/agent-skills/ yourself, keep doing so: Nimbus only publishes when a skills/ folder exists, and fails the build rather than overwrite any file it would also write."
+      ],
+      "verify": [
+        "Build the site and check /.well-known/agent-skills/index.json lists every intended skill with no skipped-skill warnings."
+      ]
+    },
+    {
+      "id": "agent-discovery-content-signals",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "clear-agent-discovery",
+      "summary": "Optionally add Content Signals to the site-owned robots.txt route.",
+      "affected": "Existing sites whose robots.txt does not declare Content Signals. Agent discovery and homepage Markdown are generated by the framework; this step only updates the site-owned policy text.",
+      "instructions": [
+        "Existing robots.txt files keep their current output. Review the site policy before adopting the new starter defaults.",
+        "For an unmodified starter route, inspect nimbus-docs diff src/pages/robots.txt.ts and apply it after reviewing the permissions. Add the Content-Signal line manually to customized routes.",
+        "The new starter allows search, AI input, and AI training. Change the yes/no values to reflect the owner’s policy; do not overwrite existing bot restrictions or sitemap URLs."
+      ],
+      "verify": [
+        "Build the site and inspect robots.txt, preserving existing directives.",
+        "Confirm the chosen Content-Signal values and the sitemap URL. Robots directives and Content Signals do not protect private documentation; require authentication for private content."
+      ]
+    },
+    {
+      "id": "browser-documentation-search",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "quiet-browser-search",
+      "summary": "Optionally expose documentation search to browser agents through WebMCP.",
+      "affected": "Existing sites using Pagefind search that want the new starter browser-agent integration.",
+      "instructions": [
+        "Keep existing sites unchanged if browser-agent search is not wanted.",
+        "Add the starter WebMCP.astro component to BaseLayout.astro inside head. It reads virtual:nimbus/agent-capabilities and uses initDocumentationWebMcp with the standard mount lifecycle from @cloudflare/nimbus-docs/client.",
+        "Use Pagefind 1.5.2 or newer and run a fresh production build. No polyfill, remote MCP server, or extra search service is required."
+      ],
+      "verify": [
+        "In a browser implementing the current Document.modelContext draft, call search_documentation before opening the search dialog.",
+        "Verify that view transitions remove the old registration, unsupported browsers stay quiet, and disabled or custom search registers nothing."
+      ]
+    },
+    {
+      "id": "page-collections-from-helpers",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "page-collections-from-helpers",
+      "summary": "Only collections made with Nimbus's page helpers become pages; every other collection is plain Astro data, and the `_` naming rule is removed.",
+      "affected": "Sites that route a plain-loader collection through Nimbus, use `_`-prefixed collection names, or set `rendering` while owning a page collection with its own catch-all route.",
+      "instructions": [
+        "No action is needed for most sites: with the starter's Markdown routes, a collection Nimbus doesn't prepare already failed the build before this release.",
+        "A collection that should stay pages must be created with docsCollection(), componentsCollection(), or a loader wrapped in withNimbusMarkdown(); version and API collections stay pages as before, and partialsCollection() stays component content.",
+        "A plain data collection (file() or glob() without a Nimbus helper) leaves search, the sitemap, llms.txt, Markdown files, and social images; getCollection() keeps returning its entries unchanged. The `_` name prefix is no longer needed to hide a collection and is harmless to keep.",
+        "If `rendering` is set and the site has its own page collection with a catch-all route (for example `blog` with src/pages/blog/[...slug].astro), add that collection to rendering.collections; rendering.default now covers only docs, version, and API collections.",
+        "If rendering.collections names a data collection, the build now fails and names it; remove the key or make the collection a page collection."
+      ],
+      "verify": [
+        "Run the production build and confirm it passes; the build now verifies the rendering policy and versions.others against the collections the helpers actually loaded.",
+        "Confirm data collections are absent from llms.txt and the sitemap, and that every intended page collection still appears."
+      ]
+    },
+    {
+      "id": "agent-files-follow-rendering",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "agent-files-follow-rendering",
+      "summary": "Agent files render the same way as the pages they describe: request-rendered collections stop shipping prebuilt Markdown and llms.txt files.",
+      "affected": "Sites with a `rendering` policy that renders a collection on request. Static sites and all-build policies are unchanged.",
+      "instructions": [
+        "No action is needed: copied starter routes keep working because the policy wins over their `export const prerender`; URLs and response bytes don't change.",
+        "A page's index.md and index.mdx follow its collection's mode, a section's llms.txt follows the collection it lists, llms.txt and llms-full.txt follow rendering.default, and homepage Markdown follows the root collection's mode. Mounted collections get their own agent routes at their mount unless the project already has a route file at that pattern.",
+        "One behavior change: when /index.md renders on request, /llms.txt is prebuilt, and the site has no root content entry, /index.md now serves Nimbus's site llms.txt content (that combination returned 404 before). A site that wants its own homepage Markdown there adds a root content entry or its own /index.md route.",
+        "A customized root Markdown or source route keeps serving every collection that shares the root collection's rendering mode: the injected mounted route runs the project's own module behind a shim that supplies the same catch-all parameter a static build would (the full slug, mount segment included). A mounted collection in a different mode, and every per-mount llms.txt, is served by Nimbus's own route without root-route customization — add a route file at that mount (it owns the pattern and suppresses the injection) to customize there.",
+        "Custom routes that call no Nimbus agent factory keep their own `prerender` export and are never policy-managed."
+      ],
+      "verify": [
+        "Build and confirm request-rendered collections emit no dist/ files at their index.md, index.mdx, or llms.txt URLs, and that those URLs are served on request with the same bytes as a static build.",
+        "On a static or all-build site, confirm output is unchanged."
+      ]
+    },
+    {
+      "id": "lighter-sidebar-markup",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "lighter-sidebar-markup",
+      "summary": "Sidebar groups become native details/summary with one class per row type, a CSS caret, and one tree shared by the desktop rail and the mobile drawer.",
+      "affected": "Sites with copied sidebar components (Sidebar, SidebarGroup, SidebarGroupHeader, SidebarLink, sidebar.client.ts, ApiSidebarItem), the layouts that host them (DocsLayout, ApiLayout), or styling that targets the old per-row Tailwind strings.",
+      "instructions": [
+        "No action is needed: the framework's state scripts drive both the old scripted-collapsible markup and the new native details markup, so existing copied components keep working.",
+        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference also updates src/components/ui/api-sidebar/ApiSidebarItem.astro and src/components/ui/api-layout/ApiLayout.astro in the same step. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
+        "Page HTML for a large sidebar drops by roughly 80%, and each page renders one sidebar tree shared by the rail and the drawer.",
+        "Row styling is three classes (nb-sidebar-link, nb-sidebar-row, nb-sidebar-list) in the \"Sidebar rows\" section of src/styles/globals.css, in Tailwind's components layer, so utilities on a row still win. If you edited globals.css, copy that section in by hand. The data-nb-sidebar-* attributes are unchanged.",
+        "One visible change: a group with a landing page now lists it as the group's first child, labelled \"Overview\" — the summary row is label-only, so keyboard and screen-reader users get one disclosure control and one link.",
+        "Groups open and close with no animation (native details). The old Collapsible/Accordion content components are unchanged."
+      ],
+      "verify": [
+        "Open a built page: groups toggle with JavaScript off, every link is in the HTML, and the current page's groups are open.",
+        "Check open-group and scroll persistence across pages, and the drawer on mobile (focus return, Escape, backdrop)."
+      ]
+    },
+    {
+      "id": "api-body-request-example",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-generated-samples",
+      "summary": "The starter ApiBody shows an operation's request example when it has no code samples.",
+      "affected": "Projects with a copied src/components/ui/api-layout/ApiBody.astro that use samples.generate to drop generated languages: an operation left without samples showed no request body example in HTML.",
+      "instructions": [
+        "Update an unmodified copy with nimbus-docs diff src/components/ui/api-layout/ApiBody.astro --apply.",
+        "In a customized copy, when page.requestExamples is empty and page.samples is empty, render page.example (its highlightedHtml) as the request example."
+      ],
+      "verify": [
+        "With samples: { generate: [] }, open an operation with a request body and no x-codeSamples: the page shows the example request."
+      ]
+    },
+    {
+      "id": "api-query-version-mode",
+      "introducedIn": "0.17.0",
+      "mode": "optional",
+      "changeset": "api-query-version-mode",
+      "summary": "Opt a request-rendered API family into query-addressed versions: one URL per operation, the version in ?api-version=.",
+      "affected": "Only families that set versionMode: \"query\". Path mode stays the default; see api-version-id-format for the version id rule that applies to both modes.",
+      "instructions": [
+        "Families that don't set versionMode keep path versions: existing routes, store ids, URLs, alternates, sitemaps, and agent files are unchanged.",
+        "To adopt query versions on a family, set versionMode: \"query\" on its api entry. It requires \"versions\" and the family's effective rendering mode to be \"request\" — a static site serves the same file whatever the query says.",
+        "In query mode: /<family>/<slug> renders the default version; ?api-version=<id> selects another; an unknown or version-prefixed path URL is a 404. Every generated same-version link carries the version's query; discovery (sitemap, Markdown twins, llms indexes) covers the default version at version-free URLs; non-default pages are noindex with the default counterpart as canonical and no per-page Markdown affordance.",
+        "Adopters must also update three copied files. The API catch-all route (src/pages/<family>/[...slug].astro from the api-reference recipe): derive the social image from the pathname and fall back to the shared image when the page URL carries a query, and pass markdownUrl={page.markdownHref ?? undefined} — the recipe's current form is the reference. A copied BaseLayout and AgentDirective: update with nimbus-docs diff src/layouts/BaseLayout.astro --apply and nimbus-docs diff src/components/AgentDirective.astro --apply, so a page without per-page Markdown still emits an index-only agent directive."
+      ],
+      "verify": [
+        "Request /<family>/x/, /<family>/x/?api-version=<default>, and ?api-version=<other> and confirm the right versions render; an unknown id returns the 404 page.",
+        "Confirm the sitemap lists each visible path once with no api-version, and llms.txt links only default-version pages.",
+        "On a non-default page, confirm og:image is the shared site image (no query inside the file name) and the agent directive links only the llms.txt index."
+      ]
+    },
+    {
+      "id": "api-version-id-format",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-query-version-mode",
+      "summary": "API version ids may contain dots, and must start and end with a lowercase letter or digit.",
+      "affected": "API families in either mode whose version ids start or end with a dash, such as -v1 or v1-. The build fails validation with a message naming the field.",
+      "instructions": [
+        "Rename each affected id in api[].versions[].version so it starts and ends with a letter or digit, for example v1-beta instead of v1-.",
+        "In path mode the id is the URL segment, so a rename moves that version's pages (/api/v1-/x/ becomes /api/v1/x/). Add redirects from the old paths if they were published."
+      ],
+      "verify": [
+        "Run the build: it passes config validation.",
+        "Request a renamed version's old and new paths and confirm the redirect and the new page."
+      ]
+    },
+    {
+      "id": "version-switcher-keeps-query",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-query-version-mode",
+      "summary": "The starter VersionSwitcher's active item keeps the page's API version.",
+      "affected": "Projects with a copied VersionSwitcher that adopt versionMode: \"query\" — the old copy drops ?api-version= from the active item, so clicking it would jump to the default version.",
+      "instructions": [
+        "If the project doesn't use versionMode: \"query\", no change is needed; the updated component is otherwise identical.",
+        "Update an unmodified copy with nimbus-docs diff src/components/ui/version-switcher/VersionSwitcher.astro --apply.",
+        "In a customized copy, take the active item's href from the page's own alternates record (record.self.url), and without one use the current pathname plus that version's ?api-version= query. Don't copy the whole query string: unrelated parameters such as utm_source don't belong in the link."
+      ],
+      "verify": [
+        "On a query-versioned API page with ?api-version= set, open the switcher and confirm the active item's link keeps the query."
       ]
     }
   ]

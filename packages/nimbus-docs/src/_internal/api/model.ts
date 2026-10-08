@@ -345,7 +345,10 @@ export interface NamedRequestExample extends DerivedExample {
 }
 
 export interface CodeSample {
-  /** `curl`, `typescript`, `python`, … */
+  /** Unique within the operation: the language for its first sample, then
+   *  `<lang>-2`, `<lang>-3`, … for further samples in the same language. */
+  id: string;
+  /** `curl`, `typescript`, `python`, …: the syntax, not the sample's identity. */
   lang: string;
   label: string;
   source: string;
@@ -401,6 +404,13 @@ export interface DocsModel {
    * shared coordinate.
    */
   mountPath?: string;
+  /**
+   * Public URL base when it differs from `mountPath` (query-mode versions
+   * share the version-free family base while their stores stay versioned).
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   nodes: Map<Coordinate, Node>;
   pages: PageGraph;
   nav: NavTree;

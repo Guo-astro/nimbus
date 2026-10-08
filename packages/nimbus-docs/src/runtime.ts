@@ -16,6 +16,7 @@ import {
   loadNimbusConfig,
   loadVersionAlternates,
 } from "./_internal/runtime-config.js";
+import { notAPageCollectionMessage } from "./_internal/page-collection-error.js";
 import { loadCollectionOrWarn } from "./_internal/load-collection.js";
 import { runtimeWarn } from "./_internal/runtime-warn.js";
 import {
@@ -44,7 +45,7 @@ import {
 } from "./_internal/sidebar.js";
 import { entryRouteKey } from "./_internal/astro-slug.js";
 import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
-import { stripBase, toDocumentHref, withBase, withoutHtmlExtension } from "./_internal/url.js";
+import { stripBase, withBase, withoutHtmlExtension } from "./_internal/url.js";
 import {
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
@@ -334,13 +335,21 @@ export async function getIndexedEntries(
   const cached = indexedEntriesCache.get(cacheKey);
   if (cached) return cached;
   const { getCollection } = await import("astro:content");
-  const collectionNames = await loadIndexedCollections();
-  // Fall back to the primary collection name if the build-time parse
-  // came up empty. Belt-and-braces: the integration also defaults to
-  // ["docs"] when content.config.ts is missing.
-  const names =
-    collectionNames.length > 0 ? collectionNames : [PRIMARY_COLLECTION];
+  // The page-collection list: collections made with Nimbus's helpers, plus
+  // configured API collections. Read from the build's registry record via
+  // `virtual:nimbus/config` — a site with none indexes nothing.
+  const names = await loadIndexedCollections();
   const versions = await getVersions();
+  // Query-mode API families: discovery is default-only. Non-default entries
+  // have no URLs of their own (their store ids are not routes), so they stay
+  // out of llms indexes, social images, previous/next, and negotiation.
+  const config = await loadNimbusConfig();
+  const queryModeDefaults = new Map<string, string>();
+  for (const entry of config.api ?? []) {
+    if (entry.versionMode !== "query" || !entry.versions) continue;
+    const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
+    queryModeDefaults.set(entry.collection, fallback!.version);
+  }
 
   const indexed: IndexedEntry[] = [];
   for (const name of names) {
@@ -354,6 +363,14 @@ export async function getIndexedEntries(
     for (const entry of entries) {
       const data = (entry.data ?? {}) as Record<string, unknown>;
       if (data.draft === true) continue;
+      const queryDefault = queryModeDefaults.get(name);
+      if (
+        queryDefault !== undefined &&
+        typeof data.version === "string" &&
+        data.version !== queryDefault
+      ) {
+        continue;
+      }
 
       // A versioned API family stamps a per-entry `data.version`; prefer it over
       // the docs-axis `getCurrentVersion` (which is null for API collections).
@@ -1146,6 +1163,18 @@ function proseResolutionResponse(
   });
 }
 
+/**
+ * Routing a collection through Nimbus requires a page collection — one made
+ * with `docsCollection()`, `componentsCollection()`, `withNimbusMarkdown()`,
+ * or registered under `api`. Everything else is plain Astro data; routing it
+ * here fails the build (or the request-rendered route) with the fix.
+ */
+async function assertPageCollection(collection: string): Promise<void> {
+  const pageCollections = await loadIndexedCollections();
+  if (pageCollections.includes(collection)) return;
+  throw new Error(notAPageCollectionMessage(collection));
+}
+
 async function resolveProseRoute<C extends string>(
   astro: AstroGlobal,
   collection: string | undefined,
@@ -1162,6 +1191,7 @@ async function resolveProseRoute<C extends string>(
   const result = await resolveAstroProsePage(astro, collection);
   if (result.status !== "found") return proseResolutionResponse(astro, result);
   const { entry: found, Content, headings } = result.page;
+  await assertPageCollection(found.collection);
   const { markdownUrl, sourceUrl, ogImageUrl } = pageUrls(
     resolveCollectionPrefix(found.collection, await getVersions()),
     found,
@@ -1203,6 +1233,7 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
   // Docs-specific helper: always reads the `docs` collection. Other
   // collections require their own `pages/<name>/[...slug].astro` with
   // a one-line `getCollection("<name>")`-based getStaticPaths.
+  await assertPageCollection(PRIMARY_COLLECTION);
   const entries = await getVisibleEntries(["docs"]);
   return entries.map((entry) => ({
     params: { slug: entryRouteKey(entry.id) },
@@ -1312,6 +1343,7 @@ export async function getRouteFlags(entry: {
  */
 export function getCollectionStaticPaths(collection: string): GetStaticPaths {
   return async () => {
+    await assertPageCollection(collection);
     const entries = await getVisibleEntries([collection]);
     return entries.map((entry) => ({
       params: { slug: entryRouteKey(entry.id) },
@@ -1535,6 +1567,10 @@ async function resolveApiRoute(
     {},
     {
       getApiCollections: loadApiCollections,
+      async getApiQueryRouting(collection) {
+        const { apiQueryRouting } = await import("./_internal/api/resolve-versions.js");
+        return apiQueryRouting((await loadNimbusConfig()).api, collection);
+      },
       getVisibleEntry: getVisibleEntry as (
         collection: string,
         id: string,
@@ -1586,7 +1622,7 @@ async function resolveApiRoute(
             `nimbus-docs: API collection "${collection}" is missing prepared navigation for "${coordinate}".`,
           );
         }
-        const [{ applyApiSidebarMode }, { resolveApiVersion }, config] =
+        const [{ applyApiSidebarMode }, { resolveApiVersion, targetUrlFields }, config] =
           await Promise.all([
             import("./_internal/api/nav-bounds.js"),
             import("./_internal/api/resolve-versions.js"),
@@ -1600,6 +1636,7 @@ async function resolveApiRoute(
             ? applyApiSidebarMode(nav, {
                 mode: target.sidebar,
                 mountPath: target.mountPath,
+                ...targetUrlFields(target),
                 overview: prepared.page.kind === "api",
               })
             : nav,
@@ -1660,14 +1697,17 @@ export async function getApiVersions(
   if (!entry || !entry.versions) return null;
   const { resolveApiFamily } =
     await import("./_internal/api/resolve-versions.js");
+  const { pageUrl } = await import("./_internal/api/resolve-versions.js");
   return resolveApiFamily(entry).map((t) => ({
     version: t.version!,
     label: t.label,
     isDefault: t.isDefault,
     status: t.status,
     hidden: t.hidden,
-    // Trailing-slashed; a bare `/family/v2` would 307-redirect under directory builds.
-    url: toDocumentHref(t.mountPath),
+    // Trailing-slashed; a bare `/family/v2` would 307-redirect under
+    // directory builds. In query mode this is the version-free landing with
+    // the version's query (`/<family>/?api-version=<id>` for non-defaults).
+    url: pageUrl(t, ""),
   }));
 }
 

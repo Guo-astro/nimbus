@@ -10,13 +10,21 @@ export const getStaticPaths = getApiStaticPaths("api");
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate } = result;
-const socialImage = `/og${page.href.replace(/\/$/, "")}.png`;
+// The generated per-page card exists for the default version's version-free
+// URL; a non-default query-mode page (its href carries ?api-version=) uses
+// the site's shared social image instead. The card path derives from the
+// documentation pathname, never from `page.href` verbatim — the query would
+// land inside the file name.
+const pagePathname = new URL(page.href, Astro.url).pathname;
+const socialImage = new URL(page.href, Astro.url).search
+  ? undefined
+  : `/og${pagePathname.replace(/\/$/, "")}.png`;
 ---
 
 <BaseLayout
   title={page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
-  markdownUrl={page.markdownHref}
+  markdownUrl={page.markdownHref ?? undefined}
   socialImage={socialImage}
   collection={collection}
   apiVersion={version ?? undefined}

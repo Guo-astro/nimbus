@@ -53,6 +53,8 @@ async function runConfigSetup(opts: {
   assert.ok(hook, "integration exposes astro:config:setup");
 
   await hook!({
+    injectRoute: () => {},
+    addMiddleware: () => {},
     updateConfig: (config: Record<string, unknown>) => {
       updatedConfig = config;
       return {} as never;
@@ -115,13 +117,15 @@ test("config:setup resolves components.ts from srcDir, not <root>/src", async ()
   );
 });
 
-test("negative control: srcDir without a content.config.ts still warns", async () => {
+test("srcDir without a content.config.ts no longer warns", async () => {
+  // Which collections are pages comes from the registry record, not from
+  // parsing content.config.ts, so a missing file is not a problem to report.
   const root = await fixture();
   // root/src has no content.config.ts.
   const { warnings } = await runConfigSetup({ root, srcDir: path.join(root, "src") });
   assert.ok(
-    warnings.some(missingConfig),
-    `expected a "missing content.config.ts" warning; got: ${JSON.stringify(warnings)}`,
+    !warnings.some(missingConfig),
+    `expected no "missing content.config.ts" warning; got: ${JSON.stringify(warnings)}`,
   );
 });
 

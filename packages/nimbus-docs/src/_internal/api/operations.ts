@@ -416,11 +416,17 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
       server: ctx.firstServer,
       params: allParams,
       body: facts.example
-        ? { mediaType: facts.example.mediaType, value: facts.example.value }
+        ? {
+          mediaType: facts.example.mediaType,
+          value: facts.example.value,
+          ...(requestEntry?.media.encoding ? { encoding: requestEntry.media.encoding } : {}),
+        }
         : undefined,
       securitySchemes: ctx.doc.components?.securitySchemes,
       auth,
       xCodeSamples: op["x-codeSamples"] ?? op["x-code-samples"],
+      generate: ctx.samples.generate,
+      keepGenerated: ctx.samples.keepGenerated,
     });
   }
   return facts;

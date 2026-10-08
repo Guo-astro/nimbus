@@ -24,6 +24,7 @@ import type {
   UnionShape,
   VariantRef,
 } from "./model.js";
+import { operationShape } from "./coordinates.js";
 import {
   apiSchemaVersion,
   type ApiAuthView,
@@ -98,14 +99,16 @@ class ModelView {
     return this.apiFacts?.securitySchemes?.[name];
   }
 
-  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`. */
+  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`.
+   *  In query mode every same-version link carries the version's query. */
   href(coordinate: Coordinate): string {
-    return toDocumentHref(this.routePath(coordinate));
+    return `${toDocumentHref(this.routePath(coordinate))}${this.model.urlQuery ?? ""}`;
   }
 
   private routePath(coordinate: Coordinate): string {
     const slug = this.model.pages.slugs.get(coordinate);
-    const base = this.model.mountPath ?? `/${this.model.collection}`;
+    const base =
+      this.model.urlBasePath ?? this.model.mountPath ?? `/${this.model.collection}`;
     if (slug === undefined || slug === "") return base;
     return `${base}/${slug}`;
   }
@@ -116,7 +119,11 @@ class ModelView {
     return this.model.pages.pages.has(coordinate);
   }
 
-  markdownHref(coordinate: Coordinate): string {
+  markdownHref(coordinate: Coordinate): string | null {
+    // A non-default query-mode page has no per-page Markdown affordance:
+    // only default-version entries publish twins, and this page's
+    // version-free `.md` URL would be another version's content.
+    if (this.model.urlQuery) return null;
     return `${this.routePath(coordinate)}/index.md`;
   }
 }
@@ -697,7 +704,7 @@ function projectPageWithView(
         parameters: paramGroups(view, node.id),
         body: bodyFields.fields,
         responses: responseViews(view, node.id),
-        samples: f.samples.map((s) => ({ lang: s.lang, label: s.label, source: s.source })),
+        samples: f.samples.map((s) => ({ id: s.id, lang: s.lang, label: s.label, source: s.source })),
       };
       if (bodyFields.truncated) page.bodyTruncated = { total: bodyFields.total };
       if (f.example) {
@@ -870,6 +877,26 @@ export function projectNav(
  *  reads this to compare `derived` slugs only. */
 export function routeProvenance(model: DocsModel): Map<string, ApiRouteProvenance> {
   return model.pages.provenance ?? new Map();
+}
+
+/**
+ * Coordinate → wire shape (`operationShape`) for every operation page.
+ * The version-fallback matcher pairs operations whose `operationId` changed
+ * by this shape. Webhooks carry no path and are excluded.
+ */
+export function operationShapes(model: DocsModel): Map<string, string> {
+  const shapes = new Map<string, string>();
+  for (const coordinate of model.pages.pages) {
+    const node = model.nodes.get(coordinate);
+    if (!node || node.kind !== "operation") continue;
+    const facts = node.facts as OperationFacts;
+    const method = protocolString(facts.protocol, "method");
+    const path = protocolString(facts.protocol, "path");
+    const webhook = protocolString(facts.protocol, "webhook");
+    if (!method || !path || webhook) continue;
+    shapes.set(coordinate, operationShape(method, path));
+  }
+  return shapes;
 }
 
 export function pageSlugs(

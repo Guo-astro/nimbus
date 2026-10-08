@@ -88,7 +88,7 @@ function lint(project: Project, args: string[] = []): { status: number | null; j
 }
 
 const routes = (body: Record<string, unknown>) =>
-  JSON.stringify({ version: ROUTE_TRUTH_VERSION, base: "", knownRoutes: ["/"], opaqueNamespaces: [], ...body });
+  JSON.stringify({ version: ROUTE_TRUTH_VERSION, base: "", knownRoutes: ["/"], redirects: [], redirectPages: [], redirectRules: "cloudflare", opaqueNamespaces: [], ...body });
 
 function assertFailsClosed(
   result: ReturnType<typeof lint>,

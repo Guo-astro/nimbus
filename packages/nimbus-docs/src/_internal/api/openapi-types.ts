@@ -102,6 +102,8 @@ export interface OpenApiParameter {
   required?: boolean;
   deprecated?: boolean;
   schema?: OpenApiSchema;
+  example?: unknown;
+  examples?: Record<string, { value?: unknown; externalValue?: string } | undefined>;
 }
 
 export interface OpenApiRequestBody {
@@ -130,6 +132,15 @@ export interface OpenApiMediaType {
       externalValue?: string;
     }
   >;
+  /** How each property of a form body is serialized. */
+  encoding?: Record<string, OpenApiEncoding | undefined>;
+}
+
+export interface OpenApiEncoding {
+  contentType?: string;
+  style?: string;
+  explode?: boolean;
+  allowReserved?: boolean;
 }
 
 export interface OpenApiSchema {
@@ -148,10 +159,15 @@ export interface OpenApiSchema {
   const?: unknown;
   default?: unknown;
   example?: unknown;
+  /** OAS 3.1 / JSON Schema example list. */
+  examples?: unknown[];
   nullable?: boolean;
   oneOf?: OpenApiSchema[];
   anyOf?: OpenApiSchema[];
   allOf?: OpenApiSchema[];
+  /** JSON Schema conditional; the sampler merges `if` and `then`. */
+  if?: OpenApiSchema;
+  then?: OpenApiSchema;
   discriminator?: { propertyName: string; mapping?: Record<string, string> };
   minimum?: number;
   maximum?: number;

@@ -1162,7 +1162,9 @@ async function assertArtifactsAndSmoke(dist) {
         JSON.stringify({
           main: 1,
           codeRail: 1,
-          apiNav: 2,
+          // One nav tree since the sidebar rework: the drawer borrows the
+          // rail's tree instead of rendering its own copy.
+          apiNav: 1,
           searchTrigger: 1,
           searchDialog: 1,
           themeControl: 1,

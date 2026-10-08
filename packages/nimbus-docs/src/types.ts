@@ -2,6 +2,29 @@
  * Public type surface for `nimbus-docs/types`.
  */
 
+/** Published resources exposed through virtual:nimbus/agent-capabilities. */
+export interface AgentApiPublication {
+  collection: string;
+  version?: string;
+  /** The HTML reference. */
+  docsUrl: string;
+  /** The reference's Markdown representation. */
+  markdownUrl: string;
+  /** The published self-contained spec, when publishing is on and bundling succeeded. */
+  spec?: { url: string; type: string };
+}
+
+export interface AgentCapabilities {
+  search: "pagefind" | "unavailable";
+  versions: string[];
+  apis: AgentApiPublication[];
+  homepageMarkdownUrl?: string;
+  homepageDiscoverable?: boolean;
+  llmsUrl?: string;
+  /** The Agent Skills discovery index, when the site publishes skills. */
+  skillsIndexUrl?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -256,6 +279,16 @@ export interface ApiSpec {
    */
   versions?: ApiVersionSpec[];
   /**
+   * How a version is addressed in URLs. `"path"` (the default) mounts each
+   * non-default version at `/<collection>/<version>`. `"query"` gives every
+   * operation one URL: `/<collection>/<slug>` with the version in
+   * `?api-version=<id>` — absent means the default, unknown or repeated is
+   * a 404, and a hidden version's pages are reachable only by query. `"query"`
+   * requires `versions` and the family's effective rendering mode to be
+   * `"request"`: a static site serves the same file whatever the query says.
+   */
+  versionMode?: "path" | "query";
+  /**
    * Require every operation to declare a stable `operationId`. When `false` (the
    * default), an operation missing one warns and falls back to a path-derived
    * coordinate so the spec still renders; that coordinate moves if the method,
@@ -263,6 +296,15 @@ export interface ApiSpec {
    * missing case a build error. A coordinate/URL collision is always fatal.
    */
   requireOperationId?: boolean;
+  /** Code sample policy. Applies to every version of a family. */
+  samples?: ApiSamples;
+  /**
+   * Publish this collection's spec as one self-contained JSON file at
+   * `/<collection>/openapi.json` (each version at its own mount path) and
+   * list it in the API catalog. Default `true`. A version can override it.
+   * Opting out keeps the catalog entry with documentation links only.
+   */
+  publishSpec?: boolean;
   /**
    * Publish a page for each `components/schemas` entry, at
    * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
@@ -294,6 +336,25 @@ export interface ApiSpec {
    * Use `"on-demand"` for large APIs, where the full tree dominates page size.
    */
   sidebar?: ApiSidebarMode;
+}
+
+/** A language Nimbus generates code samples for. */
+export type ApiSampleLang = "curl" | "typescript" | "python";
+
+/** Code sample policy for one API collection. See {@link ApiSpec.samples}. */
+export interface ApiSamples {
+  /**
+   * Languages Nimbus generates samples in, on every operation. Default: all
+   * three. `[]` generates none, so operations show only authored samples.
+   */
+  generate?: ApiSampleLang[];
+  /**
+   * Generated languages kept when an operation has authored `x-codeSamples`.
+   * They follow the authored samples; an authored sample in the same language
+   * replaces the generated one. Each must also be in `generate`. Default `[]`:
+   * authored samples replace all generated ones.
+   */
+  keepGenerated?: ApiSampleLang[];
 }
 
 /** How much of the API navigation each page includes. See {@link ApiSpec.sidebar}. */
@@ -333,6 +394,8 @@ export interface ApiVersionSpec {
   hidden?: boolean;
   /** Display label override for the picker (defaults to `version`). */
   label?: string;
+  /** Override the family's {@link ApiSpec.publishSpec} for this version. */
+  publishSpec?: boolean;
   /**
    * Route convention for this version's pages. Each version carries its own
    * policy; a shared route map may be imported into several versions, but every

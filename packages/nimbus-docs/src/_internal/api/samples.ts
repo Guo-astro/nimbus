@@ -8,15 +8,20 @@
  * @readme/httpsnippet renders the request per language. Both parsers are optional
  * peer deps, lazy-loaded so a prose-only build pulls neither — synthesis is
  * best-effort and its absence never aborts a build. Authored examples resolve
- * even without the parsers; a spec's own `x-codeSamples` win outright.
+ * even without the parsers. `samples.generate` picks the generated languages.
+ * A spec's own `x-codeSamples` win, followed only by the generated languages
+ * `samples.keepGenerated` keeps.
  */
 
+import type { ApiSampleLang } from "../../types.js";
 import type { AuthRequirement, CodeSample } from "./model.js";
 import type {
+  OpenApiEncoding,
   OpenApiParameter,
   OpenApiSchema,
   OpenApiSecurityScheme,
 } from "./openapi-types.js";
+import { isPlainObject } from "./schema-algebra.js";
 
 interface SamplerModule {
   sample: (
@@ -35,6 +40,12 @@ interface HarField {
   value: string;
 }
 
+interface FormField extends HarField {
+  allowReserved?: boolean;
+  /** The value is already percent-encoded: a joined list whose separators are structural. */
+  encoded?: boolean;
+}
+
 interface HarRequestInput {
   method: string;
   url: string;
@@ -42,7 +53,7 @@ interface HarRequestInput {
   cookies: [];
   headers: HarField[];
   queryString: HarField[];
-  postData?: { mimeType: string; text: string };
+  postData?: { mimeType: string; text: string; params?: HarField[] };
   headersSize: number;
   bodySize: number;
 }
@@ -61,7 +72,7 @@ export interface SampleTools {
 }
 
 interface LangTarget {
-  lang: string;
+  lang: ApiSampleLang;
   label: string;
   target: string;
   client: string;
@@ -74,6 +85,12 @@ const LANGS: LangTarget[] = [
   { lang: "typescript", label: "TypeScript", target: "node", client: "fetch" },
   { lang: "python", label: "Python", target: "python", client: "requests" },
 ];
+
+export const GENERATED_SAMPLE_LANGS: readonly ApiSampleLang[] = LANGS.map((l) => l.lang);
+
+// Other spellings of a generated language in authored `x-codeSamples`. Shell
+// names are not aliases of `curl`: an authored shell sample is often a CLI call.
+const LANG_ALIASES: Record<string, ApiSampleLang> = { py: "python", ts: "typescript" };
 
 const DEFAULT_SERVER = "https://api.example.com";
 // Bounds sampler work on deep or self-referential schemas; a runaway sample
@@ -224,37 +241,120 @@ export interface OperationSampleInput {
   params: OpenApiParameter[];
   /** The pre-resolved request example (see `resolveExampleValue`) — feeds the
    *  snippet body so an authored example and the rendered example never diverge. */
-  body?: { mediaType: string; value: unknown };
+  body?: { mediaType: string; value: unknown; encoding?: Record<string, OpenApiEncoding | undefined> };
   securitySchemes?: Record<string, OpenApiSecurityScheme>;
   auth: AuthRequirement[][];
   xCodeSamples?: unknown;
+  /** Languages generated on every operation; all of them when unset. */
+  generate?: readonly ApiSampleLang[];
+  /** Generated languages kept next to authored `x-codeSamples`. */
+  keepGenerated?: readonly ApiSampleLang[];
 }
 
 /**
- * Per-language request snippets for one operation. A spec's own `x-codeSamples`
- * win outright. Best-effort: one pathological operation degrades to an empty
- * list, never aborts the build. The call site sits inside the fatal parse
- * try/catch, so this is the last line holding the contract.
+ * Per-language request snippets for one operation, in the `generate`
+ * languages. A spec's own `x-codeSamples` win; `keepGenerated` languages they
+ * don't already cover follow them.
+ * Best-effort: one pathological operation degrades to an empty list, never
+ * aborts the build. The call site sits inside the fatal parse try/catch, so
+ * this is the last line holding the contract.
  */
 export function buildOperationSamples(
   tools: SampleTools,
   input: OperationSampleInput,
 ): CodeSample[] {
+  const generated = LANGS.filter((l) => input.generate?.includes(l.lang) ?? true);
   const authored = fromSpecCodeSamples(input.xCodeSamples);
-  if (authored.length > 0) return authored;
+  if (authored.length === 0) return withIds(generateSamples(tools, input, generated));
+  const keep = input.keepGenerated ?? [];
+  if (keep.length === 0) return withIds(authored);
+  const used = new Set(authored.map((s) => {
+    const lang = s.lang.toLowerCase();
+    return LANG_ALIASES[lang] ?? lang;
+  }));
+  const langs = generated.filter((l) => keep.includes(l.lang) && !used.has(l.lang));
+  return withIds([...authored, ...generateSamples(tools, input, langs)]);
+}
 
+// A sample's id is its language for the first sample in that language, then
+// `<lang>-2`, `<lang>-3`. Every language in the list is reserved first, so a
+// sample whose language is `bash-2` always gets `bash-2`, and a second `bash`
+// sample skips to `bash-3`. Labels get the same treatment for display: a
+// repeated label becomes `Python (2)`, so the picker and the Markdown headings
+// never show two identical names. Languages and sources are unchanged.
+function withIds(samples: Omit<CodeSample, "id">[]): CodeSample[] {
+  const ids = unique(samples.map((sample) => sample.lang), (base, n) => `${base}-${n}`);
+  const labels = unique(samples.map((sample) => sample.label), (base, n) => `${base} (${n})`);
+  return samples.map((sample, i) => ({ id: ids[i]!, ...sample, label: labels[i]! }));
+}
+
+// Keeps the first of each value and numbers the repeats from 2, skipping any
+// numbered form another entry already uses.
+function unique(values: string[], numbered: (base: string, n: number) => string): string[] {
+  const reserved = new Set(values);
+  const taken = new Set<string>();
+  return values.map((value) => {
+    let out = value;
+    if (taken.has(out)) {
+      let n = 2;
+      while (reserved.has(numbered(value, n)) || taken.has(numbered(value, n))) n++;
+      out = numbered(value, n);
+    }
+    taken.add(out);
+    return out;
+  });
+}
+
+function generateSamples(
+  tools: SampleTools,
+  input: OperationSampleInput,
+  langs: LangTarget[],
+): Omit<CodeSample, "id">[] {
+  if (langs.length === 0) return [];
   try {
     const mediaType = input.body?.mediaType ?? "application/json";
-    const har = buildHar(tools, input, mediaType, input.body?.value);
-    const samples: CodeSample[] = [];
-    for (const lang of LANGS) {
-      const source = convert(tools, har, lang);
+    const values = paramValues(tools, input.params);
+    const { har, placeholders, bodyMarker } = buildMarkedHar(input, mediaType, values);
+    const samples: Omit<CodeSample, "id">[] = [];
+    for (const lang of langs) {
+      const source = convertWithBody(tools, har, lang, placeholders, bodyMarker);
       if (source) samples.push({ lang: lang.lang, label: lang.label, source });
     }
     return samples;
   } catch {
     return [];
   }
+}
+
+// Placeholders enter the request as markers of letters and digits, which no
+// target URL-encodes or escapes, and become `<name>` only after conversion.
+// Restoring markers instead of `%3Cname%3E` leaves declared values alone (a
+// declared `<id>` stays encoded, a body's `%3Cid%3E` stays as written) and
+// works for names URL encoding would change (`filter[name]`, non-ASCII). A
+// prefix the request's own data already contains is skipped. The body marker
+// shares the prefix but never matches `MARKER`, so restoring leaves it alone.
+const MARKER = /nbph\d+q\d+z/g;
+
+function buildMarkedHar(
+  input: OperationSampleInput,
+  mediaType: string,
+  values: ParamValues,
+): { har: HarRequestInput; placeholders: Map<string, string>; bodyMarker: string } {
+  const declared = JSON.stringify(buildHar(input, mediaType, values, () => ""));
+  let attempt = 0;
+  while (declared.includes(`nbph${attempt}q`)) attempt++;
+  const prefix = `nbph${attempt}q`;
+  const placeholders = new Map<string, string>();
+  const placeholder = (name: string): string => {
+    const marker = `${prefix}${placeholders.size}z`;
+    placeholders.set(marker, name);
+    return marker;
+  };
+  return {
+    har: buildHar(input, mediaType, values, placeholder),
+    placeholders,
+    bodyMarker: `${prefix}body`,
+  };
 }
 
 function sampleForRole(tools: SampleTools, schema: OpenApiSchema, role: ExampleRole): unknown {
@@ -270,45 +370,233 @@ function sampleForRole(tools: SampleTools, schema: OpenApiSchema, role: ExampleR
   }
 }
 
-// Params are always request-role scalars (a read-only path param is still sent).
-function sampleSchema(tools: SampleTools, schema: OpenApiSchema): unknown {
-  return sampleForRole(tools, schema, "request");
-}
-
-function convert(tools: SampleTools, har: HarRequestInput, lang: LangTarget): string | undefined {
+function convert(
+  tools: SampleTools,
+  har: HarRequestInput,
+  lang: LangTarget,
+  placeholders: Map<string, string>,
+): string | undefined {
   try {
     const out = new tools.snippet.HTTPSnippet(har).convert(lang.target, lang.client);
     const first = Array.isArray(out) ? out[0] : out;
-    return typeof first === "string" && first.length > 0 ? first : undefined;
+    if (typeof first !== "string" || first.length === 0) return undefined;
+    let source = first;
+    // httpsnippet leaves a shell-safe URL unquoted, and markers are shell-safe.
+    // `<` is not, so quote the whole URL while it still holds markers.
+    // For a body containing `'` it writes a heredoc with an unquoted delimiter,
+    // where the shell would expand `$`, backticks, and backslashes in the body.
+    if (lang.target === "shell") {
+      source = source.replace(/(--url )([^'\s]+)/, (m, flag: string, url: string) =>
+        [...placeholders.keys()].some((marker) => url.includes(marker)) ? `${flag}'${url}'` : m,
+      );
+      source = source.replace("@- <<EOF\n", "@- <<'EOF'\n");
+    }
+    // Every marker sits inside a string literal the target has already quoted,
+    // so the restored `<name>` is escaped for that target's quoting. One pass,
+    // so a restored name that looks like a marker is never replaced again.
+    return source.replace(MARKER, (marker) => {
+      const name = placeholders.get(marker);
+      return name === undefined ? marker : escapeForTarget(lang.target, `<${name}>`);
+    });
   } catch {
     return undefined;
   }
 }
 
-function buildHar(
+function convertWithBody(
   tools: SampleTools,
+  har: HarRequestInput,
+  lang: LangTarget,
+  placeholders: Map<string, string>,
+  bodyMarker: string,
+): string | undefined {
+  const rewrite = bodyRewrite(har, lang.target, bodyMarker);
+  if (!rewrite) return convert(tools, har, lang, placeholders);
+  const marked = convert(tools, rewrite.har, lang, placeholders);
+  const at = marked?.indexOf(rewrite.line) ?? -1;
+  if (!marked || at < 0) return undefined;
+  const indent = /^[ \t]*/.exec(marked.slice(marked.lastIndexOf("\n", at) + 1))![0];
+  return marked.slice(0, at) + rewrite.text(indent) + marked.slice(at + rewrite.line.length);
+}
+
+// httpsnippet writes some bodies without escaping: Python's JSON and form
+// payloads (newlines and backslashes in strings and keys), and every
+// TypeScript body (backslashes), whose form fields also use `set` and so keep
+// only a repeated field's last value. TypeScript also drops a JSON body of
+// `false`, `0`, or `""`. Such a body enters as one marker, and Nimbus writes
+// the code in its place, indented like the marker's line. Python's text
+// bodies, which it escapes, keep its output. When the marker isn't where it's
+// expected, as after an httpsnippet change, the sample is left out rather than shown unescaped.
+function bodyRewrite(
+  har: HarRequestInput,
+  target: string,
+  marker: string,
+): { har: HarRequestInput; line: string; text: (indent: string) => string } | undefined {
+  const postData = har.postData;
+  if (!postData) return undefined;
+  const params = postData.params;
+  if (!params && isFormMediaType(postData.mimeType)) {
+    // Keep pre-encoded forms out of httpsnippet's form encoder; the original
+    // Content-Type header stays on the request.
+    const markedHar = { ...har, postData: { mimeType: "text/plain", text: marker } };
+    if (target === "python") return { har: markedHar, line: `payload = ${JSON.stringify(marker)}`, text: () => `payload = ${JSON.stringify(postData.text)}` };
+    if (target === "node") return { har: markedHar, line: `'${marker}'`, text: () => jsString(postData.text) };
+    if (target === "shell") return { har: markedHar, line: `--data ${marker}`, text: () => `--data-raw '${escapeForTarget("shell", postData.text)}'` };
+    return undefined;
+  }
+  if (params) {
+    const markedHar = { ...har, postData: { ...postData, params: [{ name: marker, value: "" }] } };
+    if (target === "python") {
+      return {
+        har: markedHar,
+        line: `payload = { ${JSON.stringify(marker)}: "" }`,
+        text: () => `payload = ${pythonLiteral(formPayload(params))}`,
+      };
+    }
+    if (target === "node") {
+      return {
+        har: markedHar,
+        line: `encodedParams.set('${marker}', '');`,
+        text: () => params.map((field) => `encodedParams.append(${jsString(field.name)}, ${jsString(field.value)});`).join("\n"),
+      };
+    }
+    return undefined;
+  }
+  if (SNIPPET_JSON_TYPES.has(postData.mimeType)) {
+    const body = parseJson(postData.text);
+    if (body === undefined) return undefined;
+    if (body === null && (har.method === "GET" || har.method === "HEAD")) return undefined;
+    if (body === null && target === "python") {
+      const markedHar = { ...har, postData: { mimeType: "text/plain", text: marker } };
+      return { har: markedHar, line: `payload = ${JSON.stringify(marker)}`, text: () => `payload = ${JSON.stringify(postData.text)}` };
+    }
+    const markedHar = { ...har, postData: { ...postData, text: JSON.stringify(marker) } };
+    if (target === "python") return { har: markedHar, line: `payload = ${JSON.stringify(marker)}`, text: () => `payload = ${pythonLiteral(body)}` };
+    if (target === "node") return { har: markedHar, line: `JSON.stringify('${marker}')`, text: (indent) => `JSON.stringify(${jsLiteral(body, indent)})` };
+    return undefined;
+  }
+  if (!postData.text || SNIPPET_MULTIPART_TYPES.has(postData.mimeType)) return undefined;
+  const text = postData.text;
+  // cURL's `--data` reads a file for a body starting with `@`; `--data-raw` never does.
+  if (target === "shell") return { har: { ...har, postData: { ...postData, text: marker } }, line: `--data ${marker}`, text: () => `--data-raw '${escapeForTarget("shell", text)}'` };
+  if (target !== "node") return undefined;
+  return { har: { ...har, postData: { ...postData, text: marker } }, line: `'${marker}'`, text: () => jsString(text) };
+}
+
+// The media types httpsnippet writes as a literal; Python sends any other body
+// as an escaped string. It sends no text for its multipart types.
+const SNIPPET_JSON_TYPES = new Set(["application/json", "application/x-json", "text/json", "text/x-json"]);
+const SNIPPET_MULTIPART_TYPES = new Set(["multipart/form-data", "multipart/mixed", "multipart/related", "multipart/alternative"]);
+
+// Form fields as httpsnippet groups them: a repeated name holds a list. No
+// prototype, so names like `constructor` and `__proto__` are ordinary keys.
+function formPayload(fields: HarField[]): Record<string, string | string[]> {
+  const payload: Record<string, string | string[]> = Object.create(null);
+  for (const { name, value } of fields) {
+    const existing = payload[name];
+    if (existing === undefined) payload[name] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else payload[name] = [existing, value];
+  }
+  return payload;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+const PYTHON_INDENT = "    ";
+
+// A JSON value as a Python literal in httpsnippet's layout: multiline for an
+// object with more than one key, or an array holding one. JSON string escapes
+// are all valid Python string escapes.
+function pythonLiteral(value: unknown, depth = 1): string {
+  if (value === null) return "None";
+  if (typeof value === "boolean") return value ? "True" : "False";
+  if (typeof value !== "object") return JSON.stringify(value);
+  const nested = (item: unknown) => pythonLiteral(item, depth + 1);
+  const wide = (item: unknown) =>
+    Boolean(item) && typeof item === "object" && !Array.isArray(item) && Object.keys(item as object).length > 1;
+  const isArray = Array.isArray(value);
+  const items = isArray
+    ? value.map(nested)
+    : Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${nested(item)}`);
+  const [open, close] = isArray ? ["[", "]"] : ["{", "}"];
+  if (items.length === 0) return `${open}${close}`;
+  if (isArray ? value.some(wide) : items.length > 1) {
+    const indent = PYTHON_INDENT.repeat(depth);
+    return `${open}\n${indent}${items.join(`,\n${indent}`)}\n${PYTHON_INDENT.repeat(depth - 1)}${close}`;
+  }
+  return isArray ? `[${items.join(", ")}]` : `{ ${items.join(", ")} }`;
+}
+
+const JS_INDENT = "  ";
+const JS_INLINE_LIMIT = 80;
+
+function jsString(text: string): string {
+  return `'${escapeForTarget("node", text)}'`;
+}
+
+// A JSON value as a JavaScript literal in httpsnippet's layout: single-quoted
+// strings, bare keys where valid, and a container on one line when it fits in
+// 80 characters. `__proto__` is computed, so it stays an ordinary key.
+function jsLiteral(value: unknown, indent: string): string {
+  if (value === null || typeof value !== "object") return typeof value === "string" ? jsString(value) : String(value);
+  const inner = indent + JS_INDENT;
+  const key = (name: string) =>
+    name === "__proto__" ? `['__proto__']` : /^[A-Za-z_$][\w$]*$/.test(name) ? name : jsString(name);
+  const items = Array.isArray(value)
+    ? value.map((item) => jsLiteral(item, inner))
+    : Object.entries(value).map(([name, item]) => `${key(name)}: ${jsLiteral(item, inner)}`);
+  const [open, close] = Array.isArray(value) ? ["[", "]"] : ["{", "}"];
+  const inline = `${open}${items.join(", ")}${close}`;
+  if (items.length === 0 || (inline.length <= JS_INLINE_LIMIT && !inline.includes("\n"))) return inline;
+  return `${open}\n${inner}${items.join(`,\n${inner}`)}\n${indent}${close}`;
+}
+
+// The string-literal escaping each target's snippets use: single-quoted shell
+// arguments, single-quoted JavaScript strings, double-quoted Python strings.
+function escapeForTarget(target: string, text: string): string {
+  if (target === "shell") return text.replaceAll("'", `'\\''`);
+  const escaped = JSON.stringify(text).slice(1, -1);
+  if (target !== "node") return escaped;
+  return escaped.replace(/\\(.)|'/g, (match, escapedChar?: string) =>
+    escapedChar === undefined ? "\\'" : escapedChar === '"' ? '"' : match,
+  );
+}
+
+function buildHar(
   input: OperationSampleInput,
   mediaType: string,
-  bodyExample: unknown,
+  values: ParamValues,
+  placeholder: (name: string) => string,
 ): HarRequestInput {
   const base = (input.server ?? DEFAULT_SERVER).replace(/\/+$/, "");
+  const bodyExample = input.body?.value;
 
   let filledPath = input.path;
   for (const p of input.params) {
     if (p.in !== "path") continue;
+    const value = values.get(p);
     // Replace every occurrence — a path may repeat a template (`/{id}/x/{id}`).
-    filledPath = filledPath.split(`{${p.name}}`).join(encodeURIComponent(scalar(tools, p.schema, p.name)));
+    filledPath = filledPath
+      .split(`{${p.name}}`)
+      .join(value === undefined ? placeholder(p.name) : encodeURIComponent(value));
   }
 
   const headers: HarField[] = [];
   const queryString: HarField[] = [];
   for (const p of input.params) {
-    if (!p.required) continue;
-    if (p.in === "header") headers.push({ name: p.name, value: scalar(tools, p.schema, p.name) });
-    else if (p.in === "query") queryString.push({ name: p.name, value: scalar(tools, p.schema, p.name) });
+    if (!p.required || (p.in !== "header" && p.in !== "query")) continue;
+    const field = { name: p.name, value: values.get(p) ?? placeholder(p.name) };
+    (p.in === "header" ? headers : queryString).push(field);
   }
 
-  applyAuth(headers, queryString, input);
+  applyAuth(headers, queryString, input, placeholder);
 
   const har: HarRequestInput = {
     method: input.method.toUpperCase(),
@@ -321,24 +609,239 @@ function buildHar(
     bodySize: -1,
   };
 
-  if (bodyExample !== undefined) {
+  const fields = isFormMediaType(mediaType) ? formFields(bodyExample, input.body?.encoding) : undefined;
+  if (bodyExample !== undefined && fields?.length !== 0) {
     headers.unshift({ name: "Content-Type", value: mediaType });
-    // A raw string body for a non-JSON media type is sent verbatim (matches the
-    // rendered example); everything else is JSON-serialized.
-    const text =
-      typeof bodyExample === "string" && !mediaType.includes("json")
-        ? bodyExample
-        : JSON.stringify(bodyExample, null, 2);
-    har.postData = { mimeType: mediaType, text };
+    if (fields) {
+      // httpsnippet builds a form from `params` only for the bare media type;
+      // with parameters such as `charset`, every target sends the text.
+      const text = serializeForm(fields);
+      // An empty name (cURL drops it) or a value that is already encoded must
+      // go as text, which every target sends unchanged.
+      har.postData = mediaType === "application/x-www-form-urlencoded" &&
+        !fields.some((field) => field.allowReserved || field.encoded || field.name === "")
+        ? { mimeType: mediaType, text, params: fields }
+        : { mimeType: mediaType, text };
+    } else {
+      // A raw string body for a non-JSON media type is sent verbatim (matches the
+      // rendered example); everything else is JSON-serialized.
+      const text =
+        typeof bodyExample === "string" && !mediaType.includes("json")
+          ? bodyExample
+          : JSON.stringify(bodyExample, null, 2);
+      har.postData = { mimeType: mediaType, text };
+    }
   }
   return har;
 }
 
-function scalar(tools: SampleTools, schema: OpenApiSchema | undefined, fallback: string): string {
-  if (!schema) return fallback;
-  const value = sampleSchema(tools, schema);
-  if (value === undefined || value === null || typeof value === "object") return fallback;
-  return String(value);
+function isFormMediaType(mediaType: string): boolean {
+  return mediaType.split(";")[0]!.trim().toLowerCase() === "application/x-www-form-urlencoded";
+}
+
+function serializeForm(fields: FormField[]): string {
+  return fields
+    .map(({ name, value, allowReserved, encoded }) =>
+      `${encodeFormText(name)}=${encoded ? value : encodeFormValue(value, allowReserved)}`)
+    .join("&");
+}
+
+function encodeFormText(text: string): string {
+  return new URLSearchParams([["", text]]).toString().slice(1);
+}
+
+// Reserved expansion writes a space as `%20`, except inside a space-delimited
+// join, where `%20` is the separator and an item's space stays `+`.
+function encodeFormValue(value: string, allowReserved = false, spaceAsPlus = false): string {
+  if (!allowReserved) return encodeFormText(value);
+  return value.replace(/%[0-9A-Fa-f]{2}|[^A-Za-z0-9\-._~:/?@!$'()*,;]/gu, (token) => {
+    if (token.startsWith("%") && token.length === 3) return token;
+    const encoded = encodeFormText(token);
+    return spaceAsPlus ? encoded : encoded.replaceAll("+", "%20");
+  });
+}
+
+// A form body's fields: a string is read as an encoded form, an object
+// gives one or more fields per property, and anything else sends no body.
+// A property with an `encoding` entry follows OpenAPI: `style`, `explode`, or
+// `allowReserved` select query-style serialization (`style` defaults to
+// `form`); without them the value is sent as its content type, so an object
+// is JSON. A property without an entry nests objects as `a[b]=c`, repeats its
+// name for an array of scalars, and indexes an array holding objects or
+// arrays (`a[0][b]=c`). Empty objects and arrays send nothing.
+function formFields(
+  value: unknown,
+  encoding: Record<string, OpenApiEncoding | undefined> | undefined,
+): FormField[] {
+  if (typeof value === "string") return [...new URLSearchParams(value)].map(([name, text]) => ({ name, value: text }));
+  if (!isPlainObject(value)) return [];
+  const fields: FormField[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    const rule = encoding && Object.hasOwn(encoding, key) ? encoding[key] : undefined;
+    const add = (name: string, entry: unknown) => fields.push({ name, value: formText(entry), ...(rule?.allowReserved ? { allowReserved: true } : {}) });
+    if (!rule) {
+      addNested(key, item, false, add);
+    } else if (rule.style === undefined && rule.explode === undefined && rule.allowReserved === undefined) {
+      const addContent = (entry: unknown) => fields.push({ name: key, value: formText(entry, rule.contentType) });
+      if (Array.isArray(item)) item.forEach(addContent);
+      else addContent(item);
+    } else {
+      const style = rule.style ?? "form";
+      // Separators are written so a value can't produce one: a value's space
+      // encodes as `+` and its `|` and `,` as `%7C` and `%2C`.
+      const separator = style === "spaceDelimited" ? "%20" : style === "pipeDelimited" ? "|" : ",";
+      const explode = rule.explode ?? style === "form";
+      const addJoined = (parts: string[]) => fields.push({
+        name: key,
+        value: parts.map((part) => encodeFormValue(part, rule.allowReserved, style === "spaceDelimited")).join(separator),
+        encoded: true,
+      });
+      if (style === "deepObject") {
+        addNested(key, item, true, add);
+      } else if (Array.isArray(item)) {
+        if (explode) item.forEach((entry) => add(key, entry));
+        else addJoined(item.map((entry) => formText(entry)));
+      } else if (isPlainObject(item)) {
+        if (explode) Object.entries(item).forEach(([name, entry]) => add(name, entry));
+        else addJoined(Object.entries(item).flatMap(([name, entry]) => [name, formText(entry)]));
+      } else {
+        add(key, item);
+      }
+    }
+  }
+  return fields;
+}
+
+function addNested(name: string, item: unknown, indexArrays: boolean, add: (name: string, item: unknown) => void): void {
+  if (Array.isArray(item)) {
+    const indexed = indexArrays || item.some((entry) => entry !== null && typeof entry === "object");
+    item.forEach((entry, i) => (indexed ? addNested(`${name}[${i}]`, entry, indexArrays, add) : add(name, entry)));
+  } else if (isPlainObject(item)) {
+    for (const [key, entry] of Object.entries(item)) {
+      if (entry !== undefined) addNested(`${name}[${key}]`, entry, indexArrays, add);
+    }
+  } else {
+    add(name, item);
+  }
+}
+
+function formText(item: unknown, contentType?: string): string {
+  const mediaType = contentType?.split(";")[0]!.trim().toLowerCase();
+  if (mediaType?.endsWith("/json") || mediaType?.endsWith("+json")) return JSON.stringify(item) ?? "";
+  if (item === null || item === undefined) return "";
+  if (typeof item === "string") return item;
+  if (typeof item === "number" || typeof item === "boolean") return String(item);
+  return JSON.stringify(item);
+}
+
+type ParamValues = Map<OpenApiParameter, string | undefined>;
+
+// Each parameter's sample value; `undefined` renders a `<name>` placeholder.
+// The parameter's own `example` or `examples` come first, as OpenAPI
+// specifies. Otherwise openapi-sampler picks the value, so precedence and
+// composition are the sampler's. A path parameter keeps the sampler's value
+// only when a declaration the sampler reads supports it; anything else is a
+// type guess (`string`, `0`, a format's stock value), and a made-up identifier
+// names no real resource, so it gets the placeholder. Query and header
+// parameters keep the sampler's value, guesses included.
+function paramValues(tools: SampleTools, params: OpenApiParameter[]): ParamValues {
+  const values: ParamValues = new Map();
+  for (const p of params) {
+    const own = scalarText([p.example, firstExample(p.examples)].find((c) => c !== undefined));
+    if (own !== undefined) {
+      values.set(p, own);
+    } else if (p.schema) {
+      const sampled = scalarText(sampleForRole(tools, p.schema, "request"));
+      const declared = p.in !== "path" || (sampled !== undefined && supportingValues(p.schema).has(sampled));
+      values.set(p, declared ? sampled : undefined);
+    } else {
+      values.set(p, undefined);
+    }
+  }
+  return values;
+}
+
+// The declared values the sampler can return for a scalar schema, as text,
+// following the sampler's own order of reading a schema (openapi-sampler
+// `traverse`): an `example` short-circuits; `allOf` merges the rest of the
+// schema with every member; `oneOf` takes its first branch, or `anyOf` its
+// first branch when there's no `oneOf`; `if` with `then` merges the schema,
+// `if`, and `then` first and reads the result (`else` is never read);
+// otherwise `const`, `examples`, `enum`, and `default`. Values in branches the
+// sampler skips don't count, so an unused branch's `"string"` can't vouch for a
+// guessed `"string"`.
+function supportingValues(schema: OpenApiSchema): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<OpenApiSchema>();
+  const add = (value: unknown) => {
+    const text = scalarText(value);
+    if (text !== undefined) out.add(text);
+  };
+  const addOwn = (s: OpenApiSchema) => {
+    add(s.const);
+    if (Array.isArray(s.examples)) s.examples.forEach(add);
+    if (Array.isArray(s.enum)) s.enum.forEach(add);
+    add(s.default);
+  };
+  const visit = (s: OpenApiSchema | undefined): void => {
+    if (!s || typeof s !== "object" || seen.has(s)) return;
+    seen.add(s);
+    if (s.example !== undefined) return add(s.example);
+    if (s.allOf !== undefined) {
+      addOwn(s);
+      visit({ ...s, allOf: undefined });
+      for (const member of s.allOf) visit(member);
+      return;
+    }
+    const branch = s.oneOf?.length ? s.oneOf[0] : s.anyOf?.length ? s.anyOf[0] : undefined;
+    if (branch) {
+      addOwn(s);
+      return visit(branch);
+    }
+    if (s.if && s.then) {
+      // The merged schema decides, as for the sampler: a `oneOf` in `then`
+      // outranks an `anyOf` in `if`.
+      const { if: condition, then, ...rest } = s;
+      return visit(mergeLikeSampler(rest, condition, then) as OpenApiSchema);
+    }
+    addOwn(s);
+  };
+  visit(schema);
+  return out;
+}
+
+// openapi-sampler's `mergeDeep`, which it applies to `if` and `then`: later
+// objects win, nested objects (arrays too, index by index) merge.
+function mergeLikeSampler(...objects: unknown[]): unknown {
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    Boolean(value) && typeof value === "object";
+  return objects.reduce<Record<string, unknown>>(
+    (prev, obj) => {
+      for (const key of Object.keys((obj as Record<string, unknown>) ?? {})) {
+        const pVal = prev[key];
+        const oVal = (obj as Record<string, unknown>)[key];
+        prev[key] = isObject(pVal) && isObject(oVal) ? (mergeLikeSampler(pVal, oVal) as Record<string, unknown>) : oVal;
+      }
+      return prev;
+    },
+    Array.isArray(objects[objects.length - 1]) ? ([] as unknown as Record<string, unknown>) : {},
+  );
+}
+
+// A parameter's first `examples` entry with an inline value, in spec order.
+// Unlike request bodies (`pickExample`), a `default` key gets no priority.
+function firstExample(examples: OpenApiParameter["examples"]): unknown {
+  for (const entry of Object.values(examples ?? {})) {
+    if (entry && typeof entry === "object" && "value" in entry && entry.value !== undefined) return entry.value;
+  }
+  return undefined;
+}
+
+function scalarText(value: unknown): string | undefined {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+    ? String(value)
+    : undefined;
 }
 
 // OpenAPI security is OR-of-AND: any one alternative satisfies the operation.
@@ -349,6 +852,7 @@ function applyAuth(
   headers: HarField[],
   queryString: HarField[],
   input: OperationSampleInput,
+  placeholder: (name: string) => string,
 ): void {
   if (input.auth.some((alternative) => alternative.length === 0)) return;
   const group = input.auth[0];
@@ -359,11 +863,14 @@ function applyAuth(
     if (!scheme) continue;
     const type = (scheme.type ?? "").toLowerCase();
     if (type === "http") {
-      const prefix = (scheme.scheme ?? "bearer").toLowerCase() === "basic" ? "Basic" : "Bearer";
-      headers.push({ name: "Authorization", value: `${prefix} <token>` });
+      const basic = (scheme.scheme ?? "bearer").toLowerCase() === "basic";
+      headers.push({
+        name: "Authorization",
+        value: basic ? "Basic <credentials>" : "Bearer <token>",
+      });
     } else if (type === "apikey" && scheme.name) {
-      if (scheme.in === "query") queryString.push({ name: scheme.name, value: "<value>" });
-      else headers.push({ name: scheme.name, value: "<value>" });
+      const field = { name: scheme.name, value: placeholder(scheme.name) };
+      (scheme.in === "query" ? queryString : headers).push(field);
     } else if (type === "oauth2" || type === "openidconnect") {
       headers.push({ name: "Authorization", value: "Bearer <token>" });
     }
@@ -376,19 +883,13 @@ interface SpecCodeSample {
   source?: string;
 }
 
-function fromSpecCodeSamples(raw: unknown): CodeSample[] {
+// Every valid entry, in spec order. Several may share a `lang` (a Python SDK
+// call and a raw `requests` call); `withIds` keeps them apart.
+function fromSpecCodeSamples(raw: unknown): Omit<CodeSample, "id">[] {
   if (!Array.isArray(raw)) return [];
-  const out: CodeSample[] = [];
-  // Dedupe by `lang`, first-wins: the rail's language `<select>` keys panels by
-  // lang, so two entries sharing one (e.g. two `python` snippets) would emit
-  // duplicate option values the picker can't disambiguate — it would reveal
-  // both panels at once. First-wins keeps the author's primary snippet per
-  // language and leaves the control coherent.
-  const seen = new Set<string>();
+  const out: Omit<CodeSample, "id">[] = [];
   for (const entry of raw as SpecCodeSample[]) {
     if (!entry || typeof entry.source !== "string" || typeof entry.lang !== "string") continue;
-    if (seen.has(entry.lang)) continue;
-    seen.add(entry.lang);
     const label = typeof entry.label === "string" ? entry.label : entry.lang;
     out.push({ lang: entry.lang, label, source: entry.source });
   }

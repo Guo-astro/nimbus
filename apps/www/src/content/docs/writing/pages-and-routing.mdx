@@ -101,7 +101,9 @@ export const collections = {
 };
 ```
 
-The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`. Every general-purpose indexed collection must provide prepared Markdown for alternate Markdown/MDX versions and `llms-full.txt`; arbitrary data-only collections are not supported. `apiCollection()` is the purpose-built exception because Nimbus supplies its renderer. If a collection is not prepared, the build names it and tells you to wrap its loader.
+The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`.
+
+Page collections come from the helpers: a collection made with `docsCollection()`, `componentsCollection()`, or a `withNimbusMarkdown()`-wrapped loader becomes pages — routed, indexed, and included in search, the sitemap, `llms.txt`, and Markdown versions. Every other collection is plain Astro data: Nimbus doesn't route it, index it, check it, or fail on it, no wrapping is needed, and `getCollection()` works as in any Astro site. Collection names carry no meaning — there is no reserved `_` prefix. `apiCollection()` is the purpose-built exception for API references because Nimbus supplies its renderer.
 
 ## Custom route helpers
 

@@ -79,6 +79,7 @@ projects get zero new transitive deps when they install `nimbus-docs`.
 | `emphasis-style` | authoring | remark-lint | ✓ |
 | `bare-url` | authoring | remark-lint | — |
 | `internal-link` | authoring | hand-rolled | did-you-mean hint |
+| `redirected-link` | authoring | hand-rolled | destination hint |
 | `image-ref` | authoring | hand-rolled | did-you-mean hint |
 | `duplicate-slug` | build | hand-rolled | — |
 | `mdx-syntax` | build | parser | — |
@@ -130,10 +131,10 @@ Three design calls hold this rule together:
     pre-build. This catches `pages/search.astro` shadowing
     `content/docs/search.mdx` at `/search`.
 
-- **Scoped to indexable collections, honors custom bases.** Only
-  collections that survive `filterIndexableCollections` (`partials`,
-  `_*`-prefixed names excluded) participate — non-routed collections
-  aren't pages. The walk uses `parseCollectionBases` to read each
+- **Scoped to page collections, honors custom bases.** Runs after
+  content sync, over the page collections the Nimbus helpers loaded
+  (partials and plain data collections aren't pages and don't
+  participate). The walk uses `parseCollectionBases` to read each
   collection's `base:` override from `content.config.ts`: a
   `docsCollection({ base: "documentation" })` collection gets scanned at
   `src/content/documentation/` and tagged with key `docs`, rather than
@@ -192,6 +193,7 @@ the integration writes `.nimbus/routes.json` from what the build emitted:
   final `build.assets` directory (read at `astro:config:done`), `pagefind/`, `_nimbus/`, and the platform files
   `_headers`, `_redirects`, `_routes.json`, `.assetsignore`, and
   `_worker.js` at the output root;
+- the site's redirects (see **Redirects** below);
 - request-rendered pages from the request-route inventory, and concrete
   on-demand routes.
 
@@ -254,6 +256,25 @@ added since the last build doesn't appear in `routes.json`. Links to
 those pages get flagged. This is correct behavior given the contract —
 the site doesn't serve them yet either — but worth knowing when shipping
 new content in a single commit alongside the links into it.
+
+**Redirects (`link-resolver.ts`).** Route truth also lists the site's
+redirect rules (the output's `_redirects`, then the `redirectsFile`
+integration option) and, separately, Astro's redirect pages. A link that matches a source follows the chain,
+whatever each hop's status, and is broken only when it ends nowhere, loops,
+or passes 20 hops. A source wins over a file at the same path. Exact `200`
+sources are rewrites; pattern `200` sources are dropped. `redirected-link`
+reports links whose first hop is permanent, naming the last permanent
+destination, written without `base`, resolving with `internal-link`'s
+options (`RuleContext.optionsOf`). Sources match the pathname as written,
+encoded, per `RouteTruth.redirectRules` (`netlify` with a `netlify.toml`,
+else `cloudflare`): Cloudflare matches exactly, trailing slash included,
+and applies a rule over an existing file; Netlify ignores the trailing
+slash and applies only forced (`!`) rules over an existing file. Astro's
+meta-refresh pages are recorded separately (`redirectPages`): when no rule
+applies at a path (including a shadowed Netlify rule), the page sends the
+link on to its destination. The incoming query passes through a destination without its own.
+`ignore` applies to every destination in a chain. Route keys are only for built pages and globs. A line without a status is `301`
+on Netlify, `302` on Cloudflare.
 
 A near-match within Levenshtein distance 3 produces a "did you mean"
 hint via the same `_internal/levenshtein.ts:suggest` helper the

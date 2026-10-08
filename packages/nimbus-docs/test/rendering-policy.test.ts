@@ -889,7 +889,7 @@ test("request inventory is removed before downstream build failures", async (t) 
 test("route policy independently selects canonical collection catch-alls", async (t) => {
   const { routeSetup } = await setupIntegration(t, {
     default: "request",
-    collections: { docs: "build" },
+    collections: { docs: "build", blog: "request" },
   });
   const docs = { component: "src/pages/[...slug].astro", prerender: false };
   const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
@@ -913,6 +913,18 @@ test("route policy independently selects canonical collection catch-alls", async
   assert.equal(nearMatch.prerender, true);
 });
 
+test("the rendering default does not reach collections the config does not name", async (t) => {
+  const { routeSetup } = await setupIntegration(t, {
+    default: "request",
+    collections: { docs: "build" },
+  });
+  const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
+  await routeSetup({ route: blog } as never);
+  // `blog` is not `docs`, a version, an API collection, or named in
+  // `rendering.collections`, so the policy leaves its route alone.
+  assert.equal(blog.prerender, true);
+});
+
 test("omitted rendering policy leaves existing route decisions untouched", async (t) => {
   const integration = await setupIntegration(t, undefined, "build");
   const docs = { component: "src/pages/[...slug].astro", prerender: false };
@@ -923,7 +935,7 @@ test("omitted rendering policy leaves existing route decisions untouched", async
 
   assert.equal(docs.prerender, false);
   assert.equal(blog.prerender, true);
-  assert.equal(integration.injectedRoutes.length, 1);
+  assert.equal(integration.injectedRoutes.length, 3);
 
   integration.configDone({
     injectTypes: () => new URL("file:///noop"),
@@ -980,14 +992,22 @@ test("opaque version registrations still reach the request inventory", async (t)
   assert.ok(virtualConfig?.resolveId && virtualConfig.load);
   const resolved = virtualConfig.resolveId("virtual:nimbus/config");
   assert.ok(resolved);
-  assert.match(
-    virtualConfig.load(resolved) ?? "",
-    /requestRenderingCollections = \["docs-v1"\]/,
-  );
-  assert.match(
-    virtualConfig.load(resolved) ?? "",
-    /indexedCollections = \["docs","docs-v1"\]/,
-  );
+  // The page-collection list comes from the registry record, not from
+  // parsing content.config.ts, so the opaque registration is irrelevant.
+  const preparedRoot = preparedMarkdownRootKey(integration.root);
+  for (const collection of ["docs", "docs-v1"]) {
+    const epoch = beginPreparedMarkdownLoad(preparedRoot, collection, true);
+    commitPreparedMarkdownCollection(
+      preparedRoot,
+      collection,
+      epoch,
+      { generation: 1, base: "/" },
+      [],
+    );
+  }
+  const source = (await virtualConfig.load(resolved)) ?? "";
+  assert.match(source, /requestRenderingCollections = \["docs-v1"\]/);
+  assert.match(source, /indexedCollections = \["docs","docs-v1"\]/);
 });
 
 test("an explicitly empty rendering policy applies the build default", async (t) => {
@@ -1002,7 +1022,10 @@ test("an explicitly empty rendering policy applies the build default", async (t)
   await routeSetup({ route: blog } as never);
 
   assert.equal(docs.prerender, true);
-  assert.equal(blog.prerender, true);
+  // An unnamed collection's route keeps its own prerender value; after
+  // content sync the build fails if `blog` is a page collection with a
+  // catch-all route that `rendering` doesn't cover.
+  assert.equal(blog.prerender, false);
 });
 
 test("production request rendering requires server output and an adapter", async (t) => {
@@ -1049,15 +1072,29 @@ test("production request rendering requires server output and an adapter", async
     } as never),
   );
 
-  assert.throws(
-    () =>
+  for (const name of ["node", "@astrojs/netlify", "@astrojs/vercel", "test:adapter"]) {
+    assert.doesNotThrow(() =>
       serverBuild.configDone({
         injectTypes: () => new URL("file:///noop"),
-        config: { output: "server", adapter: { name: "node" } },
+        config: { output: "server", adapter: { name } },
         buildOutput: "server",
       } as never),
-    /currently requires `@astrojs\/cloudflare`/,
-  );
+    );
+  }
+});
+
+test("generated API request rendering retains its adapter compatibility guard", async (t) => {
+  const api = [{ collection: "api", spec: { openapi: "3.1.0", info: { title: "Example", version: "1" }, paths: { "/ping": { get: { operationId: "ping", responses: { "200": { description: "OK" } } } } } } }];
+  for (const mode of ["build", "request"] as const) {
+    const integration = await setupIntegration(t, { collections: { docs: "request", api: mode } }, "build", 'export const collections = { docs: {}, "docs-v1": {}, api: {} };\n', api);
+    const configure = () => integration.configDone({
+      injectTypes: () => new URL("file:///noop"),
+      config: { output: "server", adapter: { name: "@astrojs/node" } },
+      buildOutput: "server",
+    } as never);
+    if (mode === "request") assert.throws(configure, /generated API rendering.*currently requires `@astrojs\/cloudflare`/);
+    else assert.doesNotThrow(configure);
+  }
 });
 
 test("required canonical routes retain rendering policy when their file is missing", async (t) => {
@@ -1130,7 +1167,7 @@ test("production API request rendering is accepted with model packaging", async 
 test("configured request routes are explained to the build invariant", async (t) => {
   const integration = await setupIntegration(
     t,
-    { collections: { docs: "request" } },
+    { collections: { docs: "request", blog: "build" } },
     "build",
   );
   const route = {
@@ -1170,7 +1207,7 @@ test("configured request routes are explained to the build invariant", async (t)
       entries,
     );
   }
-  await integration.buildStart({} as never);
+  await integration.buildStart({ logger: buildLogger } as never);
 
   const dist = path.join(integration.root, "dist");
   await mkdir(path.join(dist, "_nimbus"), { recursive: true });
@@ -1215,13 +1252,16 @@ test("configured request routes are explained to the build invariant", async (t)
       ),
     ),
     {
-      version: 2,
+      version: 3,
       base: "",
       knownRoutes: [
         "/built",
         "/foo/_nimbus/request-route-inventory.json",
         "/guide",
       ],
+      redirects: [],
+      redirectPages: [],
+      redirectRules: "cloudflare",
       opaqueNamespaces: [],
     },
   );
@@ -1308,32 +1348,21 @@ test("collection parsing reports whether registrations are complete", async (t) 
   });
 });
 
-test("opaque registrations cannot silently absorb request policy", async (t) => {
+test("opaque registrations no longer gate the request policy", async (t) => {
   const contentConfig =
     'const extras = {}; export const collections = { docs: {}, "docs-v1": {}, ...extras };\n';
-  await assert.rejects(
-    () => setupIntegration(t, { default: "request" }, "build", contentConfig),
-    /cannot safely enumerate collections.*cannot identify statically/,
+  // Which collections are pages comes from the registry record, never from
+  // parsing content.config.ts, so opaque registrations can't block setup.
+  await assert.doesNotReject(() =>
+    setupIntegration(t, { default: "request" }, "build", contentConfig),
   );
-  await assert.rejects(
-    () =>
-      setupIntegration(
-        t,
-        { default: "request" },
-        "build",
-        "const all = {}; export { all as collections };\n",
-      ),
-    /cannot safely enumerate collections.*cannot identify statically/,
-  );
-  await assert.rejects(
-    () =>
-      setupIntegration(
-        t,
-        { collections: { blog: "request" } },
-        "build",
-        contentConfig,
-      ),
-    /cannot safely enumerate collections.*cannot identify statically/,
+  await assert.doesNotReject(() =>
+    setupIntegration(
+      t,
+      { default: "request" },
+      "build",
+      "const all = {}; export { all as collections };\n",
+    ),
   );
 
   const knownOverride = await setupIntegration(
@@ -1345,9 +1374,84 @@ test("opaque registrations cannot silently absorb request policy", async (t) => 
   const docs = { component: "src/pages/[...slug].astro", prerender: true };
   await knownOverride.routeSetup({ route: docs } as never);
   assert.equal(docs.prerender, false);
-  const injected = knownOverride.injectedRoutes[0] as {
+  const injected = knownOverride.injectedRoutes.find((route) =>
+    (route as { pattern: string }).pattern.includes("request-route-inventory"),
+  ) as {
     entrypoint: URL;
   };
   assert.equal(injected.entrypoint.protocol, "file:");
   assert.match(injected.entrypoint.pathname, /request-route-inventory\.ts$/);
+});
+
+// ---------------------------------------------------------------------------
+// Post-sync page checks: the record (not content.config.ts) decides which
+// collections are pages, and the build verifies the policy against it.
+// ---------------------------------------------------------------------------
+
+function commitPageCollections(
+  projectRoot: string,
+  collections: readonly string[],
+): void {
+  const preparedRoot = preparedMarkdownRootKey(projectRoot);
+  for (const collection of collections) {
+    const epoch = beginPreparedMarkdownLoad(preparedRoot, collection, true);
+    commitPreparedMarkdownCollection(
+      preparedRoot,
+      collection,
+      epoch,
+      { generation: 1, base: "/" },
+      [],
+    );
+  }
+}
+
+test("a rendering.collections key that isn't a page collection fails after sync", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build", blog: "request" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /rendering\.collections names a collection that is not a Nimbus page collection[\s\S]*"blog"/,
+  );
+});
+
+test("a page collection with an uncovered catch-all route fails after sync", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1", "blog"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /doesn't cover page collection.*"blog".*Add "blog" to rendering\.collections/s,
+  );
+});
+
+test("a versions.others entry without a page collection fails after sync", async (t) => {
+  const integration = await setupIntegration(t, undefined, "build");
+  commitPageCollections(integration.root, ["docs"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /versions\.others.*docs-v1/s,
+  );
+});
+
+test("the build writes .nimbus/page-collections.json for nimbus-docs check", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build", blog: "build" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1", "blog"]);
+  await integration.buildStart({ logger: buildLogger } as never);
+  const file = path.join(integration.root, ".nimbus", "page-collections.json");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), {
+    version: 1,
+    collections: ["docs", "docs-v1", "blog"],
+    mdxFiles: [],
+  });
 });

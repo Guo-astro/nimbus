@@ -38,27 +38,27 @@ test("reports ungenerated URLs with the first matching endpoint and skips unserv
     ["/guide/index.md", "/changelog/a/index.md", "/changelog/b/index.md", "/guide/index.mdx", "/v1/llms.txt", "/llms.txt"],
     new Set(["/changelog/a/index.md", "/v1/llms.txt"]),
   );
+  // `/guide/index.md` belongs to the request-rendered shared route, which
+  // serves it on request — agent files follow the rendering policy, so that
+  // is normal operation, not a missing file.
   assert.deepEqual(
     missing.map(({ url, owner }) => [url, owner.entrypoint]),
-    [
-      ["/changelog/b/index.md", changelog.entrypoint],
-      ["/guide/index.md", shared.entrypoint],
-    ],
+    [["/changelog/b/index.md", changelog.entrypoint]],
   );
   assert.equal(
-    formatUngeneratedAgentPages(missing).split("\n").slice(0, 3).join("\n"),
+    formatUngeneratedAgentPages(missing).split("\n").slice(0, 2).join("\n"),
     [
-      "nimbus-docs: 2 Markdown or llms.txt pages were not prerendered:",
+      "nimbus-docs: 1 Markdown or llms.txt page was not prerendered:",
       "  - src/pages/changelog/[...slug]/index.md.ts (/changelog/[...slug]/index.md) is prerendered but did not generate: /changelog/b/index.md",
-      "  - src/pages/[...slug]/index.md.ts (/[...slug]/index.md) is rendered on request, so the build has no file for: /guide/index.md",
     ].join("\n"),
   );
 });
 
 test("lists ten URLs per route and counts the rest", () => {
   const urls = Array.from({ length: 12 }, (_, index) => `/p${String(index).padStart(2, "0")}/index.md`);
+  const prerenderedShared = { ...shared, prerendered: true };
   const message = formatUngeneratedAgentPages(
-    findUngeneratedAgentPages([shared], urls, new Set()),
+    findUngeneratedAgentPages([prerenderedShared], urls, new Set()),
   );
   assert.match(message, /^nimbus-docs: 12 Markdown or llms\.txt pages were not prerendered:/);
   assert.match(message, /\/p09\/index\.md and 2 more\n/);

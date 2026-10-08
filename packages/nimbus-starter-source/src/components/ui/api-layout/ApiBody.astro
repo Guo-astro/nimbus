@@ -27,7 +27,7 @@ interface Props {
 }
 
 const { page } = Astro.props;
-const markdownUrl = page.markdownHref;
+const markdownUrl = page.markdownHref ?? undefined;
 
 const detail = (v: unknown): string => JSON.stringify(v);
 
@@ -67,7 +67,17 @@ const responseBodies = (r: ApiResponseView) => [
 ];
 
 const authFieldList = page.kind === "operation" ? authFields(page.auth) : [];
-const requestExamples = page.kind === "operation" ? (page.requestExamples ?? []) : [];
+// Named examples when the spec has them. Otherwise the request body shows
+// through the code samples; with none (e.g. `samples.generate: []`), the
+// primary example renders here so the page still shows what to send.
+const requestExamples =
+  page.kind !== "operation"
+    ? []
+    : page.requestExamples?.length
+      ? page.requestExamples
+      : page.samples.length === 0 && page.example
+        ? [{ ...page.example, id: "example", label: "Example" }]
+        : [];
 
 // Deprecation notice, built as sanitized HTML for the shared Banner (which takes
 // a content string, mirroring DocsLayout's version-deprecation banner).

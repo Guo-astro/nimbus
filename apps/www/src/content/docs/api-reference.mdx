@@ -225,7 +225,13 @@ api: [
 ],
 ```
 
-The version marked `default: true` owns `/api`; other versions mount below their version, such as `/api/v1`. If none is marked, the first version is the default. Nimbus links pages across versions when they share a coordinate. A deprecated version renders its status in the reference UI.
+The version marked `default: true` owns `/api`; other versions mount below their version, such as `/api/v1`. If none is marked, the first version is the default. A deprecated version renders its status in the reference UI.
+
+The version picker keeps readers on the same page when they switch versions. Nimbus links pages across versions in this order:
+
+1. **Same coordinate.** Pages that share a coordinate, such as the same `operationId`, are the same page. This link always wins.
+2. **Same method and path.** When an `operationId` changed between versions, an operation links to the one with the same HTTP method and path. Path parameter names may differ, so `/zones/{zone_id}` matches `/zones/{id}`. The match must be the only one in both versions.
+3. **No match.** An ambiguous or conflicting match links nothing, and the picker opens the other version's landing page.
 
 Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
 

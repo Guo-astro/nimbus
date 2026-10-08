@@ -1009,6 +1009,140 @@ function assertWorkerPurityScanner() {
   );
 }
 
+/** The picker's links on a page: href plus whether it is the active entry. */
+function pickerLinks(html) {
+  const start = html.indexOf("data-feasibility-picker");
+  assert(start !== -1, "query-mode page is missing the version picker");
+  const region = html.slice(start, html.indexOf("</nav>", start));
+  return [...region.matchAll(/<a\b[^>]*>/g)].map(([tag]) => ({
+    href: tag.match(/href="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
+    active: /aria-current="page"/.test(tag),
+  }));
+}
+
+/**
+ * A query-mode family (`versionMode: "query"`) served by workerd, with the
+ * starter's real VersionSwitcher mounted: each version renders at the one
+ * version-free URL, the picker keeps the reader's version, a renamed
+ * operation pairs by method and path, and duplicate or unknown versions 404.
+ */
+async function verifyQueryVersions(site, baseConfig) {
+  const spec = (operations) => JSON.stringify({
+    openapi: "3.0.0",
+    info: { title: "Query versions", version: "1.0.0" },
+    paths: Object.fromEntries(operations.map(([id, path]) => [path, {
+      get: {
+        operationId: id,
+        ...(path.includes("{") ? {
+          parameters: [{ name: path.match(/\{([^}]+)\}/)[1], in: "path", required: true, schema: { type: "string" } }],
+        } : {}),
+        responses: { 200: { description: "ok" } },
+      },
+    }])),
+  });
+  mkdirSync(join(site, "src/content/qapi"), { recursive: true });
+  writeFileSync(join(site, "src/content/qapi/v2.json"), spec([["listPets", "/pets"], ["getPet", "/pets/{id}"]]));
+  writeFileSync(join(site, "src/content/qapi/v1.json"), spec([["listPets", "/pets"], ["fetchPet", "/pets/{petId}"], ["legacyOnly", "/legacy"]]));
+  for (const component of ["popover", "version-switcher"]) {
+    cpSync(join(STARTER, "components", "ui", component), join(site, "src", "components", "ui", component), { recursive: true });
+  }
+  mkdirSync(join(site, "src/pages/qapi"), { recursive: true });
+  writeFileSync(join(site, "src/pages/qapi/[...slug].astro"), `---
+import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { ApiLayout } from "@/components/ui/api-layout";
+import { VersionSwitcher } from "@/components/ui/version-switcher";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+export const prerender = true;
+export const getStaticPaths = getApiStaticPaths("qapi");
+
+const result = await getApiRoute(Astro);
+if (result instanceof Response) return result;
+const { page, nav, collection, version, coordinate } = result;
+---
+
+<BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref ?? undefined}>
+  <nav data-feasibility-picker>
+    <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
+  </nav>
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+</BaseLayout>
+`);
+  const contentConfig = join(site, "src/content.config.ts");
+  const baseContent = readFileSync(contentConfig, "utf8");
+  writeFileSync(contentConfig, baseContent.replace(
+    "api: defineCollection(apiCollection()),",
+    "api: defineCollection(apiCollection()),\n  qapi: defineCollection(apiCollection()),",
+  ));
+  const configPath = join(site, "astro.config.ts");
+  writeFileSync(configPath, baseConfig.replace(
+    "  api: [\n",
+    `  api: [
+    {
+      collection: "qapi",
+      label: "Query API",
+      versionMode: "query",
+      versions: [
+        { version: "v2", spec: "src/content/qapi/v2.json", default: true },
+        { version: "v1", spec: "src/content/qapi/v1.json" },
+      ],
+    },
+`,
+  ));
+  // Built directly: the shared discovery assertions count the base fixture's pages.
+  writeRenderingPolicy(site, { docs: "request", api: "request", qapi: "request" });
+  run("pnpm", ["build"], { cwd: site, env: { ASTRO_KEY } });
+  assertWorkerPurity(join(site, "dist", "server"));
+  const sitemap = filesUnder(join(site, "dist", "client"))
+    .filter((file) => /sitemap.*\.xml$/.test(file))
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
+  assert(sitemap.includes("/qapi/"), "sitemap omitted the query-mode family");
+  assert(!sitemap.includes("api-version"), "sitemap advertised a non-default query version");
+
+  await withWorkerd(site, async (origin) => {
+    const page = async (route) => {
+      const { response, html } = await request(origin, route);
+      assert(response.status === 200, `${route} returned ${response.status}`);
+      return { html, links: pickerLinks(html) };
+    };
+    const landing = (await page("/qapi/")).links;
+    const v1Landing = landing.find((link) => link.href.includes("api-version=v1"));
+    assert(v1Landing, `default landing has no v1 picker entry: ${JSON.stringify(landing)}`);
+
+    // Find v1's renamed operation through its landing's sidebar.
+    const v1Html = (await page(v1Landing.href)).html;
+    const fetchHref = v1Html.match(/href="([^"]*fetchPet[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
+    assert(fetchHref?.includes("?api-version=v1"), `v1 sidebar link to fetchPet lost its version: ${fetchHref}`);
+
+    const v1Op = await page(fetchHref);
+    const active = v1Op.links.find((link) => link.active);
+    assert(active?.href === fetchHref, `v1 picker active entry ${active?.href} should stay on ${fetchHref}`);
+    const toDefault = v1Op.links.find((link) => !link.active);
+    assert(
+      toDefault && /getPet/.test(toDefault.href) && !toDefault.href.includes("api-version"),
+      `v1 fetchPet should pair with the default getPet: ${toDefault?.href}`,
+    );
+    assert(/<meta name="robots" content="noindex/.test(v1Op.html), "non-default version page must be noindex");
+    const canonical = v1Op.html.match(/<link rel="canonical" href="([^"]*)"/)?.[1] ?? "";
+    assert(new URL(canonical).pathname === new URL(toDefault.href, origin).pathname,
+      `v1 canonical ${canonical} should be the default counterpart`);
+
+    const defaultOp = await page(toDefault.href);
+    assert(defaultOp.links.find((link) => link.active)?.href === toDefault.href,
+      "default picker active entry should stay on the default page");
+
+    const path = new URL(fetchHref, origin).pathname;
+    for (const query of ["?api-version=nope", "?api-version=v1&api-version=v1", "?api-version=v1&api-version=v2"]) {
+      const { response } = await request(origin, `${path}${query}`);
+      assert(response.status === 404, `${path}${query} returned ${response.status}, expected 404`);
+    }
+  });
+  writeFileSync(configPath, baseConfig);
+  writeFileSync(contentConfig, baseContent);
+  rmSync(join(site, "src/pages/qapi"), { recursive: true, force: true });
+}
+
 function writeRenderingPolicy(site, policy) {
   mkdirSync(join(site, ".nimbus"), { recursive: true });
   writeFileSync(
@@ -1470,5 +1604,8 @@ run(
   { cwd: site },
 );
 assertWorkerPurity(deployOutput);
+
+console.log(`${PREFIX} proving query-versioned API pages and the real picker on workerd`);
+await verifyQueryVersions(site, discoveryConfig);
 
 console.log(`${PREFIX} OK - technical build/request matrix passed on workerd`);

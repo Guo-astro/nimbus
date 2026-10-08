@@ -282,8 +282,8 @@ export interface ApiSpec {
    * How a version is addressed in URLs. `"path"` (the default) mounts each
    * non-default version at `/<collection>/<version>`. `"query"` gives every
    * operation one URL: `/<collection>/<slug>` with the version in
-   * `?api-version=<id>` — absent means the default, unknown is a 404, and
-   * hidden versions are reachable by query and nowhere else. `"query"`
+   * `?api-version=<id>` — absent means the default, unknown or repeated is
+   * a 404, and a hidden version's pages are reachable only by query. `"query"`
    * requires `versions` and the family's effective rendering mode to be
    * `"request"`: a static site serves the same file whatever the query says.
    */

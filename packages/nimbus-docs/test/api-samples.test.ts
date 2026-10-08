@@ -22,6 +22,7 @@ import type { OpenApiSchema } from "../src/_internal/api/openapi-types.js";
 import { getApiPageSlugs } from "../src/api/index.js";
 import { prepareApiPageCode } from "../src/_internal/api-loader.js";
 import { resolveApiFamily } from "../src/_internal/api/resolve-versions.js";
+import { resolveSpecSource } from "../src/_internal/api/resolve-spec.js";
 import { validateNimbusConfig } from "../src/_internal/validate.js";
 
 const baseSpec = {
@@ -1104,6 +1105,630 @@ describe("parameter and credential placeholders", () => {
     const curl = lang(out, "curl");
     assert.match(curl, /\/things\/<thing_id>'/);
     assert.ok(curl.includes(JSON.stringify(body, null, 2)), "body text verbatim");
+  });
+});
+
+describe("generated request bodies", () => {
+  const hasPython = spawnSync("python3", ["-c", "pass"]).status === 0;
+  const hasBash = spawnSync("bash", ["-c", "true"]).status === 0;
+  const readPayload = [
+    "import ast, json, sys",
+    "tree = ast.parse(sys.stdin.read())",
+    "found = [n.value for n in tree.body if isinstance(n, ast.Assign) and getattr(n.targets[0], 'id', '') == 'payload']",
+    "print(json.dumps(ast.literal_eval(found[0])))",
+  ].join("\n");
+
+  // The value Python would send, or undefined without python3.
+  function sentByPython(source: string): unknown {
+    if (!hasPython) return undefined;
+    const run = spawnSync("python3", ["-c", readPayload], { input: source, encoding: "utf8" });
+    assert.equal(run.status, 0, `Python is valid: ${run.stderr}\n${source}`);
+    return JSON.parse(run.stdout);
+  }
+
+  // A stand-in `curl` that prints the body it was given.
+  const stubCurl = [
+    "curl() {",
+    "  while [ $# -gt 0 ]; do",
+    `    if [ "$1" = --data ]; then if [ "$2" = @- ]; then cat; else printf '%s' "$2"; fi; fi`,
+    `    if [ "$1" = --data-raw ]; then printf '%s' "$2"; fi`,
+    "    shift",
+    "  done",
+    "}",
+  ].join("\n");
+
+  // The body text cURL would send, or undefined without bash.
+  function sentByCurl(source: string): string | undefined {
+    if (!hasBash) return undefined;
+    const run = spawnSync("bash", ["-c", `${stubCurl}\n${source}`], { encoding: "utf8" });
+    assert.equal(run.status, 0, `cURL is valid shell: ${run.stderr}\n${source}`);
+    return run.stdout;
+  }
+
+  async function sampleFor(id: string, value: unknown, mediaType = "application/json", method = "post"): Promise<string> {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const out = buildOperationSamples(tools, {
+      method,
+      path: "/items",
+      auth: [],
+      params: [],
+      body: { mediaType, value },
+    });
+    return out.find((s) => s.lang === id)?.source ?? "";
+  }
+
+  const pythonFor = (value: unknown, mediaType?: string) => sampleFor("python", value, mediaType);
+
+  // Runs a TypeScript sample with a captured `fetch` and returns the body it sends.
+  function sentByFetch(source: string): unknown {
+    let body: unknown;
+    const fetch = (_url: string, options: { body?: unknown }) => {
+      body = options.body;
+      return { then: () => ({ then: () => ({ catch: () => undefined }) }) };
+    };
+    new Function("fetch", source)(fetch);
+    return body;
+  }
+
+  test("a body string with a newline is an escaped Python string", async (t) => {
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python value check");
+    const page = await operationPage(
+      {
+        ...baseSpec,
+        paths: {
+          "/keys": {
+            post: {
+              operationId: "createKey",
+              requestBody: {
+                content: { "application/json": { example: { key: "line one\nline two" } } },
+              },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      },
+      "createKey",
+    );
+    const python = page.samples.find((s) => s.lang === "python")?.source ?? "";
+    assert.ok(python.includes(`payload = { "key": "line one\\nline two" }`), python);
+    assert.ok(python.includes("json=payload"));
+    if (hasPython) assert.deepEqual(sentByPython(python), page.example?.value);
+  });
+
+  test("Python sends every JSON value as authored", async (t) => {
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python value check");
+    const value = {
+      text: "a\nb\rc\td",
+      quotes: `say "hi" and 'bye'`,
+      backslashes: "C:\\temp\\new \\b \\u0041",
+      words: ["true", "false", "null", "None", "True"],
+      flags: { on: true, off: false, none: null },
+      numbers: [0, -1.5, 1e21],
+      nested: [{ pem: "-----BEGIN-----\nAA==\n-----END-----\n", list: [[{ deep: "x\ny" }]] }, { one: 1 }],
+      'key "with"\nbreaks\\': "ok",
+      unicode: "héllo ✓ \u2028 \u0001",
+      empty: { object: {}, array: [], string: "" },
+    };
+    const python = await pythonFor(value);
+    assert.doesNotMatch(python, /"a$/m, "no raw newline inside a string");
+    if (hasPython) assert.deepEqual(sentByPython(python), value);
+  });
+
+  test("TypeScript sends every JSON value as authored", async () => {
+    const value = {
+      path: "C:\\temp\\new \\b",
+      text: "a\nb\rc\td",
+      quotes: `say "hi" and 'bye'`,
+      shell: "$HOME `id`",
+      flags: { on: true, off: false, none: null },
+      nested: [{ pem: "-----BEGIN-----\nAA==\n", list: [[{ deep: "x\\y" }]] }, { one: 1 }],
+      'key "with"\nbreaks\\': "ok",
+      unicode: "héllo ✓ \u2028 \u0001",
+      empty: { object: {}, array: [], string: "" },
+    };
+    const source = await sampleFor("typescript", value);
+    assert.deepEqual(JSON.parse(sentByFetch(source) as string), value, source);
+    const proto = JSON.parse('{"__proto__":{"x":1},"a":2}');
+    const protoSource = await sampleFor("typescript", proto);
+    assert.deepEqual(JSON.parse(sentByFetch(protoSource) as string), proto, protoSource);
+  });
+
+  test("TypeScript sends a text body as written", async () => {
+    const text = "line one\nline 'two' \\ \"three\"";
+    assert.equal(sentByFetch(await sampleFor("typescript", text, "text/plain")), text);
+    const vendor = { path: "C:\\temp" };
+    assert.deepEqual(JSON.parse(sentByFetch(await sampleFor("typescript", vendor, "application/vnd.api+json")) as string), vendor);
+  });
+
+  test("TypeScript sends falsy JSON bodies, including null", async () => {
+    for (const value of [false, 0, "", null]) {
+      const source = await sampleFor("typescript", value);
+      assert.equal(sentByFetch(source), JSON.stringify(value), source);
+    }
+    assert.equal(sentByFetch(await sampleFor("typescript", undefined)), undefined);
+  });
+
+  test("Python sends falsy JSON bodies and serializes null as text", async () => {
+    for (const [value, literal] of [[false, "False"], [0, "0"], ["", `""`]] as const) {
+      const python = await pythonFor(value);
+      assert.ok(python.includes(`payload = ${literal}\n`), python);
+      assert.ok(python.includes("json=payload"), python);
+    }
+    const python = await pythonFor(null);
+    assert.match(python, /payload = "null"\n/);
+    assert.match(python, /data=payload/);
+    assert.doesNotMatch(python, /json=payload/);
+    assert.doesNotMatch(await pythonFor(undefined), /payload/);
+  });
+
+  test("native JSON null on GET and HEAD retains the existing client behavior", async () => {
+    for (const method of ["get", "head"]) {
+      for (const mediaType of ["application/json", "application/x-json", "text/json", "text/x-json"]) {
+        const source = await sampleFor("typescript", null, mediaType, method);
+        assert.ok(source, "TypeScript sample remains present");
+        let calls = 0;
+        const fetch = (url: string, options: RequestInit) => {
+          calls++;
+          const request = new Request(url, options);
+          assert.equal(request.method, method.toUpperCase());
+          assert.equal(request.body, null);
+          return { then: () => ({ then: () => ({ catch: () => undefined }) }) };
+        };
+        new Function("fetch", source)(fetch);
+        assert.equal(calls, 1);
+        const python = await sampleFor("python", null, mediaType, method);
+        assert.ok(python, "Python sample remains present");
+        assert.doesNotMatch(python, /payload/);
+      }
+    }
+  });
+
+  test("a body httpsnippet sends as text keeps its output and stays valid", async (t) => {
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python value check");
+    const text = "line one\nline \"two\" \\";
+    const plain = await pythonFor(text, "text/plain");
+    assert.ok(plain.includes("data=payload"), plain);
+    if (hasPython) assert.equal(sentByPython(plain), text);
+
+    const vendor = { note: "a\nb" };
+    const json = await pythonFor(vendor, "application/vnd.api+json");
+    assert.ok(json.includes("data=payload"), json);
+    if (hasPython) assert.equal(sentByPython(json), JSON.stringify(vendor, null, 2));
+  });
+
+  test("cURL sends a body with quotes, backslashes, `$`, and backticks as written", async (t) => {
+    if (!hasBash) t.diagnostic("bash not found: skipping the cURL value check");
+    const value = { quote: "it's", path: "C:\\temp\\new", env: "$HOME ${PATH}", command: "`id` $(id)", text: "a\nb" };
+    const curl = await sampleFor("curl", value);
+    assert.ok(curl.includes("--data @- <<'EOF'\n"), curl);
+    if (hasBash) assert.deepEqual(JSON.parse(sentByCurl(curl)!), value);
+  });
+
+  test("a body that contains the internal marker text is sent as written", async (t) => {
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python value check");
+    const value = { a: "nbph0qbody", b: "nbph1qbody" };
+    const python = await pythonFor(value);
+    assert.ok(python.includes(`"a": "nbph0qbody"`) && python.includes(`"b": "nbph1qbody"`), python);
+    if (hasPython) assert.deepEqual(sentByPython(python), value);
+  });
+});
+
+describe("form request bodies", () => {
+  type Field = [string, string];
+  const FORM = "application/x-www-form-urlencoded";
+  const hasPython = spawnSync("python3", ["-c", "pass"]).status === 0;
+  const hasBash = spawnSync("bash", ["-c", "true"]).status === 0;
+
+  const wire = {
+    curl(source: string): string | undefined {
+      if (!hasBash) return undefined;
+      const stub = `curl() { while [ $# -gt 0 ]; do case "$1" in --data-urlencode|--data|--data-raw) printf '%s\\0%s\\0' "$1" "$2"; shift;; esac; shift; done; }`;
+      const run = spawnSync("bash", ["-c", `${stub}\n${source}`], { encoding: "utf8" });
+      assert.equal(run.status, 0, `cURL is valid shell: ${run.stderr}\n${source}`);
+      const args = run.stdout.split("\0");
+      const fields: string[] = [];
+      for (let i = 0; i < args.length - 1; i += 2) {
+        const arg = args[i + 1]!;
+        if (args[i] === "--data" || args[i] === "--data-raw") {
+          fields.push(arg);
+          continue;
+        }
+        const at = arg.indexOf("=");
+        const value = encodeURIComponent(arg.slice(at + 1)).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+        fields.push(`${arg.slice(0, at)}=${value}`);
+      }
+      return fields.join("&");
+    },
+    typescript(source: string): string {
+      let body: URLSearchParams | string | undefined;
+      const fetch = (_url: string, options: { body: URLSearchParams | string }) => {
+        body = options.body;
+        return { then: () => ({ then: () => ({ catch: () => undefined }) }) };
+      };
+      new Function("fetch", source)(fetch);
+      assert.ok(body instanceof URLSearchParams || typeof body === "string", source);
+      return String(body);
+    },
+    python(source: string): string | undefined {
+      if (!hasPython) return undefined;
+      const harness = [
+        "import json, sys, types, urllib.parse",
+        "sent = {}",
+        "requests = types.ModuleType('requests')",
+        "def post(url, data=None, headers=None, **rest):",
+        "    sent['data'] = data",
+        "    return types.SimpleNamespace(text='')",
+        "requests.post = post",
+        "sys.modules['requests'] = requests",
+        "exec(sys.stdin.read())",
+        "data = sent['data']",
+        "print(json.dumps(data if isinstance(data, str) else urllib.parse.urlencode(data, doseq=True)))",
+      ].join("\n");
+      const run = spawnSync("python3", ["-c", harness], { input: source, encoding: "utf8" });
+      assert.equal(run.status, 0, `Python is valid: ${run.stderr}\n${source}`);
+      return JSON.parse(run.stdout);
+    },
+  };
+
+  async function samplesFor(value: unknown, encoding?: Record<string, Record<string, unknown>>, mediaType = FORM) {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const out = buildOperationSamples(tools, {
+      method: "post",
+      path: "/customers",
+      auth: [],
+      params: [],
+      body: { mediaType, value, ...(encoding ? { encoding } : {}) },
+    });
+    assert.equal(out.length, 3);
+    return Object.fromEntries(out.map((s) => [s.lang, s.source])) as Record<"curl" | "typescript" | "python", string>;
+  }
+
+  // Every language sends `expected`, in order.
+  async function assertSends(t: { diagnostic: (message: string) => void }, value: unknown, expected: Field[], encoding?: Record<string, Record<string, unknown>>, mediaType?: string) {
+    if (!hasBash) t.diagnostic("bash not found: skipping the cURL check");
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python check");
+    const samples = await samplesFor(value, encoding, mediaType);
+    for (const lang of ["curl", "typescript", "python"] as const) {
+      const body = wire[lang](samples[lang]);
+      if (body !== undefined) assert.deepEqual([...new URLSearchParams(body)], expected, `${lang}:\n${samples[lang]}`);
+    }
+  }
+
+  async function assertWire(t: { diagnostic: (message: string) => void }, value: unknown, encoding: Record<string, Record<string, unknown>>, expected: string, mediaType?: string) {
+    if (!hasBash) t.diagnostic("bash not found: skipping the cURL check");
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python check");
+    const samples = await samplesFor(value, encoding, mediaType);
+    for (const lang of ["curl", "typescript", "python"] as const) {
+      const body = wire[lang](samples[lang]);
+      if (body !== undefined) assert.equal(body, expected, `${lang}:\n${samples[lang]}`);
+    }
+  }
+
+  test("explicit JSON content types serialize scalar values before form encoding", async (t) => {
+    await assertWire(
+      t,
+      { id: "abc", empty: "", cleared: null, flag: false, count: 0, list: ["a", "b"], vendor: "v" },
+      {
+        id: { contentType: "application/json" },
+        empty: { contentType: "application/json" },
+        cleared: { contentType: "application/json" },
+        flag: { contentType: "application/json" },
+        count: { contentType: "application/json" },
+        list: { contentType: "application/json" },
+        vendor: { contentType: "application/vnd.example+json; charset=utf-8" },
+      },
+      "id=%22abc%22&empty=%22%22&cleared=null&flag=false&count=0&list=%22a%22&list=%22b%22&vendor=%22v%22",
+    );
+  });
+
+  test("reserved expansion preserves percent triples and safe reserved characters only", async (t) => {
+    const value = { q: "a%2Fb/c:d", punctuation: ":/?@!$'()*,;=[]#&+%", text: "héllo ✓", invalid: "%2g%a" };
+    const encoding = Object.fromEntries(Object.keys(value).map((name) => [name, { allowReserved: true }]));
+    const expected = "q=a%2Fb/c:d&punctuation=:/?@!$'()*,;%3D%5B%5D%23%26%2B%25&text=h%C3%A9llo%20%E2%9C%93&invalid=%252g%25a";
+    await assertWire(t, value, encoding, expected);
+    await assertWire(t, value, encoding, expected, `${FORM}; charset=utf-8`);
+    await assertWire(t, { q: value.q }, { q: { allowReserved: false } }, "q=a%252Fb%2Fc%3Ad");
+    await assertWire(t, { q: value.q }, {}, "q=a%252Fb%2Fc%3Ad");
+  });
+
+  test("without an encoding, objects nest, scalar arrays repeat, and arrays of objects are indexed", async (t) => {
+    await assertSends(
+      t,
+      {
+        name: "Jenny O'Neil",
+        metadata: { plan: "pro", limits: { seats: 5 } },
+        tags: ["a", "b"],
+        items: [{ price: "p_1", quantity: 2 }],
+        note: "line one\nline \"two\" \\ $HOME `id`",
+        active: true,
+        cleared: null,
+      },
+      [
+        ["name", "Jenny O'Neil"],
+        ["metadata[plan]", "pro"],
+        ["metadata[limits][seats]", "5"],
+        ["tags", "a"],
+        ["tags", "b"],
+        ["items[0][price]", "p_1"],
+        ["items[0][quantity]", "2"],
+        ["note", "line one\nline \"two\" \\ $HOME `id`"],
+        ["active", "true"],
+        ["cleared", ""],
+      ],
+    );
+  });
+
+  test("deepObject indexes every array", async (t) => {
+    await assertSends(
+      t,
+      { expand: ["customer", "invoice"], metadata: { plan: "pro" }, lines: [{ tags: ["x"] }] },
+      [
+        ["expand[0]", "customer"],
+        ["expand[1]", "invoice"],
+        ["metadata[plan]", "pro"],
+        ["lines[0][tags][0]", "x"],
+      ],
+      {
+        expand: { style: "deepObject", explode: true },
+        metadata: { style: "deepObject", explode: true },
+        lines: { style: "deepObject", explode: true },
+      },
+    );
+  });
+
+  test("form, spaceDelimited, pipeDelimited, and contentType follow OpenAPI", async (t) => {
+    await assertSends(
+      t,
+      {
+        exploded: ["a", "b"],
+        joined: ["a", "b"],
+        spaced: ["a", "b"],
+        piped: ["a", "b"],
+        flattened: { x: "1", y: "2" },
+        pairs: { x: "1", y: "2" },
+        json: { x: [1] },
+      },
+      [
+        ["exploded", "a"],
+        ["exploded", "b"],
+        ["joined", "a,b"],
+        ["spaced", "a b"],
+        ["piped", "a|b"],
+        ["x", "1"],
+        ["y", "2"],
+        ["pairs", "x,1,y,2"],
+        ["json", '{"x":[1]}'],
+      ],
+      {
+        exploded: { style: "form" },
+        joined: { style: "form", explode: false },
+        spaced: { style: "spaceDelimited" },
+        piped: { style: "pipeDelimited" },
+        flattened: { style: "form", explode: true },
+        pairs: { style: "form", explode: false },
+        json: { contentType: "application/json" },
+      },
+    );
+  });
+
+  test("an encoding entry without style, explode, or allowReserved sends the content type; with any, query style", async (t) => {
+    await assertSends(
+      t,
+      {
+        plain: { x: 1 },
+        list: ["a", { b: 1 }],
+        joined: ["a", "b"],
+        overridden: { x: 1 },
+        reserved: { x: "1" },
+        spaced: { x: 1, y: 2 },
+        piped: { x: 1, y: 2 },
+        constructor: "inherited name",
+      },
+      [
+        ["plain", '{"x":1}'],
+        ["list", "a"],
+        ["list", '{"b":1}'],
+        ["joined", "a,b"],
+        ["overridden", "x,1"],
+        ["x", "1"],
+        ["spaced", "x 1 y 2"],
+        ["piped", "x|1|y|2"],
+        ["constructor", "inherited name"],
+      ],
+      {
+        plain: {},
+        list: { contentType: "text/plain" },
+        joined: { explode: false },
+        overridden: { contentType: "application/json", explode: false },
+        reserved: { allowReserved: true },
+        spaced: { style: "spaceDelimited" },
+        piped: { style: "pipeDelimited" },
+      },
+    );
+  });
+
+  test("field names an object inherits are ordinary names", async (t) => {
+    await assertSends(t, JSON.parse('{"constructor":"a","__proto__":"b","toString":"c","hasOwnProperty":{"x":"d"}}'), [
+      ["constructor", "a"],
+      ["__proto__", "b"],
+      ["toString", "c"],
+      ["hasOwnProperty[x]", "d"],
+    ]);
+  });
+
+  test("a form with no fields, or an example that isn't an object, sends no body", async () => {
+    for (const value of [{}, { empty: {}, none: [] }, [1, 2], 7]) {
+      const samples = await samplesFor(value);
+      assert.ok(!samples.curl.includes("--data") && !samples.curl.includes("Content-Type"), samples.curl);
+      assert.ok(!samples.typescript.includes("body"), samples.typescript);
+      assert.ok(!samples.python.includes("payload"), samples.python);
+    }
+  });
+
+  test("a body httpsnippet writes differently is left out rather than shown unescaped", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    class Reformatted extends tools.snippet.HTTPSnippet {
+      convert(...args: Parameters<InstanceType<typeof tools.snippet.HTTPSnippet>["convert"]>) {
+        const out = super.convert(...args);
+        const first = Array.isArray(out) ? out[0] : out;
+        return typeof first === "string"
+          ? first.replace("payload = ", "payload  = ").replace("encodedParams.set(", "encodedParams.set (").replace("JSON.stringify(", "JSON.stringify (")
+          : out;
+      }
+    }
+    const changed = { ...tools, snippet: { ...tools.snippet, HTTPSnippet: Reformatted } } as typeof tools;
+    for (const [mediaType, value] of [[FORM, { note: "a\nb" }], ["application/json", { note: "a\nb" }], ["application/json", null]] as const) {
+      const out = buildOperationSamples(changed, { method: "post", path: "/x", auth: [], params: [], body: { mediaType, value } });
+      const langs = out.map((s) => s.lang);
+      assert.ok(!langs.includes("python"), `${mediaType}: ${langs}`);
+      assert.ok(!langs.includes("typescript"), `${mediaType}: ${langs}`);
+      assert.ok(langs.includes("curl"), `${mediaType}: ${langs}`);
+    }
+  });
+
+  test("a string example is read as an encoded form", async (t) => {
+    await assertSends(t, "name=Jenny+Rosen&tags=a&tags=b&note=a%26b", [
+      ["name", "Jenny Rosen"],
+      ["tags", "a"],
+      ["tags", "b"],
+      ["note", "a&b"],
+    ]);
+  });
+
+  test("a form media type with parameters sends the same encoded body", async () => {
+    const samples = await samplesFor({ name: "Jenny Rosen", metadata: { plan: "pro" } }, undefined, `${FORM}; charset=utf-8`);
+    const encoded = "name=Jenny+Rosen&metadata%5Bplan%5D=pro";
+    assert.ok(samples.curl.includes(`--data-raw '${encoded}'`), samples.curl);
+    assert.ok(samples.typescript.includes(`body: '${encoded}'`), samples.typescript);
+    assert.ok(samples.python.includes(`payload = "${encoded}"`), samples.python);
+  });
+
+  test("an operation's media type encoding reaches its samples", async () => {
+    const page = await operationPage(
+      {
+        ...baseSpec,
+        paths: {
+          "/customers": {
+            post: {
+              operationId: "createCustomer",
+              requestBody: {
+                content: {
+                  [FORM]: {
+                    schema: { type: "object", properties: { expand: { type: "array", items: { type: "string" } } } },
+                    example: { expand: ["invoice"] },
+                    encoding: { expand: { style: "deepObject", explode: true } },
+                  },
+                },
+              },
+              responses: { "200": { description: "ok" } },
+            },
+          },
+        },
+      },
+      "createCustomer",
+    );
+    const typescript = page.samples.find((s) => s.lang === "typescript")?.source ?? "";
+    assert.ok(typescript.includes("encodedParams.append('expand[0]', 'invoice');"), typescript);
+  });
+
+  test("an operation preserves mixed field encodings and the declared content type", async (t) => {
+    if (!hasBash) t.diagnostic("bash not found: skipping the cURL check");
+    if (!hasPython) t.diagnostic("python3 not found: skipping the Python check");
+    for (const mediaType of [FORM, `${FORM}; charset=utf-8`]) {
+      const page = await operationPage(
+        {
+          ...baseSpec,
+          paths: {
+            "/customers": {
+              post: {
+                operationId: "createMixedCustomer",
+                requestBody: {
+                  content: {
+                    [mediaType]: {
+                      schema: { type: "object" },
+                      example: { id: "abc", q: "a%2fb/c:d", tags: ["a/b", "%2F"], pairs: ["a/b", "c:d"], metadata: { "a&b": "x:y" }, ordinary: "%2F?&", plain: "abc" },
+                      encoding: {
+                        id: { contentType: "application/json" },
+                        q: { allowReserved: true },
+                        tags: { style: "form", allowReserved: true },
+                        pairs: { style: "form", explode: false, allowReserved: true },
+                        metadata: { style: "deepObject", explode: true, allowReserved: true },
+                        plain: { contentType: "application/json", allowReserved: false },
+                      },
+                    },
+                  },
+                },
+                responses: { "200": { description: "ok" } },
+              },
+            },
+          },
+        },
+        "createMixedCustomer",
+      );
+      assert.equal(page.samples.length, 3);
+      for (const sample of page.samples) {
+        assert.ok(sample.source.includes(mediaType), sample.source);
+        const body = wire[sample.lang as keyof typeof wire](sample.source);
+        if (body !== undefined) assert.equal(body, "id=%22abc%22&q=a%2fb/c:d&tags=a/b&tags=%2F&pairs=a/b,c:d&metadata%5Ba%26b%5D=x:y&ordinary=%252F%3F%26&plain=abc", sample.lang);
+      }
+    }
+  });
+});
+
+describe("samples.generate", () => {
+  const spec = {
+    ...baseSpec,
+    paths: {
+      "/accounts": {
+        get: {
+          operationId: "listAccounts",
+          "x-codeSamples": [{ lang: "typescript", label: "SDK", source: "client.accounts.list()" }],
+          responses: { "200": { description: "ok" } },
+        },
+      },
+      "/health": { get: { operationId: "health", responses: { "200": { description: "ok" } } } },
+    },
+  };
+  type Lang = "curl" | "typescript" | "python";
+  async function langs(coordinate: string, samples: { generate?: Lang[]; keepGenerated?: Lang[] }) {
+    const model = await buildApiModel({ collection: "generate", spec, samples });
+    return (getApiPageProps(model, coordinate) as ApiOperationPage).samples.map((s) => `${s.lang}${s.label === "SDK" ? " (authored)" : ""}`);
+  }
+
+  test("limits the generated languages on operations without authored samples", async () => {
+    assert.deepEqual(await langs("health", { generate: ["curl"] }), ["curl"]);
+    assert.deepEqual(await langs("health", { generate: ["python", "curl"] }), ["curl", "python"]);
+    assert.deepEqual(await langs("health", {}), ["curl", "typescript", "python"]);
+  });
+
+  test("keepGenerated picks from the generated languages next to authored samples", async () => {
+    assert.deepEqual(await langs("listAccounts", { generate: ["curl"], keepGenerated: ["curl"] }), ["typescript (authored)", "curl"]);
+    assert.deepEqual(await langs("listAccounts", { generate: ["curl"] }), ["typescript (authored)"]);
+  });
+
+  test("an empty list generates none, so only authored samples show", async () => {
+    assert.deepEqual(await langs("health", { generate: [] }), []);
+    assert.deepEqual(await langs("listAccounts", { generate: [] }), ["typescript (authored)"]);
+  });
+
+  test("a spec entry carries the policy to the build", async () => {
+    const source = await resolveSpecSource({ collection: "api", spec, samples: { generate: ["curl"] } }, process.cwd());
+    assert.deepEqual(source.samples, { generate: ["curl"] });
+  });
+
+  test("config validation rejects unknown ids and kept languages that aren't generated", () => {
+    const config = (samples: unknown) => ({ site: "https://example.com", title: "T", api: [{ collection: "api", spec: "./openapi.yaml", samples }] });
+    assert.throws(() => validateNimbusConfig(config({ generate: ["curl", "go"] })), /generate[\s\S]*"curl", "typescript", "python"[\s\S]*"go"/);
+    assert.throws(
+      () => validateNimbusConfig(config({ generate: ["curl"], keepGenerated: ["curl", "python"] })),
+      /keepGenerated" lists "python", which "api\[\]\.samples\.generate" doesn't include/,
+    );
+    assert.doesNotThrow(() => validateNimbusConfig(config({ generate: ["curl"], keepGenerated: ["curl"] })));
+    assert.doesNotThrow(() => validateNimbusConfig(config({ generate: [] })));
+    assert.doesNotThrow(() => validateNimbusConfig(config({ keepGenerated: ["python"] })));
   });
 });
 

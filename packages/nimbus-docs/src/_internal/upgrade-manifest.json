@@ -479,6 +479,21 @@
       ]
     },
     {
+      "id": "api-body-request-example",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "api-generated-samples",
+      "summary": "The starter ApiBody shows an operation's request example when it has no code samples.",
+      "affected": "Projects with a copied src/components/ui/api-layout/ApiBody.astro that use samples.generate to drop generated languages: an operation left without samples showed no request body example in HTML.",
+      "instructions": [
+        "Update an unmodified copy with nimbus-docs diff src/components/ui/api-layout/ApiBody.astro --apply.",
+        "In a customized copy, when page.requestExamples is empty and page.samples is empty, render page.example (its highlightedHtml) as the request example."
+      ],
+      "verify": [
+        "With samples: { generate: [] }, open an operation with a request body and no x-codeSamples: the page shows the example request."
+      ]
+    },
+    {
       "id": "api-query-version-mode",
       "introducedIn": "0.17.0",
       "mode": "optional",

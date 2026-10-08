@@ -16,7 +16,7 @@ The OpenAPI document remains the source of truth. You do not create one MDX file
 
 ### Install with the recipe
 
-Start with an OpenAPI 3.x document stored in your repository. Convert Swagger 2.0 documents to OpenAPI 3.x first. `src/api/openapi.yaml` is the usual location, but Nimbus accepts any project-relative local path or an inline document object. Remote specification URLs are not supported.
+Start with an OpenAPI 3.x document stored in your repository. If you have a Swagger 2.0 document, [convert it first](#convert-a-swagger-20-document). `src/api/openapi.yaml` is the usual location, but Nimbus accepts any project-relative local path or an inline document object. Remote specification URLs are not supported.
 
 Run the API reference recipe from the project root inside your coding agent:
 
@@ -31,6 +31,27 @@ The recipe tells the agent to inspect your project, ask for the specification pa
 3. Registers a loader-backed Astro content collection with one line.
 4. Adds the HTML catch-all route. The starter's shared Markdown route serves each page's Markdown version.
 5. Connects the collection to search, alternate Markdown versions, and `llms.txt` indexes.
+
+### Convert a Swagger 2.0 document
+
+Nimbus reads OpenAPI 3.x only. A Swagger 2.0 document fails the build with `Swagger 2.0 isn't supported. Convert it to OpenAPI 3.x first.`, followed by the document's path.
+
+Keep the Swagger document as your source, and generate a separate OpenAPI 3.x document from it with [swagger2openapi](https://github.com/Mermade/oas-kit/tree/main/packages/swagger2openapi):
+
+<PackageManagers pkg="swagger2openapi@7.0.8" dev />
+
+Run the conversion before Astro in your `dev` and `build` scripts, so the generated document always matches its source:
+
+```json title="package.json"
+{
+  "scripts": {
+    "dev": "swagger2openapi src/api/swagger.yaml --yaml --outfile src/api/openapi.yaml && astro dev",
+    "build": "swagger2openapi src/api/swagger.yaml --yaml --outfile src/api/openapi.yaml && astro build"
+  }
+}
+```
+
+Point the `api` entry's `spec` at the generated document, `./src/api/openapi.yaml`. The converter turns `host`, `basePath`, and `schemes` into `servers`, moves body and form parameters into request bodies, and converts security definitions. The development server watches the generated document, not the Swagger source, so restart `dev` after editing the source.
 
 ### How the pieces fit
 
@@ -368,6 +389,34 @@ Each operation page shows the request in cURL, TypeScript, and Python. Parameter
 
 Credentials always render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are, as in a real request. Request bodies use the request example, or a value generated from the schema.
 
+For methods that support a request body, an explicit JSON `null` is sent as the four bytes `null` in every generated language. It is distinct from an absent body. Without an authored example, Nimbus still generates a value from a usable schema.
+
+An `application/x-www-form-urlencoded` body is sent as form fields. A property with an entry in the media type's `encoding` follows it: `style`, `explode`, or `allowReserved` select query-style serialization, and an entry without them sends the value as its `contentType`, so an object is sent as JSON. A `deepObject` property indexes every array (`expand[0]=customer`). A property without an `encoding` entry uses the bracket convention common to form APIs, not OpenAPI's JSON default: nested objects in brackets (`metadata[plan]=pro`), the name repeated for each item of a scalar array (`tags=a&tags=b`), and arrays of objects indexed (`items[0][price]=p_1`). A string example is read as an encoded form. A `null` field is sent as an empty value (`name=`), the same as `""`; a JSON `contentType` sends it as `null`. Empty objects and arrays send no fields, and any other example sends no body.
+
+For example, this media type sends `tags` joined with commas and `metadata` in brackets:
+
+```yaml
+application/x-www-form-urlencoded:
+  schema:
+    type: object
+    properties:
+      tags: { type: array, items: { type: string } }
+      metadata: { type: object, additionalProperties: { type: string } }
+  encoding:
+    tags: { style: form, explode: false }
+  example:
+    tags: ["a,b", "c"]
+    metadata: { plan: pro }
+```
+
+```text
+tags=a%2Cb,c&metadata%5Bplan%5D=pro
+```
+
+With `explode: false`, items are joined with `,` (`form`), `|` (`pipeDelimited`), or `%20` (`spaceDelimited`), and each item is encoded first, so a separator inside an item stays distinct from the one between items. With `allowReserved: true`, a `,` inside an item is sent unencoded as OpenAPI specifies, so `["a,b", "c"]` and `["a", "b,c"]` send the same bytes; use `allowReserved: false` or a JSON `contentType` when items can contain separators. With `explode: true`, or a JSON `contentType`, an array repeats the field once per item.
+
+An explicit JSON `contentType`, including a `+json` media type, JSON-serializes each field value before form encoding: a string such as `abc` is sent as `%22abc%22`. With `allowReserved: true`, valid percent-encoded triples and safe reserved characters pass through unchanged; form delimiters (`=`, `&`, `+`) and unsafe characters (`[`, `]`, `#`) stay encoded. Forms using reserved expansion are sent as pre-encoded text so the HTTP client does not encode them again.
+
 ```sh
 curl --request GET \
   --url 'https://api.example.com/accounts/<account_id>' \
@@ -378,19 +427,21 @@ An operation's `x-codeSamples` replace the generated samples, and Nimbus never c
 
 Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs add api-code-rail` and choose **Overwrite** for `ApiCodeRail.astro` and `code-rail.client.ts`, and **Skip** for the other components.
 
-To keep generated languages next to authored samples, set `samples.keepGenerated` on the `api` entry:
+If the installed httpsnippet writes a body in a layout Nimbus doesn't recognize, that language's sample is left out rather than shown with a wrong body; the other languages are unaffected. On the page, the request body appears inside the code samples, and the page's Markdown version also lists it as an example request. An operation with no samples at all, such as with `samples.generate: []` and no `x-codeSamples`, shows its request example on the page instead. That needs the `api-layout` component from this release: run `nimbus-docs diff src/components/ui/api-layout/ApiBody.astro --apply`, or `nimbus-docs add api-layout` and choose **Overwrite** for `ApiBody.astro`.
+
+Two settings on the `api` entry control generated samples. `samples.generate` picks the languages Nimbus generates, on every operation; it defaults to all three, and `[]` generates none. `samples.keepGenerated` keeps generated languages next to authored samples. For example, to generate only cURL, and show it next to any authored SDK samples:
 
 ```ts title="astro.config.ts"
 api: [
   {
     collection: "api",
     spec: "./src/api/openapi.yaml",
-    samples: { keepGenerated: ["curl"] },
+    samples: { generate: ["curl"], keepGenerated: ["curl"] },
   },
 ],
 ```
 
-Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, and `typescript` or `ts`, in any case. An authored `shell` or `bash` sample does not replace cURL. Valid values are `"curl"`, `"typescript"`, and `"python"`. The setting applies to every version of a family.
+Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, and `typescript` or `ts`, in any case. An authored `shell` or `bash` sample does not replace cURL. Every `keepGenerated` language must also be in `generate`. Valid values for both are `"curl"`, `"typescript"`, and `"python"`. The settings apply to every version of a family.
 
 The code rail remembers the reader's language, not the exact sample: choosing a second Python sample opens the first Python sample on the next operation. A `?lang=` link opens the sample with that id, such as `python-2`, or the first sample in that language, such as `python`.
 

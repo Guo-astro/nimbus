@@ -46,10 +46,7 @@ interface Entry {
 
 let entries: Entry[] = [];
 let activeLabel = "";
-// The current URL including the query: on a query-versioned API page the
-// `?api-version=` IS the version, and the active item must keep it.
-const currentPath =
-  stripBase(Astro.url.pathname, import.meta.env.BASE_URL) + Astro.url.search;
+const currentPath = stripBase(Astro.url.pathname, import.meta.env.BASE_URL);
 
 if (apiCollection) {
   const apiVersions = (await getApiVersions(apiCollection)) ?? [];
@@ -70,10 +67,10 @@ if (apiCollection) {
 
     entries = visible.map((v) => {
       const isActive = v.version === activeVersion;
-      // The sibling if the op exists in that version, else the version landing.
-      const href = isActive
-        ? currentPath
-        : (altByVersion.get(v.version) ?? v.url);
+      // The sibling if the op exists in that version, else the version
+      // landing. The active entry is the page's own record, so a
+      // query-versioned page keeps its `?api-version=`.
+      const href = altByVersion.get(v.version) ?? v.url;
       return {
         version: v.version,
         label: v.label,

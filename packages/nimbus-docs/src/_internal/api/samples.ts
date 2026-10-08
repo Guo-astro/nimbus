@@ -436,7 +436,7 @@ function needsObjectType(schema: OpenApiSchema): boolean {
   if (!schema.allOf?.length || schema.type !== undefined || keywordType(schema) !== undefined) return false;
   if (authoredValue(schema) !== undefined || schema.oneOf || schema.anyOf || schema.if) return false;
   const members = schema.allOf.filter(isSchema);
-  if (members.some((member) => mayBeNonObject(member) || pinsValue(member))) return false;
+  if (members.some(mayBeNonObject) || limitsMerge(schema)) return false;
   return members.some(
     (member) => member.type === undefined && keywordType(member) === "object" && authoredValue(member) === undefined,
   );
@@ -450,34 +450,48 @@ function needsObjectType(schema: OpenApiSchema): boolean {
 const nonObject = new WeakMap<OpenApiSchema, boolean>();
 function mayBeNonObject(root: OpenApiSchema): boolean {
   return reachesHit(root, nonObject, (schema) => {
-    const value = decidingValue(schema);
+    const merged = afterConditionals(schema);
+    const value = merged.example !== undefined ? merged.example : inferredValue(merged);
     if (value !== undefined) return { hit: jsonType(value) !== "object", parts: [] };
-    return { hit: nonObjectType(schema) || nonObjectInferred(schema), parts: sampledParts(schema) };
+    return { hit: nonObjectType(merged), parts: sampledParts(merged) };
   });
 }
 
-// Whether a `const` or `enum` the sampler can reach pins the value, which
-// merged fields would break. Unlike the shape, this looks past authored
-// values: an `example` beside a `then.const` still pins the result.
-const pinned = new WeakMap<OpenApiSchema, boolean>();
-function pinsValue(root: OpenApiSchema): boolean {
-  return reachesHit(root, pinned, (schema) => ({
-    hit: schema.const !== undefined || schema.enum !== undefined,
+// Keywords that limit which fields an object may have, or pin its value:
+// fields merged from another member could break any of them.
+const MERGE_LIMITS = [
+  "const", "enum", "additionalProperties", "unevaluatedProperties", "maxProperties",
+  "propertyNames", "patternProperties", "dependentRequired", "dependentSchemas", "dependencies",
+];
+
+// Whether anything the sampler can reach limits a merge. Unlike the shape,
+// this looks past authored values: an `example` beside a `then.const` still
+// pins the result. When it does, the sampler's own result stands.
+const limited = new WeakMap<OpenApiSchema, boolean>();
+function limitsMerge(root: OpenApiSchema): boolean {
+  return reachesHit(root, limited, (schema) => ({
+    hit: MERGE_LIMITS.some((keyword) => {
+      const value = (schema as Record<string, unknown>)[keyword];
+      return value !== undefined && !(keyword === "additionalProperties" && value === true);
+    }),
     parts: sampledParts(schema),
   }));
 }
 
-// The value openapi-sampler takes before reading any parts, if any.
-function decidingValue(schema: OpenApiSchema): unknown {
-  if (schema.example !== undefined) return schema.example;
-  const mergesFirst = schema.allOf === undefined && !schema.oneOf?.length && !schema.anyOf?.length && schema.if && schema.then;
-  return mergesFirst ? undefined : inferredValue(schema);
-}
-
-// After an `if`/`then` merge, the schema's own value can still be what's read.
-function nonObjectInferred(schema: OpenApiSchema): boolean {
-  const value = inferredValue(schema);
-  return value !== undefined && jsonType(value) !== "object";
+// openapi-sampler merges `if` and `then` into a schema without composition
+// before it reads any value, `then` winning, so a schema is judged as merged.
+const mergedConditionals = new WeakMap<OpenApiSchema, OpenApiSchema>();
+function afterConditionals(schema: OpenApiSchema): OpenApiSchema {
+  const cached = mergedConditionals.get(schema);
+  if (cached) return cached;
+  let merged = schema;
+  for (let depth = 0; depth < 32; depth++) {
+    if (merged.allOf !== undefined || merged.oneOf?.length || merged.anyOf?.length || !isSchema(merged.if) || !isSchema(merged.then)) break;
+    const { if: condition, then, ...rest } = merged;
+    merged = { ...rest, ...condition, ...then } as OpenApiSchema;
+  }
+  mergedConditionals.set(schema, merged);
+  return merged;
 }
 
 function nonObjectType(schema: OpenApiSchema): boolean {

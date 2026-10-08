@@ -325,6 +325,39 @@ describe("resilience — best-effort, never fatal", () => {
     assert.deepEqual(page.kind === "operation" ? page.example?.value : undefined, { extra: "required", fixed: 1 });
   });
 
+  test("a member that limits an object's fields leaves the sampler's valid example", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const optional = { properties: { extra: { type: "string", example: "optional" } } };
+    for (const member of [
+      { type: ["object", "null"], additionalProperties: false },
+      { type: "object", additionalProperties: false },
+      { type: ["object", "null"], maxProperties: 0 },
+    ]) {
+      for (const role of ["request", "response"] as const) {
+        assert.deepEqual(resolveExampleValue({ schema: { allOf: [optional, member] } } as never, role, tools), {}, `${JSON.stringify(member)} ${role}`);
+      }
+    }
+  });
+
+  test("a value then overwrites is judged after the conditional merges", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+    const extra = { properties: { extra: { type: "string", example: "required" } }, required: ["extra"] };
+    for (const member of [
+      { default: "unused", if: {}, then: { default: { fixed: 1 } } },
+      { examples: ["unused"], if: {}, then: { examples: [{ fixed: 1 }] } },
+    ]) {
+      for (const role of ["request", "response"] as const) {
+        assert.deepEqual(
+          resolveExampleValue({ schema: { allOf: [extra, member] } } as never, role, tools),
+          { extra: "required", fixed: 1 },
+          `${JSON.stringify(member)} ${role}`,
+        );
+      }
+    }
+  });
+
   test("a shared schema keeps its fields whichever schema reaches it first", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools);

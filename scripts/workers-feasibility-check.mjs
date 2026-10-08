@@ -784,8 +784,9 @@ function assertSizeBudgets(site) {
 
   // The large-sidebar fixture page (~4,400 links, ~1,300 groups): CI fails
   // when its HTML grows more than the budget past the recorded baseline.
+  // Server output bakes prerendered pages under dist/client.
   const sidebarPage = readFileSync(
-    join(site, "dist", "sidebar-budget", "index.html"),
+    join(site, "dist", "client", "sidebar-budget", "index.html"),
   );
   assert(
     sidebarPage.length <= SIZE_BUDGET.sidebarFixturePage.maxBytes,

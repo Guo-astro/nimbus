@@ -237,9 +237,10 @@ Route policies belong to each version in a version family. This makes URL decisi
 
 #### Versions in the query
 
-A request-rendered family can keep one URL per operation and select the version with a query parameter instead of a path prefix:
+A request-rendered family can keep one URL per operation and select the version with a query parameter instead of a path prefix. Query mode needs `versions` and request rendering for the family, since a static file is the same whatever the query says:
 
 ```ts title="astro.config.ts"
+rendering: { default: "request" },
 api: [
   {
     collection: "api",
@@ -253,9 +254,11 @@ api: [
 ],
 ```
 
-Every version serves from the family's own path: `/api/pets/` renders the default version, `/api/pets/?api-version=v1` renders `v1`, and an unknown id returns the 404 page. Version-prefixed paths such as `/api/v1/pets/` do not exist in this mode. Inside a non-default version, every generated same-version link — page body, navigation, breadcrumbs, citations, the picker's active item — carries that version's `api-version` query, so readers stay in the version they chose.
+Every version serves from the family's own path: `/api/pets/` renders the default version, `/api/pets/?api-version=v1` renders `v1`, and an unknown id, or `api-version` given more than once, returns the 404 page. An empty `api-version` selects the default. Version-prefixed paths such as `/api/v1/pets/` do not exist in this mode. Inside a non-default version, every generated same-version link — page body, navigation, breadcrumbs, citations, the picker's active item — carries that version's `api-version` query, so readers stay in the version they chose.
 
-Discovery stays version-free: the sitemap, alternate Markdown, `llms.txt`, and `llms-full.txt` describe the default version at the plain URLs, non-default pages are `noindex` with their default counterpart as canonical, and a hidden version is reachable only by its query. Query mode requires `versions` and an effective rendering mode of `request` for the family — a static site serves the same file whatever the query says. Sites that don't set `versionMode` keep path versions unchanged, and version ids may contain dots in both modes (`2026-11-30.air`).
+Discovery stays version-free: the sitemap, alternate Markdown, `llms.txt`, and `llms-full.txt` describe the default version at the plain URLs. Non-default pages are `noindex`, with their default counterpart as canonical; a page with no default counterpart has no canonical. A hidden version's pages are reached only by its query, but `hidden` is not access control: `/nimbus-api/coordinates.json` lists them, and its spec is published at `/api/<version>/openapi.json` unless the version sets `publishSpec: false`.
+
+Sites that don't set `versionMode` keep path versions unchanged. In both modes a version id uses lowercase letters, digits, dots, and dashes, and starts and ends with a letter or digit (`2026-11-30.air`).
 
 ### Sidebar for large APIs
 

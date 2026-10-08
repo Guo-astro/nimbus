@@ -1,0 +1,33 @@
+---
+import { Sidebar } from "@/components/ui/sidebar";
+import type { SidebarItem } from "@cloudflare/nimbus-docs/types";
+export const prerender = true;
+
+// ~1,300 groups and ~4,400 links — the large-sidebar fixture the size
+// budget measures (sidebar bytes dominate large API/docs pages).
+function tree(): SidebarItem[] {
+  const items: SidebarItem[] = [];
+  for (let g = 0; g < 260; g++) {
+    const children: SidebarItem[] = [];
+    for (let s = 0; s < 4; s++) {
+      const leaves: SidebarItem[] = [];
+      for (let l = 0; l < 3; l++) {
+        leaves.push({ type: "link", label: `Leaf ${g}-${s}-${l}`, href: `/g${g}/s${s}/l${l}/` });
+      }
+      children.push({ type: "group", label: `Sub ${g}-${s}`, children: leaves, collapsed: true });
+    }
+    for (let l = 0; l < 5; l++) {
+      children.push({ type: "link", label: `Page ${g}-${l}`, href: `/g${g}/p${l}/` });
+    }
+    items.push({ type: "group", label: `Group ${g}`, children, collapsed: true });
+  }
+  return items;
+}
+---
+
+<html lang="en">
+  <head><title>Sidebar budget</title></head>
+  <body>
+    <Sidebar items={tree()} />
+  </body>
+</html>

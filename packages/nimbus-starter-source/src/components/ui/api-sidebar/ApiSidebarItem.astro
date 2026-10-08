@@ -4,17 +4,17 @@
  * through the SAME atoms as the docs sidebar (`SidebarGroupHeader`,
  * `SidebarLink`) so the two rails are one visual language; the only
  * API-specific decoration is the leading `ApiMethodChip` on operation leaves.
- * Open/active state is pre-resolved by `getApiNav` (`expanded` marks the active
- * trail, `active` marks the current node), so this maps those flags straight
- * onto the shared header/link props — no descendant scan.
+ * Groups are native `<details>`; a group with its own page lists it as the
+ * group's first child, labelled "Overview". Open/active state is pre-resolved
+ * by `getApiNav` (`expanded` marks the active trail, `active` the current
+ * node), so this maps those flags straight onto the shared atoms.
  *
  * Under `sidebar: "on-demand"`, a collapsed group arrives `deferred`, with no
  * children and a `childrenHref`: the page whose sidebar lists them. It renders
- * as a closed group with an empty panel; `initNavSidebar` (mounted by
- * `ApiLayout`) fills the panel from that page when the group opens. Without
- * JavaScript, the group's label still links to its page.
+ * as a closed group whose list holds only the Overview row; `initNavSidebar`
+ * (mounted by `ApiLayout`) fills the list from that page when the group
+ * opens. Without JavaScript, the Overview row still reaches its page.
  */
-import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import SidebarGroupHeader from "@/components/ui/sidebar/SidebarGroupHeader.astro";
 import SidebarLink from "@/components/ui/sidebar/SidebarLink.astro";
 import ApiMethodChip from "./ApiMethodChip.astro";
@@ -35,32 +35,27 @@ const onActiveTrail = Boolean(item.expanded || item.active);
 
 {
   hasChildren ? (
-    <Collapsible
-      open={onActiveTrail}
+    <details
       data-nb-sidebar-group
       data-nb-nav-group={item.coordinate}
       data-nb-nav-src={deferred ? withBase(item.childrenHref!, import.meta.env.BASE_URL) : undefined}
+      open={onActiveTrail || undefined}
     >
-      <SidebarGroupHeader
-        label={item.label}
-        isOpen={onActiveTrail}
-        hasActive={onActiveTrail}
-        indexHref={item.href}
-        indexIsCurrent={item.active}
-        deprecated={item.deprecated}
-      />
-      <CollapsibleContent data-nb-state={onActiveTrail ? "open" : "closed"}>
-        {!deferred && (
-          <ul class="mt-0.5 ml-3 list-none border-l border-border p-0 pl-2 flex flex-col gap-px">
-            {item.children.map((child) => (
-              <li class="break-words">
-                <Astro.self item={child} />
-              </li>
-            ))}
-          </ul>
+      <SidebarGroupHeader label={item.label} hasActive={onActiveTrail} deprecated={item.deprecated} />
+      <ul class="nb-sidebar-list">
+        {item.href && (
+          <li>
+            <SidebarLink label="Overview" href={item.href} isCurrent={item.active} />
+          </li>
         )}
-      </CollapsibleContent>
-    </Collapsible>
+        {!deferred &&
+          item.children.map((child) => (
+            <li>
+              <Astro.self item={child} />
+            </li>
+          ))}
+      </ul>
+    </details>
   ) : (
     <SidebarLink
       label={item.label}

@@ -268,36 +268,27 @@ describe("initNavSidebar", () => {
     stop();
   });
 
-  test("a copy shown after mounting restores its scroll, not its groups", async () => {
-    const g = globalThis as any;
-    const priorObserver = g.ResizeObserver;
-    let resized!: () => void;
-    g.ResizeObserver = class {
-      constructor(callback: () => void) {
-        resized = callback;
-      }
-      observe() {}
-      disconnect() {}
-    };
-    try {
-      const root = page("/api/shown-later/");
-      let height = 0;
-      Object.defineProperty(root, "clientHeight", { get: () => height });
-      const stop = initNavSidebar(root);
-      // Meanwhile the reader opened tags.A in the other copy.
-      sessionStorage.setItem(`${NAV_STATE_KEYS.state}k`, JSON.stringify({ open: ["tags.A"] }));
-      height = 400;
-      resized();
-      await settle();
-      // Opening it here would bypass this copy's mounted disclosure, whose own
-      // state would then disagree with the markup.
-      assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "closed");
-      assert.deepEqual(fetches, [], "and nothing loads as if the reader opened it");
-      assert.equal(navigations.length, 0);
-      stop();
-    } finally {
-      g.ResizeObserver = priorObserver;
-    }
+  test("the drawer's explicit scroll-only restore leaves groups alone", async () => {
+    // One tree per page now: nothing watches for a container becoming
+    // visible. The drawer calls the shared restore itself when it reveals
+    // the node, scroll-only — opening groups there would bypass the mounted
+    // disclosure, whose own state would then disagree with the markup.
+    const root = page("/api/shown-later/");
+    let height = 0;
+    Object.defineProperty(root, "clientHeight", { get: () => height });
+    const stop = initNavSidebar(root);
+    sessionStorage.setItem(
+      `${NAV_STATE_KEYS.state}k`,
+      JSON.stringify({ open: ["tags.A"], scroll: { desktop: 120 } }),
+    );
+    height = 400;
+    restoreNavState(NAV_STATE_KEYS, root, true);
+    await settle();
+    assert.equal(trigger("tags.A").getAttribute("data-nb-state"), "closed");
+    assert.deepEqual(fetches, [], "and nothing loads as if the reader opened it");
+    assert.equal(navigations.length, 0);
+    assert.equal(root.scrollTop, 120);
+    stop();
   });
 
   test("a deploy mid-session: no old pages from memory, no rows cached across builds", async () => {
@@ -342,6 +333,81 @@ describe("initNavSidebar", () => {
     await settle();
     assert.equal(panel("tags.A").textContent, "Stale edge copy");
     assert.equal(sessionStorage.getItem(NAV_STATE_KEYS.rows), null);
+    stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Native <details> markup (the current starter): same storage format, same
+// behavior, driven by the element's own `open` and `toggle` events.
+// ---------------------------------------------------------------------------
+
+describe("native <details> markup", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    fetches.length = 0;
+    navigations.length = 0;
+  });
+
+  const detailsGroup = (
+    id: string,
+    options: { src?: string; open?: boolean; rows?: string } = {},
+  ) => `
+    <details data-nb-nav-group="${id}"${options.src ? ` data-nb-nav-src="${options.src}"` : ""}${options.open ? " open" : ""}>
+      <summary data-nb-sidebar-group-label>${id}</summary>
+      <ul>${options.rows ?? ""}</ul>
+    </details>`;
+
+  const detailsPage = (src = "/api/a/", build = "b1") => {
+    document.body.innerHTML = `
+      <aside data-nb-nav-state="k" data-nb-nav-build="${build}" data-nb-nav-scroller="desktop">
+        ${detailsGroup("tags.A", { src })}
+        ${detailsGroup("tags.T", { open: true, rows: `<li><a aria-current="page" href="/api/t/x/">Current</a></li>` })}
+      </aside>`;
+    return document.querySelector<HTMLElement>("[data-nb-nav-state]")!;
+  };
+  const details = (id: string) =>
+    document.querySelector<HTMLDetailsElement>(`details[data-nb-nav-group='${id}']`)!;
+  const listOf = (id: string) => details(id).querySelector("ul")!;
+
+  test("restore opens remembered details and fills cached rows into the list", () => {
+    detailsPage();
+    sessionStorage.setItem(
+      `${NAV_STATE_KEYS.state}k`,
+      JSON.stringify({ open: ["tags.A", "tags.T"] }),
+    );
+    cacheRows("b1", { "/api/a/ tags.A": "<li><a href='/api/a/one/'>One</a></li>" });
+    restoreNavState(NAV_STATE_KEYS);
+    assert.equal(details("tags.A").open, true);
+    assert.equal(details("tags.T").open, true);
+    assert.match(listOf("tags.A").innerHTML, /One/);
+    assert.equal(details("tags.A").hasAttribute("data-nb-nav-src"), false);
+    // The server-rendered trail keeps its rows (and highlight).
+    assert.match(listOf("tags.T").innerHTML, /aria-current="page"/);
+  });
+
+  test("a toggle records the change and loads a deferred group's rows", async () => {
+    respond = () =>
+      Promise.resolve(
+        new Response(
+          `<!DOCTYPE html><body><aside data-nb-nav-build="b1">${detailsGroup("tags.A", { rows: "<li><a href='/api/a/one/'>One</a></li>" })}</aside></body>`,
+          { status: 200 },
+        ),
+      );
+    const root = detailsPage();
+    const stop = initNavSidebar(root);
+    const group = details("tags.A");
+    group.open = true;
+    group.dispatchEvent(new window.Event("toggle"));
+    await settle();
+    assert.deepEqual(saved().open, ["tags.A"]);
+    assert.match(listOf("tags.A").innerHTML, /One/);
+    assert.equal(group.hasAttribute("data-nb-nav-src"), false);
+    // Closing removes it from the saved set.
+    group.open = false;
+    group.dispatchEvent(new window.Event("toggle"));
+    await settle();
+    assert.deepEqual(saved().open, []);
     stop();
   });
 });

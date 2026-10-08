@@ -1,114 +1,114 @@
 ---
 /**
- * SidebarGroupHeader — the label + disclosure caret row of a sidebar group,
- * extracted so any consumer composes the same header (no forked markup). It
- * renders the header only; the caller wraps it in a `Collapsible` and supplies
- * the `CollapsibleContent`.
+ * SidebarGroupHeader — a sidebar group's `<summary>` row: label, optional
+ * leading icon, badge, and a caret drawn by CSS (`nb-sidebar-row`'s `::after`
+ * mask, rotated by `details[open]`). The caller renders it as the first child
+ * of a `<details data-nb-sidebar-group>`.
  *
- * Two shapes (matching the group's data):
- *   - `indexHref` set  → the label is an `<a>` to the landing page and the caret
- *     is a separate trigger (whole-row active state).
- *   - no `indexHref`   → the whole row is the disclosure trigger; the label is
- *     non-interactive (a pure section divider / nav-only category).
+ * The summary is label-only: a group's landing page renders as the group's
+ * first child row ("Overview"), so keyboard and screen-reader users get one
+ * disclosure control and one link, never a link nested in a control.
  *
- * `deprecated` strikes the label through. Caret rotation is driven by the
- * trigger's `data-nb-state` via the global rule below.
+ * `deprecated` strikes the label through. The row, caret, and child-list
+ * styling is defined once below — shipped with the component so
+ * `nimbus-docs add`/`diff` carry it, overridable from your own stylesheet.
  */
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { cn } from "@/lib/cn";
-import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import type { SidebarBadge } from "@cloudflare/nimbus-docs/types";
-import { withBase } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   label: string;
-  isOpen: boolean;
-  /** True when this group is on the active trail — bolds the label. */
+  /** True when this group is on the active trail — emphasizes the label. */
   hasActive?: boolean;
   badge?: SidebarBadge;
-  indexHref?: string;
-  indexIsCurrent?: boolean;
-  indexIsExternal?: boolean;
   icon?: string;
   /** Strike the label through for deprecated sections. */
   deprecated?: boolean;
 }
 
-const { label, isOpen, hasActive, badge, indexHref, indexIsCurrent, indexIsExternal, icon, deprecated } = Astro.props;
-const resolvedIndexHref = indexHref
-  ? withBase(indexHref, import.meta.env.BASE_URL)
-  : undefined;
-
-const rowClass = cn(
-  "group/expander flex min-h-[2rem] items-center rounded-lg px-3 py-1 text-[0.8125rem] font-medium no-underline focus-visible:outline-offset-[-2px]",
-  "hover:bg-accent hover:text-foreground",
-  hasActive ? "text-foreground" : "text-muted-foreground",
-);
-const caretClass =
-  "ml-auto -mr-px shrink-0 size-4 opacity-40 transition-[rotate,opacity] duration-[250ms] ease-[cubic-bezier(0.87,0,0.13,1)] group-hover/expander:opacity-100";
-const labelClass = cn("break-words", deprecated && "line-through");
+const { label, hasActive, badge, icon, deprecated } = Astro.props;
 ---
 
-{
-  indexHref ? (
-    <div
-      class={cn(rowClass, "p-0", indexIsCurrent ? "bg-accent text-foreground" : "")}
-      data-nb-state={isOpen ? "open" : "closed"}
-      data-nb-sidebar-group-label
-    >
-      <a
-        href={resolvedIndexHref}
-        aria-current={indexIsCurrent ? "page" : undefined}
-        target={indexIsExternal ? "_blank" : undefined}
-        rel={indexIsExternal ? "noopener" : undefined}
-        class="flex flex-1 min-w-0 items-center min-h-[2rem] px-3 py-1 rounded-l-lg focus-visible:outline-offset-[-2px]"
-      >
-        <span class="flex items-center gap-2 flex-1 min-w-0">
-          {icon && <Icon name={icon} class="shrink-0 h-4 w-4 text-muted-foreground" />}
-          <span class={labelClass}>{label}</span>
-          {badge &&
-            (typeof badge === "string" ? <Badge text={badge} /> : <Badge text={badge.text} variant={badge.variant} />)}
-        </span>
-      </a>
-      <CollapsibleTrigger
-        class={cn(
-          "w-auto flex items-center shrink-0 min-h-[2rem] px-3 py-1 rounded-r-lg",
-          "hover:bg-accent hover:text-foreground focus-visible:outline-offset-[-2px]",
-          "group/expander",
-        )}
-        data-nb-state={isOpen ? "open" : "closed"}
-        aria-expanded={isOpen ? "true" : "false"}
-        aria-label={`Toggle ${label} section`}
-      >
-        <Icon name="ph:caret-right" class={caretClass} data-nb-caret />
-      </CollapsibleTrigger>
-    </div>
-  ) : (
-    <CollapsibleTrigger
-      class={cn(rowClass, "justify-between w-full")}
-      data-nb-sidebar-group-label
-      data-nb-state={isOpen ? "open" : "closed"}
-      aria-expanded={isOpen ? "true" : "false"}
-    >
-      <span class="flex items-center gap-2 flex-1 min-w-0">
-        {icon && <Icon name={icon} class="shrink-0 h-4 w-4 text-muted-foreground" />}
-        <span class={labelClass}>{label}</span>
-        {badge &&
-          (typeof badge === "string" ? <Badge text={badge} /> : <Badge text={badge.text} variant={badge.variant} />)}
-      </span>
-      <Icon name="ph:caret-right" class={caretClass} data-nb-caret />
-    </CollapsibleTrigger>
-  )
-}
+<summary
+  class="nb-sidebar-row"
+  data-nb-sidebar-group-label
+  data-nb-active={hasActive ? "" : undefined}
+>
+  {icon && <Icon name={icon} class="h-4 w-4 shrink-0 text-muted-foreground" />}
+  <span class={cn("break-words", deprecated && "line-through")}>{label}</span>
+  {badge &&
+    (typeof badge === "string" ? <Badge text={badge} /> : <Badge text={badge.text} variant={badge.variant} />)}
+</summary>
 
 <style is:global>
-  /*
-   * Chevron rotation, driven by the trigger's `data-nb-state`. The disclosure
-   * runtime (`@/components/ui/collapsible/collapsible.client`) keeps this
-   * attribute in sync on toggle; this rule turns it into the visual rotation.
-   */
-  [data-nb-collapsible-trigger][data-nb-state="open"] [data-nb-caret] {
-    rotate: 90deg;
+  /* `components` layer: callers' Tailwind utilities (a `px-1` or
+     `line-through` on a row) still win, and your own unlayered overrides
+     in globals.css win over both. */
+  @layer components {
+    .nb-sidebar-row {
+      display: flex;
+      min-height: 2rem;
+      align-items: center;
+      gap: 0.5rem;
+      border-radius: 0.5rem;
+      padding: 0.25rem 0.75rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--color-muted-foreground);
+      overflow-wrap: break-word;
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+    }
+    .nb-sidebar-row::-webkit-details-marker {
+      display: none;
+    }
+    .nb-sidebar-row:hover {
+      background-color: var(--color-accent);
+      color: var(--color-foreground);
+    }
+    .nb-sidebar-row:focus-visible {
+      outline-offset: -2px;
+    }
+    /* The caret, drawn once as a mask — no inline SVG per group. */
+    .nb-sidebar-row::after {
+      content: "";
+      margin-left: auto;
+      margin-right: -1px;
+      width: 1rem;
+      height: 1rem;
+      flex-shrink: 0;
+      background-color: currentColor;
+      opacity: 0.4;
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M96 48l80 80-80 80' fill='none' stroke='black' stroke-width='24' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+        no-repeat center / contain;
+    }
+    .nb-sidebar-row:hover::after {
+      opacity: 1;
+    }
+    details[open] > .nb-sidebar-row::after {
+      rotate: 90deg;
+    }
+    /* Active trail: the group holds the current page. */
+    .nb-sidebar-row[data-nb-active] {
+      color: var(--color-foreground);
+    }
+
+    .nb-sidebar-list {
+      margin: 0.125rem 0 0 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      list-style: none;
+      border-left: 1px solid var(--color-border);
+      padding: 0 0 0 0.5rem;
+    }
+    /* Safari lays out closed <details> content in large trees; keep closed
+       lists out of layout entirely. */
+    details[data-nb-sidebar-group]:not([open]) > .nb-sidebar-list {
+      display: none;
+    }
   }
 </style>

@@ -1010,8 +1010,8 @@ function assertWorkerPurityScanner() {
 }
 
 /** The picker's links on a page: href plus whether it is the active entry. */
-function pickerLinks(html) {
-  const start = html.indexOf("data-feasibility-picker");
+function pickerLinks(html, marker = "data-feasibility-picker") {
+  const start = html.search(new RegExp(`${marker}[\\s>]`));
   assert(start !== -1, "query-mode page is missing the version picker");
   const region = html.slice(start, html.indexOf("</nav>", start));
   return [...region.matchAll(/<a\b[^>]*>/g)].map(([tag]) => ({
@@ -1030,9 +1030,10 @@ async function verifyQueryVersions(site, baseConfig) {
   const spec = (operations) => JSON.stringify({
     openapi: "3.0.0",
     info: { title: "Query versions", version: "1.0.0" },
-    paths: Object.fromEntries(operations.map(([id, path]) => [path, {
+    paths: Object.fromEntries(operations.map(([id, path, summary]) => [path, {
       get: {
         operationId: id,
+        ...(summary ? { summary } : {}),
         ...(path.includes("{") ? {
           parameters: [{ name: path.match(/\{([^}]+)\}/)[1], in: "path", required: true, schema: { type: "string" } }],
         } : {}),
@@ -1041,8 +1042,8 @@ async function verifyQueryVersions(site, baseConfig) {
     }])),
   });
   mkdirSync(join(site, "src/content/qapi"), { recursive: true });
-  writeFileSync(join(site, "src/content/qapi/v2.json"), spec([["listPets", "/pets"], ["getPet", "/pets/{id}"]]));
-  writeFileSync(join(site, "src/content/qapi/v1.json"), spec([["listPets", "/pets"], ["fetchPet", "/pets/{petId}"], ["legacyOnly", "/legacy"]]));
+  writeFileSync(join(site, "src/content/qapi/v2.json"), spec([["listPets", "/pets", "List pets in v-two"], ["getPet", "/pets/{id}"]]));
+  writeFileSync(join(site, "src/content/qapi/v1.json"), spec([["listPets", "/pets", "List pets in v-one"], ["fetchPet", "/pets/{petId}"], ["legacyOnly", "/legacy"]]));
   for (const component of ["popover", "version-switcher"]) {
     cpSync(join(STARTER, "components", "ui", component), join(site, "src", "components", "ui", component), { recursive: true });
   }
@@ -1064,6 +1065,9 @@ const { page, nav, collection, version, coordinate } = result;
 <BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref ?? undefined}>
   <nav data-feasibility-picker>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
+  </nav>
+  <nav data-feasibility-picker-no-coordinate>
+    <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
   </nav>
   <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
 </BaseLayout>
@@ -1124,19 +1128,44 @@ const { page, nav, collection, version, coordinate } = result;
       `v1 fetchPet should pair with the default getPet: ${toDefault?.href}`,
     );
     assert(/<meta name="robots" content="noindex/.test(v1Op.html), "non-default version page must be noindex");
-    const canonical = v1Op.html.match(/<link rel="canonical" href="([^"]*)"/)?.[1] ?? "";
-    assert(new URL(canonical).pathname === new URL(toDefault.href, origin).pathname,
-      `v1 canonical ${canonical} should be the default counterpart`);
+    const canonical = v1Op.html.match(/<link rel="canonical" href="([^"]*)"/)?.[1];
+    const expectedCanonical = new URL(toDefault.href, "https://workers-feasibility.test").href;
+    assert(canonical === expectedCanonical, `v1 canonical ${canonical} should be ${expectedCanonical}`);
+
+    // Unrelated params stay out of the active link; a picker with no
+    // coordinate keeps the reader on this page and version too.
+    const tracked = await page(`${fetchHref}&utm_source=x`);
+    assert(tracked.links.find((link) => link.active)?.href === fetchHref,
+      "picker active entry should keep the version and drop unrelated params");
+    const noCoordinate = pickerLinks(v1Op.html, "data-feasibility-picker-no-coordinate");
+    assert(noCoordinate.find((link) => link.active)?.href === fetchHref,
+      `picker without a coordinate should stay on ${fetchHref}: ${JSON.stringify(noCoordinate)}`);
 
     const defaultOp = await page(toDefault.href);
     assert(defaultOp.links.find((link) => link.active)?.href === toDefault.href,
       "default picker active entry should stay on the default page");
 
-    const path = new URL(fetchHref, origin).pathname;
-    for (const query of ["?api-version=nope", "?api-version=v1&api-version=v1", "?api-version=v1&api-version=v2"]) {
-      const { response } = await request(origin, `${path}${query}`);
-      assert(response.status === 404, `${path}${query} returned ${response.status}, expected 404`);
+    // One shared path renders each version's own content.
+    const listHref = v1Html.match(/href="([^"]*listPets[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
+    const listPath = new URL(listHref, origin).pathname;
+    for (const [query, marker] of [["", "v-two"], ["?api-version=v2", "v-two"], ["?api-version=", "v-two"], ["?api-version=v1", "v-one"]]) {
+      const { html } = await page(`${listPath}${query}`);
+      assert(html.includes(`List pets in ${marker}`), `${listPath}${query} should render ${marker}`);
     }
+    for (const query of ["?api-version=nope", "?api-version=v1&api-version=v1", "?api-version=v1&api-version=v2"]) {
+      const { response } = await request(origin, `${listPath}${query}`);
+      assert(response.status === 404, `${listPath}${query} returned ${response.status}, expected 404`);
+    }
+
+    // Markdown negotiation never answers a non-default version with the default's Markdown.
+    const markdown = (route) => fetch(`${origin}${route}`, { headers: { Accept: "text/markdown" } });
+    const defaultMarkdown = await markdown(listPath);
+    assert(defaultMarkdown.headers.get("Content-Type")?.includes("text/markdown"),
+      `default ${listPath} should negotiate Markdown`);
+    const v1Markdown = await markdown(`${listPath}?api-version=v1`);
+    assert(v1Markdown.headers.get("Content-Type")?.includes("text/html") &&
+      (await v1Markdown.text()).includes("List pets in v-one"),
+      "a non-default version must answer Markdown requests with its own HTML");
   });
   writeFileSync(configPath, baseConfig);
   writeFileSync(contentConfig, baseContent);

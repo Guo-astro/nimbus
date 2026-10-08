@@ -132,12 +132,10 @@ export async function buildApiVersionAlternates(
         const a = versionIds[i]!;
         const b = versionIds[j]!;
         const eligible = (side: string, other: string) => {
+          // Walk only this version's operations, never every class.
           const byShape = new Map<string, string[]>();
-          const shapes = shapesByVersion.get(side);
-          for (const [coordinate, present] of classVersions) {
-            if (!present.has(side) || present.has(other)) continue;
-            const shape = shapes?.get(coordinate);
-            if (!shape) continue;
+          for (const [coordinate, shape] of shapesByVersion.get(side) ?? []) {
+            if (classVersions.get(coordinate)?.has(other)) continue;
             const bucket = byShape.get(shape);
             if (bucket) bucket.push(coordinate);
             else byShape.set(shape, [coordinate]);

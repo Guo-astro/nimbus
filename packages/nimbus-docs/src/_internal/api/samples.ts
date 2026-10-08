@@ -494,7 +494,9 @@ function formPayload(fields: HarField[]): Record<string, string | string[]> {
   const payload: Record<string, string | string[]> = Object.create(null);
   for (const { name, value } of fields) {
     const existing = payload[name];
-    payload[name] = existing === undefined ? value : [...(Array.isArray(existing) ? existing : [existing]), value];
+    if (existing === undefined) payload[name] = value;
+    else if (Array.isArray(existing)) existing.push(value);
+    else payload[name] = [existing, value];
   }
   return payload;
 }

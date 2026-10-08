@@ -419,6 +419,25 @@
         "In a browser implementing the current Document.modelContext draft, call search_documentation before opening the search dialog.",
         "Verify that view transitions remove the old registration, unsupported browsers stay quiet, and disabled or custom search registers nothing."
       ]
+    },
+    {
+      "id": "page-collections-from-helpers",
+      "introducedIn": "0.17.0",
+      "mode": "review-required",
+      "changeset": "page-collections-from-helpers",
+      "summary": "Only collections made with Nimbus's page helpers become pages; every other collection is plain Astro data, and the `_` naming rule is removed.",
+      "affected": "Sites that route a plain-loader collection through Nimbus, use `_`-prefixed collection names, or set `rendering` while owning a page collection with its own catch-all route.",
+      "instructions": [
+        "No action is needed for most sites: with the starter's Markdown routes, a collection Nimbus doesn't prepare already failed the build before this release.",
+        "A collection that should stay pages must be created with docsCollection(), componentsCollection(), or a loader wrapped in withNimbusMarkdown(); version and API collections stay pages as before, and partialsCollection() stays component content.",
+        "A plain data collection (file() or glob() without a Nimbus helper) leaves search, the sitemap, llms.txt, Markdown files, and social images; getCollection() keeps returning its entries unchanged. The `_` name prefix is no longer needed to hide a collection and is harmless to keep.",
+        "If `rendering` is set and the site has its own page collection with a catch-all route (for example `blog` with src/pages/blog/[...slug].astro), add that collection to rendering.collections; rendering.default now covers only docs, version, and API collections.",
+        "If rendering.collections names a data collection, the build now fails and names it; remove the key or make the collection a page collection."
+      ],
+      "verify": [
+        "Run the production build and confirm it passes; the build now verifies the rendering policy and versions.others against the collections the helpers actually loaded.",
+        "Confirm data collections are absent from llms.txt and the sitemap, and that every intended page collection still appears."
+      ]
     }
   ]
 }

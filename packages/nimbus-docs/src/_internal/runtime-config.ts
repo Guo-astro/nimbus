@@ -50,9 +50,10 @@ export async function loadNimbusConfig(): Promise<NimbusConfig> {
 }
 
 /**
- * Build-time-resolved list of collections the agent-facing routes
- * (llms.txt, per-page .md alternates) should iterate. Reserved names
- * (`partials`, `_*`) are already filtered. See `getIndexedEntries()`.
+ * The page-collection list the agent-facing routes (llms.txt, per-page .md
+ * alternates) iterate: collections made with Nimbus's helpers (role `page`
+ * in the prepared-markdown registry) plus configured API collections, in
+ * deterministic order. See `getIndexedEntries()` and `page-collections.ts`.
  */
 export async function loadIndexedCollections(): Promise<readonly string[]> {
   if (_cachedCollections) return _cachedCollections;

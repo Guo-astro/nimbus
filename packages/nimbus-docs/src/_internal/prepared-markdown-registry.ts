@@ -20,7 +20,17 @@ export interface PreparedMarkdownEntry {
   headings?: Array<{ depth: number; text: string; slug: string }>;
 }
 
+/**
+ * What a collection is to Nimbus, recorded when its loader commits:
+ *   - `page` — made with a page helper (`docsCollection()`,
+ *     `componentsCollection()`, `withNimbusMarkdown()`); its entries are pages.
+ *   - `partials` — made with `partialsCollection()`; component content.
+ *   - `api` — an OpenAPI reference collection's prepared page data.
+ */
+export type PreparedMarkdownCollectionRole = "page" | "partials" | "api";
+
 export interface PreparedMarkdownCollection {
+  role: PreparedMarkdownCollectionRole;
   capability: PreparedMarkdownCollectionCapability;
   entries: ReadonlyMap<string, PreparedMarkdownEntry>;
 }
@@ -35,6 +45,7 @@ export interface PreparedMarkdownSnapshot {
 }
 
 interface MutableCollection {
+  role: PreparedMarkdownCollectionRole;
   capability: PreparedMarkdownCollectionCapability;
   entries: Map<string, PreparedMarkdownEntry>;
 }
@@ -221,11 +232,13 @@ export function commitPreparedMarkdownCollection(
     string,
     Array<{ depth: number; text: string; slug: string }>
   > = new Map(),
+  role: PreparedMarkdownCollectionRole = "page",
 ): boolean {
   const current = state.roots.get(root);
   if (!current || current.activeEpochs.get(collection) !== epoch) return false;
   const sourceEntries = [...entries];
   const nextCollection = {
+    role,
     capability: preparedMarkdownCollectionCapability(
       collection,
       sourceEntries,
@@ -256,6 +269,7 @@ export function commitPreparedDataCollection(
   if (!current || current.activeEpochs.get(collection) !== epoch) return false;
   const sourceEntries = [...entries];
   const nextCollection = {
+    role: "api" as const,
     capability: preparedMarkdownCollectionCapability(
       collection,
       sourceEntries,
@@ -335,6 +349,7 @@ export function getPreparedMarkdownSnapshot(
       [...current.collections].map(([collection, value]) => [
         collection,
         {
+          role: value.role,
           capability: structuredClone(value.capability),
           entries: new Map(
             [...value.entries].map(([id, entry]) => [

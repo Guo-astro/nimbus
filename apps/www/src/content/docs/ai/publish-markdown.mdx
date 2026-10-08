@@ -88,7 +88,7 @@ curl --fail http://localhost:4321/llms-full.txt
 curl --fail http://localhost:4321/writing/llms.txt
 ```
 
-Each command must return content with a successful status. A `404` means the corresponding route file is missing. If the build reports an unprepared collection, wrap its Markdown loader with `withNimbusMarkdown()` as described in [Other collections](/writing/pages-and-routing#other-collections). If a section index is absent, confirm that the section has discoverable pages and appears in `/llms.txt`.
+Each command must return content with a successful status. A `404` means the corresponding route file is missing, or the collection isn't a page collection — only collections made with Nimbus's helpers publish Markdown; wrap a custom loader with `withNimbusMarkdown()` as described in [Other collections](/writing/pages-and-routing#other-collections). If a section index is absent, confirm that the section has discoverable pages and appears in `/llms.txt`.
 
 ## Direct rendering
 

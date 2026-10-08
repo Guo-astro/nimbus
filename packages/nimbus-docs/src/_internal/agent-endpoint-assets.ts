@@ -36,6 +36,7 @@ import {
   type PreparedMarkdownEntry,
   waitForPreparedMarkdownTransactions,
 } from "./prepared-markdown-registry.js";
+import { orderPageCollections } from "./page-collections.js";
 import { registerAgentEndpointAssetReader } from "./agent-endpoint-asset-reader.js";
 import {
   renderEntryAsMarkdown,
@@ -92,8 +93,6 @@ export interface BakeAgentEndpointAssetsOptions {
   title: string;
   description?: string;
   socialImage?: string;
-  indexedCollections: readonly string[];
-  apiCollections?: readonly string[];
   versions?: {
     current: string;
     others: readonly string[];
@@ -114,7 +113,6 @@ export interface BakeAgentEndpointAssetsOptions {
 export interface BakePreparedHeadingsOptions {
   root: URL | string;
   base: string;
-  indexedCollections: readonly string[];
   partialResolver?: GeneratedMarkdownPartialResolver;
 }
 
@@ -1070,9 +1068,8 @@ export async function bakePreparedHeadings(
     }
     const partials = snapshot.collections.get("partials");
     const records: PreparedHeadingRecord[] = [];
-    for (const collectionName of options.indexedCollections) {
-      const collection = snapshot.collections.get(collectionName);
-      if (!collection) continue;
+    for (const collection of snapshot.collections.values()) {
+      if (collection.role !== "page") continue;
       for (const entry of collection.entries.values()) {
         const record = await preparedHeadingRecord(
           entry,
@@ -1211,17 +1208,16 @@ export async function bakeAgentEndpointAssets(
     }
   }
   const base = options.base || "/";
-  const apiCollections = new Set(options.apiCollections ?? []);
+  // Page collections come from the same registry snapshot this bake reads:
+  // the collections Nimbus's helpers committed with role `page`, in the
+  // deterministic order the list is published everywhere (API entries arrive
+  // separately through `loadApiEntries`/`apiEntries`).
   const candidates: PreparedMarkdownEntry[] = [];
-  for (const collectionName of options.indexedCollections) {
-    if (apiCollections.has(collectionName)) continue;
+  for (const collectionName of orderPageCollections(snapshot, {
+    versionsOthers: options.versions?.others,
+  })) {
     const collection = snapshot.collections.get(collectionName);
-    if (!collection) {
-      throw new Error(
-        `nimbus-docs: indexed collection "${collectionName}" is not prepared. ` +
-          "Wrap its object loader with withNimbusMarkdown(loader).",
-      );
-    }
+    if (!collection) continue;
     assertPreparedCollection(collectionName, collection, base);
     candidates.push(...collection.entries.values());
   }

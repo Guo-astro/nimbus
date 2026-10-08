@@ -90,6 +90,7 @@ function commit(
         data: { ...entry.data },
       })) as never,
       new Map(entries.map((entry) => [entry.id, entry.headings ?? []])),
+      collection === "partials" ? "partials" : "page",
     ),
     true,
   );
@@ -134,8 +135,6 @@ test("bakes API discovery from thin entries through the projection callback", as
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["api"],
-    apiCollections: ["api"],
     apiEntries: [entry],
     renderApiEntryMarkdown: async (candidate: typeof entry, base: string) => {
       calls.push(`${candidate.collection}:${candidate.id}:${base}`);
@@ -179,7 +178,6 @@ test("bakes compact headings with a revisioned partial resolver", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
     partialResolver: {
       revision: "product-v1",
       resolve: ({ file, product }: { file: string; product?: string }) =>
@@ -234,7 +232,6 @@ test("does not expand literal Render elements in Markdown headings", async () =>
   const records = await bakePreparedHeadings({
     root: projectRoot,
     base: "/docs",
-    indexedCollections: ["docs"],
   });
   assert.deepEqual(records[0]?.headings, [
     { depth: 1, text: "Guide", slug: "guide" },
@@ -269,7 +266,6 @@ test("bakes expanded source and transformed Markdown endpoint assets determinist
     site: "https://example.test",
     title: "Test",
     socialImage: "/og.png",
-    indexedCollections: ["docs"],
     citationIndex: new Map([["api:list", "/api/list"]]),
     componentMap: {
       Catalog: {
@@ -363,8 +359,6 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
     site: "https://example.test",
     title: "Test",
     description: "Test docs",
-    indexedCollections: ["blog", "docs-v1", "docs", "api"],
-    apiCollections: ["api"],
     versions: { current: "current", others: ["v1"], hidden: ["v1"] },
     componentMap: {
       Card: {
@@ -475,7 +469,6 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
 
@@ -577,7 +570,6 @@ test("staging rejects manifest paths outside asset roots before cleanup", async 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   });
   const manifest = await ensureAgentEndpointAssets(projectRoot);
   const asset = manifest.markdownAssets[0];
@@ -644,8 +636,6 @@ test("waits for API index transactions before caching llms.txt output", async ()
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs", "api"],
-    apiCollections: ["api"],
   };
   let firstRead = true;
   let update: Promise<void> | undefined;
@@ -690,7 +680,6 @@ test("rebakes when invalidated during API input loading", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let bakes = 0;
   let reads = 0;
@@ -733,7 +722,6 @@ test("rejects page collisions and unsafe section route parameters", async () => 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   await assert.rejects(
     bakeAgentEndpointAssets(options),
@@ -791,7 +779,6 @@ test("uses locale-independent ordering in llms.txt indexes", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -817,7 +804,6 @@ test("preserves protocol-relative social images", async () => {
     site: "https://example.test",
     title: "Test",
     socialImage: "//cdn.example.test/og.png",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -845,7 +831,6 @@ test("resolves the complete audience before touching partials", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   });
   assert.deepEqual(
     manifest.markdownAssets.map(({ id, surface }) => [id, surface]),
@@ -873,7 +858,6 @@ test("fails closed for unknown audiences and invalid transitive partials", async
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   await assert.rejects(
     bakeAgentEndpointAssets(options),
@@ -893,19 +877,8 @@ test("fails closed for unknown audiences and invalid transitive partials", async
   );
 });
 
-test("rejects unprepared collections and stale collection capabilities", async () => {
+test("rejects stale collection capabilities", async () => {
   const projectRoot = await root();
-  await assert.rejects(
-    bakeAgentEndpointAssets({
-      root: projectRoot,
-      base: "/docs",
-      site: "https://example.test",
-      title: "Test",
-      indexedCollections: ["custom"],
-    }),
-    /withNimbusMarkdown/,
-  );
-
   commit(projectRoot, "docs", [
     { id: "guide", body: "Guide", data: { title: "Guide" } },
   ]);
@@ -924,7 +897,6 @@ test("rejects unprepared collections and stale collection capabilities", async (
       base: "/docs",
       site: "https://example.test",
       title: "Test",
-      indexedCollections: ["docs"],
     }),
     /collection "docs".*not prepared/s,
   );
@@ -951,7 +923,6 @@ test("prepares headings without requiring every indexed collection to support pr
   const records = await bakePreparedHeadings({
     root: projectRoot,
     base: "/docs",
-    indexedCollections: ["docs", "bodyless", "unwrapped"],
   });
   assert.deepEqual(
     records.map(({ collection, id }) => `${collection}:${id}`),
@@ -970,7 +941,6 @@ test("prepares headings without requiring every indexed collection to support pr
       bakePreparedHeadings({
         root: projectRoot,
         base: "/docs",
-        indexedCollections: ["docs", "bodyless", "unwrapped"],
       }),
     "/docs",
   );
@@ -1006,7 +976,6 @@ test("joins concurrent rebakes and rejects symlinked agent-endpoint asset roots"
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let calls = 0;
   configureAgentEndpointAssetRoot(projectRoot, "dev", async () => {
@@ -1044,7 +1013,6 @@ test("queues a follow-up bake when invalidated during in-flight work", async () 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let calls = 0;
   let entered: (() => void) | undefined;
@@ -1084,7 +1052,6 @@ test("removes assets made obsolete by edits and deletions", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -1113,7 +1080,6 @@ test("scopes agent-endpoint asset demand to the current configuration session", 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   registerAgentEndpointAssetDemand(projectRoot);
@@ -1139,8 +1105,6 @@ test("bakes every Markdown asset at its public URL, API pages included, hidden A
     site: "https://example.test",
     title: "Test",
     socialImage: "/og.png",
-    indexedCollections: ["docs", "docs-v1", "api"],
-    apiCollections: ["api"],
     versions: { current: "v2", others: ["v1"] },
     apiEntries: [
       { ...visible, hidden: false },
@@ -1212,8 +1176,6 @@ test("fails when a docs page and an API page share a public Markdown path", asyn
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs", "api"],
-    apiCollections: ["api"],
     apiEntries: [{ ...apiPage("SmallCo API"), hidden: false }],
   };
   configure(projectRoot, options);

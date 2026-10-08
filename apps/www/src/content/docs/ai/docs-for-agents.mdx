@@ -153,7 +153,7 @@ Nimbus destroys only its isolated agent-search instance after observable executi
 
 ## How pages are indexed
 
-Indexing is multi-collection by default and schema-tolerant — every prepared collection registered in `src/content.config.ts` (except `partials` and reserved names) is walked, reading `title` and `description` when present. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.
+Indexing is multi-collection by default and schema-tolerant — every page collection (one made with Nimbus's helpers: `docsCollection()`, `componentsCollection()`, or a `withNimbusMarkdown()`-wrapped loader, plus API collections) is walked, reading `title` and `description` when present. Plain data collections are not indexed. There is no per-page opt-in; all discoverable pages are listed. Hidden versions are excluded, and `/llms-full.txt` omits non-current prose versions.
 
 Alternate Markdown/MDX versions and `llms.txt` indexes use public agent-endpoint assets. Request-time authorization cannot make private material safe here. Keep private material outside public content collections. Nimbus omits excluded entries and fails the build when it cannot determine whether content is public.
 

@@ -21,6 +21,11 @@ export interface NimbusMarkdownCapability {
 export interface PrepareMarkdownLoaderOptions extends NimbusMarkdownCapability {
   transform: (source: string, sourceId?: string) => string;
   transformRenderMarkdown?: boolean;
+  /**
+   * What the prepared collection is to Nimbus. `page` collections become
+   * pages; `partials` stay component content. Default `page`.
+   */
+  role?: "page" | "partials";
 }
 
 type StoreEntry = Parameters<LoaderContext["store"]["set"]>[0];
@@ -380,6 +385,7 @@ export function prepareMarkdownLoader<T extends Loader>(
             capability,
             sourceEntries,
             headings,
+            options.role ?? "page",
           );
         } catch (error) {
           rollback?.();

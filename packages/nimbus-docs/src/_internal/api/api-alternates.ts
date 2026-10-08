@@ -43,7 +43,7 @@ export async function buildApiVersionAlternates(
   );
   if (families.length === 0) return {};
 
-  const { pageUrl, resolveApiFamily } = await import("./resolve-versions.js");
+  const { pageUrl, resolveApiFamily, targetUrlFields } = await import("./resolve-versions.js");
   const { resolveSpecSource } = await import("./resolve-spec.js");
   const { buildApiModel, getApiPageSlugs } = await import("../../api/index.js");
   const { operationShapes } = await import("./view-model.js");
@@ -72,6 +72,7 @@ export async function buildApiVersionAlternates(
             spec: target.spec,
             label: target.label,
             mountPath: target.mountPath,
+            ...targetUrlFields(target),
             requireOperationId: target.requireOperationId,
             schemaPages: target.schemaPages,
             routes: target.routes,

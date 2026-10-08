@@ -6,7 +6,7 @@
  * payload). Version lives in the path via `mountPath`, never in the coordinate.
  */
 
-import { apiVersionQuery } from "./resolve-versions.js";
+import { apiVersionQuery, targetUrlFields } from "./resolve-versions.js";
 import {
   buildApiModel,
   getApiFieldCitations,
@@ -107,6 +107,7 @@ export async function buildCitationIndex(
         spec: target.spec,
         label: target.label,
         mountPath: target.mountPath,
+        ...targetUrlFields(target),
         requireOperationId: target.requireOperationId,
         schemaPages: target.schemaPages,
         routes: target.routes,

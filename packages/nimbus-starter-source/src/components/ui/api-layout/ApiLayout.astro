@@ -158,7 +158,7 @@ if (versionStatus?.isHidden) {
 
 
 <script>
-  import { mount, lockScroll, unlockScroll, generateId, initNavSidebar, restoreNavState, NAV_STATE_KEYS } from "@cloudflare/nimbus-docs/client";
+  import { mount, lockScroll, unlockScroll, generateId, initNavSidebar } from "@cloudflare/nimbus-docs/client";
 
   mount("[data-nb-nav-state]", initNavSidebar);
 
@@ -192,38 +192,16 @@ if (versionStatus?.isHidden) {
     };
 
     // One tree per page: the drawer borrows the rail's tree node while it
-    // is open and returns it on close. One restore path covers both hosts.
+    // is open and returns it on close. `initNavSidebar` restores the scroll
+    // whenever the tree is revealed.
     const tree = document.querySelector<HTMLElement>("[data-nb-api-tree]");
     const rail = tree?.parentElement ?? null;
     const drawerSlot = dialog.querySelector<HTMLElement>("[data-nb-api-drawer-slot]");
     const moveTreeToDrawer = () => {
-      if (tree && drawerSlot && tree.parentElement !== drawerSlot) {
-        const scroll = tree.scrollTop;
-        drawerSlot.append(tree);
-        if (scroll > 0) tree.scrollTop = scroll;
-      }
-    };
-    // After showModal(): a tree that was hidden until the drawer opened (the
-    // rail on a phone) has no live scroll, and the shared restore path only
-    // applies the saved one once the container is visible.
-    const restoreDrawerScroll = () => {
-      if (tree && tree.scrollTop === 0) restoreNavState(NAV_STATE_KEYS, tree, true);
-    };
-    // A closed dialog is display:none, where scrollTop reads 0 — capture
-    // the drawer's scroll before any close path hides it.
-    let drawerScroll = 0;
-    const captureDrawerScroll = () => {
-      if (tree && drawerSlot && tree.parentElement === drawerSlot) {
-        drawerScroll = tree.scrollTop;
-      }
+      if (tree && drawerSlot && tree.parentElement !== drawerSlot) drawerSlot.append(tree);
     };
     const moveTreeToRail = () => {
-      if (tree && rail && tree.parentElement !== rail) {
-        const scroll = tree.scrollTop || drawerScroll;
-        rail.prepend(tree);
-        tree.scrollTop = scroll;
-        drawerScroll = 0;
-      }
+      if (tree && rail && tree.parentElement !== rail) rail.prepend(tree);
     };
 
     const openSidebar = () => {
@@ -244,7 +222,6 @@ if (versionStatus?.isHidden) {
       // starts on the next frame (a double rAF delays it by two frames).
       void dialog.offsetWidth;
       dialog.dataset.state = "open";
-      restoreDrawerScroll();
 
       dialog.querySelector<HTMLElement>("[data-close-sidebar]")?.focus({ preventScroll: true });
     };
@@ -253,13 +230,11 @@ if (versionStatus?.isHidden) {
     const closeNow = () => {
       if (!dialog.open) return;
       clearTimer();
-      captureDrawerScroll();
       dialog.close();
     };
 
     const closeSidebar = () => {
       if (!dialog.open || dialog.dataset.state === "closing") return;
-      captureDrawerScroll();
       if (prefersReducedMotion()) {
         closeNow();
         return;

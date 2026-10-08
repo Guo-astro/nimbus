@@ -464,11 +464,12 @@
       "mode": "optional",
       "changeset": "lighter-sidebar-markup",
       "summary": "Sidebar groups become native details/summary with one class per row type, a CSS caret, and one tree shared by the desktop rail and the mobile drawer.",
-      "affected": "Sites with copied sidebar components (Sidebar, SidebarGroup, SidebarGroupHeader, SidebarLink, ApiSidebarItem, sidebar.client.ts) or styling that targets the old per-row Tailwind strings.",
+      "affected": "Sites with copied sidebar components (Sidebar, SidebarGroup, SidebarGroupHeader, SidebarLink, sidebar.client.ts, ApiSidebarItem), the layouts that host them (DocsLayout, ApiLayout), or styling that targets the old per-row Tailwind strings.",
       "instructions": [
         "No action is needed: the framework's state scripts drive both the old scripted-collapsible markup and the new native details markup, so existing copied components keep working.",
-        "To adopt the lighter markup, update unmodified components with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): page HTML for a large sidebar drops by roughly 80%, and each page renders one sidebar tree shared by the rail and the drawer.",
-        "Row styling is three global classes (nb-sidebar-link, nb-sidebar-row, nb-sidebar-list) defined once inside the sidebar atoms, so nimbus-docs add and diff carry the styling with the components; override the classes from src/styles/globals.css to restyle. The data-nb-sidebar-* attributes are unchanged.",
+        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference also updates src/components/ui/api-sidebar/ApiSidebarItem.astro and src/components/ui/api-layout/ApiLayout.astro in the same step. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
+        "Page HTML for a large sidebar drops by roughly 80%, and each page renders one sidebar tree shared by the rail and the drawer.",
+        "Row styling is three classes (nb-sidebar-link, nb-sidebar-row, nb-sidebar-list) in the \"Sidebar rows\" section of src/styles/globals.css, in Tailwind's components layer, so utilities on a row still win. If you edited globals.css, copy that section in by hand. The data-nb-sidebar-* attributes are unchanged.",
         "One visible change: a group with a landing page now lists it as the group's first child, labelled \"Overview\" — the summary row is label-only, so keyboard and screen-reader users get one disclosure control and one link.",
         "Groups open and close with no animation (native details). The old Collapsible/Accordion content components are unchanged."
       ],

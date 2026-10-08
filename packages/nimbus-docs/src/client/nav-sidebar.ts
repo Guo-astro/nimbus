@@ -338,12 +338,10 @@ export function initNavSidebar(root: HTMLElement): () => void {
   };
   root.addEventListener("click", onClick);
 
-  // A container restored while hidden gets its scroll when it is first
-  // shown. The current layouts render one tree and restore explicitly when
-  // the drawer reveals it, but older copied layouts keep a second, hidden
-  // drawer copy whose only restoration path is this observer — a newer
-  // nimbus-docs must keep driving them. Only scroll: disclosures have
-  // mounted and own their state from here on.
+  // A container restored while hidden gets its scroll when it is shown: the
+  // one tree moving into the mobile drawer, or an older layout's separate
+  // drawer copy opening. Only scroll: disclosures have mounted and own
+  // their state from here on.
   let visible = root.clientHeight > 0;
   const resize =
     typeof ResizeObserver === "undefined"

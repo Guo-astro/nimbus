@@ -14,7 +14,7 @@
 export { mount } from "./mount";
 export { initDocumentationWebMcp } from "./webmcp";
 export type { DocumentationWebMcpOptions } from "./webmcp";
-export { initNavSidebar, restoreNavState, NAV_STATE_KEYS } from "./nav-sidebar";
+export { initNavSidebar } from "./nav-sidebar";
 export { makeDisclosure } from "./disclosure";
 export type { DisclosureOptions, DisclosureInstance } from "./disclosure";
 export { initDisclosureGroup } from "./disclosure-group";

@@ -2,9 +2,8 @@
 /**
  * SidebarLink — a leaf row: `<a class="nb-sidebar-link">Label</a>`, with an
  * inner span only when a badge or the `leading` slot needs one. The row's
- * styling is the `nb-sidebar-link` class below — defined once, shipped with
- * the component so `nimbus-docs add`/`diff` carry it, overridable from your
- * own stylesheet.
+ * styling is the `nb-sidebar-link` class in `src/styles/globals.css`
+ * ("Sidebar rows").
  */
 import { cn } from "@/lib/cn";
 import type { HTMLAttributes } from "astro/types";
@@ -47,35 +46,3 @@ const plain = !hasLeading && !badge;
     </Fragment>
   )}
 </a>
-
-<style is:global>
-  /* `components` layer: callers' Tailwind utilities (a `px-1` or
-     `line-through` on a row) still win, and your own unlayered overrides
-     in globals.css win over both. */
-  @layer components {
-    .nb-sidebar-link {
-      display: flex;
-      min-height: 2rem;
-      align-items: center;
-      gap: 0.5rem;
-      border-radius: 0.5rem;
-      padding: 0.25rem 0.75rem;
-      font-size: 0.8125rem;
-      font-weight: 500;
-      color: var(--color-muted-foreground);
-      text-decoration: none;
-      overflow-wrap: break-word;
-    }
-    .nb-sidebar-link:hover {
-      background-color: var(--color-accent);
-      color: var(--color-foreground);
-    }
-    .nb-sidebar-link:focus-visible {
-      outline-offset: -2px;
-    }
-    .nb-sidebar-link[aria-current="page"] {
-      background-color: var(--color-accent);
-      color: var(--color-foreground);
-    }
-  }
-</style>

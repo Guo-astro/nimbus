@@ -141,13 +141,49 @@ function initPersistence(root: HTMLElement): (() => void) | null {
     root.closest<HTMLElement>("[data-nb-sidebar-tree]") ?? root.closest("aside") ?? root;
   const hash = root.dataset.nbSidebarHash ?? "";
 
+  function savedScroll(): number | null {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "null");
+      return saved?.hash === hash && typeof saved.scroll === "number" ? saved.scroll : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // A hidden tree (the rail on a phone) reads scrollTop 0: keep the last
+  // scroll it had while visible.
   function readState(): SidebarState {
     return {
       hash,
       open: groupsOf(root).map((group) => group.open),
-      scroll: scrollHost.scrollTop,
+      scroll: scrollHost.clientHeight > 0 ? scrollHost.scrollTop : (savedScroll() ?? 0),
     };
   }
+
+  // Shown after being hidden (the mobile drawer opening): apply the saved
+  // scroll, then bring the current page into view if it is outside it.
+  function restoreScroll() {
+    const scroll = savedScroll();
+    if (scroll !== null) scrollHost.scrollTop = scroll;
+    const active = root.querySelector("[aria-current='page']");
+    if (!active) return;
+    const box = scrollHost.getBoundingClientRect();
+    const item = active.getBoundingClientRect();
+    if (item.top < box.top || item.bottom > box.bottom) {
+      scrollHost.scrollTop += item.top - box.top - box.height / 2 + item.height / 2;
+    }
+  }
+
+  let visible = scrollHost.clientHeight > 0;
+  const resize =
+    typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(() => {
+          const nowVisible = scrollHost.clientHeight > 0;
+          if (nowVisible && !visible) restoreScroll();
+          visible = nowVisible;
+        });
+  resize?.observe(scrollHost);
 
   function save() {
     try {
@@ -179,6 +215,7 @@ function initPersistence(root: HTMLElement): (() => void) | null {
   scrollHost.addEventListener("scroll", handleScroll);
 
   return () => {
+    resize?.disconnect();
     root.removeEventListener("toggle", handleToggle, true);
     document.removeEventListener("visibilitychange", handleVisibility);
     window.removeEventListener("pagehide", save);

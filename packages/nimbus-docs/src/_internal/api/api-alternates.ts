@@ -155,19 +155,29 @@ export async function buildApiVersionAlternates(
       }
     }
 
+    // Union by size with full path compression keeps every chain short, so
+    // a long contradictory component stays near-linear to collect.
     const parent = new Map<string, string>();
+    const size = new Map<string, number>();
     const find = (key: string): string => {
       let root = key;
-      while (parent.get(root) !== undefined && parent.get(root) !== root) {
+      while (parent.has(root) && parent.get(root) !== root) {
         root = parent.get(root)!;
       }
-      parent.set(key, root);
+      for (let node = key; node !== root; ) {
+        const next = parent.get(node)!;
+        parent.set(node, root);
+        node = next;
+      }
       return root;
     };
     const union = (a: string, b: string) => {
-      const ra = find(a);
-      const rb = find(b);
-      if (ra !== rb) parent.set(ra, rb);
+      let ra = find(a);
+      let rb = find(b);
+      if (ra === rb) return;
+      if ((size.get(ra) ?? 1) > (size.get(rb) ?? 1)) [ra, rb] = [rb, ra];
+      parent.set(ra, rb);
+      size.set(rb, (size.get(ra) ?? 1) + (size.get(rb) ?? 1));
     };
     for (const [a, b] of candidates) union(a, b);
 

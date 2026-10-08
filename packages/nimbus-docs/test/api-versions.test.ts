@@ -609,7 +609,39 @@ describe("buildApiVersionAlternates — method-and-path fallback for renamed ope
     const record = table["m12@v1:oldId"]!;
     assert.equal(record.canonical!.version, "v2");
     assert.equal(record.canonical!.slug, "newId");
-    assert.match(record.canonical!.url, /\/m12\//);
+    assert.equal(record.canonical!.url, table["m12@v2:newId"]!.self.url);
+  });
+
+  test("an id that moves path bridges its old shape into one class", async () => {
+    const table = await buildApiVersionAlternates(
+      family("bridge", [
+        ["v1", [{ id: "a", path: "/x" }]],
+        ["v2", [{ id: "b", path: "/x" }]],
+        ["v3", [{ id: "b", path: "/y" }]],
+      ]),
+      FIXTURE_ROOT,
+    );
+    assert.deepEqual(classOf(table, "bridge@v1:a"), ["v1:a", "v2:b", "v3:b"]);
+  });
+
+  test("a long contradictory chain rejects as one component and keeps every exact-id class", async () => {
+    // Every candidate links into one chain (a_i–b_i, b_i–c_i, a_i–c_(i+1)),
+    // which an unbalanced union-find walks quadratically.
+    const n = 300;
+    const pad = (i: number) => String(i).padStart(4, "0");
+    const ops = (rows: Array<(i: number) => Op>) =>
+      Array.from({ length: n }, (_, i) => rows.map((row) => row(i))).flat();
+    const table = await buildApiVersionAlternates(
+      family("chain", [
+        ["v1", ops([(i) => ({ id: `a${pad(i)}`, path: `/x/${pad(i)}` }), (i) => ({ id: `c${pad(i)}`, path: `/z/${pad(i)}` })])],
+        ["v2", ops([(i) => ({ id: `a${pad(i)}`, path: `/y/${pad(i)}` }), (i) => ({ id: `b${pad(i)}`, path: `/z/${pad(i)}` })])],
+        ["v3", ops([(i) => ({ id: `b${pad(i)}`, path: `/x/${pad(i)}` }), (i) => ({ id: `c${pad(i)}`, path: `/y/${pad(i - 1)}` })])],
+      ]),
+      FIXTURE_ROOT,
+    );
+    assert.deepEqual(classOf(table, "chain@v1:a0007"), ["v1:a0007", "v2:a0007"]);
+    assert.deepEqual(classOf(table, "chain@v2:b0007"), ["v2:b0007", "v3:b0007"]);
+    assert.deepEqual(classOf(table, "chain@v1:c0007"), ["v1:c0007", "v3:c0007"]);
   });
 });
 

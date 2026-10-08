@@ -1062,7 +1062,7 @@ if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate } = result;
 ---
 
-<BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref ?? undefined}>
+<BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref}>
   <nav data-feasibility-picker>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
   </nav>

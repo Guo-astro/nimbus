@@ -65,7 +65,6 @@ const RUNTIME_EXPORTS = [
   "getApiFieldCitations",
   "getApiModel",
   "getApiNav",
-  "getApiOperationShapes",
   "getApiPageIndex",
   "getApiPageProps",
   "getApiPageSlugs",

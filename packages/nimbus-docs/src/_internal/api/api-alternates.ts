@@ -46,8 +46,9 @@ export async function buildApiVersionAlternates(
 
   const { resolveApiFamily } = await import("./resolve-versions.js");
   const { resolveSpecSource } = await import("./resolve-spec.js");
-  const { buildApiModel, getApiPageSlugs, getApiOperationShapes } =
-    await import("../../api/index.js");
+  const { buildApiModel, getApiPageSlugs } = await import("../../api/index.js");
+  const { operationShapes } = await import("./view-model.js");
+  const { unwrapModel } = await import("./model-handle.js");
 
   const table: VersionAlternatesTable = {};
 
@@ -87,7 +88,7 @@ export async function buildApiVersionAlternates(
           { cause: err },
         );
       }
-      shapesByVersion.set(target.version!, getApiOperationShapes(model));
+      shapesByVersion.set(target.version!, operationShapes(unwrapModel(model)));
       for (const { coordinate, slug } of getApiPageSlugs(model)) {
         const path =
           slug === "" ? target.mountPath : `${target.mountPath}/${slug}`;

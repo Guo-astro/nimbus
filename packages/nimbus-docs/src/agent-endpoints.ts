@@ -323,6 +323,25 @@ function createMarkdownRoute(surface: MarkdownEndpointSurface): MarkdownRoute {
           const url = requestAssetUrl(context.url, base);
           asset = url ? indexes.markdownByUrl.get(url) : undefined;
         }
+        if (!asset && surface === "markdown" && !reference) {
+          // Homepage Markdown without a root content entry, on a
+          // request-rendered root route: no asset exists at /index.md and a
+          // prebuilt /llms.txt can't be reached by rewrite, so the factory
+          // serves the site llms index itself.
+          const { base } = await loadAgentEndpointAssets();
+          if (requestAssetUrl(context.url, base) === "/index.md") {
+            const fallback = await getLlmsPayload(
+              { scope: "site", surface: "index" },
+              { request: context.request },
+            );
+            if (fallback) {
+              return {
+                body: fallback.body,
+                mediaType: "text/markdown; charset=utf-8",
+              };
+            }
+          }
+        }
         if (!asset || asset.surface !== surface) return null;
         return markdownPayload(asset, { request: context.request });
       }),
@@ -374,14 +393,30 @@ export async function getLlmsPayload(
   };
 }
 
-export async function getLlmsStaticPaths(): Promise<
+export async function getLlmsStaticPaths(context?: {
+  routePattern?: string;
+}): Promise<
   Array<{
     params: { section: string };
     props: { reference: LlmsEndpointReference };
     cacheKey: string;
   }>
 > {
-  const { llmsAssets } = await llmsIndex();
+  const [{ llmsAssets }, { routes }] = await Promise.all([
+    llmsIndex(),
+    import("virtual:nimbus/markdown-routes"),
+  ]);
+  // Skip sections a more specific llms.txt route owns: a mounted collection
+  // following its own rendering mode gets its own `/<mount>/llms.txt` route,
+  // and this shared route must not also prerender that URL.
+  let ownIndex = -1;
+  if (context?.routePattern) {
+    try {
+      ownIndex = findOwnMarkdownRoute(routes, context.routePattern, "llms");
+    } catch {
+      ownIndex = -1;
+    }
+  }
   return llmsAssets
     .filter(
       (
@@ -390,6 +425,15 @@ export async function getLlmsStaticPaths(): Promise<
         LlmsEndpointAsset,
         { scope: "section" }
       > => asset.scope === "section" && asset.surface === "index",
+    )
+    .filter(
+      (asset) =>
+        ownIndex < 0 ||
+        !higherMarkdownRouteOwner(
+          routes,
+          ownIndex,
+          `/${asset.section}/llms.txt`,
+        ),
     )
     .map((asset) => ({
       params: { section: asset.section },

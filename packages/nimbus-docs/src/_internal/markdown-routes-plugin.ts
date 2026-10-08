@@ -36,6 +36,9 @@ const DYNAMIC_IMPORT = new RegExp(String.raw`\bimport\s*\(\s*${AGENT_ENDPOINTS}\
 const FACTORIES = {
   markdownSourceRoute: "source",
   markdownRoute: "markdown",
+  llmsRoute: "llms",
+  llmsFullRoute: "llms",
+  llmsSectionRoute: "llms",
 } as const satisfies Record<string, MarkdownRouteSurface>;
 
 type ResolvedRouteInput = Pick<
@@ -46,8 +49,14 @@ type ResolvedRouteInput = Pick<
 function markdownFileSegment(route: ResolvedRouteInput): string | undefined {
   if (route.type !== "endpoint") return undefined;
   const last = route.segments?.at(-1);
-  if (last?.length !== 1 || last[0]!.dynamic) return undefined;
-  return /\.mdx?$/u.test(last[0]!.content) ? last[0]!.content : undefined;
+  if (!last) return undefined;
+  // The injected per-mount llms route uses a dynamic last segment
+  // ("[llms].txt") so an absent section emits nothing; its one URL is still
+  // a section index and must be recorded for route-priority skipping.
+  if (route.pattern.endsWith("/[llms].txt")) return "llms.txt";
+  if (last.length !== 1 || last[0]!.dynamic) return undefined;
+  const file = last[0]!.content;
+  return /\.mdx?$/u.test(file) || file === "llms.txt" ? file : undefined;
 }
 
 function escapeRegExp(value: string): string {
@@ -81,7 +90,7 @@ export function sharedMarkdownRouteSurface(
     }
     if (DYNAMIC_IMPORT.test(code)) callees.set(factory, surface);
   }
-  for (const surface of ["source", "markdown"] as const) {
+  for (const surface of ["source", "markdown", "llms"] as const) {
     for (const [callee, calleeSurface] of callees) {
       if (
         calleeSurface === surface &&
@@ -104,7 +113,11 @@ export function recordMarkdownRoutes(
     if (!file) continue;
     const source = readSource(route.entrypoint);
     const shared = source ? sharedMarkdownRouteSurface(source) : undefined;
-    if (shared) {
+    // A policy-managed factory route may render on request since agent files
+    // follow the rendering policy, so "not prerendered" is no longer an
+    // error here: the policy set the mode, and on request the factory looks
+    // its file up by URL.
+    if (shared && shared !== "llms" && /\.mdx?$/u.test(file)) {
       const factory =
         shared === "markdown" ? "markdownRoute()" : "markdownSourceRoute()";
       const extension = shared === "markdown" ? ".md" : ".mdx";
@@ -114,14 +127,6 @@ export function recordMarkdownRoutes(
             `but its route ends in "${file}". Use ${
               shared === "markdown" ? "markdownSourceRoute()" : "markdownRoute()"
             } there, or rename the file.`,
-        );
-      }
-      if (!route.isPrerendered) {
-        throw new Error(
-          `nimbus-docs: ${route.entrypoint} uses ${factory} but is not prerendered. ` +
-            "Shared Markdown routes serve files baked at build time and only work " +
-            "prerendered; on request, a request-rendered page route such as " +
-            "src/pages/api/[...slug].astro outranks them. Add `export const prerender = true;` to the file.",
         );
       }
     }

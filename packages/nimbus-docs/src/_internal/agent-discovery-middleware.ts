@@ -47,11 +47,26 @@ async function publishedMarkdown(context: APIContext, pathname: string): Promise
     const { fetchAgentEndpointAsset } = await import("virtual:nimbus/agent-endpoint-asset-loader");
     const asset = await fetchAgentEndpointAsset(path, context.request);
     if (asset?.status === 404) {
-      if (pathname === "/index.md" && options.homepageMarkdownFallback) return await homepageMarkdownFallback(context);
+      if (pathname === "/index.md" && options.homepageMarkdownFallback) {
+        // A prebuilt /llms.txt can't be reached by rewrite from a
+        // request-rendered homepage; fall through to the /index.md route,
+        // whose factory serves the site llms payload itself.
+        try {
+          const fallback = await homepageMarkdownFallback(context);
+          if (fallback) return fallback;
+        } catch {}
+      }
       const route = await context.rewrite(pathname);
       return route.ok && route.headers.get("Content-Type")?.includes("text/markdown") ? route : undefined;
     }
     if (asset) return asset.ok ? asset : undefined;
+    // No assets binding (non-Cloudflare server): a request-rendered Markdown
+    // route has no public file, so try the in-process rewrite first and fall
+    // back to fetching the deployed file from the configured origin.
+    try {
+      const route = await context.rewrite(pathname);
+      if (route.ok && route.headers.get("Content-Type")?.includes("text/markdown")) return route;
+    } catch {}
     const origin = import.meta.env.DEV ? context.url.origin : new URL(options.site).origin;
     const url = new URL(path, origin);
     if (url.origin !== origin) return undefined;

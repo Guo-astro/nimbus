@@ -10,7 +10,7 @@
  * imports, so the factories can use it from a prerender or Worker bundle.
  */
 
-export type MarkdownRouteSurface = "markdown" | "source";
+export type MarkdownRouteSurface = "markdown" | "source" | "llms";
 
 export interface MarkdownRouteRecord {
   pattern: string;
@@ -65,7 +65,11 @@ export function findOwnMarkdownRoute(
     return candidates[0]!.index;
   }
   const factory =
-    surface === "markdown" ? "markdownRoute()" : "markdownSourceRoute()";
+    surface === "markdown"
+      ? "markdownRoute()"
+      : surface === "source"
+        ? "markdownSourceRoute()"
+        : "llmsSectionRoute()";
   if (candidates.length === 0) {
     throw new Error(
       `nimbus-docs: ${factory} is used by route ${routePattern}, but that route ` +

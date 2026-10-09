@@ -1,5 +1,46 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.7.11
+
+### Patch Changes
+
+- [#204](https://github.com/cloudflare/nimbus/pull/204) [`a8e0d02`](https://github.com/cloudflare/nimbus/commit/a8e0d02232da3e0e9f6e1bb619651993403ca504) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Agent files follow the rendering policy: a page's `index.md`/`index.mdx` renders in its collection's mode, a section's `llms.txt` in the mode of the collection it lists, `llms.txt`/`llms-full.txt` in `rendering.default`, and homepage Markdown in the root collection's mode. Mounted collections get their own agent routes, copied starter routes keep working unchanged, and static sites don't change.
+
+- [#201](https://github.com/cloudflare/nimbus/pull/201) [`855091c`](https://github.com/cloudflare/nimbus/commit/855091cb8403c78f9c62b8278b62027262b4c237) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Add `samples.generate` to choose which languages Nimbus generates code samples in, and fix generated samples and examples that sent different values from the page.
+
+  - **`samples.generate`:** set `samples: { generate: ["curl"] }` on an `api` entry to generate only a cURL request, instead of cURL, TypeScript, and Python, on every operation. `[]` generates none, so operations show only their authored `x-codeSamples`. The default is unchanged: all three. `samples.keepGenerated` still picks the generated languages shown next to authored samples; each of its languages must now also be in `generate`.
+  - **Python and TypeScript bodies:** in Python, a string containing a newline, carriage return, or tab no longer breaks the sample with a `SyntaxError`, and object keys with quotes or backslashes stay valid. In both languages, a backslash is no longer read as an escape (`C:\\temp\\new` was sent with a tab and a newline), including in text bodies such as `text/plain`. A JSON body of `false`, `0`, or `""` is now sent instead of dropped.
+  - **cURL bodies:** a body containing `'` was passed through an unquoted heredoc, so the shell collapsed backslashes and ran `$NAME` and backticks in the example when the sample was pasted. The heredoc is now quoted.
+  - **Form bodies:** `application/x-www-form-urlencoded` bodies were dropped from every sample and are now sent in all three languages. A property with an `encoding` entry follows OpenAPI: `style`, `explode`, or `allowReserved` select query-style serialization, and an entry without them sends the value as its `contentType`, so an object is sent as JSON. A property without an entry nests objects in brackets (`metadata[plan]=pro`), repeats the name for each item of a scalar array (`tags=a&tags=b`), and indexes arrays of objects (`items[0][price]=p_1`). A string example is read as an encoded form; a form example with no fields sends no body. `multipart/form-data` bodies are still omitted.
+  - **Form encoding:** explicit JSON content types serialize scalar values as JSON before form encoding. `allowReserved: true` preserves valid percent-encoded triples and safe reserved characters without double encoding; form delimiters and unsafe characters remain encoded.
+  - **cURL text bodies:** a body starting with `@` is sent as text instead of uploading the file it names.
+  - **Joined form values:** a `,`, `|`, or space inside an array item no longer reads as a separator with `explode: false`, unless `allowReserved: true` leaves a `,` unencoded.
+  - **Empty form field names:** cURL now sends `=value` like the other languages.
+  - **Request example:** an operation without code samples, such as with `samples.generate: []`, shows its request example on the page.
+  - **Swagger 2.0:** a Swagger 2.0 document now fails the build with `Swagger 2.0 isn't supported. Convert it to OpenAPI 3.x first.` and the document's path, instead of building pages with no server URL, `unknown` parameter types, and missing response schemas. The API reference docs show how to convert one before each build.
+
+  If the installed httpsnippet writes a body differently from the layout Nimbus corrects, that language's sample is left out rather than shown with an unescaped body. Authored `x-codeSamples` are unchanged. New sites scaffolded by `create-nimbus-docs` use this release.
+
+- [#207](https://github.com/cloudflare/nimbus/pull/207) [`d77ff08`](https://github.com/cloudflare/nimbus/commit/d77ff0888964d78e86f01cf6570c032836898d26) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - A request-rendered API family can set `versionMode: "query"`: one URL per operation, the version in `?api-version=` (absent means the default, unknown is 404, hidden versions reachable by query only). Generated same-version links carry the query; discovery covers the default version at version-free URLs; non-default pages are `noindex` with the default counterpart as canonical. Path mode stays the default and is unchanged.
+  - API version ids may contain dots, and must start and end with a letter or digit. An id like `-v1` or `v1-` now fails validation; rename it.
+
+- [#195](https://github.com/cloudflare/nimbus/pull/195) [`b685092`](https://github.com/cloudflare/nimbus/commit/b6850929ba3219614aeb5da1cee2cde2c5bfd190) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Add discovery files, homepage Markdown, and Link headers to all sites.
+  - Add editable Content Signals to the starter's robots.txt.
+
+- [#205](https://github.com/cloudflare/nimbus/pull/205) [`7b76521`](https://github.com/cloudflare/nimbus/commit/7b765216aba248882e3d35c1226f9e63bb47e279) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Sidebar groups are native `details`/`summary` with one class per row type, a CSS caret, and no animation; a group's landing page lists as an "Overview" child row. Each page renders one sidebar tree, shared by the desktop rail and the mobile drawer, and a large sidebar's page HTML drops by roughly 80%. The state scripts drive the old copied markup too.
+
+- [#203](https://github.com/cloudflare/nimbus/pull/203) [`62d7956`](https://github.com/cloudflare/nimbus/commit/62d79561b3cdbe05342b9858c9eafd1da9e12d5a) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Only collections made with Nimbus's helpers (`docsCollection()`, `componentsCollection()`, `withNimbusMarkdown()`) become pages; every other collection is plain Astro data with no naming rule, and the `_` prefix convention is removed. If `rendering` is set, a site's own page collection with a catch-all route now needs an entry in `rendering.collections`.
+
+- [#196](https://github.com/cloudflare/nimbus/pull/196) [`2e200ce`](https://github.com/cloudflare/nimbus/commit/2e200ce500e487aad0e23a1c09a401d4f69f9db1) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - The starter registers a `search_documentation` WebMCP tool, backed by the site's Pagefind index.
+
+- [#200](https://github.com/cloudflare/nimbus/pull/200) [`c17a945`](https://github.com/cloudflare/nimbus/commit/c17a945a811573731861e6cde132a56bddabecbc) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - On server output, a request-rendered page returns its Markdown when the request prefers `text/markdown`; the URL stays canonical and both forms send `Vary: Accept`.
+  - The starter homepage renders on request when a collection already does under server output, so it negotiates too. All-build homepages remain prerendered in production.
+  - Preserve owner static-header rules while adding discovery fields, and support prose request rendering and published Markdown negotiation through Astro adapters and standard HTTP on non-Cloudflare deployments.
+  - Recreate the isolated browser-agent Pagefind instance after observable search failures and give accurate connection/reload guidance. Pagefind's swallowed index-chunk failures remain a documented upstream limitation.
+  - Include a release-matched agent-interface guide in the framework package and point generated project instructions to it.
+- Updated dependencies [[`a8e0d02`](https://github.com/cloudflare/nimbus/commit/a8e0d02232da3e0e9f6e1bb619651993403ca504), [`855091c`](https://github.com/cloudflare/nimbus/commit/855091cb8403c78f9c62b8278b62027262b4c237), [`d77ff08`](https://github.com/cloudflare/nimbus/commit/d77ff0888964d78e86f01cf6570c032836898d26), [`86b573a`](https://github.com/cloudflare/nimbus/commit/86b573a8e46ce83b8af879b3bfab8417bfc7d0e8), [`b8a8dbd`](https://github.com/cloudflare/nimbus/commit/b8a8dbd45eb69d980113ae982130aefba947fdc5), [`b685092`](https://github.com/cloudflare/nimbus/commit/b6850929ba3219614aeb5da1cee2cde2c5bfd190), [`7b8c3e8`](https://github.com/cloudflare/nimbus/commit/7b8c3e8575ef066548ea58b7a6fb0d136d11086b), [`7b76521`](https://github.com/cloudflare/nimbus/commit/7b765216aba248882e3d35c1226f9e63bb47e279), [`62d7956`](https://github.com/cloudflare/nimbus/commit/62d79561b3cdbe05342b9858c9eafd1da9e12d5a), [`2e200ce`](https://github.com/cloudflare/nimbus/commit/2e200ce500e487aad0e23a1c09a401d4f69f9db1), [`c17a945`](https://github.com/cloudflare/nimbus/commit/c17a945a811573731861e6cde132a56bddabecbc), [`bcc1b1e`](https://github.com/cloudflare/nimbus/commit/bcc1b1ed9972de34ff60fa260b77d0cf7990be29), [`bcfe446`](https://github.com/cloudflare/nimbus/commit/bcfe4466a972784c1eaa2d74d52af7c6f419cbc8)]:
+  - @cloudflare/nimbus-docs@0.17.0
+
 ## 0.7.10
 
 ### Patch Changes

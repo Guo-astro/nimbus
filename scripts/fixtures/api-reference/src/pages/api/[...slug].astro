@@ -24,7 +24,7 @@ const socialImage = new URL(page.href, Astro.url).search
 <BaseLayout
   title={page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
-  markdownUrl={page.markdownHref ?? undefined}
+  markdownUrl={page.markdownHref}
   socialImage={socialImage}
   collection={collection}
   apiVersion={version ?? undefined}

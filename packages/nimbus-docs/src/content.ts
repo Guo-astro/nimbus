@@ -278,13 +278,6 @@ export interface ApiCollectionOptions {
    * one of `spec` or `versions`.
    */
   versions?: ApiVersionSpec[];
-  /**
-   * How versions are addressed in URLs: `"path"` (default) mounts each
-   * non-default version under `/<collection>/<version>`; `"query"` keeps one
-   * URL per operation and selects the version with `?api-version=<id>`.
-   * Mirrors the `api[].versionMode` entry in the Nimbus config.
-   */
-  versionMode?: "path" | "query";
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
   /** Publish a page per `components/schemas` entry. Default false. */
@@ -350,7 +343,6 @@ export function apiCollection(options?: ApiCollectionOptions): {
     spec: options.spec,
     label: options.label,
     versions: options.versions,
-    versionMode: options.versionMode,
     requireOperationId: options.requireOperationId,
     schemaPages: options.schemaPages,
     samples: options.samples,
@@ -376,23 +368,29 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, versionMode, requireOperationId, schemaPages, samples, routes } =
+      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, routes } =
         explicit ?? registered!;
-      // The sidebar mode always comes from the Nimbus config's `api` entry:
-      // request rendering and the build's component check read it there too.
-      const sidebar = (
+      // The sidebar and version modes always come from the Nimbus config's
+      // `api` entry: request rendering and the build's component check read
+      // them there too, so a second value could only disagree.
+      const entry =
         registered ??
         getRegisteredApiCollections(astroConfig.root)?.find(
-          (entry) => entry.collection === collection,
-        )
-      )?.sidebar;
-      const explicitSidebar = (options as { sidebar?: unknown } | undefined)?.sidebar;
-      if (explicit && explicitSidebar !== undefined && explicitSidebar !== sidebar) {
-        logger.warn(
-          `apiCollection({ collection: "${collection}" }) sets \`sidebar\`, which is read only from the ` +
-            `\`api\` entry in the Nimbus config (astro.config.*). Using ${sidebar ? `"${sidebar}"` : `"full"`}; ` +
-            `set \`sidebar\` on that entry instead.`,
+          (candidate) => candidate.collection === collection,
         );
+      const sidebar = entry?.sidebar;
+      const versionMode = entry ? entry.versionMode : (options as { versionMode?: "path" | "query" } | undefined)?.versionMode;
+      for (const [key, used, shown] of [
+        ["sidebar", sidebar, sidebar ?? "full"],
+        ["versionMode", versionMode, versionMode ?? "path"],
+      ] as const) {
+        const passed = (options as Record<string, unknown> | undefined)?.[key];
+        if (explicit && passed !== undefined && passed !== used) {
+          logger.warn(
+            `apiCollection({ collection: "${collection}" }) sets \`${key}\`, which is read only from the ` +
+              `\`api\` entry in the Nimbus config (astro.config.*). Using "${shown}"; set \`${key}\` on that entry instead.`,
+          );
+        }
       }
       noteApiCollectionLoad(astroConfig.root, context.collection, collection);
 

@@ -19,7 +19,7 @@ const requestProbe = Astro.request.headers.get("x-nimbus-probe") ?? "";
 <BaseLayout
   title={page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
-  markdownUrl={page.markdownHref ?? undefined}
+  markdownUrl={page.markdownHref}
   collection="api"
   coordinate={coordinate}
 >

@@ -119,11 +119,11 @@ class ModelView {
     return this.model.pages.pages.has(coordinate);
   }
 
-  markdownHref(coordinate: Coordinate): string | null {
+  markdownHref(coordinate: Coordinate): string | undefined {
     // A non-default query-mode page has no per-page Markdown affordance:
     // only default-version entries publish twins, and this page's
     // version-free `.md` URL would be another version's content.
-    if (this.model.urlQuery) return null;
+    if (this.model.urlQuery) return undefined;
     return `${this.routePath(coordinate)}/index.md`;
   }
 }

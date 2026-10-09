@@ -61,7 +61,7 @@ curl -I https://docs.example.com/docs/index.md
 
 ### Content Signals
 
-The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs upgrade` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
+The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs migrate` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
 ## API catalog and published specs
 

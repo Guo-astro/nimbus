@@ -84,7 +84,7 @@ walk(nav.items as never);
       collection={collection}
       apiVersion={version ?? undefined}
       coordinate={coordinate}
-      markdownUrl={page.markdownHref ?? undefined}
+      markdownUrl={page.markdownHref}
       socialImage={socialImage}
     />
   </head>
@@ -212,7 +212,7 @@ export const collections = {
   core: defineCollection(apiCollection()),
   qx: defineCollection(apiCollection({
     collection: "qx",
-    versionMode: "query",
+    versionMode: "path",
     versions: [
       { version: "v2", spec: "./specs/qx-v2.json", default: true },
       { version: "v1", spec: "./specs/qx-v1.json" },
@@ -531,7 +531,7 @@ test("the sitemap lists each visible path once, version-free, with the family pr
   assert.ok(!xml.includes("legacy-report"), "no old-only pages");
 });
 
-test("explicit apiCollection options carry versionMode; getApiModel builds query-form models", async () => {
+test("explicit apiCollection options follow the config entry's versionMode; getApiModel builds query-form models", async () => {
   const old = await page("/qx/ping/?api-version=v1");
   assert.equal(old.status, 200);
   assert.match(old.html, /data-version="v1"/);

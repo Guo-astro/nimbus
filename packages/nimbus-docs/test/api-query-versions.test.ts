@@ -314,7 +314,7 @@ test("one spec never aliases path-form and query-form models in the cache", asyn
   assert.equal(getApiPageProps(plain, "ping").href, "/alias/v1/ping/");
   assert.equal(getApiPageProps(plain, "ping").markdownHref, "/alias/v1/ping/index.md");
   assert.equal(getApiPageProps(query, "ping").href, "/alias/ping/?api-version=v1");
-  assert.equal(getApiPageProps(query, "ping").markdownHref, null);
+  assert.equal(getApiPageProps(query, "ping").markdownHref, undefined);
 });
 
 describe("hidden versions and the sitemap", () => {

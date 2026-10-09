@@ -137,8 +137,8 @@ frontmatter and one paragraph of body text explaining it's a placeholder.
 Print a short, exact plan to the user **before** writing anything, listing:
 
 - Files to create
-- Existing files to edit (just `content.config.ts`; possibly
-  `astro.config.ts` if versioning wiring is requested in step 5)
+- Existing files to edit (`content.config.ts`; `astro.config.ts` when it sets
+  `rendering` (step 4d) or versioning wiring is requested in step 5)
 - The resulting URLs (e.g. `/blog/welcome`, `/blog/llms.txt`,
   `/blog/welcome/index.md`)
 
@@ -209,7 +209,7 @@ import {
   getRouteFlags,
   getTOC,
   stripBase,
-} from "@cloudflare/nimbus-docs";
+} from "@cloudflare/nimbus-docs/runtime";
 import { components } from "../../components";
 
 export const prerender = true;
@@ -276,6 +276,23 @@ always (`docs-v1` collection → `v1` prefix).
 If the user's primary `DocsLayout` accepts an `audience` prop or any other
 field not listed above, mirror it. If it drops one of the props above, drop
 that prop here too.
+
+### 4d. Add the collection to the rendering policy (if one is set)
+
+If the Nimbus config sets `rendering` (Cloudflare scaffolds do, with
+`rendering: { default: "request" }`), add the collection to
+`rendering.collections`. `rendering.default` doesn't cover a page collection
+with its own catch-all route, so the build fails until it's listed:
+
+```ts
+rendering: {
+  default: "request",
+  collections: { <collection>: "request" },
+},
+```
+
+Use `"request"` to render it like the rest of a request-rendered site, or
+`"build"` to prerender it. Without a `rendering` option, skip this step.
 
 ## 5. Adding a docs version? Stop and use `nimbus-docs add new-version`
 

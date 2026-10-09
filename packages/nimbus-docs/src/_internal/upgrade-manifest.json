@@ -467,7 +467,7 @@
       "affected": "Sites with copied sidebar components (Sidebar, SidebarGroup, SidebarGroupHeader, SidebarLink, sidebar.client.ts, ApiSidebarItem), the layouts that host them (DocsLayout, ApiLayout), or styling that targets the old per-row Tailwind strings.",
       "instructions": [
         "No action is needed: the framework's state scripts drive both the old scripted-collapsible markup and the new native details markup, so existing copied components keep working.",
-        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference also reinstalls the api-sidebar and api-layout registry components in the same step: nimbus-docs add api-sidebar --overwrite and nimbus-docs add api-layout --overwrite, then review the change with git diff and reapply your own edits. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
+        "To adopt the lighter markup, update these files together with nimbus-docs diff <file> --apply (nimbus-docs outdated lists them): src/components/ui/sidebar/*, src/layouts/DocsLayout.astro, and src/styles/globals.css. The API sidebar composes the same atoms, so a site with an API reference then reinstalls the api-sidebar and api-layout registry components, last: nimbus-docs add api-sidebar --overwrite and nimbus-docs add api-layout --overwrite. Commit first: reinstalling also replaces the components they depend on, including src/components/ui/sidebar/*, so review the change with git diff and reapply your own edits. Updating only some of these files breaks the sidebar's styling or restoring open groups across pages.",
         "Page HTML for a large sidebar drops by roughly 80%, and each page renders one sidebar tree shared by the rail and the drawer.",
         "Row styling is three classes (nb-sidebar-link, nb-sidebar-row, nb-sidebar-list) in the \"Sidebar rows\" section of src/styles/globals.css, in Tailwind's components layer, so utilities on a row still win. If you edited globals.css, copy that section in by hand. The data-nb-sidebar-* attributes are unchanged.",
         "One visible change: a group with a landing page now lists it as the group's first child, labelled \"Overview\" — the summary row is label-only, so keyboard and screen-reader users get one disclosure control and one link.",
@@ -486,7 +486,7 @@
       "summary": "The starter ApiBody shows an operation's request example when it has no code samples.",
       "affected": "Projects with a copied src/components/ui/api-layout/ApiBody.astro that use samples.generate to drop generated languages: an operation left without samples showed no request body example in HTML.",
       "instructions": [
-        "Reinstall the api-layout registry component with nimbus-docs add api-layout --overwrite, then review the change with git diff and reapply your own edits.",
+        "Commit first, then reinstall the api-layout registry component with nimbus-docs add api-layout --overwrite. It also replaces the components it depends on, including the sidebar, so do this after the lighter-sidebar-markup step has updated src/styles/globals.css, then review the change with git diff and reapply your own edits.",
         "In a customized copy, when page.requestExamples is empty and page.samples is empty, render page.example (its highlightedHtml) as the request example."
       ],
       "verify": [
@@ -537,7 +537,7 @@
       "affected": "Projects with a copied VersionSwitcher that adopt versionMode: \"query\" — the old copy drops ?api-version= from the active item, so clicking it would jump to the default version.",
       "instructions": [
         "If the project doesn't use versionMode: \"query\", no change is needed; the updated component is otherwise identical.",
-        "Reinstall the version-switcher registry component with nimbus-docs add version-switcher --overwrite, then review the change with git diff and reapply your own edits.",
+        "Commit first, then reinstall the version-switcher registry component with nimbus-docs add version-switcher --overwrite. It also replaces the components it depends on, so review the change with git diff and reapply your own edits.",
         "In a customized copy, take the active item's href from the page's own alternates record (record.self.url), and without one use the current pathname plus that version's ?api-version= query. Don't copy the whole query string: unrelated parameters such as utm_source don't belong in the link."
       ],
       "verify": [

@@ -43,7 +43,7 @@ For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copie
   </Step>
 </Steps>
 
-If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Missing files are always added, and `add` lists every file it adds and every differing file it keeps. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component since installing it, or when `nimbus.json` has no record of installing it; review the change with `git diff`:
+If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Missing files are always added, and `add` lists every file it adds and every differing file it keeps. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component. Edits are detected from its install record in `nimbus.json` or, for a component that came with the starter, from the starter release your site came from (`--template-dir <path>` compares against a local checkout offline). When neither is available, it asks anyway. Review the change with `git diff`:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 

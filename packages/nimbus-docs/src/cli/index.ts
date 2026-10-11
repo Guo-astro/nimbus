@@ -35,7 +35,7 @@ import {
 } from "./adapter.js";
 import { BUNDLED_INDEX } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents, registerHint } from "./component.js";
+import { installComponents, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
 import { installFeature, shouldUseAgentHandoff } from "./feature.js";
 import { initCommand } from "./init.js";
@@ -130,7 +130,7 @@ const HELP = `
     --diff                         \`migrate\`: print proposed edits without prompting or writing
     --all                          \`outdated\`/\`diff\`: include content files (hidden by default)
     --to <templates-vX.Y.Z>        \`outdated\`/\`diff\`: compare against a specific tag (default latest)
-    --template-dir <path>          \`outdated\`/\`diff\`: compare against a local checkout (offline)
+    --template-dir <path>          \`outdated\`/\`diff\`/\`add\`: compare against a local checkout (offline)
     --print                        \`add\`/\`migrate\`: print an agent task without writing
     --force                        \`init\`: rebuild an existing nimbus.json
     --root <dir>                   \`init\`: src dir to scan (monorepo; default src)
@@ -291,6 +291,7 @@ async function main(): Promise<void> {
       print: args.print,
       overwrite: args.overwrite,
       adapter: args.adapter,
+      templateDir: args["template-dir"],
     });
     return;
   }
@@ -377,7 +378,7 @@ const ADAPTER_SLUGS: Record<string, AdapterId> = Object.fromEntries(
 
 async function addCommand(
   slug: string,
-  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string },
+  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
 ): Promise<void> {
   if (slug === "server-output") {
     const adapterId = parseAdapterFlag(flags.adapter);
@@ -458,13 +459,17 @@ async function addCommand(
   const skew = registryVersionWarning(items.find((i) => i.name === slug)?.version, projectVersion);
   if (skew) p.log.warn(skew);
 
+  const starter = starterBaseline(nimbus, srcRoot, flags.templateDir);
+  process.once("exit", () => starter?.cleanup());
   const report = await installComponents(items, {
     cwd,
     yes: flags.yes,
     overwrite: flags.overwrite,
     srcRoot,
     recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
+    starter,
   });
+  starter?.cleanup();
 
   const lines: string[] = [];
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;

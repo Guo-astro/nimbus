@@ -17,16 +17,18 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
 import * as p from "@clack/prompts";
 
 import { componentsMapBody } from "../_internal/parse-components-registry.js";
 import { stripComments, stripStrings } from "../_internal/parse-object-literal.js";
-import { bytesHash } from "./nimbus-json.js";
+import { readTreeFile, resolveTemplateTree, type FetchedTree } from "./_templates.js";
+import { bytesHash, type NimbusJson } from "./nimbus-json.js";
 import { addCommand, detectPackageManager } from "./pm.js";
 import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
+import { starterProjectPath } from "./upgrade.js";
 
 export interface InstallOptions {
   /** User's project root. */
@@ -40,6 +42,8 @@ export interface InstallOptions {
   srcRoot?: string;
   /** Each installed slug's record in nimbus.json, to tell local edits from upstream changes. */
   recorded?: ReadonlyMap<string, { hash: string | null; files: readonly string[] }>;
+  /** The starter release the site came from, to tell edits on components it shipped. */
+  starter?: StarterBaseline | null;
 }
 
 export interface InstallReport {
@@ -116,7 +120,10 @@ export async function installComponents(
     let keep = false;
     const edits =
       conflicts.length > 0 && options.overwrite && !options.yes && process.stdin.isTTY
-        ? localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src")
+        ? await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
+            files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
+            baseline: options.starter ?? null,
+          })
         : "none";
     if (edits !== "none") {
       // `--overwrite` replaces upstream changes freely, but asks before
@@ -268,25 +275,92 @@ function assertResolvedInsideSrc(
 }
 
 /**
- * Whether the files recorded at install still hash to the recorded source.
- * Compares the installed set, not the registry's current one, so an upstream
- * file added or removed isn't mistaken for an edit.
+ * Whether a component was edited since it was installed. With an install
+ * record, whether its files still hash to the recorded source; it compares the
+ * installed set, not the registry's current one, so an upstream file added or
+ * removed isn't mistaken for an edit. Without one, whether `starter.files`
+ * match the starter release the site came from; a file the starter never
+ * shipped doesn't count.
  */
-export function localEdits(
+export async function localEdits(
   record: { hash: string | null; files: readonly string[] } | undefined,
   cwd: string,
   srcRoot: string,
-): "none" | "edited" | "unknown" {
-  if (!record?.hash || record.files.length === 0) return "unknown";
-  const prefix = `${srcRoot.replace(/\/+$/, "")}/`;
-  const files: { path: string; content: string }[] = [];
-  for (const file of record.files) {
-    if (!file.startsWith(prefix)) return "unknown";
-    const abs = resolve(cwd, file);
-    if (!existsSync(abs)) return "edited";
-    files.push({ path: file.slice(prefix.length), content: readFileSync(abs, "utf8") });
+  starter?: { files: readonly string[]; baseline: StarterBaseline | null },
+): Promise<"none" | "edited" | "unknown"> {
+  if (record?.hash && record.files.length > 0) {
+    const prefix = `${srcRoot.replace(/\/+$/, "")}/`;
+    const files: { path: string; content: string }[] = [];
+    for (const file of record.files) {
+      if (!file.startsWith(prefix)) return "unknown";
+      const abs = resolve(cwd, file);
+      if (!existsSync(abs)) return "edited";
+      files.push({ path: file.slice(prefix.length), content: readFileSync(abs, "utf8") });
+    }
+    return bytesHash(files) === record.hash ? "none" : "edited";
   }
-  return bytesHash(files) === record.hash ? "none" : "edited";
+
+  if (!starter?.baseline) return "unknown";
+  let compared = 0;
+  for (const file of starter.files) {
+    let shipped: string | null;
+    try {
+      shipped = await starter.baseline.read(file);
+    } catch {
+      return "unknown"; // offline, or the release can't be fetched
+    }
+    if (shipped === null) continue;
+    if (readFileSync(resolve(cwd, file), "utf8") !== shipped) return "edited";
+    compared++;
+  }
+  return compared > 0 ? "none" : "unknown";
+}
+
+export interface StarterBaseline {
+  /** A project file as the site's starter release shipped it, or null when it
+   * shipped no such file. Rejects when the release can't be fetched. */
+  read: (file: string) => Promise<string | null>;
+  cleanup: () => void;
+}
+
+/**
+ * The starter release a site was scaffolded from: each file at its
+ * `templatesTagByFile` tag (taken with `diff --apply`), else `templatesTag`.
+ * Null without a recorded tag (adopted with `init`, or a preview build). Each
+ * tag is fetched once, on first read; `templateDir` reads a local tree instead.
+ */
+export function starterBaseline(
+  nimbus: NimbusJson | null,
+  srcRoot: string,
+  templateDir?: string,
+  resolveTree = (tag: string) => resolveTemplateTree({ variant: nimbus?.variant, tag, templateDir }),
+): StarterBaseline | null {
+  const recorded = nimbus?.templatesTag;
+  if (!nimbus || !recorded) return null;
+  const trees = new Map<string, Promise<FetchedTree>>();
+  const fetched: FetchedTree[] = [];
+  const tree = (tag: string) => {
+    let pending = trees.get(tag);
+    if (!pending) {
+      pending = resolveTree(tag).then((t) => {
+        fetched.push(t);
+        return t;
+      });
+      trees.set(tag, pending);
+    }
+    return pending;
+  };
+  return {
+    async read(file) {
+      const treeFile = posix.join("src", posix.relative(srcRoot, file));
+      if (treeFile.startsWith("src/..") || starterProjectPath(srcRoot, treeFile) !== file) return null;
+      const { dir } = await tree(nimbus.templatesTagByFile?.[treeFile] ?? recorded);
+      return readTreeFile(dir, treeFile);
+    },
+    cleanup() {
+      for (const t of fetched.splice(0)) t.cleanup();
+    },
+  };
 }
 
 /**

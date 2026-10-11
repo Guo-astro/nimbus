@@ -364,7 +364,7 @@ if (LANE !== "static") {
     join(site, "src", "pages", "nimbus-api", "coordinates.json.ts"),
     join(site, "src", "pages", "og.png.ts"),
     join(site, "src", "pages", "og", "[...slug].ts"),
-    join(site, "src", "pages", "[section]", "llms.txt.ts"),
+    join(site, "src", "pages", "[...section]", "llms.txt.ts"),
   ]) {
     writeFileSync(
       route,

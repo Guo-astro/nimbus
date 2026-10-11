@@ -37,12 +37,13 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
     );
   }
 
-  const result = applyAdapterToConfig(readFileSync(configPath, "utf-8"), adapter);
-  if (
-    result.status !== "error" &&
-    adapter === "cloudflare" &&
-    result.requestRendering === "unresolved"
-  ) {
+  // A new server site renders its docs on request, so content negotiation and
+  // agent headers work from the first deploy. Off Cloudflare that's the docs
+  // collection only: generated API pages render on request only there.
+  const result = applyAdapterToConfig(readFileSync(configPath, "utf-8"), adapter, {
+    requestRendering: adapter === "cloudflare" ? true : { collections: ["docs"] },
+  });
+  if (result.status !== "error" && result.requestRendering === "unresolved") {
     throw new ScaffoldError(
       "The template's Nimbus config is customized, so request rendering cannot be enabled safely.",
     );

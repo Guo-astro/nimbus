@@ -9,6 +9,7 @@
  * users stranded on stale templates:
  *
  *   if (starter source changed) OR (a changeset bumps nimbus-docs minor+)
+ *     OR (the nimbus-docs code the scaffolder bundles changed)
  *     then a changeset bumping create-nimbus-docs is REQUIRED.
  *
  * A patch-only `nimbus-docs` change is fine — the scaffold's `^` pin picks it
@@ -29,6 +30,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 const CHANGESET_DIR = resolve(ROOT, ".changeset");
 const STARTER_PREFIX = "packages/nimbus-starter-source/";
+// nimbus-docs source the scaffolder bundles at build time (tsdown noExternal):
+// a change here reaches `npm create` only through a CLI release.
+const BUNDLED_INTO_CLI = [
+  "packages/nimbus-docs/src/adapters.ts",
+  "packages/nimbus-docs/src/_internal/adapters.ts",
+];
 
 // Names from manifests, keyed by stable directory so a rename needs no edit here.
 const pkgName = (dir) =>
@@ -82,12 +89,14 @@ const changed = changedFiles();
 const bumps = changesetBumps();
 
 const starterChanged = changed.some((f) => f.startsWith(STARTER_PREFIX));
+const bundledChanged = changed.some((f) => BUNDLED_INTO_CLI.includes(f));
 const nimbusMinorPlus = ["minor", "major"].includes(bumps[NIMBUS_NAME]);
 const cliHasChangeset = Boolean(bumps[CLI_NAME]);
 
-if ((starterChanged || nimbusMinorPlus) && !cliHasChangeset) {
+if ((starterChanged || nimbusMinorPlus || bundledChanged) && !cliHasChangeset) {
   const reasons = [];
   if (starterChanged) reasons.push("• the starter source changed (packages/nimbus-starter-source/**)");
+  if (bundledChanged) reasons.push(`• ${NIMBUS_NAME} code the scaffolder bundles changed (${BUNDLED_INTO_CLI.join(", ")})`);
   if (nimbusMinorPlus) reasons.push(`• a changeset bumps ${NIMBUS_NAME} ${bumps[NIMBUS_NAME]} (more than a patch)`);
   console.error(
     `[freshness-guard] FAIL — this PR needs a ${CLI_NAME} changeset.\n\n` +

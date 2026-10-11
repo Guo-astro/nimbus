@@ -63,6 +63,7 @@ import { unknownFlagError } from "./flags.js";
 import { progress } from "./progress.js";
 import { diffCommand, outdatedCommand } from "./upgrade.js";
 import { installedNimbusVersion, runningNimbusVersion } from "../_internal/upgrades.js";
+import { getCommand } from "../lib/pkgm.js";
 
 // Load the CLI-only registry override without importing feature/build variables
 // into process.env before the Vite-parity preflight runs.
@@ -192,7 +193,7 @@ async function main(): Promise<void> {
   if (args.help) {
     process.stdout.write(
       `\n  Usage:  ${invocation("<command> [args]")}\n` +
-        `          Once \`${CLI_PACKAGE}\` is a project dependency, call \`nimbus-docs <command>\` directly (e.g. \`pnpm exec nimbus-docs\` or an npm script).\n` +
+        `          Once \`${CLI_PACKAGE}\` is a project dependency, call \`nimbus-docs <command>\` directly (e.g. \`${getCommand(detectPackageManager(process.cwd()), "exec", "nimbus-docs")}\` or an npm script).\n` +
         HELP,
     );
     return;

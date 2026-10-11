@@ -109,7 +109,9 @@ for (const adapter of ADAPTER_IDS) {
         path.join(cwd, "my-docs", "astro.config.ts"),
         "utf8",
       );
-      const cliEdit = applyAdapterToConfig(STARTER_CONFIG, adapter);
+      const cliEdit = applyAdapterToConfig(STARTER_CONFIG, adapter, {
+        requestRendering: adapter === "cloudflare" ? true : { collections: ["docs"] },
+      });
       assert.equal(cliEdit.status, "applied");
       const expected = cliEdit.status === "applied" ? cliEdit.source : "";
       assert.equal(scaffolded, expected);
@@ -168,20 +170,25 @@ test("server + cloudflare defaults canonical collections to request rendering", 
   }
 });
 
-test("explicit non-Cloudflare adapters leave request rendering disabled", async () => {
-  const cwd = makeCwd();
-  const tmpl = makeTemplate();
-  try {
-    await scaffold(
-      { ...BASE, output: "server", adapter: "vercel", dir: "my-docs" },
-      internals(cwd, tmpl),
-    );
-
-    const config = fs.readFileSync(path.join(cwd, "my-docs", "astro.config.ts"), "utf8");
-    assert.doesNotMatch(config, /default:\s*["']request["']/);
-  } finally {
-    cleanup(cwd, tmpl);
+test("server scaffolds request-render docs (everything on Cloudflare); adding an adapter to a site doesn't", async () => {
+  for (const adapter of ADAPTER_IDS) {
+    const cwd = makeCwd();
+    const tmpl = makeTemplate();
+    try {
+      await scaffold({ ...BASE, output: "server", adapter, dir: "my-docs" }, internals(cwd, tmpl));
+      const config = fs.readFileSync(path.join(cwd, "my-docs", "astro.config.ts"), "utf8");
+      assert.match(
+        config,
+        adapter === "cloudflare" ? /rendering: \{ default: "request" \}/ : /rendering: \{ collections: \{ "docs": "request" \} \}/,
+        adapter,
+      );
+    } finally {
+      cleanup(cwd, tmpl);
+    }
   }
+  const added = applyAdapterToConfig(STARTER_CONFIG, "vercel");
+  assert.equal(added.status, "applied");
+  assert.doesNotMatch(added.status === "applied" ? added.source : "", /default:\s*["']request["']/);
 });
 
 test("server + cloudflare writes a server wrangler.jsonc (nodejs_compat, no static assets.directory)", async () => {

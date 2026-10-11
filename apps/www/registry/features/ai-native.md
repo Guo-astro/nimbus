@@ -12,7 +12,7 @@
 
 You are helping the user add alternate Markdown/MDX versions and `llms.txt` indexes to an existing Nimbus docs site. Their generated content is deterministic on every deployment provider.
 
-Read this entire file before making changes. The target project should already depend on `nimbus-docs` and use the starter-style routes/layouts.
+Read this entire file before making changes. The target project should already depend on `@cloudflare/nimbus-docs` and use the starter-style routes/layouts.
 
 ## What to add
 

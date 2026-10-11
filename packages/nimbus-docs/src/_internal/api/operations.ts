@@ -43,10 +43,11 @@ import {
   resolveExampleValue,
   resolveNamedExampleValues,
 } from "./samples.js";
-import { addField, walkFields } from "./field-walk.js";
+import { addField, extensionValues, walkFields, type FieldRole } from "./field-walk.js";
 import {
   asString,
   constraintsOf,
+  foldAllOf,
   isPlainObject,
   itemsOf,
   orderedMediaEntries,
@@ -261,6 +262,9 @@ export interface OperationSite {
  */
 export function assembleOperation(ctx: ParseContext, site: OperationSite): OperationFacts {
   const { coord, op, sourceBase, rawOp, sharedParams } = site;
+  // A webhook's body is sent by the API, so it reads like a response: its
+  // readOnly fields show and its writeOnly ones don't.
+  const bodyRole: FieldRole = site.sampleTarget ? "request" : "response";
   const request: Coordinate[] = [];
   const responses: Coordinate[] = [];
 
@@ -284,7 +288,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
     : undefined;
   const bodyFieldPaths: string[] = [];
   if (bodySchema) {
-    for (const c of addBodyFields(ctx, coord, bodySchema, sourceBase, rawBodySchema)) {
+    for (const c of addBodyFields(ctx, coord, bodySchema, sourceBase, bodyRole, rawBodySchema)) {
       request.push(c);
       bodyFieldPaths.push(c.slice(coord.length + 1));
     }
@@ -297,7 +301,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
     leadingSegments(bodyFieldPaths),
   );
   bodyEntries.forEach((entry, i) => {
-    addMediaBody(ctx, coord, entry, bodyTokens[i]!, sourceBase, rawOp?.requestBody);
+    addMediaBody(ctx, coord, entry, bodyTokens[i]!, sourceBase, bodyRole, rawOp?.requestBody);
   });
 
   for (const [status, response] of Object.entries(op.responses ?? {})) {
@@ -349,7 +353,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
           ? responseFieldCoordinate(coord, status, parentPath)
           : respCoord;
         addField(ctx, fieldCoord, parent, fieldSchema, required, "field", respSource, rawField);
-      }, rawRespSchema);
+      }, rawRespSchema, "response");
     }
     const extraMedia = respEntries.slice(1);
     const extraTokens = mediaTypeTokens(
@@ -397,7 +401,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
   const requestEntry = primaryMediaEntry(op.requestBody?.content);
   const requestExample = resolveExampleValue(
     mediaExample(requestEntry),
-    "request",
+    bodyRole,
     ctx.sampleTools,
   );
   if (requestEntry && requestExample !== undefined) {
@@ -413,12 +417,14 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
     facts.samples = buildOperationSamples(ctx.sampleTools, {
       method: site.sampleTarget.method,
       path: site.sampleTarget.path,
-      server: ctx.firstServer,
+      openapiVersion: ctx.doc.openapi,
+      server: ctx.sampleServer,
       params: allParams,
       body: facts.example
         ? {
           mediaType: facts.example.mediaType,
           value: facts.example.value,
+          ...(requestEntry?.media.schema ? { schema: requestEntry.media.schema } : {}),
           ...(requestEntry?.media.encoding ? { encoding: requestEntry.media.encoding } : {}),
         }
         : undefined,
@@ -429,6 +435,8 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
       keepGenerated: ctx.samples.keepGenerated,
     });
   }
+  const extensions = extensionValues(ctx.extensions, op);
+  if (extensions) facts.extensions = extensions;
   return facts;
 }
 
@@ -465,6 +473,9 @@ function addParameter(
       )
     : undefined;
   if (union) facts.union = union;
+  // The parameter object's own value wins over its schema's.
+  const extensions = extensionValues(ctx.extensions, param, param.schema && foldAllOf(param.schema));
+  if (extensions) facts.extensions = extensions;
   ctx.node(coord, "parameter", opCoord, facts);
   return coord;
 }
@@ -474,6 +485,7 @@ function addBodyFields(
   opCoord: Coordinate,
   schema: OpenApiSchema,
   sourceBase: string,
+  role: FieldRole,
   rawSchema?: OpenApiSchema,
 ): Coordinate[] {
   const coords: Coordinate[] = [];
@@ -490,7 +502,7 @@ function addBodyFields(
     }
     addField(ctx, coord, parent, fieldSchema, required, "field", `${sourceBase}/requestBody`, rawField);
     coords.push(coord);
-  }, rawSchema);
+  }, rawSchema, role);
   return coords;
 }
 
@@ -500,6 +512,7 @@ function addMediaBody(
   entry: { mediaType: string; media: OpenApiMediaType },
   token: string,
   sourceBase: string,
+  role: FieldRole,
   rawRequestBody: unknown,
 ): void {
   const mediaCoord = bodyMediaCoordinate(opCoord, token);
@@ -513,7 +526,7 @@ function addMediaBody(
     ? ctx.resolver.unionPreferRaw(rawSchema, schema, itemsOf(schema))
     : undefined;
   if (union) facts.union = union;
-  const example = resolveExampleValue(mediaExample(entry), "request", ctx.sampleTools);
+  const example = resolveExampleValue(mediaExample(entry), role, ctx.sampleTools);
   if (example !== undefined) facts.example = { mediaType: entry.mediaType, value: example };
   ctx.node(mediaCoord, "requestBody", opCoord, facts, source);
 
@@ -522,7 +535,7 @@ function addMediaBody(
       const coord = bodyMediaFieldCoordinate(opCoord, token, fieldPath);
       const parent = parentPath ? bodyMediaFieldCoordinate(opCoord, token, parentPath) : mediaCoord;
       addField(ctx, coord, parent, fieldSchema, required, "field", source, rawField);
-    }, rawSchema);
+    }, rawSchema, role);
   }
 }
 
@@ -556,6 +569,6 @@ function addResponseMedia(
         ? responseMediaFieldCoordinate(opCoord, status, token, parentPath)
         : mediaCoord;
       addField(ctx, coord, parent, fieldSchema, required, "field", source, rawField);
-    }, rawSchema);
+    }, rawSchema, "response");
   }
 }

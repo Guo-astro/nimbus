@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 
 import { buildCitationIndex, ingestRemoteManifest, type CoordinatesManifest } from "../src/_internal/api/citation-index.ts";
+import { resolveCitations } from "../src/_internal/api/citations.ts";
 import type { ApiSpec } from "../src/types.ts";
 
 function fixturePath(rel: string): string {
@@ -163,3 +164,103 @@ function read(manifest: CoordinatesManifest) {
   }
   return index;
 }
+
+describe("prepared API citations: historical authored lookup without published history", () => {
+  test("cached summaries avoid parsing and preserve old fields and responses", async () => {
+    const reads = new Map<string, number>();
+    const versions = ["v3", "v2", "v1"];
+    const preparedVersions = new Map(
+      versions.map((version) => [
+        `svc@${version}`,
+        {
+          read() {
+            reads.set(version, (reads.get(version) ?? 0) + 1);
+            return {
+              targets: [
+                { coordinate: "svc", slug: "" },
+                { coordinate: `operation-${version}`, slug: `slug-${version}` },
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.profile`, slug: `slug-${version}`, anchor: "request-profile" }] : []),
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201`, slug: `slug-${version}`, anchor: "response-201" }] : []),
+                {
+                  coordinate: `operation-${version}.field`,
+                  slug: `slug-${version}`,
+                  anchor: "field",
+                },
+                {
+                  coordinate: `operation-${version}.response.200`,
+                  slug: `slug-${version}`,
+                  anchor: "response-200",
+                },
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201.hidden`, slug: `slug-${version}`, anchor: "response-201-hidden" }] : []),
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201.profile.hidden`, slug: `slug-${version}`, anchor: "response-201-profile-hidden" }] : []),
+              ],
+              unpublished: { UnpublishedSchema: "UnpublishedSchema" },
+            };
+          },
+        },
+      ]),
+    );
+    const { index, manifest, unpublished } = await buildCitationIndex(
+      [
+        {
+          collection: "svc",
+          versionUrl: { in: "query" },
+          versions: versions.map((version, i) => ({
+            version,
+            spec: "/does/not/exist.json",
+            default: i === 0,
+          })),
+        },
+      ],
+      root,
+      { preparedVersions },
+    );
+    assert.equal(reads.get("v3"), 1);
+    assert.equal(reads.has("v2"), false);
+    assert.equal(
+      index.get("svc@v2:operation-v2.field"),
+      "/svc/slug-v2?version=v2#field",
+    );
+    assert.equal(
+      index.get("svc@v2:operation-v2.response.200"),
+      "/svc/slug-v2?version=v2#response-200",
+    );
+    assert.equal(
+      unpublished.get("svc@v2:UnpublishedSchema"),
+      "UnpublishedSchema",
+    );
+    assert.equal(
+      reads.get("v2"),
+      1,
+      "one summary read serves all fields and diagnostics in this version",
+    );
+    assert.equal(index.has("svc@v2:operation-v2"), true);
+    const { diagnostics } = resolveCitations("[x](api.ref:svc@v2:operation-v2.hidden)", { mode: "author", citationIndex: index });
+    assert.match(diagnostics[0]?.message ?? "", /cite it under the response: "api\.ref:svc@v2:operation-v2\.response\.201\.hidden"/);
+    const nested = resolveCitations("[x](api.ref:svc@v2:operation-v2.profile.hidden)", { mode: "author", citationIndex: index });
+    assert.match(nested.diagnostics[0]?.message ?? "", /cite it under the response: "api\.ref:svc@v2:operation-v2\.response\.201\.profile\.hidden"/);
+    assert.equal(reads.get("v2"), 1, "the hint reuses the cached historical version");
+    assert.equal(
+      index.get("svc@v1:operation-v1"),
+      "/svc/slug-v1?version=v1",
+    );
+    assert.equal(
+      index.get("svc@v2:operation-v2"),
+      "/svc/slug-v2?version=v2",
+    );
+    assert.equal(reads.get("v2"), 2, "cache retains one historical version");
+    assert.equal(index.get("svc@missing:operation-v2"), undefined);
+    assert.equal(index.get("svc@v2:missing"), undefined);
+    assert.deepEqual(Object.keys(manifest.collections.svc!.versions!), ["v3"]);
+    assert.ok(
+      [...index.keys()].every(
+        (key) => !key.includes("@v1:") && !key.includes("@v2:"),
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(Object.fromEntries(index)),
+      /operation-v[12]/,
+      "virtual module contains published default only even after authored reads",
+    );
+  });
+});

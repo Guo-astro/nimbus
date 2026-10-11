@@ -148,6 +148,8 @@ export interface OpenApiSchema {
   title?: string;
   description?: string;
   deprecated?: boolean;
+  readOnly?: boolean;
+  writeOnly?: boolean;
   format?: string;
   properties?: Record<string, OpenApiSchema>;
   required?: string[];
@@ -174,6 +176,9 @@ export interface OpenApiSchema {
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  /** OAS 3.1 / JSON Schema: a string's media type (raw bytes, unless `contentEncoding` is set). */
+  contentMediaType?: string;
+  contentEncoding?: string;
   /** Present on schemas the parser could not fully dereference (a cycle). */
   $ref?: string;
   /** Schema name recovered from the components map, when known. */

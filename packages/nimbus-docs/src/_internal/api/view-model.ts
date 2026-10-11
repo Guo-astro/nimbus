@@ -53,6 +53,7 @@ import {
   type ApiVariant,
   type JsonValue,
 } from "./api-view-types.js";
+import type { ApiExtensionValues } from "../../types.js";
 import { renderMarkdown } from "../../markdown/render.js";
 import { toDocumentHref } from "../url.js";
 
@@ -72,6 +73,19 @@ const PARAM_LABELS: Record<(typeof PARAM_LOCATIONS)[number], string> = {
  * A view over one model that indexes children by parent once, so projection is
  * a linear walk rather than a filter-per-node scan.
  */
+const pageReferenceModels = new WeakSet<DocsModel>();
+
+/** Build-only mode: preserve page identity while leaving URL context to the reader. */
+export function setApiModelPageReferences(
+  model: DocsModel,
+  enabled: boolean,
+): void {
+  if (enabled) pageReferenceModels.add(model);
+  else pageReferenceModels.delete(model);
+  viewCache.delete(model);
+  navBaseCache.delete(model);
+}
+
 class ModelView {
   private readonly childrenByParent = new Map<Coordinate, Node[]>();
   private readonly apiFacts: ApiFacts | undefined;
@@ -102,6 +116,8 @@ class ModelView {
   /** The page's link, shaped by Astro's `trailingSlash` and `build.format`.
    *  In query mode every same-version link carries the version's query. */
   href(coordinate: Coordinate): string {
+    if (pageReferenceModels.has(this.model))
+      return `nimbus-ref:v1:${Buffer.from(coordinate, "utf8").toString("base64url")}`;
     return `${toDocumentHref(this.routePath(coordinate))}${this.model.urlQuery ?? ""}`;
   }
 
@@ -120,6 +136,7 @@ class ModelView {
   }
 
   markdownHref(coordinate: Coordinate): string | undefined {
+    if (pageReferenceModels.has(this.model)) return undefined;
     // A non-default query-mode page has no per-page Markdown affordance:
     // only default-version entries publish twins, and this page's
     // version-free `.md` URL would be another version's content.
@@ -457,8 +474,17 @@ function fieldView(
   if (f.typeRef?.coordinate && view.hasPage(f.typeRef.coordinate)) {
     out.typeRef = { label: f.typeRef.label, href: view.href(f.typeRef.coordinate) };
   }
+  const extensions = extensionsView(f.extensions);
+  if (extensions) out.extensions = extensions;
 
   return out;
+}
+
+function extensionsView(values: Record<string, unknown> | undefined): ApiExtensionValues | undefined {
+  if (!values) return undefined;
+  const out: Record<string, JsonValue> = {};
+  for (const [name, value] of Object.entries(values)) out[name] = jsonOrOmit(value) ?? null;
+  return out as ApiExtensionValues;
 }
 
 function topLevelFields(
@@ -707,6 +733,8 @@ function projectPageWithView(
         samples: f.samples.map((s) => ({ id: s.id, lang: s.lang, label: s.label, source: s.source })),
       };
       if (bodyFields.truncated) page.bodyTruncated = { total: bodyFields.total };
+      const extensions = extensionsView(f.extensions);
+      if (extensions) page.extensions = extensions;
       if (f.example) {
         const value = jsonOrOmit(f.example.value);
         if (value !== undefined) page.example = { mediaType: f.example.mediaType, value };
@@ -897,6 +925,18 @@ export function operationShapes(model: DocsModel): Map<string, string> {
     shapes.set(coordinate, operationShape(method, path));
   }
   return shapes;
+}
+
+/** Each operation's path, as the spec writes it. */
+export function operationPaths(model: DocsModel): Record<string, string> {
+  const paths: Record<string, string> = {};
+  for (const coordinate of model.pages.pages) {
+    const node = model.nodes.get(coordinate);
+    if (node?.kind !== "operation") continue;
+    const path = protocolString((node.facts as OperationFacts).protocol, "path");
+    if (path) paths[coordinate] = path;
+  }
+  return paths;
 }
 
 export function pageSlugs(

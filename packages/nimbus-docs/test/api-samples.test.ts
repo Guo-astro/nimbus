@@ -107,7 +107,7 @@ describe("derived example + code samples", () => {
     assert.match(md, /### cURL/);
     assert.match(md, /### TypeScript/);
     assert.match(md, /### Python/);
-    assert.match(md, /```curl/);
+    assert.match(md, /```bash\ncurl/);
     assert.doesNotMatch(md, /^# /m, "no H1 that would collide with the page title");
   });
 
@@ -708,7 +708,7 @@ describe("parameter and credential placeholders", () => {
         { name: "h", in: "path", required: true, schema: { type: "string", example: "a/b" } },
       ],
     });
-    assert.match(lang(out, "curl"), /\/x%20y\/ex1\/sx\/s1\/main\/7\/v1\/a%2Fb$/);
+    assert.match(lang(out, "curl"), /\/x%20y\/ex1\/sx\/s1\/main\/7\/v1\/a%2Fb'?$/);
   });
 
   test("schema composition is the sampler's: allOf, then the first oneOf or anyOf branch", async () => {
@@ -726,7 +726,7 @@ describe("parameter and credential placeholders", () => {
         { name: "d", in: "path", required: true, schema: { oneOf: [identifier], anyOf: [identifier] } },
       ],
     });
-    assert.match(lang(out, "curl"), /\/acc_123\/deep\/outer\/acc_123$/);
+    assert.match(lang(out, "curl"), /\/acc_123\/deep\/outer\/acc_123'?$/);
   });
 
   test("required query and header params use a declared value, else the sampler's; optional ones stay omitted", async () => {
@@ -935,7 +935,7 @@ describe("parameter and credential placeholders", () => {
         },
       ],
     });
-    assert.match(lang(out, "curl"), /\/items\/FIRST$/);
+    assert.match(lang(out, "curl"), /\/items\/FIRST'?$/);
   });
 
   test("a declared value that matches the internal marker stays as declared", async () => {
@@ -976,7 +976,7 @@ describe("parameter and credential placeholders", () => {
     });
     const expected = schemas.map((schema) => String(tools.sampler.sample(schema, { quiet: true }))).join("/");
     assert.equal(expected, "a/c/f/i/second/l/outer");
-    assert.match(lang(out, "curl"), new RegExp(`/${expected}$`));
+    assert.match(lang(out, "curl"), new RegExp(`/${expected}'?$`));
   });
 
   test("a guess the sampler keeps over a declaration renders the placeholder; a non-scalar value too; a parameter example wins", async () => {
@@ -1151,6 +1151,7 @@ describe("generated request bodies", () => {
     const out = buildOperationSamples(tools, {
       method,
       path: "/items",
+      server: "https://api.example.com",
       auth: [],
       params: [],
       body: { mediaType, value },
@@ -1598,12 +1599,13 @@ describe("form request bodies", () => {
     ]);
   });
 
-  test("a form media type with parameters sends the same encoded body", async () => {
+  test("a form media type with parameters is sent field by field, keeping its full type", async () => {
     const samples = await samplesFor({ name: "Jenny Rosen", metadata: { plan: "pro" } }, undefined, `${FORM}; charset=utf-8`);
-    const encoded = "name=Jenny+Rosen&metadata%5Bplan%5D=pro";
-    assert.ok(samples.curl.includes(`--data-raw '${encoded}'`), samples.curl);
-    assert.ok(samples.typescript.includes(`body: '${encoded}'`), samples.typescript);
-    assert.ok(samples.python.includes(`payload = "${encoded}"`), samples.python);
+    assert.ok(samples.curl.includes("--data-urlencode 'name=Jenny Rosen'"), samples.curl);
+    assert.ok(samples.curl.includes("--data-urlencode metadata%5Bplan%5D=pro"), samples.curl);
+    assert.ok(samples.typescript.includes("encodedParams.append('metadata[plan]', 'pro');"), samples.typescript);
+    assert.ok(samples.python.includes('"metadata[plan]": "pro"'), samples.python);
+    for (const source of Object.values(samples)) assert.ok(source.includes(`${FORM}; charset=utf-8`), source);
   });
 
   test("an operation's media type encoding reaches its samples", async () => {
@@ -1924,5 +1926,137 @@ describe("samples.keepGenerated", () => {
       params: [{ name: "id", in: "path", required: true, example: "\uD800" }],
     });
     assert.deepEqual(broken, ided(goAndPython), "a request that cannot be built keeps authored samples");
+  });
+});
+
+describe("read-only and write-only fields", () => {
+  test("request field lists leave out readOnly; response field lists leave out writeOnly", async () => {
+    const user = {
+      type: "object",
+      properties: {
+        id: { type: "string", readOnly: true },
+        name: { type: "string" },
+        password: { type: "string", writeOnly: true },
+        profile: { type: "object", properties: { created: { type: "string", readOnly: true }, bio: { type: "string" } } },
+      },
+    };
+    const page = await operationPage({
+      ...baseSpec,
+      paths: {
+        "/users": {
+          post: {
+            operationId: "createUser",
+            requestBody: { content: { "application/json": { schema: user } } },
+            responses: { "201": { description: "Created", content: { "application/json": { schema: user } } } },
+          },
+        },
+      },
+    }, "createUser");
+    const names = (fields: { name: string; children: { name: string }[] }[]) =>
+      fields.flatMap((field) => [field.name, ...field.children.map((child) => `${field.name}.${child.name}`)]);
+    assert.deepEqual(names(page.body), ["name", "password", "profile", "profile.bio"]);
+    assert.deepEqual(names(page.responses[0]!.fields), ["id", "name", "profile", "profile.created", "profile.bio"]);
+    assert.ok(!Object.hasOwn(page.example!.value as object, "id"), "the request example already leaves it out");
+  });
+
+  test("a union-wrapped field is hidden only when all variants mark it", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        id: { oneOf: [{ type: "string", readOnly: true }, { type: "integer", readOnly: true }] },
+        password: { anyOf: [{ type: "string", writeOnly: true }, { type: "integer", writeOnly: true }] },
+        optional: { oneOf: [{ type: "string", readOnly: true }, { type: "integer" }] },
+      },
+    };
+    const page = await operationPage({
+      ...baseSpec,
+      paths: { "/users": { post: {
+        operationId: "createUser",
+        requestBody: { content: { "application/json": { schema } } },
+        responses: { "201": { description: "Created", content: { "application/json": { schema } } } },
+      } } },
+    }, "createUser");
+    assert.deepEqual(page.body.map((field) => field.name), ["password", "optional"]);
+    assert.deepEqual(page.responses[0]!.fields.map((field) => field.name), ["id", "optional"]);
+  });
+});
+
+describe("read-only and write-only fields: refs, media types, webhooks, citations", () => {
+  const event = {
+    type: "object",
+    properties: {
+      id: { allOf: [{ type: "string" }], readOnly: true },
+      secret: { type: "string", writeOnly: true },
+      kind: { type: "string" },
+    },
+  };
+  const spec = {
+    ...baseSpec,
+    paths: {
+      "/events": {
+        post: {
+          operationId: "createEvent",
+          requestBody: { content: { "application/json": { schema: event }, "application/xml": { schema: event } } },
+          responses: { "201": { description: "Created", content: { "application/json": { schema: event }, "text/csv": { schema: event } } } },
+        },
+      },
+    },
+    webhooks: {
+      eventCreated: { post: { operationId: "eventCreated", requestBody: { content: { "application/json": { schema: event } } }, responses: { "200": { description: "ok" } } } },
+    },
+  };
+
+  test("a readOnly beside a wrapped $ref, and every media type, follow the rule", async () => {
+    const page = await operationPage(spec, "createEvent");
+    assert.deepEqual(page.body.map((f) => f.name), ["secret", "kind"]);
+    assert.deepEqual(page.additionalBodies!.map((b) => b.fields.map((f) => f.name)), [["secret", "kind"]]);
+    assert.deepEqual(page.responses[0]!.fields.map((f) => f.name), ["id", "kind"]);
+    assert.deepEqual(page.responses[0]!.additionalMedia!.map((m) => m.fields.map((f) => f.name)), [["id", "kind"]]);
+  });
+
+  test("a webhook payload reads like a response", async () => {
+    const model = await buildApiModel({ collection: "samples", spec });
+    const webhook = getApiPageProps(model, "eventCreated") as ApiOperationPage;
+    assert.deepEqual(webhook.body.map((f) => f.name), ["id", "kind"]);
+  });
+});
+
+describe("cURL heredoc", () => {
+  test("a heredoc whose delimiter stays unquoted leaves the cURL sample out", async () => {
+    const tools = (await loadSampleTools())!;
+    const Real = tools.snippet.HTTPSnippet;
+    const changed: SampleTools = {
+      sampler: tools.sampler,
+      snippet: {
+        HTTPSnippet: class {
+          #inner: InstanceType<typeof Real>;
+          constructor(input: ConstructorParameters<typeof Real>[0]) { this.#inner = new Real(input); }
+          convert(target: string, client?: string) {
+            const out = this.#inner.convert(target, client);
+            const first = Array.isArray(out) ? out[0] : out;
+            return typeof first === "string" ? [first.replace("@- <<EOF\n", "@-  <<EOF\n")] : out;
+          }
+        },
+      },
+    };
+    const input = {
+      method: "post", path: "/x", auth: [], params: [],
+      body: { mediaType: "application/json", value: { quote: "it's", env: "$HOME" } },
+    };
+    assert.match(buildOperationSamples(tools, input).find((s) => s.lang === "curl")!.source, /<<'EOF'/);
+    assert.deepEqual(buildOperationSamples(changed, input).map((s) => s.lang), ["typescript", "python"]);
+    const unusual: SampleTools = {
+      ...tools,
+      snippet: { HTTPSnippet: class extends Real {
+        convert(target: string, client?: string) {
+          const out = super.convert(target, client);
+          const first = Array.isArray(out) ? out[0] : out;
+          return typeof first === "string"
+            ? [first.replace("@- <<EOF\n", "@- <<EOF-2\n").replace(/\nEOF(?=\n|$)/, "\nEOF-2")]
+            : out;
+        }
+      } },
+    };
+    assert.deepEqual(buildOperationSamples(unusual, input).map((s) => s.lang), ["typescript", "python"]);
   });
 });

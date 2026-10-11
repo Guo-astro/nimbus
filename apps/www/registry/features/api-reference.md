@@ -117,10 +117,6 @@ and `@readme/httpsnippet` (the curl/TypeScript/Python sample generators). Nimbus
 keeps these out of its bundle and lazy-loads them, so docs-only sites never
 install them.
 
-`add api-layout` ends with a hint to register the components in
-`src/components.ts`. Skip it: that's for components used in `.mdx`, and the
-route in 4d imports `ApiLayout` itself.
-
 The components read the frozen view-model only (hrefs, anchors, flags, grouping
 are all pre-resolved) and own nothing but their look — restyle them freely,
 they're yours now. The route in 4d composes them.
@@ -221,7 +217,7 @@ const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate } = result;
 // The generated per-page card exists for the default version's version-free
-// URL; a non-default query-mode page (its href carries ?api-version=) uses
+// URL; a non-default query-mode page (its href carries the version query) uses
 // the site's shared social image instead. The card path derives from the
 // documentation pathname, never from `page.href` verbatim — the query would
 // land inside the file name.

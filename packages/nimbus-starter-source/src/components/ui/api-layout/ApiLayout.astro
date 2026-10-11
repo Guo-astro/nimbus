@@ -8,11 +8,14 @@
  */
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { ApiSidebar } from "@/components/ui/api-sidebar";
+import ApiMethodChip from "@/components/ui/api-sidebar/ApiMethodChip.astro";
+import { SidebarFilter, SidebarLink } from "@/components/ui/sidebar";
 import { ApiCodeRail } from "@/components/ui/api-code-rail";
 import { Banner } from "@/components/ui/banner";
+import { VersionSwitcher } from "@/components/ui/version-switcher";
 import ApiBody from "./ApiBody.astro";
 import { cn } from "@/lib/cn";
-import { getApiVersionAlternates, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
+import { getApiVersionHead, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiNav, ApiPageProps } from "@cloudflare/nimbus-docs/api";
 
 interface Props {
@@ -28,6 +31,12 @@ interface Props {
 const { page, nav, collection, version, coordinate } = Astro.props;
 // Sidebar state is shared per API version, across both sidebar copies. The
 // base keeps two sites on one origin apart.
+// The version picker sits above the tree, in the rail and in the drawer, not
+// inside it: the tree's scroll restore looks for the current page's link.
+// Renders nothing for an unversioned or single-version API.
+const picker = collection
+  ? { apiCollection: collection, apiVersion: version, coordinate, variant: "sidebar" as const }
+  : undefined;
 const navKey = `${import.meta.env.BASE_URL}|${nav.collection}${version ? `@${version}` : ""}`;
 
 const versionStatus =
@@ -36,7 +45,7 @@ const versionStatus =
     : null;
 const currentSiblingUrl =
   collection && version && coordinate
-    ? ((await getApiVersionAlternates(collection, version, coordinate))?.canonical
+    ? ((await getApiVersionHead(collection, version, coordinate, Astro.request))?.canonical
         ?.url ?? null)
     : null;
 const currentSiblingHref = withBase(currentSiblingUrl ?? "/", import.meta.env.BASE_URL);
@@ -83,6 +92,7 @@ if (versionStatus?.isHidden) {
         <Icon name="ph:x" class="h-5 w-5" />
       </button>
     </div>
+    {picker && <VersionSwitcher {...picker} class="mx-4 mt-4 mb-0" />}
     {/* The rail's tree is moved here while the drawer is open — one tree
         per page, one open/scroll state. */}
     <div data-nb-api-drawer-slot class="flex min-h-0 flex-1 flex-col [&>[data-nb-api-tree]]:min-h-0 [&>[data-nb-api-tree]]:flex-1 [&>[data-nb-api-tree]]:overflow-y-auto [&>[data-nb-api-tree]]:overscroll-contain"></div>
@@ -98,6 +108,7 @@ if (versionStatus?.isHidden) {
     transition:animate="none"
     class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 flex-col border-r border-border bg-background md:flex lg:w-(--nb-sidebar-width)"
   >
+    {picker && <VersionSwitcher {...picker} class="mx-4 mt-6 mb-0 shrink-0 pl-2" />}
     <div
       data-nb-api-tree
       data-nb-nav-state={navKey}
@@ -105,7 +116,24 @@ if (versionStatus?.isHidden) {
       data-nb-nav-scroller="nav"
       class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-color:gray_transparent] [scrollbar-width:thin]"
     >
-      <div class="pt-8 pb-12 pl-6 pr-4">
+      {/* A full tree filters in place, as the docs sidebar does. An on-demand
+          tree holds only part of the API, so its filter searches the
+          version's page list instead (`api-nav-filter.client`). */}
+      <div class="pt-8 pb-12 pl-6 pr-4" data-nb-sidebar={nav.listHref ? undefined : ""}>
+        <SidebarFilter data-nb-nav-list={nav.listHref && withBase(nav.listHref, import.meta.env.BASE_URL)} />
+        {nav.listHref && (
+          <>
+            <p data-nb-nav-status role="status" class="px-3 pb-2 text-xs text-muted-foreground empty:p-0"></p>
+            <ul data-nb-nav-results hidden class="flex list-none flex-col gap-0.5 p-0"></ul>
+            <template data-nb-nav-result>
+              <li>
+                <SidebarLink label="" href="/" class="px-1">
+                  <ApiMethodChip slot="leading" method="GET" display="label" />
+                </SidebarLink>
+              </li>
+            </template>
+          </>
+        )}
         <ApiSidebar items={nav.items} />
       </div>
     </div>
@@ -159,6 +187,8 @@ if (versionStatus?.isHidden) {
 
 <script>
   import { mount, lockScroll, unlockScroll, generateId, initNavSidebar } from "@cloudflare/nimbus-docs/client";
+  import "@/components/ui/sidebar/sidebar.client";
+  import "@/components/ui/api-sidebar/api-nav-filter.client";
 
   mount("[data-nb-nav-state]", initNavSidebar);
 
@@ -196,12 +226,14 @@ if (versionStatus?.isHidden) {
     // whenever the tree is revealed.
     const tree = document.querySelector<HTMLElement>("[data-nb-api-tree]");
     const rail = tree?.parentElement ?? null;
+    // Back to the same place: the version picker sits above it in the rail.
+    const railNext = tree?.nextElementSibling ?? null;
     const drawerSlot = dialog.querySelector<HTMLElement>("[data-nb-api-drawer-slot]");
     const moveTreeToDrawer = () => {
       if (tree && drawerSlot && tree.parentElement !== drawerSlot) drawerSlot.append(tree);
     };
     const moveTreeToRail = () => {
-      if (tree && rail && tree.parentElement !== rail) rail.prepend(tree);
+      if (tree && rail && tree.parentElement !== rail) rail.insertBefore(tree, railNext);
     };
 
     const openSidebar = () => {

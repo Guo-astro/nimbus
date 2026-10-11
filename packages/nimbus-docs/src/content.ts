@@ -22,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { glob } from "astro/loaders";
+import { unusedExtensions, warnUnusedExtensions } from "./_internal/api/extensions.js";
 import type { Loader } from "astro/loaders";
 import { z } from "astro/zod";
 
@@ -31,7 +32,12 @@ import {
   definePartialsSchema,
   partialsSchema,
 } from "./schemas.js";
-import type { ApiRoutePolicy, ApiSamples, ApiVersionSpec } from "./types.js";
+import type {
+  ApiRoutePolicy,
+  ApiSamples,
+  ApiVersionSpec,
+  ApiVersionUrl,
+} from "./types.js";
 import {
   noteApiCollectionLoad,
   registeredOutput,
@@ -49,6 +55,10 @@ import {
   runPreparedMarkdownTransaction,
 } from "./_internal/prepared-markdown-registry.js";
 import { transparentProxy } from "./_internal/transparent-proxy.js";
+import {
+  rendersApiOnRequest,
+  usesPageAssets,
+} from "./_internal/page-assets-config.js";
 
 // Re-export the public schema factories from `nimbus-docs/content` so users
 // have a single import for content-config concerns (collections + schemas).
@@ -120,6 +130,9 @@ export interface PartialsCollectionOptions<
 }
 
 const DEFAULT_PATTERN = "**/*.{md,mdx}";
+/** A quarter of the 64 MiB Workers script limit (uncompressed; there is no
+ * compressed limit): developers.cloudflare.com/workers/platform/limits. */
+const BUNDLE_HINT_BYTES = 16 * 1024 * 1024;
 const NIMBUS_MARKDOWN_GENERATION = 1;
 // One cache across roles: wrapping an already-wrapped loader must return it
 // unchanged (whatever role it was wrapped with), or the nested wrappers would
@@ -284,6 +297,8 @@ export interface ApiCollectionOptions {
   schemaPages?: boolean;
   /** Code sample policy. See {@link ApiSamples}. */
   samples?: ApiSamples;
+  /** `x-*` extension names to keep. See {@link ApiSpec.extensions}. */
+  extensions?: string[];
   /** Route convention for this collection's pages (unversioned only; for a family
    *  set `routes` on each version). Omit to keep legacy operationId URLs. */
   routes?: ApiRoutePolicy;
@@ -346,6 +361,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
     requireOperationId: options.requireOperationId,
     schemaPages: options.schemaPages,
     samples: options.samples,
+    extensions: options.extensions,
     routes: options.routes,
   };
 
@@ -368,7 +384,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
       const registered = explicit
         ? undefined
         : resolveRegisteredApiCollection(astroConfig.root, context.collection);
-      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, routes } =
+      const { collection, spec, label, versions, requireOperationId, schemaPages, samples, extensions, routes } =
         explicit ?? registered!;
       // The sidebar and version modes always come from the Nimbus config's
       // `api` entry: request rendering and the build's component check read
@@ -379,18 +395,44 @@ export function apiCollection(options?: ApiCollectionOptions): {
           (candidate) => candidate.collection === collection,
         );
       const sidebar = entry?.sidebar;
-      const versionMode = entry ? entry.versionMode : (options as { versionMode?: "path" | "query" } | undefined)?.versionMode;
-      for (const [key, used, shown] of [
-        ["sidebar", sidebar, sidebar ?? "full"],
-        ["versionMode", versionMode, versionMode ?? "path"],
+      const versionUrl = entry
+        ? entry.versionUrl
+        : (options as { versionUrl?: ApiVersionUrl } | undefined)?.versionUrl;
+      // Compare what the setting means, so key order or a spelled-out
+      // default doesn't count as a difference.
+      const describeUrl = (url: ApiVersionUrl | undefined) =>
+        url?.in === "query"
+          ? `{ in: "query", param: "${url.param ?? "version"}" }`
+          : `{ in: "path" }`;
+      const passedOptions = (options ?? {}) as Record<string, unknown>;
+      for (const [key, used, passed] of [
+        [
+          "sidebar",
+          `"${sidebar ?? "full"}"`,
+          passedOptions.sidebar === undefined
+            ? undefined
+            : `"${String(passedOptions.sidebar)}"`,
+        ],
+        [
+          "versionUrl",
+          describeUrl(versionUrl),
+          passedOptions.versionUrl === undefined
+            ? undefined
+            : describeUrl(passedOptions.versionUrl as ApiVersionUrl),
+        ],
       ] as const) {
-        const passed = (options as Record<string, unknown> | undefined)?.[key];
         if (explicit && passed !== undefined && passed !== used) {
           logger.warn(
             `apiCollection({ collection: "${collection}" }) sets \`${key}\`, which is read only from the ` +
-              `\`api\` entry in the Nimbus config (astro.config.*). Using "${shown}"; set \`${key}\` on that entry instead.`,
+              `\`api\` entry in the Nimbus config (astro.config.*). Using ${used}; set \`${key}\` on that entry instead.`,
           );
         }
+      }
+      if (explicit && passedOptions.versionMode !== undefined) {
+        logger.warn(
+          `apiCollection({ collection: "${collection}" }) sets \`versionMode\`, which is now \`versionUrl\` and is read only from the ` +
+            `\`api\` entry in the Nimbus config (astro.config.*). Set versionUrl: { in: "query" } on that entry instead.`,
+        );
       }
       noteApiCollectionLoad(astroConfig.root, context.collection, collection);
 
@@ -408,6 +450,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         registerConfiguredApiModel,
         resolveApiFamily,
         resolveSpecSource,
+        stageApiModelNavList,
         targetUrlFields,
       } = await loadApiLoader();
 
@@ -422,10 +465,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
         spec,
         label,
         versions,
-        versionMode,
+        versionUrl,
         requireOperationId,
         schemaPages,
         samples,
+        extensions,
         routes,
         sidebar,
       });
@@ -440,6 +484,31 @@ export function apiCollection(options?: ApiCollectionOptions): {
         .map((t) => t.version!);
 
       const index = async () => {
+        let bundledBytes = 0;
+        if (usesPageAssets(astroConfig.root, collection)) {
+          const { prepareApiAssetFamily } =
+            await import("./_internal/api/page-assets-build.js");
+          await prepareApiAssetFamily(
+            rootDir,
+            {
+              collection,
+              spec,
+              label,
+              versions,
+              versionUrl,
+              requireOperationId,
+              schemaPages,
+              samples,
+              extensions,
+              routes,
+              sidebar,
+            },
+            (message) => logger.warn(message),
+          );
+          // No per-page payload or page index enters Astro's bundled store.
+          // Build consumers enumerate the default staged index instead.
+          return [];
+        }
         const nextEntries: Array<Parameters<typeof store.set>[0]> = [];
         // Default-version top segment → the route provenances that produced it
         // ("override"/"derived"/"fallback", or "identity" for a page with none),
@@ -467,10 +536,17 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 schemaPages: target.schemaPages,
                 routes: target.routes,
                 samples: target.samples,
+                extensions: target.extensions,
               },
               rootDir,
             );
             model = await buildApiModel(source);
+            warnUnusedExtensions(
+              collection,
+              target.version,
+              unusedExtensions(model, target.extensions),
+              (message) => logger.warn(message),
+            );
             registerConfiguredApiModel(
               collection,
               target.version ?? null,
@@ -481,6 +557,13 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 ...targetUrlFields(target),
               },
             );
+            if (target.sidebar === "on-demand")
+              await stageApiModelNavList(
+                rootDir,
+                collection,
+                target.version ?? null,
+                model,
+              );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; surface
             // it (plus which spec failed) and fail the build cleanly.
@@ -525,6 +608,19 @@ export function apiCollection(options?: ApiCollectionOptions): {
               throw new Error(message);
             }
             seenIds.set(id, coordinate);
+            const prepared = persistPreparedPages
+              ? {
+                  version: preparedApiVersion,
+                  page: await prepareApiPageCode(
+                    getApiPageProps(model, coordinate),
+                  ),
+                  navEntryId,
+                  ...(id === navEntryId ? { nav: preparedNav } : {}),
+                }
+              : undefined;
+            // Measure until the hint threshold; past it the answer is known.
+            if (prepared && bundledBytes <= BUNDLE_HINT_BYTES)
+              bundledBytes += JSON.stringify(prepared).length;
             const data = await parseData({
               id,
               data: {
@@ -532,18 +628,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 title,
                 ...(description === undefined ? {} : { description }),
                 ...(target.version ? { version: target.version } : {}),
-                ...(persistPreparedPages
-                  ? {
-                      prepared: {
-                        version: preparedApiVersion,
-                        page: await prepareApiPageCode(
-                          getApiPageProps(model, coordinate),
-                        ),
-                        navEntryId,
-                        ...(id === navEntryId ? { nav: preparedNav } : {}),
-                      },
-                    }
-                  : {}),
+                ...(prepared ? { prepared } : {}),
               },
             });
             nextEntries.push({ id, data });
@@ -585,6 +670,17 @@ export function apiCollection(options?: ApiCollectionOptions): {
               `override in each version to keep the URL stable across versions.`,
           );
         }
+        // Prepared pages are bundled into the server. Suggest the escape hatch
+        // well before the Worker's 64 MiB limit.
+        if (
+          bundledBytes > BUNDLE_HINT_BYTES &&
+          rendersApiOnRequest(astroConfig.root, collection)
+        ) {
+          logger.warn(
+            `API "${collection}" adds more than ${BUNDLE_HINT_BYTES / 1048576} MiB of page data to the server bundle. ` +
+              `Set bundle: false on its api entry to serve it from static assets instead (Cloudflare and Node adapters).`,
+          );
+        }
         return nextEntries;
       };
 
@@ -620,7 +716,9 @@ export function apiCollection(options?: ApiCollectionOptions): {
               store.clear();
               for (const entry of nextEntries) store.set(entry);
               logger.info(
-                `Indexed ${store.keys().length} API pages for "${collection}".`,
+                usesPageAssets(astroConfig.root, collection)
+                  ? `Prepared API pages for "${collection}" as static assets (bundle: false).`
+                  : `Indexed ${store.keys().length} API pages for "${collection}".`,
               );
             } catch (error) {
               cancelPreparedMarkdownLoad(preparedRoot, collection, epoch);

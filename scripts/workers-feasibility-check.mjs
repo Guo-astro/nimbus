@@ -880,6 +880,7 @@ async function verifyPackageManagerConsumer(site, manager) {
     const api = await request(origin, "/api/Health/ping/");
     assert(api.response.status === 200, `${manager.name} API was not 200`);
     assertPreparedApi(api.html, "operation");
+    assert(!api.html.includes('aria-label="Versions"'), "an unversioned API must render no version picker");
     await assertStaticSurfaces(origin);
   });
 }
@@ -1009,11 +1010,13 @@ function assertWorkerPurityScanner() {
   );
 }
 
-/** The picker's links on a page: href plus whether it is the active entry. */
-function pickerLinks(html, marker = "data-feasibility-picker") {
+/** The picker's links on a page: href plus whether it is the active entry.
+ *  By default, the copy ApiLayout mounts in its mobile drawer. */
+function pickerLinks(html, marker = "data-mobile-sidebar", end = "</section>") {
   const start = html.search(new RegExp(`${marker}[\\s>]`));
   assert(start !== -1, "query-mode page is missing the version picker");
-  const region = html.slice(start, html.indexOf("</nav>", start));
+  const region = html.slice(start, html.indexOf(end, start));
+  assert(region.includes('aria-label="Versions"'), "query-mode page is missing the version picker");
   return [...region.matchAll(/<a\b[^>]*>/g)].map(([tag]) => ({
     href: tag.match(/href="([^"]*)"/)?.[1]?.replaceAll("&amp;", "&") ?? "",
     active: /aria-current="page"/.test(tag),
@@ -1021,7 +1024,7 @@ function pickerLinks(html, marker = "data-feasibility-picker") {
 }
 
 /**
- * A query-mode family (`versionMode: "query"`) served by workerd, with the
+ * A query-mode family (`versionUrl: { in: "query" }`) served by workerd, with the
  * starter's real VersionSwitcher mounted: each version renders at the one
  * version-free URL, the picker keeps the reader's version, a renamed
  * operation pairs by method and path, and duplicate or unknown versions 404.
@@ -1044,9 +1047,6 @@ async function verifyQueryVersions(site, baseConfig) {
   mkdirSync(join(site, "src/content/qapi"), { recursive: true });
   writeFileSync(join(site, "src/content/qapi/v2.json"), spec([["listPets", "/pets", "List pets in v-two"], ["getPet", "/pets/{id}"]]));
   writeFileSync(join(site, "src/content/qapi/v1.json"), spec([["listPets", "/pets", "List pets in v-one"], ["fetchPet", "/pets/{petId}"], ["legacyOnly", "/legacy"]]));
-  for (const component of ["popover", "version-switcher"]) {
-    cpSync(join(STARTER, "components", "ui", component), join(site, "src", "components", "ui", component), { recursive: true });
-  }
   mkdirSync(join(site, "src/pages/qapi"), { recursive: true });
   writeFileSync(join(site, "src/pages/qapi/[...slug].astro"), `---
 import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
@@ -1063,9 +1063,6 @@ const { page, nav, collection, version, coordinate } = result;
 ---
 
 <BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref}>
-  <nav data-feasibility-picker>
-    <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
-  </nav>
   <nav data-feasibility-picker-no-coordinate>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
   </nav>
@@ -1085,7 +1082,7 @@ const { page, nav, collection, version, coordinate } = result;
     {
       collection: "qapi",
       label: "Query API",
-      versionMode: "query",
+      versionUrl: { in: "query" },
       versions: [
         { version: "v2", spec: "src/content/qapi/v2.json", default: true },
         { version: "v1", spec: "src/content/qapi/v1.json" },
@@ -1102,29 +1099,34 @@ const { page, nav, collection, version, coordinate } = result;
     .map((file) => readFileSync(file, "utf8"))
     .join("\n");
   assert(sitemap.includes("/qapi/"), "sitemap omitted the query-mode family");
-  assert(!sitemap.includes("api-version"), "sitemap advertised a non-default query version");
+  assert(!/[?&]version=/.test(sitemap), "sitemap advertised a non-default query version");
 
   await withWorkerd(site, async (origin) => {
     const page = async (route) => {
       const { response, html } = await request(origin, route);
       assert(response.status === 200, `${route} returned ${response.status}`);
+      // ApiLayout's two copies (rail and drawer) plus the fixture's own.
+      assert(html.split('aria-label="Versions"').length - 1 === 3, `${route} should render the picker in the rail and the drawer`);
+      // Not inside the tree: its scroll restore finds the current page by aria-current.
+      const tree = html.slice(html.search(/data-nb-api-tree[\s>]/), html.indexOf("</aside>"));
+      assert(!tree.includes('aria-label="Versions"'), `${route} renders the picker inside the sidebar tree`);
       return { html, links: pickerLinks(html) };
     };
     const landing = (await page("/qapi/")).links;
-    const v1Landing = landing.find((link) => link.href.includes("api-version=v1"));
+    const v1Landing = landing.find((link) => link.href.includes("version=v1"));
     assert(v1Landing, `default landing has no v1 picker entry: ${JSON.stringify(landing)}`);
 
     // Find v1's renamed operation through its landing's sidebar.
     const v1Html = (await page(v1Landing.href)).html;
     const fetchHref = v1Html.match(/href="([^"]*fetchPet[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
-    assert(fetchHref?.includes("?api-version=v1"), `v1 sidebar link to fetchPet lost its version: ${fetchHref}`);
+    assert(fetchHref?.includes("?version=v1"), `v1 sidebar link to fetchPet lost its version: ${fetchHref}`);
 
     const v1Op = await page(fetchHref);
     const active = v1Op.links.find((link) => link.active);
     assert(active?.href === fetchHref, `v1 picker active entry ${active?.href} should stay on ${fetchHref}`);
     const toDefault = v1Op.links.find((link) => !link.active);
     assert(
-      toDefault && /getPet/.test(toDefault.href) && !toDefault.href.includes("api-version"),
+      toDefault && /getPet/.test(toDefault.href) && !/[?&]version=/.test(toDefault.href),
       `v1 fetchPet should pair with the default getPet: ${toDefault?.href}`,
     );
     assert(/<meta name="robots" content="noindex/.test(v1Op.html), "non-default version page must be noindex");
@@ -1137,7 +1139,7 @@ const { page, nav, collection, version, coordinate } = result;
     const tracked = await page(`${fetchHref}&utm_source=x`);
     assert(tracked.links.find((link) => link.active)?.href === fetchHref,
       "picker active entry should keep the version and drop unrelated params");
-    const noCoordinate = pickerLinks(v1Op.html, "data-feasibility-picker-no-coordinate");
+    const noCoordinate = pickerLinks(v1Op.html, "data-feasibility-picker-no-coordinate", "</nav>");
     assert(noCoordinate.find((link) => link.active)?.href === fetchHref,
       `picker without a coordinate should stay on ${fetchHref}: ${JSON.stringify(noCoordinate)}`);
 
@@ -1148,11 +1150,11 @@ const { page, nav, collection, version, coordinate } = result;
     // One shared path renders each version's own content.
     const listHref = v1Html.match(/href="([^"]*listPets[^"]*)"/)?.[1]?.replaceAll("&amp;", "&");
     const listPath = new URL(listHref, origin).pathname;
-    for (const [query, marker] of [["", "v-two"], ["?api-version=v2", "v-two"], ["?api-version=", "v-two"], ["?api-version=v1", "v-one"]]) {
+    for (const [query, marker] of [["", "v-two"], ["?version=v2", "v-two"], ["?version=", "v-two"], ["?version=v1", "v-one"]]) {
       const { html } = await page(`${listPath}${query}`);
       assert(html.includes(`List pets in ${marker}`), `${listPath}${query} should render ${marker}`);
     }
-    for (const query of ["?api-version=nope", "?api-version=v1&api-version=v1", "?api-version=v1&api-version=v2"]) {
+    for (const query of ["?version=nope", "?version=v1&version=v1", "?version=v1&version=v2"]) {
       const { response } = await request(origin, `${listPath}${query}`);
       assert(response.status === 404, `${listPath}${query} returned ${response.status}, expected 404`);
     }
@@ -1164,7 +1166,7 @@ const { page, nav, collection, version, coordinate } = result;
       defaultMarkdown.headers.get("Content-Type")?.includes("text/markdown") &&
       (await defaultMarkdown.text()).includes("List pets in v-two"),
       `default ${listPath} should negotiate the default version's Markdown`);
-    const v1Markdown = await markdown(`${listPath}?api-version=v1`);
+    const v1Markdown = await markdown(`${listPath}?version=v1`);
     assert(v1Markdown.headers.get("Content-Type")?.includes("text/html") &&
       (await v1Markdown.text()).includes("List pets in v-one"),
       "a non-default version must answer Markdown requests with its own HTML");
@@ -1260,6 +1262,8 @@ for (const component of [
   "api-field-row",
   "api-layout",
   "api-sidebar",
+  "popover",
+  "version-switcher",
 ]) {
   cpSync(
     join(STARTER, "components", "ui", component),

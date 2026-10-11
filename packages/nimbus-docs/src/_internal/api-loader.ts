@@ -1,4 +1,5 @@
 import { codeToHtml } from "shiki";
+import { usesPageAssets } from "./page-assets-config.js";
 
 import { defaultCodeTransformers } from "./code-transformers.js";
 import type {
@@ -27,6 +28,13 @@ import {
   targetUrlFields,
 } from "./api/resolve-versions.js";
 import type { ApiSidebarMode, ApiSpec } from "../types.js";
+import { unwrapModel } from "./api/model-handle.js";
+import { operationPaths } from "./api/view-model.js";
+import {
+  apiNavList,
+  recordApiNavList,
+  stageApiNavList,
+} from "./api/nav-list.js";
 
 export {
   clearApiModelCache,
@@ -44,6 +52,21 @@ export {
   targetUrlFields,
 } from "./api/resolve-versions.js";
 export { prepareApiNav, preparedApiVersion } from "./api/prepared.js";
+
+/** Stage the sidebar filter's list for one bundled API version. */
+export async function stageApiModelNavList(
+  root: string,
+  collection: string,
+  version: string | null,
+  model: ApiModel,
+): Promise<void> {
+  const list = apiNavList(
+    getApiNav(model),
+    operationPaths(unwrapModel(model)),
+  );
+  await stageApiNavList(root, list);
+  recordApiNavList(root, collection, version, list.filename);
+}
 
 /** Where a projected page's navigation is bounded. Omitted = the full tree. */
 interface ApiNavBounds {
@@ -138,7 +161,16 @@ function exampleSource(example: ApiExampleView): string {
     : JSON.stringify(example.value, null, 2);
 }
 
+let codeHighlightCalls = 0;
+export function getApiCodePreparationMetrics() {
+  return { highlightCalls: codeHighlightCalls };
+}
+export function resetApiCodePreparationMetrics(): void {
+  codeHighlightCalls = 0;
+}
+
 async function highlight(code: string, lang: string): Promise<string> {
+  codeHighlightCalls++;
   return codeToHtml(code, {
     lang,
     themes: { light: "github-light", dark: "github-dark" },
@@ -266,6 +298,7 @@ function configuredApiModel(
         schemaPages: target.schemaPages,
         routes: target.routes,
         samples: target.samples,
+        extensions: target.extensions,
       },
       configuredRoot,
     ).then(buildApiModel);
@@ -299,6 +332,7 @@ export async function configuredApiNavs(): Promise<
 > {
   const navs: Array<{ nav: ApiNav } & ApiNavBounds> = [];
   for (const entry of configuredApi) {
+    if (usesPageAssets(configuredRoot, entry.collection)) continue;
     for (const target of resolveApiFamily(entry)) {
       const model = await configuredApiModel(entry.collection, target.version);
       navs.push({ nav: getApiNav(model), sidebar: target.sidebar, mountPath: target.mountPath });

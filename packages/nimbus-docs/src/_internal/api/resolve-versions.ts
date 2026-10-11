@@ -62,12 +62,16 @@ export interface ResolvedApiVersion {
   publishSpec: boolean;
   /** Code sample policy. Family-wide. */
   samples?: ApiSamples;
+  /** `x-*` names copied onto pages. Version override, else family. */
+  extensions?: string[];
   /** Route convention for this target, or `undefined` for legacy operationId URLs. */
   routes?: RoutePolicy;
   /** How much navigation each page includes. Family-wide; default `"full"`. */
   sidebar: ApiSidebarMode;
   /** How versions are addressed in URLs. Family-wide; default `"path"`. */
   versionMode: "path" | "query";
+  /** The query parameter that carries the version. Family-wide. */
+  versionParam: string;
 }
 
 /** An `ApiRoutePolicy` is structurally the engine's `RoutePolicy`; narrow once here. */
@@ -97,6 +101,17 @@ export function apiPageRoute(
   return { storeId: joined, param: joined };
 }
 
+/** The slug an `apiPageRoute` store id was built from. */
+export function apiPageSlug(
+  target: Pick<ResolvedApiVersion, "isDefault" | "version">,
+  storeId: string,
+): string {
+  if (target.isDefault) return storeId === "index" ? "" : storeId;
+  return storeId === target.version
+    ? ""
+    : storeId.slice(`${target.version}/`.length);
+}
+
 /** Resolve one family into its render targets (one per version). */
 export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
   const family = entry.collection;
@@ -118,9 +133,11 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         schemaPages: entry.schemaPages ?? false,
         publishSpec: entry.publishSpec ?? true,
         samples: entry.samples,
+        ...(entry.extensions ? { extensions: entry.extensions } : {}),
         routes: asRoutePolicy(entry.routes),
         sidebar: entry.sidebar ?? "full",
         versionMode: "path",
+        versionParam: DEFAULT_VERSION_PARAM,
       },
     ];
   }
@@ -143,27 +160,38 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       schemaPages: entry.schemaPages ?? false,
       publishSpec: v.publishSpec ?? entry.publishSpec ?? true,
       samples: entry.samples,
+      ...((v.extensions ?? entry.extensions) ? { extensions: v.extensions ?? entry.extensions } : {}),
       routes: asRoutePolicy(v.routes),
       sidebar: entry.sidebar ?? "full",
-      versionMode: entry.versionMode ?? "path",
+      versionMode: entry.versionUrl?.in ?? "path",
+      versionParam: versionQueryParam(entry),
     };
   });
 }
 
-/** The fixed query parameter that carries the version in query mode. */
-export const API_VERSION_PARAM = "api-version";
+/** The query parameter that carries the version in query mode, by default. */
+export const DEFAULT_VERSION_PARAM = "version";
+/** 0.17's parameter name; requests using it still select a version. */
+export const LEGACY_VERSION_PARAM = "api-version";
+
+/** The query parameter a family's version uses (meaningful in query mode). */
+export function versionQueryParam(entry: Pick<ApiSpec, "versionUrl">): string {
+  const url = entry.versionUrl;
+  return (url?.in === "query" && url.param) || DEFAULT_VERSION_PARAM;
+}
 
 /**
  * The one URL builder every producer goes through. In path mode a page's URL
  * is its mount path plus the slug, as always. In query mode every version
  * shares the version-free `/<family>/<slug>` URL, and a non-default target
- * appends `?api-version=<id>` — links whose job is to stay inside a
+ * appends `?<versionParam>=<id>` — links whose job is to stay inside a
  * non-default version carry it; the default's links carry none.
  */
 export function pageUrl(
   target: Pick<
     ResolvedApiVersion,
     "family" | "mountPath" | "versionMode" | "isDefault" | "version"
+    | "versionParam"
   >,
   slug: string,
 ): string {
@@ -173,12 +201,15 @@ export function pageUrl(
   return `${toDocumentHref(path)}${apiVersionQuery(target)}`;
 }
 
-/** The `?api-version=` suffix a non-default query-mode target's links carry. */
+/** The `?version=` suffix a non-default query-mode target's links carry. */
 export function apiVersionQuery(
-  target: Pick<ResolvedApiVersion, "versionMode" | "isDefault" | "version">,
+  target: Pick<
+    ResolvedApiVersion,
+    "versionMode" | "isDefault" | "version" | "versionParam"
+  >,
 ): string {
   return target.versionMode === "query" && !target.isDefault && target.version
-    ? `?${API_VERSION_PARAM}=${encodeURIComponent(target.version)}`
+    ? `?${target.versionParam}=${encodeURIComponent(target.version)}`
     : "";
 }
 
@@ -190,7 +221,7 @@ export function apiVersionQuery(
 export function targetUrlFields(
   target: Pick<
     ResolvedApiVersion,
-    "family" | "versionMode" | "isDefault" | "version"
+    "family" | "versionMode" | "isDefault" | "version" | "versionParam"
   >,
 ): { urlBasePath?: string; urlQuery?: string } {
   if (target.versionMode !== "query") return {};
@@ -205,6 +236,8 @@ export function targetUrlFields(
 export interface ApiQueryRouting {
   defaultVersion: string;
   versions: ReadonlySet<string>;
+  /** The query parameter that carries the version. */
+  param: string;
 }
 
 /** `null` for a path-mode family or an unknown collection. */
@@ -213,11 +246,13 @@ export function apiQueryRouting(
   collection: string,
 ): ApiQueryRouting | null {
   const entry = (api ?? []).find((candidate) => candidate.collection === collection);
-  if (!entry || entry.versionMode !== "query" || !entry.versions) return null;
+  if (!entry || entry.versionUrl?.in !== "query" || !entry.versions)
+    return null;
   const fallback = entry.versions.find((v) => v.default) ?? entry.versions[0];
   return {
     defaultVersion: fallback!.version,
     versions: new Set(entry.versions.map((v) => v.version)),
+    param: versionQueryParam(entry),
   };
 }
 
@@ -231,7 +266,10 @@ export function selectApiVersion(
   params: URLSearchParams,
   routing: ApiQueryRouting,
 ): string | null {
-  const values = params.getAll(API_VERSION_PARAM);
+  // 0.17 links used `api-version`; honour it when the current name is absent.
+  let values = params.getAll(routing.param);
+  if (!values.length && routing.param !== LEGACY_VERSION_PARAM)
+    values = params.getAll(LEGACY_VERSION_PARAM);
   if (values.length > 1) return null;
   const selected = values[0] ? values[0] : routing.defaultVersion;
   return routing.versions.has(selected) ? selected : null;

@@ -279,15 +279,17 @@ export interface ApiSpec {
    */
   versions?: ApiVersionSpec[];
   /**
-   * How a version is addressed in URLs. `"path"` (the default) mounts each
-   * non-default version at `/<collection>/<version>`. `"query"` gives every
-   * operation one URL: `/<collection>/<slug>` with the version in
-   * `?api-version=<id>` — absent means the default, unknown or repeated is
-   * a 404, and a hidden version's pages are reachable only by query. `"query"`
-   * requires `versions` and the family's effective rendering mode to be
-   * `"request"`: a static site serves the same file whatever the query says.
+   * Where a version sits in URLs. `{ in: "path" }` (the default) mounts each
+   * non-default version at `/<collection>/<version>`. `{ in: "query" }` gives
+   * every operation one URL: `/<collection>/<slug>` with the version in
+   * `?version=<id>` (`param` renames it) — absent means the default, unknown
+   * or repeated is a 404, and a hidden version's pages are reachable only by
+   * query. Query URLs require `versions` and the family's effective rendering
+   * mode to be `"request"`: a static site serves the same file whatever the
+   * query says. Links using 0.17's `?api-version=` redirect to the configured
+   * parameter.
    */
-  versionMode?: "path" | "query";
+  versionUrl?: ApiVersionUrl;
   /**
    * Require every operation to declare a stable `operationId`. When `false` (the
    * default), an operation missing one warns and falls back to a path-derived
@@ -299,12 +301,32 @@ export interface ApiSpec {
   /** Code sample policy. Applies to every version of a family. */
   samples?: ApiSamples;
   /**
+   * OpenAPI specification extensions (`x-*` fields) to keep, by name, such as
+   * `["x-acme-plans"]`. Each listed field's value is copied unchanged onto the
+   * operation or field that declares it (`page.extensions`,
+   * `field.extensions`), for your own components to render. Nimbus renders
+   * nothing from them. A version can set its own list. Declare value types by
+   * augmenting {@link ApiExtensions}.
+   */
+  extensions?: string[];
+  /**
    * Publish this collection's spec as one self-contained JSON file at
    * `/<collection>/openapi.json` (each version at its own mount path) and
    * list it in the API catalog. Default `true`. A version can override it.
    * Opting out keeps the catalog entry with documentation links only.
    */
   publishSpec?: boolean;
+  /**
+   * Bundle this API's page data into the server. Default `true`.
+   *
+   * Set `false` for a large API or one that keeps many versions: its pages
+   * are then stored as static assets beside the site and read on request, so
+   * the server bundle stays small however many versions you add. Requires the
+   * collection to render on request (`rendering`) and the Cloudflare or Node
+   * adapter. Search, `llms.txt`, the sitemap and Markdown versions then cover
+   * the default version only; older versions stay readable as HTML.
+   */
+  bundle?: boolean;
   /**
    * Publish a page for each `components/schemas` entry, at
    * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
@@ -338,6 +360,37 @@ export interface ApiSpec {
   sidebar?: ApiSidebarMode;
 }
 
+/**
+ * The value types of your API's `x-*` extensions, keyed by name. Empty by
+ * default, so every value is a plain JSON value. Declare your own once, in a
+ * file of its own such as `src/nimbus-api.d.ts`:
+ *
+ * ```ts
+ * export {};
+ *
+ * declare module "@cloudflare/nimbus-docs/types" {
+ *   interface ApiExtensions {
+ *     "x-acme-plans": string[];
+ *   }
+ * }
+ * ```
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- empty until a site augments it
+export interface ApiExtensions {}
+
+/** A JSON value, as an `x-*` extension holds. */
+export type ApiJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ApiJsonValue[]
+  | { [key: string]: ApiJsonValue };
+
+/** The listed `x-*` values an operation or field declares: the types you
+ *  declared in {@link ApiExtensions}, and JSON for any other name. */
+export type ApiExtensionValues = { [K in keyof ApiExtensions]?: ApiExtensions[K] } & Record<string, ApiJsonValue>;
+
 /** A language Nimbus generates code samples for. */
 export type ApiSampleLang = "curl" | "typescript" | "python";
 
@@ -362,6 +415,15 @@ export type ApiSidebarMode = "full" | "on-demand";
 
 /** Maturity/deprecation status for one API version. */
 export type ApiVersionStatus = "ga" | "beta" | "deprecated";
+
+/** Where an API family's version sits in its URLs. */
+export type ApiVersionUrl =
+  | { in: "path" }
+  | {
+      in: "query";
+      /** The query parameter. Default `"version"`. */
+      param?: string;
+    };
 
 /**
  * One version within an {@link ApiSpec} family. Each version parses its own
@@ -396,6 +458,8 @@ export interface ApiVersionSpec {
   label?: string;
   /** Override the family's {@link ApiSpec.publishSpec} for this version. */
   publishSpec?: boolean;
+  /** Replace the family's {@link ApiSpec.extensions} list for this version. */
+  extensions?: string[];
   /**
    * Route convention for this version's pages. Each version carries its own
    * policy; a shared route map may be imported into several versions, but every

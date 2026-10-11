@@ -96,7 +96,7 @@ export const getStaticPaths = getDocsStaticPaths;
     const operation = page as ApiOperationPage;
     if (operation.example?.value === null) assert.equal(document.querySelector("[data-example]")?.textContent, "null");
     const markdown = await readFile(path.join(entry.parentPath, "index.md"), "utf8");
-    const mdSamples = [...markdown.matchAll(/```(curl|typescript|python)\n([\s\S]*?)\n```/g)].map((match) => ({ lang: match[1]!, source: match[2]! }));
+    const mdSamples = [...markdown.matchAll(/```(bash|typescript|python)\n([\s\S]*?)\n```/g)].map((match) => ({ lang: match[1] === "bash" ? "curl" : match[1]!, source: match[2]! }));
     const htmlSamples = [...document.querySelectorAll("[data-lang]")].map((element) => ({ lang: element.getAttribute("data-lang")!, source: element.textContent! }));
     const expected = operation.samples.map(({ lang, source }) => ({ lang, source }));
     assert.deepEqual(htmlSamples, expected);

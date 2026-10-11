@@ -21,7 +21,7 @@ import type {
   OpenApiSchema,
   OpenApiSecurityScheme,
 } from "./openapi-types.js";
-import { isPlainObject } from "./schema-algebra.js";
+import { collectObjectShape, foldAllOf, isPlainObject, itemsOf } from "./schema-algebra.js";
 
 interface SamplerModule {
   sample: (
@@ -40,6 +40,19 @@ interface HarField {
   value: string;
 }
 
+// httpsnippet's multipart params: a file part names its file.
+interface HarPostField extends HarField {
+  fileName?: string;
+}
+
+/** One part of a `multipart/form-data` body. A `typed` part is sent with its
+ *  own content type; `json` holds the value it serializes. */
+type MultipartPart =
+  | { name: string; kind: "text"; value: string }
+  | { name: string; kind: "typed"; value: string; contentType: string }
+  | { name: string; kind: "json"; value: unknown; contentType: string }
+  | { name: string; kind: "file"; file: string; contentType?: string };
+
 interface FormField extends HarField {
   allowReserved?: boolean;
   /** The value is already percent-encoded: a joined list whose separators are structural. */
@@ -53,7 +66,7 @@ interface HarRequestInput {
   cookies: [];
   headers: HarField[];
   queryString: HarField[];
-  postData?: { mimeType: string; text: string; params?: HarField[] };
+  postData?: { mimeType: string; text: string; params?: HarPostField[]; parts?: MultipartPart[] };
   headersSize: number;
   bodySize: number;
 }
@@ -92,7 +105,6 @@ export const GENERATED_SAMPLE_LANGS: readonly ApiSampleLang[] = LANGS.map((l) =>
 // names are not aliases of `curl`: an authored shell sample is often a CLI call.
 const LANG_ALIASES: Record<string, ApiSampleLang> = { py: "python", ts: "typescript" };
 
-const DEFAULT_SERVER = "https://api.example.com";
 // Bounds sampler work on deep or self-referential schemas; a runaway sample
 // would otherwise not be caught by try/catch.
 const MAX_SAMPLE_DEPTH = 8;
@@ -174,7 +186,10 @@ export function resolveExampleValue(
   const authored = pickExample(media.examples);
   if (authored !== undefined) return clampExample(authored);
   if (!media.schema || !tools) return undefined;
-  const sampled = sampleForRole(tools, media.schema, role);
+  let sampled = sampleForRole(tools, media.schema, role);
+  if (role === "request" && bareMediaType(media.mediaType) === "multipart/form-data") {
+    sampled = withFilePlaceholders(sampled, media.schema);
+  }
   return sampled === undefined ? undefined : clampExample(sampled);
 }
 
@@ -237,11 +252,18 @@ function clampExample(value: unknown): unknown {
 export interface OperationSampleInput {
   method: string;
   path: string;
+  openapiVersion?: string;
   server?: string;
   params: OpenApiParameter[];
   /** The pre-resolved request example (see `resolveExampleValue`) — feeds the
    *  snippet body so an authored example and the rendered example never diverge. */
-  body?: { mediaType: string; value: unknown; encoding?: Record<string, OpenApiEncoding | undefined> };
+  body?: {
+    mediaType: string;
+    value: unknown;
+    /** The media's schema: a multipart body reads its file fields from it. */
+    schema?: OpenApiSchema;
+    encoding?: Record<string, OpenApiEncoding | undefined>;
+  };
   securitySchemes?: Record<string, OpenApiSecurityScheme>;
   auth: AuthRequirement[][];
   xCodeSamples?: unknown;
@@ -313,8 +335,14 @@ function generateSamples(
   if (langs.length === 0) return [];
   try {
     const mediaType = input.body?.mediaType ?? "application/json";
+    // Other multipart types have no sample shape, and a form whose example
+    // gives no parts would send no body: both get no sample rather than a
+    // header-only one.
+    const bare = bareMediaType(mediaType);
+    if (bare.startsWith("multipart/") && bare !== "multipart/form-data") return [];
     const values = paramValues(tools, input.params);
     const { har, placeholders, bodyMarker } = buildMarkedHar(input, mediaType, values);
+    if (bare === "multipart/form-data" && input.body?.value !== undefined && !har.postData) return [];
     const samples: Omit<CodeSample, "id">[] = [];
     for (const lang of langs) {
       const source = convertWithBody(tools, har, lang, placeholders, bodyMarker);
@@ -389,7 +417,15 @@ function convert(
       source = source.replace(/(--url )([^'\s]+)/, (m, flag: string, url: string) =>
         [...placeholders.keys()].some((marker) => url.includes(marker)) ? `${flag}'${url}'` : m,
       );
-      source = source.replace("@- <<EOF\n", "@- <<'EOF'\n");
+      const visible = unquotedShell(source);
+      const heredoc = /(?:^|\n)[ \t]*--data[ \t]+(@- <<EOF\n)/.exec(visible);
+      if (heredoc) {
+        const at = heredoc.index + heredoc[0].lastIndexOf(heredoc[1]!);
+        source = `${source.slice(0, at)}@- <<'EOF'\n${source.slice(at + heredoc[1]!.length)}`;
+      } else if (UNQUOTED_HEREDOC.test(visible)) {
+        // An unfamiliar unquoted delimiter would expand the body in the shell.
+        return undefined;
+      }
     }
     // Every marker sits inside a string literal the target has already quoted,
     // so the restored `<name>` is escaped for that target's quoting. One pass,
@@ -403,6 +439,29 @@ function convert(
   }
 }
 
+// Match the cURL option, not a `@- <<TAG` sequence inside a quoted form value.
+const UNQUOTED_HEREDOC = /(?:^|\n)[ \t]*--data[ \t]+@-[ \t]*<<-?[ \t]*[^\s'"\\;|&<>]+[ \t]*\n/;
+
+function unquotedShell(source: string): string {
+  let quote: "'" | '"' | undefined;
+  let visible = "";
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i]!;
+    if (char === "\\" && quote !== "'" && i + 1 < source.length) {
+      visible += ` ${source[++i] === "\n" ? "\n" : " "}`;
+    } else if (char === quote) {
+      quote = undefined;
+      visible += " ";
+    } else if (!quote && (char === "'" || char === '"')) {
+      quote = char;
+      visible += " ";
+    } else {
+      visible += quote && char !== "\n" ? " " : char;
+    }
+  }
+  return visible;
+}
+
 function convertWithBody(
   tools: SampleTools,
   har: HarRequestInput,
@@ -412,11 +471,20 @@ function convertWithBody(
 ): string | undefined {
   const rewrite = bodyRewrite(har, lang.target, bodyMarker);
   if (!rewrite) return convert(tools, har, lang, placeholders);
-  const marked = convert(tools, rewrite.har, lang, placeholders);
-  const at = marked?.indexOf(rewrite.line) ?? -1;
-  if (!marked || at < 0) return undefined;
-  const indent = /^[ \t]*/.exec(marked.slice(marked.lastIndexOf("\n", at) + 1))![0];
-  return marked.slice(0, at) + rewrite.text(indent) + marked.slice(at + rewrite.line.length);
+  let source = convert(tools, rewrite.har, lang, placeholders);
+  for (const edit of rewrite.edits) {
+    const at = source?.indexOf(edit.line) ?? -1;
+    if (!source || at < 0) return undefined;
+    const indent = /^[ \t]*/.exec(source.slice(source.lastIndexOf("\n", at) + 1))![0];
+    source = source.slice(0, at) + edit.text(indent) + source.slice(at + edit.line.length);
+  }
+  return source;
+}
+
+interface BodyEdit {
+  /** Text httpsnippet writes for the marked request; it must be found. */
+  line: string;
+  text: (indent: string) => string;
 }
 
 // httpsnippet writes some bodies without escaping: Python's JSON and form
@@ -431,7 +499,18 @@ function bodyRewrite(
   har: HarRequestInput,
   target: string,
   marker: string,
-): { har: HarRequestInput; line: string; text: (indent: string) => string } | undefined {
+): { har: HarRequestInput; edits: BodyEdit[] } | undefined {
+  const parts = har.postData?.parts;
+  if (parts) return multipartRewrite(har, parts, target, marker);
+  const rewrite = bodyRewriteEdit(har, target, marker);
+  return rewrite && { har: rewrite.har, edits: [rewrite] };
+}
+
+function bodyRewriteEdit(
+  har: HarRequestInput,
+  target: string,
+  marker: string,
+): ({ har: HarRequestInput } & BodyEdit) | undefined {
   const postData = har.postData;
   if (!postData) return undefined;
   const params = postData.params;
@@ -475,7 +554,7 @@ function bodyRewrite(
     if (target === "node") return { har: markedHar, line: `JSON.stringify('${marker}')`, text: (indent) => `JSON.stringify(${jsLiteral(body, indent)})` };
     return undefined;
   }
-  if (!postData.text || SNIPPET_MULTIPART_TYPES.has(postData.mimeType)) return undefined;
+  if (!postData.text) return undefined;
   const text = postData.text;
   // cURL's `--data` reads a file for a body starting with `@`; `--data-raw` never does.
   if (target === "shell") return { har: { ...har, postData: { ...postData, text: marker } }, line: `--data ${marker}`, text: () => `--data-raw '${escapeForTarget("shell", text)}'` };
@@ -484,9 +563,8 @@ function bodyRewrite(
 }
 
 // The media types httpsnippet writes as a literal; Python sends any other body
-// as an escaped string. It sends no text for its multipart types.
+// as an escaped string.
 const SNIPPET_JSON_TYPES = new Set(["application/json", "application/x-json", "text/json", "text/x-json"]);
-const SNIPPET_MULTIPART_TYPES = new Set(["multipart/form-data", "multipart/mixed", "multipart/related", "multipart/alternative"]);
 
 // Form fields as httpsnippet groups them: a repeated name holds a list. No
 // prototype, so names like `constructor` and `__proto__` are ordinary keys.
@@ -575,7 +653,7 @@ function buildHar(
   values: ParamValues,
   placeholder: (name: string) => string,
 ): HarRequestInput {
-  const base = (input.server ?? DEFAULT_SERVER).replace(/\/+$/, "");
+  const base = sampleBase(input.server, placeholder);
   const bodyExample = input.body?.value;
 
   let filledPath = input.path;
@@ -609,24 +687,32 @@ function buildHar(
     bodySize: -1,
   };
 
+  if (bareMediaType(mediaType) === "multipart/form-data") {
+    // No Content-Type header: every client writes it with the boundary.
+    const parts = multipartParts(bodyExample, input.body?.schema, input.body?.encoding, input.openapiVersion);
+    if (parts.length > 0) har.postData = { mimeType: "multipart/form-data", text: "", parts };
+    return har;
+  }
+
   const fields = isFormMediaType(mediaType) ? formFields(bodyExample, input.body?.encoding) : undefined;
   if (bodyExample !== undefined && fields?.length !== 0) {
     headers.unshift({ name: "Content-Type", value: mediaType });
     if (fields) {
-      // httpsnippet builds a form from `params` only for the bare media type;
-      // with parameters such as `charset`, every target sends the text.
-      const text = serializeForm(fields);
+      // httpsnippet builds a form from `params` only for the bare media type,
+      // so it gets that; the header keeps parameters such as `charset`.
+      // An authored form string is already encoded: decoding and re-encoding
+      // it changes bytes such as `%20` and malformed percent sequences.
+      const text = typeof bodyExample === "string" ? bodyExample : serializeForm(fields);
       // An empty name (cURL drops it) or a value that is already encoded must
       // go as text, which every target sends unchanged.
-      har.postData = mediaType === "application/x-www-form-urlencoded" &&
-        !fields.some((field) => field.allowReserved || field.encoded || field.name === "")
-        ? { mimeType: mediaType, text, params: fields }
+      har.postData = typeof bodyExample !== "string" && !fields.some((field) => field.allowReserved || field.encoded || field.name === "")
+        ? { mimeType: "application/x-www-form-urlencoded", text, params: fields }
         : { mimeType: mediaType, text };
     } else {
       // A raw string body for a non-JSON media type is sent verbatim (matches the
       // rendered example); everything else is JSON-serialized.
       const text =
-        typeof bodyExample === "string" && !mediaType.includes("json")
+        typeof bodyExample === "string" && !isJsonMediaType(mediaType)
           ? bodyExample
           : JSON.stringify(bodyExample, null, 2);
       har.postData = { mimeType: mediaType, text };
@@ -635,8 +721,248 @@ function buildHar(
   return har;
 }
 
+function bareMediaType(mediaType: string): string {
+  return mediaType.split(";")[0]!.trim().toLowerCase();
+}
+
+// The URL a sample is sent to. With no server, or a relative one, the host is
+// the reader's to fill in, as `<base-url>`; a server variable left without a
+// default becomes `<name>`.
+function sampleBase(server: string | undefined, placeholder: (name: string) => string): string {
+  if (server === undefined) return placeholder("base-url");
+  let url = server.replace(/\/+$/, "").replace(/\{([^{}]+)\}/g, (_whole, name: string) => placeholder(name));
+  if (url.startsWith("//")) url = `https:${url}`;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return `${placeholder("base-url")}${url.startsWith("/") || url === "" ? "" : "/"}${url}`;
+  // A placeholder where a URL can't hold one, such as the port, leaves no
+  // valid URL; the whole base is then the reader's to fill in.
+  return URL.canParse(url) ? url : placeholder("base-url");
+}
+
 function isFormMediaType(mediaType: string): boolean {
-  return mediaType.split(";")[0]!.trim().toLowerCase() === "application/x-www-form-urlencoded";
+  return bareMediaType(mediaType) === "application/x-www-form-urlencoded";
+}
+
+function isFileSchema(schema: OpenApiSchema | undefined): boolean {
+  return schema?.format === "binary";
+}
+
+// A generated file array shows two items, so a sample shows how to send several.
+const FILE_ARRAY_ITEMS = 2;
+
+// The schema the sampler writes: `allOf` merged, and for a union its first
+// `oneOf` branch, else its first `anyOf` branch. Depth-bounded like sampling.
+function sampledSchema(schema: OpenApiSchema | undefined, depth = 0): OpenApiSchema | undefined {
+  if (!schema) return undefined;
+  const folded = foldAllOf(schema);
+  const branch = folded.oneOf?.[0] ?? folded.anyOf?.[0];
+  return branch && depth < MAX_SAMPLE_DEPTH ? sampledSchema(branch, depth + 1) : folded;
+}
+
+// A body's properties as the sampler sees them, union branch included.
+function sampledProperties(schema: OpenApiSchema | undefined): Record<string, OpenApiSchema> {
+  if (!schema) return {};
+  const folded = foldAllOf(schema);
+  const branch = sampledSchema(schema);
+  return { ...(branch && branch !== folded ? collectObjectShape(branch).properties : {}), ...collectObjectShape(folded).properties };
+}
+
+// A synthesized multipart example shows each file field as its placeholder,
+// `<name>`, instead of the sampler's `"string"`.
+function withFilePlaceholders(value: unknown, schema: OpenApiSchema | undefined): unknown {
+  if (!isPlainObject(value) || !schema) return value;
+  const properties = sampledProperties(schema);
+  const out: Record<string, unknown> = { ...value };
+  for (const key of Object.keys(value)) {
+    const property = sampledSchema(properties[key]);
+    if (isFileSchema(property)) out[key] = `<${key}>`;
+    else if (isFileSchema(sampledSchema(itemsOf(property)))) out[key] = Array.from({ length: FILE_ARRAY_ITEMS }, () => `<${key}>`);
+  }
+  return out;
+}
+
+// A value that isn't valid encoded text is sent as written.
+function decodeForm(value: string): string {
+  try {
+    return decodeURIComponent(value.replaceAll("+", " "));
+  } catch {
+    return value;
+  }
+}
+
+// A part's content type from its `encoding` entry: the first listed type, or
+// none for a wildcard, which names no type a client can send.
+function partContentType(listed: string | undefined): string | undefined {
+  const first = listed?.split(",")[0]?.trim();
+  return first && !first.includes("*") ? first : undefined;
+}
+
+function isJsonMediaType(mediaType: string): boolean {
+  const bare = bareMediaType(mediaType);
+  return SNIPPET_JSON_TYPES.has(bare) || bare.endsWith("+json");
+}
+
+function isOpenApi30(version: string | undefined): boolean {
+  return version === "3.0" || version?.startsWith("3.0.") === true;
+}
+
+// A multipart body's parts, in the example's order. A file field is a file
+// part named by its placeholder, one per item for a file array. OpenAPI 3.0
+// ignores `style`/`explode`/`allowReserved` on multipart; 3.1 applies them
+// before `contentType`. An explicit `contentType` sets the part type when no
+// style rule applies. Otherwise an object, or an array holding one, is one
+// JSON part, an array of scalars repeats, and a scalar is a text part.
+function multipartParts(
+  value: unknown,
+  schema: OpenApiSchema | undefined,
+  encoding: Record<string, OpenApiEncoding | undefined> | undefined,
+  openapiVersion: string | undefined,
+): MultipartPart[] {
+  if (!isPlainObject(value)) return [];
+  const properties = sampledProperties(schema);
+  const parts: MultipartPart[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    const rule = encoding && Object.hasOwn(encoding, key) ? encoding[key] : undefined;
+    const property = sampledSchema(properties[key]);
+    const styleApplies = !isOpenApi30(openapiVersion) && rule &&
+      (rule.style !== undefined || rule.explode !== undefined || rule.allowReserved !== undefined);
+    const contentType = partContentType(rule?.contentType);
+    if (styleApplies) {
+      for (const field of formFields({ [key]: item }, { [key]: rule })) {
+        // Joined values are written percent-encoded for a form; a part sends text.
+        parts.push({ name: field.name, kind: "text", value: field.encoded ? decodeForm(field.value) : field.value });
+      }
+    } else if (isFileSchema(property) || isFileSchema(sampledSchema(itemsOf(property)))) {
+      const fileType = contentType ?? partContentType(property?.contentMediaType ?? sampledSchema(itemsOf(property))?.contentMediaType);
+      // As many parts as the example lists; a generated example lists two.
+      const count = isFileSchema(property) ? 1 : Array.isArray(item) ? item.length : FILE_ARRAY_ITEMS;
+      for (let i = 0; i < count; i++) {
+        parts.push({ name: key, kind: "file", file: `<${key}>`, ...(fileType ? { contentType: fileType } : {}) });
+      }
+    } else if (contentType && isJsonMediaType(contentType)) {
+      parts.push({ name: key, kind: "json", value: item, contentType });
+    } else if (contentType) {
+      for (const entry of Array.isArray(item) ? item : [item]) {
+        parts.push({ name: key, kind: "typed", value: formText(entry), contentType });
+      }
+    } else if (isPlainObject(item) || (Array.isArray(item) && item.some((entry) => entry !== null && typeof entry === "object"))) {
+      parts.push({ name: key, kind: "json", value: item, contentType: "application/json" });
+    } else {
+      for (const entry of Array.isArray(item) ? item : [item]) {
+        parts.push({ name: key, kind: "text", value: formText(entry) });
+      }
+    }
+  }
+  return parts;
+}
+
+// httpsnippet writes multipart bodies with unescaped strings, drops typed
+// parts in TypeScript, and loses repeated parts in Python, so Nimbus writes
+// every part. The request goes in with marker parts; each target's marker
+// lines are replaced with the real ones, and a missing one leaves the sample
+// out. No target keeps a Content-Type header: each client adds the boundary.
+function multipartRewrite(
+  har: HarRequestInput,
+  parts: MultipartPart[],
+  target: string,
+  marker: string,
+): { har: HarRequestInput; edits: BodyEdit[] } | undefined {
+  const marked = (params: HarPostField[]): HarRequestInput => ({
+    ...har,
+    postData: { mimeType: "multipart/form-data", text: "", params },
+  });
+  if (target === "shell") {
+    return {
+      har: marked([{ name: marker, value: "" }]),
+      edits: [{
+        line: `--header 'content-type: multipart/form-data' \\\n  --form ${marker}=`,
+        text: (indent) => parts.map(curlPart).join(` \\\n${indent}`),
+      }],
+    };
+  }
+  if (target === "python") {
+    // `requests` sends `data` as plain fields and `files` as a list, so
+    // repeated parts survive; a typed part goes in `files` with no file name.
+    // It sends multipart only when `files` is set, so a body of text fields
+    // goes in `files` too.
+    const onlyText = parts.every((part) => part.kind === "text");
+    const fields = onlyText ? [] : parts.filter((part) => part.kind === "text");
+    const files = onlyText ? parts : parts.filter((part) => part.kind !== "text");
+    const params: HarPostField[] = [];
+    const edits: BodyEdit[] = [];
+    if (files.length > 0) {
+      params.push({ name: `${marker}f`, value: "", fileName: `${marker}n` });
+      edits.push({
+        line: `files = { "${marker}f": ("${marker}n", open("${marker}n", "rb")) }`,
+        text: () => `files = [\n${files.map((part) => `${PYTHON_INDENT}${pythonPart(part)}`).join(",\n")}\n]`,
+      });
+    }
+    if (fields.length > 0) {
+      params.push({ name: marker, value: "" });
+      edits.push({
+        line: `payload = { "${marker}": "" }`,
+        text: () => `payload = ${pythonLiteral(formPayload(fields))}`,
+      });
+    }
+    if (files.some((part) => part.kind === "json")) {
+      edits.push({ line: "import requests\n", text: () => "import json\nimport requests\n" });
+    }
+    return { har: marked(params), edits };
+  }
+  if (target === "node") {
+    const edits: BodyEdit[] = [{
+      line: `formData.append('${marker}', '');`,
+      text: (indent) => parts.map((part) => `formData.append(${jsPart(part, indent)});`).join(`\n${indent}`),
+    }];
+    if (parts.some((part) => part.kind === "file")) {
+      edits.push({
+        line: "const formData = new FormData();",
+        text: () => "import { readFile } from 'node:fs/promises';\n\nconst formData = new FormData();",
+      });
+    }
+    return { har: marked([{ name: marker, value: "" }]), edits };
+  }
+  return undefined;
+}
+
+// cURL reads a `--form` value starting with `@` or `<` as a file, so a text
+// part is a `--form-string`. A typed part's value is double-quoted, curl's
+// form for a value holding `;` or `,`.
+function curlPart(part: MultipartPart): string {
+  const quote = (text: string) => `'${escapeForTarget("shell", text)}'`;
+  const curlQuoted = (text: string) => `"${text.replace(/["\\]/g, "\\$&")}"`;
+  if (part.kind === "text") return `--form-string ${quote(`${part.name}=${part.value}`)}`;
+  if (part.kind === "file") {
+    const file = /^[^\s;,"]+$/.test(part.file) ? part.file : curlQuoted(part.file);
+    return `--form ${quote(`${part.name}=@${file};type=${part.contentType ?? "application/octet-stream"}`)}`;
+  }
+  const text = part.kind === "json" ? JSON.stringify(part.value) : part.value;
+  return `--form ${quote(`${part.name}=${curlQuoted(text)};type=${part.contentType}`)}`;
+}
+
+function pythonPart(part: MultipartPart): string {
+  const name = JSON.stringify(part.name);
+  if (part.kind === "text") return `(${name}, (None, ${JSON.stringify(part.value)}))`;
+  if (part.kind === "file") {
+    const file = JSON.stringify(part.file);
+    return `(${name}, (${file}, open(${file}, "rb"), ${JSON.stringify(part.contentType ?? "application/octet-stream")}))`;
+  }
+  const value = part.kind === "json" ? `json.dumps(${pythonLiteral(part.value, 2)})` : JSON.stringify(part.value);
+  return `(${name}, (None, ${value}, ${JSON.stringify(part.contentType)}))`;
+}
+
+// Node's FormData sends a Blob as a file part, so a typed part arrives with
+// `filename="blob"`; it is the only way to give a part its own type.
+function jsPart(part: MultipartPart, indent: string): string {
+  const name = jsString(part.name);
+  if (part.kind === "text") return `${name}, ${jsString(part.value)}`;
+  if (part.kind === "file") {
+    const file = jsString(part.file);
+    const type = part.contentType ? `, { type: ${jsString(part.contentType)} }` : "";
+    return `${name}, new Blob([await readFile(${file})]${type}), ${file}`;
+  }
+  const value = part.kind === "json" ? `JSON.stringify(${jsLiteral(part.value, indent)})` : jsString(part.value);
+  return `${name}, new Blob([${value}], { type: ${jsString(part.contentType)} })`;
 }
 
 function serializeForm(fields: FormField[]): string {

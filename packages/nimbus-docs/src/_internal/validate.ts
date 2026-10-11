@@ -301,13 +301,33 @@ const samplesSchema = z
     }
   });
 
+// An `x-*` specification extension name, as OpenAPI defines them; `x-nimbus-*`
+// is Nimbus's own.
+const extensionsSchema = (path: string) =>
+  z
+    .array(z.string({ error: `"${path}" entries must be strings` }))
+    .superRefine((names, ctx) => {
+      const seen = new Set<string>();
+      names.forEach((name, i) => {
+        const fault = !/^x-[A-Za-z0-9._-]+$/.test(name)
+          ? "must start with \"x-\" followed by letters, digits, \".\", \"_\", or \"-\""
+          : /^x-nimbus-/i.test(name)
+            ? "is reserved: x-nimbus-* fields are Nimbus's own"
+            : seen.has(name)
+              ? "is listed twice"
+              : undefined;
+        seen.add(name);
+        if (fault) ctx.addIssue({ code: "custom", path: [i], message: `"${path}" entry "${name}" ${fault}` });
+      });
+    });
+
 const apiVersionSpecShape = {
   version: z
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
     .min(1, '"api[].versions[].version" must be a non-empty string')
     .regex(
       /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
-      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and an api-version query value)',
+      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and a version query value)',
     ),
   spec: specSourceSchema,
   default: z.boolean().optional(),
@@ -317,6 +337,7 @@ const apiVersionSpecShape = {
   publishSpec: z
     .boolean({ error: '"api[].versions[].publishSpec" must be a boolean' })
     .optional(),
+  extensions: extensionsSchema("api[].versions[].extensions").optional(),
   routes: routePolicySchema.optional(),
 };
 const apiVersionSpecKeys = new Set(Object.keys(apiVersionSpecShape));
@@ -347,11 +368,42 @@ const apiSpecShape = {
   spec: specSourceSchema.optional(),
   label: z.string().optional(),
   versions: z.array(apiVersionSpecSchema).optional(),
-  versionMode: z
-    .enum(["path", "query"], {
-      error: '"api[].versionMode" must be "path" or "query"',
-    })
+  versionUrl: z
+    .discriminatedUnion(
+      "in",
+      [
+        z
+          .object({
+            in: z.literal("path"),
+            param: z
+              .never({
+                error:
+                  '"api[].versionUrl.param" names a query parameter, so it needs versionUrl: { in: "query" }',
+              })
+              .optional(),
+          })
+          .strict(),
+        z
+          .object({
+            in: z.literal("query"),
+            param: z
+              .string({ error: '"api[].versionUrl.param" must be a string' })
+              .regex(/^[a-z][a-z0-9_-]*$/, {
+                error:
+                  '"api[].versionUrl.param" must start with a lowercase letter and use only lowercase letters, digits, "-", and "_" (it becomes a query parameter name)',
+              })
+              .optional(),
+          })
+          .strict(),
+      ],
+      {
+        error:
+          '"api[].versionUrl" must be { in: "path" } or { in: "query", param?: string }',
+      },
+    )
     .optional(),
+  // 0.17's spelling; kept in the schema only to name its replacement.
+  versionMode: z.unknown().optional(),
   requireOperationId: z
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
@@ -361,7 +413,9 @@ const apiSpecShape = {
   publishSpec: z
     .boolean({ error: '"api[].publishSpec" must be a boolean' })
     .optional(),
+  bundle: z.boolean({ error: '"api[].bundle" must be a boolean' }).optional(),
   samples: samplesSchema.optional(),
+  extensions: extensionsSchema("api[].extensions").optional(),
   routes: routePolicySchema.optional(),
   sidebar: z
     .enum(["full", "on-demand"], {
@@ -398,12 +452,19 @@ const apiSpecSchema = z
         message: `api collection "${entry.collection}" sets "routes" at the family level, but a version family carries no shared route policy — move "routes" onto each version entry.`,
       });
     }
+    if (entry.versionMode !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["versionMode"],
+        message: `api collection "${entry.collection}" sets versionMode, which is now versionUrl. Replace versionMode: "query" with versionUrl: { in: "query" }, and versionMode: "path" with versionUrl: { in: "path" } or nothing`,
+      });
+    }
     if (!hasVersions) {
-      if (entry.versionMode === "query") {
+      if (entry.versionUrl?.in === "query") {
         ctx.addIssue({
           code: "custom",
-          path: ["versionMode"],
-          message: `api collection "${entry.collection}" sets versionMode: "query" without "versions" — the query carries a version id, so a single-spec collection has nothing to select`,
+          path: ["versionUrl"],
+          message: `api collection "${entry.collection}" sets versionUrl: { in: "query" } without "versions" — the query carries a version id, so a single-spec collection has nothing to select`,
         });
       }
       return;
@@ -578,11 +639,11 @@ const nimbusConfigSchema = withStrictKeys(
   // precedence `compileRenderingPolicy` does — the collection override,
   // else the default.
   const shaped = data as {
-    api?: { collection?: string; versionMode?: string }[];
+    api?: { collection?: string; versionUrl?: { in?: string } }[];
     rendering?: { default?: string; collections?: Record<string, string> };
   };
   (shaped.api ?? []).forEach((entry, i) => {
-    if (entry.versionMode !== "query" || !entry.collection) return;
+    if (entry.versionUrl?.in !== "query" || !entry.collection) return;
     const effective =
       shaped.rendering?.collections?.[entry.collection] ??
       shaped.rendering?.default ??
@@ -590,8 +651,26 @@ const nimbusConfigSchema = withStrictKeys(
     if (effective !== "request") {
       ctx.addIssue({
         code: "custom",
-        path: ["api", i, "versionMode"],
-        message: `api collection "${entry.collection}" sets versionMode: "query", but its effective rendering mode is "${effective}" — query versions need request rendering: a static site serves the same file whatever the query says`,
+        path: ["api", i, "versionUrl"],
+        message: `api collection "${entry.collection}" sets versionUrl: { in: "query" }, but its effective rendering mode is "${effective}" — query versions need request rendering: a static site serves the same file whatever the query says`,
+      });
+    }
+  });
+  // `bundle: false` serves page data that only a request-rendered page reads.
+  (
+    (shaped.api as { collection?: string; bundle?: boolean }[] | undefined) ??
+    []
+  ).forEach((entry, i) => {
+    if (entry.bundle !== false || !entry.collection) return;
+    const explicit = shaped.rendering?.collections?.[entry.collection];
+    const effective = explicit ?? shaped.rendering?.default ?? "build";
+    if (effective !== "request") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["api", i, "bundle"],
+        message: explicit
+          ? `api collection "${entry.collection}" sets bundle: false, but rendering.collections.${entry.collection} is "${explicit}". Set it to "request", or remove bundle: false`
+          : `api collection "${entry.collection}" sets bundle: false, which needs it rendered on request. Add rendering: { collections: { ${JSON.stringify(entry.collection)}: "request" } }, or remove bundle: false`,
       });
     }
   });

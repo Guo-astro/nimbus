@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { markdownToMdast } from "satteri-source-parser";
+import { markdownToMdast } from "satteri";
 
 import { fencedBlocks } from "../src/_internal/code-regions.js";
 

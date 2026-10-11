@@ -1,6 +1,6 @@
 import { fromHtml } from "hast-util-from-html";
-import { markdownToMdast, mdxToMdast } from "satteri-source-parser";
 import ts from "typescript";
+import { parseMarkdownSource } from "./markdown-source.js";
 
 interface MdNode {
   type?: string;
@@ -145,31 +145,17 @@ function rootRelativeInsertionOffset(
   return insertionOffset;
 }
 
-function buildOffsetMap(source: string): number[] {
-  const offsets = [0];
-  let index = 0;
-  while (index < source.length) {
-    const codePoint = source.codePointAt(index);
-    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-    offsets.push(index);
-  }
-  return offsets;
-}
-
 function nodeRange(
   node: MdNode,
-  offsets: number[],
   source: string,
   sourceId: string | undefined,
 ): [number, number] {
-  const codePointStart = node.position?.start?.offset;
-  const codePointEnd = node.position?.end?.offset;
-  if (typeof codePointStart !== "number" || typeof codePointEnd !== "number") {
+  const start = node.position?.start?.offset;
+  const end = node.position?.end?.offset;
+  if (typeof start !== "number" || typeof end !== "number") {
     fail(`missing ${node.type ?? "node"} source position`, source, sourceId);
   }
-  const start = offsets[codePointStart];
-  const end = offsets[codePointEnd];
-  if (start === undefined || end === undefined || end < start) {
+  if (end < start || end > source.length) {
     fail(`invalid ${node.type ?? "node"} source position`, source, sourceId);
   }
   return [start, end];
@@ -178,19 +164,16 @@ function nodeRange(
 function destinationOffset(
   source: string,
   node: MdNode,
-  offsets: number[],
   sourceId: string | undefined,
 ): number {
-  const [start, end] = nodeRange(node, offsets, source, sourceId);
+  const [start, end] = nodeRange(node, source, sourceId);
   const raw = source.slice(start, end);
   let offset = 0;
   if (node.type === "link") {
     const children = Array.isArray(node.children) ? node.children : [];
     const lastChild = children.at(-1) as MdNode | undefined;
     const childEnd = lastChild?.position?.end?.offset;
-    const childUtf16End =
-      typeof childEnd === "number" ? offsets[childEnd] : undefined;
-    offset = (childUtf16End ?? start) - start;
+    offset = (childEnd ?? start) - start;
     while (offset < raw.length) {
       if (raw[offset] === "]") {
         let opening = offset + 1;
@@ -547,20 +530,18 @@ export function normalizeAuthoredLinks(
 
   let tree: MdNode;
   try {
-    tree = (
-      format === "markdown" ? markdownToMdast(source) : mdxToMdast(source)
-    ) as MdNode;
+    tree = parseMarkdownSource(source, format) as MdNode;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const location = detail.match(/^(\d+):(\d+):\s*/);
-    if (location) {
-      throw new Error(
-        `Nimbus authored-link normalization failed in ${options.sourceId ?? "Markdown source"}:${location[1]}:${location[2]}: could not parse source: ${detail.slice(location[0].length)}`,
-      );
-    }
-    fail(`could not parse source: ${detail}`, source, options.sourceId);
+    const where = `${options.sourceId ?? "content"}${location ? `:${location[1]}:${location[2]}` : ""}`;
+    const hint = /\(mdx-(?:jsx|expression)[:)]/.test(detail)
+      ? " To write a literal `<` or `{`, escape it with a backslash or put it in backticks."
+      : "";
+    throw new Error(
+      `${format === "mdx" ? "MDX" : "Markdown"} syntax error in ${where}: ${location ? detail.slice(location[0].length) : detail}.${hint}`,
+    );
   }
-  const offsetMap = buildOffsetMap(source);
   const insertions = new Set<number>();
   let rawTextElement: string | null = null;
   visit(tree, (node) => {
@@ -569,12 +550,7 @@ export function normalizeAuthoredLinks(
       typeof node.url === "string" &&
       couldBeRootRelativeDestination(node.url)
     ) {
-      const offset = destinationOffset(
-        source,
-        node,
-        offsetMap,
-        options.sourceId,
-      );
+      const offset = destinationOffset(source, node, options.sourceId);
       const insertionOffset = rootRelativeInsertionOffset(
         node.url,
         source,
@@ -588,7 +564,7 @@ export function normalizeAuthoredLinks(
     }
 
     if (node.type === "html") {
-      const [start, end] = nodeRange(node, offsetMap, source, options.sourceId);
+      const [start, end] = nodeRange(node, source, options.sourceId);
       const raw = source.slice(start, end);
       const html = typeof node.value === "string" ? node.value : raw;
       if (rawTextElement) {
@@ -621,15 +597,14 @@ export function normalizeAuthoredLinks(
 
     if (node.type !== "mdxJsxFlowElement" && node.type !== "mdxJsxTextElement")
       return;
-    const [start, end] = nodeRange(node, offsetMap, source, options.sourceId);
+    const [start, end] = nodeRange(node, source, options.sourceId);
     // Sätteri identifies where the body begins. Keep Markdown and fenced
     // examples out of the TypeScript attribute parser entirely.
     const firstChild = Array.isArray(node.children)
       ? (node.children[0] as MdNode | undefined)
       : undefined;
     const childOffset = firstChild?.position?.start?.offset;
-    const openingEnd =
-      childOffset === undefined ? end : (offsetMap[childOffset] ?? end);
+    const openingEnd = childOffset ?? end;
     const raw = source.slice(start, openingEnd);
     for (const offset of staticHrefOffsets(
       raw,

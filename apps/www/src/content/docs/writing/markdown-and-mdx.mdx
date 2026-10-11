@@ -150,6 +150,22 @@ Sätteri processors are supported. For unified or another custom processor, set
 files, raw imports and files outside `admonitions.contentDirs` are unchanged. Use
 `admonitions.skip` for per-file opt-outs.
 
+## Heading ids and math
+
+Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids on:
+
+```ts title="astro.config.ts"
+nimbus(config, {
+  markdown: { features: { headingAttributes: true, math: true } },
+});
+```
+
+With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` keep working when the heading text changes. A heading that ends in other `{…}` text, such as `## GET /accounts/{account_id}` in a `.md` file, is read as attributes too; leave the feature off if your headings end that way.
+
+With `math`, write `$x^2$` inline or a `$$` block. It's off unless you turn it on, because a `$` in prose ("costs $5 and $10") would start a formula.
+
+Pages, generated Markdown, reusable snippets and `nimbus-docs lint` all read Markdown with the same features.
+
 ## Extending Markdown
 
 Extend Sätteri with `markdown.mdastPlugins` for Markdown AST transformations and

@@ -3157,6 +3157,7 @@ export function nimbus(
           await runPagefind(
             distDir,
             inventory.filter((entry) => entry.request && entry.searchable),
+            { root: projectRootForBuild },
           );
         }
 
@@ -3783,11 +3784,30 @@ type PagefindExecution = {
 type PagefindExecutor = (
   bin: string,
   args: readonly string[],
+  root: string,
 ) => Promise<PagefindExecution>;
+
+// Package-manager scripts put each `node_modules/.bin` from the project up to
+// the filesystem root on PATH. Do the same, so Pagefind is found however
+// `astro build` was started.
+function withProjectBins(root: string): NodeJS.ProcessEnv {
+  const key =
+    Object.keys(process.env).find((name) => name.toUpperCase() === "PATH") ??
+    "PATH";
+  const bins: string[] = [];
+  for (let dir = path.resolve(root); ; dir = path.dirname(dir)) {
+    bins.push(path.join(dir, "node_modules", ".bin"));
+    if (path.dirname(dir) === dir) break;
+  }
+  const inherited = process.env[key];
+  if (inherited) bins.push(inherited);
+  return { ...process.env, [key]: bins.join(path.delimiter) };
+}
 
 function executePagefind(
   bin: string,
   args: readonly string[],
+  root: string,
 ): Promise<PagefindExecution> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -3800,7 +3820,10 @@ function executePagefind(
     };
 
     try {
+      // From the project root, where a site's `pagefind.yml` lives.
       const child = crossSpawn(bin, [...args], {
+        cwd: root,
+        env: withProjectBins(root),
         stdio: ["ignore", "pipe", "pipe"],
       });
       child.stdout.setEncoding("utf8");
@@ -3830,7 +3853,10 @@ function executePagefind(
 export async function runPagefind(
   siteDir: string,
   requestEntries: readonly RequestRouteInventoryEntry[],
-  execute: PagefindExecutor = executePagefind,
+  {
+    root = process.cwd(),
+    execute = executePagefind,
+  }: { root?: string; execute?: PagefindExecutor } = {},
 ): Promise<void> {
   const ownedFiles: Array<{
     path: string;
@@ -3909,12 +3935,18 @@ export async function runPagefind(
       if (writeError !== undefined) throw writeError;
     }
 
-    const { error, stdout, stderr } = await execute(bin, ["--site", siteDir]);
+    const { error, stdout, stderr } = await execute(
+      bin,
+      ["--site", siteDir],
+      root,
+    );
     if (stdout) process.stdout.write(stdout);
     if (stderr) process.stderr.write(stderr);
     if (error) {
       console.warn(
-        `[nimbus-docs] Pagefind did not run. Install pagefind as a devDependency or set search: false in your Nimbus config.\n${error.message}`,
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? `[nimbus-docs] Pagefind did not run. Install pagefind as a devDependency or set search: false in your Nimbus config.\n${error.message}`
+          : `[nimbus-docs] Pagefind failed: ${error.message}`,
       );
     }
   } catch (err) {

@@ -425,19 +425,14 @@ const expectedOutput = LANE === "static" ? "static" : "server";
 if (!new RegExp(`output:\\s*["']${expectedOutput}["']`).test(astroConfig)) {
   fail(`astro.config.ts does not select output: "${expectedOutput}"`);
 }
-const requestRendering = /rendering:\s*\{\s*default:\s*["']request["'],?\s*\}/.test(astroConfig);
-if (requestRendering !== (LANE === "cloudflare")) {
+const requestRendering =
+  LANE === "cloudflare"
+    ? /rendering:\s*\{\s*default:\s*["']request["'],?\s*\}/.test(astroConfig)
+    : /rendering:\s*\{\s*collections:\s*\{\s*"docs":\s*"request"\s*\}\s*\}/.test(astroConfig);
+if (requestRendering !== (LANE !== "static")) {
   fail(`${LANE} scaffold has an unexpected request-rendering default`);
 }
 ok(`scaffolded the ${LANE} lane via --template-dir`);
-if (LANE !== "static" && LANE !== "cloudflare") {
-  const fixtureConfig = astroConfig.replace(
-    "const nimbusConfig = defineNimbusConfig({",
-    'const nimbusConfig = defineNimbusConfig({\n  rendering: { default: "request" },',
-  );
-  assert.notEqual(fixtureConfig, astroConfig, "missing prose request-rendering fixture seam");
-  writeFileSync(join(site, "astro.config.ts"), fixtureConfig);
-}
 const nodeRuntimePort = LANE === "node" ? await availablePort() : undefined;
 if (nodeRuntimePort !== undefined) {
   const configPath = join(site, "astro.config.ts");

@@ -23,7 +23,7 @@ The scaffolder asks:
 
 <Steps>
   <Step title="Directory">
-    Where to create the project; press Enter for `my-docs`. Pass it as the first argument, such as `my-docs`.
+    Where to create the project; press Enter for `my-docs`. Pass it as the first argument, such as `my-docs`, or `.` for the current folder. The folder must be new, empty, or hold only `.git`, such as a freshly cloned repository.
   </Step>
   <Step title="Starter content">
     **Getting started guide + example pages**, or **Empty**, just the shell for your own content. Flag: `--content starter|empty`.
@@ -32,10 +32,10 @@ The scaffolder asks:
     npm, pnpm, yarn, or bun; the default is the one that runs the scaffolder. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
   </Step>
   <Step title="Git">
-    Whether to initialize a repository. Flag: `--git` or `--no-git`.
+    Whether to initialize a repository and make a first commit. Inside an existing repository it does neither. Flag: `--git` or `--no-git`.
   </Step>
   <Step title="Output mode">
-    **Static** prerenders every content collection route and deploys anywhere. **Server** renders those routes on request. You can override individual collections later. Flag: `--deploy` chooses static, `--adapter` chooses server.
+    **Static** prerenders every content collection route and deploys anywhere. **Server** renders docs pages on request. You can override individual collections later. Flag: `--deploy` chooses static, `--adapter` chooses server.
   </Step>
   <Step title="Deploy target or adapter">
     Static output asks for a deploy target: Cloudflare or another static host (flag: `--deploy cloudflare|other`). Server output offers Cloudflare; the `--adapter` flag also accepts `vercel`, `netlify`, and `node`.
@@ -51,6 +51,10 @@ With npm, put `--` before the arguments, or npm keeps the flags for itself:
 ```sh
 npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
 ```
+
+<Aside>
+  Yarn 4 skips package versions published less than a day ago, so on a release day `yarn dlx` runs the previous scaffolder. Wait a day, use another package manager, or set `YARN_NPM_MINIMAL_AGE_GATE=0` for that run.
+</Aside>
 
 ## What lands in your repo
 
@@ -88,7 +92,7 @@ Then open the printed URL.
 
 <PackageManagers pkg="build" type="run" />
 
-Static scaffolds emit `dist/` for any static host. Cloudflare server scaffolds request-render canonical content collection routes and include the appropriate `wrangler.jsonc` and a `deploy` script.
+Static scaffolds emit `dist/` for any static host. Server scaffolds render docs pages on request; on Cloudflare, every content collection renders on request. Cloudflare scaffolds also include `wrangler.jsonc` and a `deploy` script.
 
 <Aside type="tip">
   After scaffolding, run `npx @cloudflare/nimbus-docs add <slug>` to install components from the registry. See [Adding components](/adding-components) for the workflow.

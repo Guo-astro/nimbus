@@ -574,42 +574,38 @@ import { VersionSwitcher } from "@/components/ui/version-switcher";
 ```
 
 Find the mobile sidebar drawer — the `<dialog data-mobile-sidebar>`
-block. Inside it, there's a `<nav>` that renders the sidebar. The
-starter ships this with a `hasSidebar` slot conditional that lets
-parent layouts override the sidebar entirely:
+block. Its panel has a "Navigation" header bar, then an empty
+`data-nb-sidebar-drawer-slot` div. The rail's sidebar tree moves into
+that slot while the drawer is open, so don't put anything inside it:
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  {hasSidebar ? <slot name="sidebar" /> : (
-    <Fragment>
-      <SidebarFilter />
-      <Sidebar items={sidebar} />
-    </Fragment>
-  )}
-</nav>
+<div data-mobile-sidebar-panel class="...">
+  <div class="sticky top-0 ...">
+    <span class="...">Navigation</span>
+    <button data-close-sidebar ...>...</button>
+  </div>
+  <div data-nb-sidebar-drawer-slot class="..."></div>
+</div>
 ```
 
-Add the picker as the **first child of the `<nav>`, BEFORE the
-conditional.** That way it shows on every page regardless of
-whether the parent provides a custom sidebar slot — matching the
-desktop header's unconditional render:
+Add the picker **between the header bar and the slot**. It shows on
+every page, matching the desktop header's unconditional render:
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  <VersionSwitcher collection={collection} entryId={entryId} variant="sidebar" />
-  {hasSidebar ? <slot name="sidebar" /> : (
-    <Fragment>
-      <SidebarFilter />
-      <Sidebar items={sidebar} />
-    </Fragment>
-  )}
-</nav>
+<div data-mobile-sidebar-panel class="...">
+  <div class="sticky top-0 ...">
+    <span class="...">Navigation</span>
+    <button data-close-sidebar ...>...</button>
+  </div>
+  <VersionSwitcher collection={collection} entryId={entryId} variant="sidebar" class="mx-4 mt-4" />
+  <div data-nb-sidebar-drawer-slot class="..."></div>
+</div>
 ```
 
-If the layout you're editing has NO `hasSidebar` conditional (older
-starter or custom layout), just add the picker above the existing
-sidebar/filter render. The placement principle is the same: picker
-at the top of the drawer's nav region.
+If the layout you're editing has no drawer slot (older starter or
+custom layout), add the picker above the drawer's sidebar render
+instead. The placement principle is the same: picker at the top of
+the drawer's navigation.
 
 Confirm the layout already forwards `collection` and `entryId` to
 `<Header />`:

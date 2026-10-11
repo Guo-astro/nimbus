@@ -11,7 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { downloadTemplate } from "giget";
 import type { AdapterId } from "@cloudflare/nimbus-docs/adapters";
@@ -143,6 +143,8 @@ interface ScaffoldOptionsBase {
    * variant is selected from `content`.
    */
   templateDir?: string;
+  /** The target folder already existed (empty, or holding only `.git`). */
+  intoExisting?: boolean;
 }
 
 /**
@@ -221,11 +223,6 @@ export async function scaffold(
         `Pick a path inside ${cwd}.`,
     );
   }
-  if (target === cwd) {
-    throw new ScaffoldError(
-      `Directory "${dir}" resolves to the current directory. Choose a new subdirectory name.`,
-    );
-  }
 
   const canonicalCwd = realpathSync(cwd);
   const existingParent = closestExistingPath(dirname(target));
@@ -242,16 +239,17 @@ export async function scaffold(
       `Directory "${dir}" passes through a non-directory path at ${existingParent}.`,
     );
   }
-  if (!isContainedBy(canonicalCwd, canonicalParent)) {
+  if (target !== cwd && !isContainedBy(canonicalCwd, canonicalParent)) {
     throw new ScaffoldError(
       `Directory "${dir}" resolves outside the current directory through ${existingParent}. ` +
         `Pick a path inside ${cwd}.`,
     );
   }
 
-  if (pathEntryExists(target)) {
-    throw new ScaffoldError(`Directory "${dir}" already exists.`);
-  }
+  // An existing folder is fine when it's empty, or holds only a cloned repo's `.git`.
+  const existing = pathEntryExists(target) ? existingEntries(target, dir) : null;
+  const name = basename(target);
+  if (!skipInstall) assertPackageManagerAvailable(packageManager);
 
   const fetchTemplate =
     internals.fetchTemplate ??
@@ -271,7 +269,7 @@ export async function scaffold(
   // blocks re-running (the existence check above hard-fails on it).
   startProgress("Fetching template…");
   try {
-    await fetchTemplate(target, options);
+    await fetchTemplate(target, { ...options, intoExisting: existing !== null });
     assertNoTemplateSymlinks(target);
     stopProgress("Template ready.");
 
@@ -288,14 +286,14 @@ export async function scaffold(
         declineBuildScript(target, "workerd");
       }
       await updatePackageJson(target, {
-        name: basename(dir),
+        name,
         output: "server",
         adapter: options.adapter,
       });
     } else {
       await applyDeployTarget(target, options.deploy);
       await updatePackageJson(target, {
-        name: basename(dir),
+        name,
         output: "static",
         deploy: options.deploy,
       });
@@ -305,7 +303,9 @@ export async function scaffold(
     stopProgress("Project configured.");
   } catch (err) {
     stopProgress("Failed.");
-    rmSync(target, { recursive: true, force: true });
+    // Remove only what the scaffold wrote; a folder that was already there keeps its `.git`.
+    if (existing === null) rmSync(target, { recursive: true, force: true });
+    else for (const entry of readdirSync(target)) if (!existing.includes(entry)) rmSync(join(target, entry), { recursive: true, force: true });
     // A ScaffoldError already carries an actionable message (missing tag,
     // offline, rate-limited, bad --template-dir). Pass it through untouched;
     // only wrap genuinely unexpected failures.
@@ -316,13 +316,16 @@ export async function scaffold(
     );
   }
 
-  // 3. Git init
-  if (git) {
+  // 3. Git init. Never inside an existing repository: the site is then part
+  // of the user's repo, and a nested one (or a commit in theirs) would surprise.
+  let ownRepo = git && !insideGitWorkTree(target);
+  if (ownRepo) {
     startProgress("Initializing git repository…");
     try {
       await runCommand("git", ["init"], target);
       stopProgress("Git repository initialized.");
     } catch {
+      ownRepo = false;
       stopProgress("Skipped git initialization.");
       p.log.warn("Could not initialize a git repository.");
     }
@@ -331,6 +334,7 @@ export async function scaffold(
   // 4. Install
   if (skipInstall) {
     p.log.step("Skipped dependency installation.");
+    if (ownRepo) await firstCommit(target);
     return { install: "skipped" };
   }
 
@@ -338,6 +342,7 @@ export async function scaffold(
   try {
     await installDependencies(packageManager, target);
     stopProgress("Dependencies installed.");
+    if (ownRepo) await firstCommit(target);
     return { install: "done" };
   } catch (err) {
     stopProgress("Failed to install dependencies.");
@@ -357,9 +362,62 @@ function assertNoTemplateSymlinks(target: string): void {
       );
     }
     if (!stat.isDirectory()) return;
-    for (const entry of readdirSync(path)) visit(join(path, entry));
+    for (const entry of readdirSync(path)) {
+      // A cloned repo's `.git` was there before the template; it isn't template content.
+      if (path === target && entry === ".git") continue;
+      visit(join(path, entry));
+    }
   };
   visit(target);
+}
+
+/** The entries of an existing target, which must be a folder that's empty or holds only `.git`. */
+function existingEntries(target: string, dir: string): string[] {
+  if (!lstatSync(target).isDirectory()) {
+    throw new ScaffoldError(`"${dir}" already exists and isn't a folder.`);
+  }
+  const entries = readdirSync(target);
+  // A cloned repo's `.git`, or the folder metadata Finder writes, don't count.
+  const other = entries.filter((entry) => entry !== ".git" && entry !== ".DS_Store");
+  if (other.length > 0) {
+    const shown = other.slice(0, 3).join(", ") + (other.length > 3 ? ", …" : "");
+    throw new ScaffoldError(
+      `"${dir}" isn't empty (${shown}). Scaffold into an empty folder, or one that holds only a cloned repository.`,
+    );
+  }
+  return entries;
+}
+
+/** Fail before writing anything when the package manager to install with isn't on PATH. */
+function assertPackageManagerAvailable(packageManager: ScaffoldOptions["packageManager"]): void {
+  // Look on PATH rather than spawn: Windows shims (npm.cmd) need a shell to run.
+  const extensions = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+  const found = (process.env.PATH ?? "")
+    .split(delimiter)
+    .some((dir) => dir && extensions.some((ext) => existsSync(join(dir, packageManager + ext))));
+  if (!found) {
+    throw new ScaffoldError(
+      `${packageManager} isn't installed or isn't on your PATH. Install it, choose another --package-manager, or pass --skip-install.`,
+    );
+  }
+}
+
+function insideGitWorkTree(target: string): boolean {
+  const probe = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: target, encoding: "utf8" });
+  return probe.status === 0 && probe.stdout.trim() === "true";
+}
+
+/** Commit the new site, so last-updated dates and upgrade reviews have a starting point. */
+async function firstCommit(target: string): Promise<void> {
+  p.log.step("Creating the first commit…");
+  try {
+    await runCommand("git", ["add", "-A"], target);
+    await runCommand("git", ["commit", "-m", "Initial commit from create-nimbus-docs"], target);
+    p.log.step("Created the first commit.");
+  } catch (error) {
+    const reason = (error as Error).message.trim().split("\n").slice(-3).join("\n");
+    p.log.warn(`Couldn't create the first commit, so commit the site yourself. Git said:\n${reason}`);
+  }
 }
 
 function pathEntryExists(path: string): boolean {
@@ -420,7 +478,7 @@ async function realFetchTemplate(
     return;
   }
 
-  await downloadFromTemplatesRepo(target, variant);
+  await downloadFromTemplatesRepo(target, variant, options.intoExisting ?? false);
 }
 
 function isPreviewMode(internals: ScaffoldInternals): boolean {
@@ -473,7 +531,7 @@ function copyLocalTemplate(target: string, templateDir: string, variant: string)
   });
 }
 
-async function downloadFromTemplatesRepo(target: string, variant: string) {
+async function downloadFromTemplatesRepo(target: string, variant: string, intoExisting: boolean) {
   const ref = `templates-v${__APP_VERSION__}`;
   // giget GitHub provider: `github:owner/repo/subdir#ref`. The
   // `#templates-v<version>` ref pins the fetch to the immutable orphan-branch
@@ -484,6 +542,8 @@ async function downloadFromTemplatesRepo(target: string, variant: string) {
   try {
     await downloadTemplate(source, {
       dir: target,
+      // The folder exists only when it was checked to be empty or hold just `.git`.
+      force: intoExisting,
       auth: process.env.GIGET_AUTH,
     });
   } catch (err) {
@@ -584,11 +644,12 @@ function normalizePackageManagerFiles(
   } else {
     rmSync(shippedGitignorePath, { force: true });
   }
-  // Yarn 2+ rewrites this on every install; Yarn says not to commit it.
+  // Yarn's documented ignore block for projects that don't use zero-installs.
   if (packageManager === "yarn" && existsSync(dotGitignorePath)) {
     const ignore = readFileSync(dotGitignorePath, "utf8");
-    if (!/^\.yarn\/install-state\.gz$/m.test(ignore)) {
-      writeFileSync(dotGitignorePath, `${ignore}${ignore.endsWith("\n") ? "" : "\n"}.yarn/install-state.gz\n`);
+    if (!/^\.yarn\/\*$/m.test(ignore)) {
+      const block = [".yarn/*", "!.yarn/patches", "!.yarn/plugins", "!.yarn/releases", "!.yarn/sdks", "!.yarn/versions"];
+      writeFileSync(dotGitignorePath, `${ignore}${ignore.endsWith("\n") ? "" : "\n"}${block.join("\n")}\n`);
     }
   }
 }
@@ -626,14 +687,29 @@ async function installDependencies(packageManager: ScaffoldOptions["packageManag
  */
 function pinYarnBerry(target: string): void {
   const fromAgent = /^yarn\/(\S+)/.exec(process.env.npm_config_user_agent ?? "")?.[1];
-  const version =
-    fromAgent ??
-    spawnSync("yarn", ["--version"], { cwd: target, encoding: "utf8", env: installEnv(), timeout: 30_000 }).stdout?.trim();
-  if (!version || !/^\d+\.\d+\.\d+/.test(version) || Number(version.split(".")[0]) < 2) return;
+  const version = fromAgent ?? yarnVersion(target);
+  if (!version || !/^\d+\.\d+\.\d+/.test(version)) return;
+  // Inside a parent pinned to another manager, corepack refuses yarn until the
+  // site pins its own: pin every version then. Otherwise Yarn 1 needs no pin.
+  if (Number(version.split(".")[0]) < 2 && !corepackRefusesYarn(target)) return;
   const pkgPath = join(target, "package.json");
   const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as Record<string, unknown>;
   pkg.packageManager = `yarn@${version}`;
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
+function yarnVersion(target: string): string | undefined {
+  const probe = (env: NodeJS.ProcessEnv) =>
+    spawnSync("yarn", ["--version"], { cwd: target, encoding: "utf8", env, timeout: 30_000 });
+  const first = probe(installEnv());
+  if (first.status === 0) return first.stdout.trim();
+  // Corepack refuses yarn under a parent pinned to another manager; ask past it.
+  return probe({ ...installEnv(), COREPACK_ENABLE_STRICT: "0" }).stdout?.trim() || undefined;
+}
+
+function corepackRefusesYarn(target: string): boolean {
+  const probe = spawnSync("yarn", ["--version"], { cwd: target, encoding: "utf8", env: installEnv(), timeout: 30_000 });
+  return /This project is configured to use \w+/.test(`${probe.stdout ?? ""}${probe.stderr ?? ""}`);
 }
 
 // `yarn dlx` runs the scaffolder under its own Plug'n'Play hooks. A child

@@ -81,6 +81,23 @@ If the site replaces Sätteri with another processor, set `admonitions: false` a
 
 List installable items: `npx @cloudflare/nimbus-docs list`.
 
+## Sidebar
+
+The sidebar mirrors `src/content/docs/`. A folder becomes a group, and its `index.mdx` is the group's landing page; set `sidebar.group.label` there to rename the group. Within a group, `sidebar.order` sorts entries (lowest first, otherwise alphabetical), `sidebar.label` shortens a page's rail title, and `sidebar.hidden: true` builds a page without listing it.
+
+To add an external link or fix the top-level order, set `sidebar.items` in `defineNimbusConfig` in `astro.config.ts`. Items you list replace the generated top level:
+
+```ts
+sidebar: {
+  items: [
+    { label: "Guides", autogenerate: { directory: "guides" } },
+    { label: "GitHub", link: "https://github.com/you/repo" },
+  ],
+},
+```
+
+Everything else: <https://nimbus-docs.com/navigation/sidebar/>.
+
 ## Agent interfaces
 
 Read the release-matched guide at [`node_modules/@cloudflare/nimbus-docs/dist/docs-for-agents.md`](node_modules/@cloudflare/nimbus-docs/dist/docs-for-agents.md), especially for preview packages. Nimbus publishes discovery automatically; add project-owned Skills under `skills/<name>/SKILL.md`. Keep `<WebMCP />` in `BaseLayout.astro` for browser-agent search with default Pagefind. Markdown negotiation applies to request-rendered pages; static hosting and response headers follow the deployment target's setup.

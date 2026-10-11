@@ -5,7 +5,7 @@ import { formatCheckPretty } from "../../src/check/format.js";
 import type { CheckResult, ScopeResult } from "../../src/check/run.js";
 import type { CheckFinding } from "../../src/check/finding.js";
 
-const OPTS = { color: false, invocation: "nimbus-docs check --fix" };
+const OPTS = { color: false, invocation: "nimbus-docs check --fix", rerun: "nimbus-docs check" };
 
 function scope(over: Partial<ScopeResult>): ScopeResult {
   return { scope: "env", findings: [], notes: [], evaluated: true, status: "passed", ...over };

@@ -48,15 +48,8 @@ export async function parseComponentsRegistry(
     throw err;
   }
 
-  // Zero out comments before locating the object so offsets stay aligned for
-  // the brace walk and commas inside `// foo, bar` don't split entries.
-  const stripped = stripComments(source);
-  const prefixMatch = stripped.match(EXPORT_PREFIX_PATTERN);
-  if (!prefixMatch || prefixMatch.index === undefined) return null;
-  const objectStart = prefixMatch.index + prefixMatch[0].length;
-  const objectEnd = findMatchingBrace(stripped, objectStart - 1);
-  if (objectEnd === -1) return null;
-  const body = stripped.slice(objectStart, objectEnd);
+  const body = componentsMapBody(source);
+  if (body === null) return null;
 
   const names: string[] = [];
   for (const raw of splitTopLevelCommas(body)) {
@@ -73,4 +66,20 @@ export async function parseComponentsRegistry(
   }
 
   return names;
+}
+
+/**
+ * The text inside `export const components = { … }`, comments blanked, or
+ * `null` when the file has no parseable map.
+ */
+export function componentsMapBody(source: string): string | null {
+  // Zero out comments before locating the object so offsets stay aligned for
+  // the brace walk and commas inside `// foo, bar` don't split entries.
+  const stripped = stripComments(source);
+  const prefixMatch = stripped.match(EXPORT_PREFIX_PATTERN);
+  if (!prefixMatch || prefixMatch.index === undefined) return null;
+  const objectStart = prefixMatch.index + prefixMatch[0].length;
+  const objectEnd = findMatchingBrace(stripped, objectStart - 1);
+  if (objectEnd === -1) return null;
+  return stripped.slice(objectStart, objectEnd);
 }

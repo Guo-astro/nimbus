@@ -21,6 +21,8 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import * as p from "@clack/prompts";
 
+import { componentsMapBody } from "../_internal/parse-components-registry.js";
+import { stripComments } from "../_internal/parse-object-literal.js";
 import { bytesHash } from "./nimbus-json.js";
 import { addCommand, detectPackageManager } from "./pm.js";
 import { progress } from "./progress.js";
@@ -358,6 +360,22 @@ function barrelExports(item: ComponentItem): string[] {
  * "register in components.ts" hint. Its registry dependencies are installed
  * too but aren't meant to be registered, so they get no hint.
  */
+/** components.ts imports the component and puts one of its imports in the `components` map. */
+function isRegistered(registry: string, slug: string): boolean {
+  const source = stripComments(registry);
+  const path = `(?:\\./|@/)components/ui/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/index(?:\\.ts)?)?`;
+  const clause = source.match(new RegExp(`import\\s+([^;'"]*?)\\s+from\\s*["']${path}["']`))?.[1];
+  if (!clause) return false;
+  const named = clause.match(/\{([^}]*)\}/)?.[1] ?? "";
+  const locals = [
+    ...named.split(",").map((part) => part.trim().split(/\s+as\s+/).pop()!.trim()),
+    clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim().split(/\s+/)[0] ?? "",
+  ].filter((name) => /^[A-Za-z_$][\w$]*$/.test(name));
+  const map = componentsMapBody(registry);
+  // An unreadable map can't prove the import is unused; trust the import.
+  return map === null ? locals.length > 0 : locals.some((name) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(map));
+}
+
 export function registerHint(
   installed: ComponentItem[],
   slug: string,
@@ -366,9 +384,7 @@ export function registerHint(
 ): string | null {
   const item = installed.find((i) => i.type === "registry:ui" && i.name === slug);
   if (!item) return null;
-  // Already imported in the user's components.ts: nothing to do.
-  const from = new RegExp(`from\\s*["'](?:\\./|@/)components/ui/${item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/index(?:\\.ts)?)?["']`);
-  if (from.test(registry)) return null;
+  if (isRegistered(registry, item.name)) return null;
   if (item.docs) return item.docs;
   const names = barrelExports(item);
   const snippet = names.length > 0

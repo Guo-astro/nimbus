@@ -238,6 +238,11 @@ test("resolveUpgradeBaseline prefers --from and validates persisted baselines", 
       JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/@cloudflare/nimbus-docs@123" } }),
     );
     assert.equal(resolveUpgradeBaseline({ projectRoot: root, targetVersion: "0.13.1" }).source, "preview");
+    fs.writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/cloudflare/nimbus/@cloudflare/nimbus-docs@123" } }),
+    );
+    assert.equal(resolveUpgradeBaseline({ projectRoot: root, targetVersion: "0.13.1" }).source, "preview");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -357,6 +362,18 @@ test("API scope reads the content config in Astro's srcDir", () => {
     assert.deepEqual(siteScope(root), { api: true });
     fs.writeFileSync(path.join(root, "site", "content.config.ts"), "export const collections = { docs: docsCollection() };\n");
     assert.deepEqual(siteScope(root), { api: false });
+    const config = (source: string) => {
+      fs.writeFileSync(path.join(root, "site", "content.config.ts"), source);
+      return siteScope(root).api;
+    };
+    assert.equal(config('import { apiCollection as api } from "@cloudflare/nimbus-docs/api";\nexport const collections = { api: api() };\n'), true);
+    // Collections defined in a local module could include one.
+    assert.equal(config('import { collections } from "./collections";\nexport { collections };\n'), true);
+    assert.equal(config("// apiCollection() later\nexport const collections = { docs: docsCollection() };\n"), false);
+    if (process.getuid?.() !== 0) {
+      fs.chmodSync(path.join(root, "site", "content.config.ts"), 0o000);
+      assert.deepEqual(siteScope(root), { api: true });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

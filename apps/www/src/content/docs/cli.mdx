@@ -43,7 +43,7 @@ For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copie
   </Step>
 </Steps>
 
-If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component since installing it; review the change with `git diff`:
+If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component since installing it, or when `nimbus.json` has no record of installing it; review the change with `git diff`:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 
@@ -154,7 +154,7 @@ The read-only "am I behind?" overview across package APIs, starter files, and re
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="outdated" />
 
-- **Package APIs** — points pending source migrations and version-selected reviews to `migrate`. Reviews that only concern API reference pages are skipped on sites without an API collection. It also says when a newer Nimbus release is out (looked up on npm; skipped when the lookup fails), and when nothing needs changing but the review isn't recorded yet.
+- **Package APIs** — points pending source migrations and version-selected reviews to `migrate`. Reviews that only concern API reference pages are skipped when `src/content.config.*` doesn't use `apiCollection` and imports nothing from your own files; if it can't be read, every review shows. It also says when a newer Nimbus release is out (looked up on npm; skipped when the lookup fails), and when nothing needs changing but the review isn't recorded yet.
 - **Registry components** — compares each recorded content hash against the current registry and classifies the recorded local footprint, and lists npm dependencies installed below the version a component needs, with the command to update them. Registry updates remain review-only because overwrite can also affect dependencies.
 - **Starter files** — compares your scaffolded `src/` files, plus `AGENT.md`, `CLAUDE.md`, and `tsconfig.json`, against the upstream `templates-v*` tag, including additions and removals. Because those files came from a tag that was never in your git history, plain `git diff` can't show this. Content files are hidden by default (`--all` to include them). Files every site rewrites, such as `package.json`, `wrangler.jsonc`, and `nimbus.json`, aren't compared; changes to them come through `migrate`.
 

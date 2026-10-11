@@ -6,6 +6,7 @@ import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from
 import { CLI_PACKAGE, declaresCli, detectPackageManager, installCommand, invocation } from "../cli/pm.js";
 import { getCommand } from "../lib/pkgm.js";
 import { resolveMigrationSrcDir } from "./migrations.js";
+import { stripComments } from "./parse-object-literal.js";
 import rawManifest from "./upgrade-manifest.json";
 
 declare const __APP_VERSION__: string;
@@ -60,14 +61,23 @@ export interface SiteScope {
   api: boolean;
 }
 
-/** A site has API reference pages when its content config registers an API collection. */
+/**
+ * A site skips API-only reviews only when its content config provably has no
+ * API collection: it never names `apiCollection` and imports no local module
+ * that could define one. Anything unreadable or unclear shows every review.
+ */
 export function siteScope(projectRoot: string, srcDirOverride?: string): SiteScope {
   const { srcDir } = resolveMigrationSrcDir(projectRoot, srcDirOverride);
-  // When the site can't be read, show every review rather than hide one.
   if (!srcDir) return { api: true };
   for (const name of ["content.config.ts", "content.config.mts", "content.config.js", "content.config.mjs"]) {
     const file = path.join(srcDir, name);
-    if (fs.existsSync(file)) return { api: /\bapiCollection\s*\(/.test(fs.readFileSync(file, "utf8")) };
+    if (!fs.existsSync(file)) continue;
+    try {
+      const source = stripComments(fs.readFileSync(file, "utf8"));
+      return { api: /\bapiCollection\b/.test(source) || /\bfrom\s*["']\.{1,2}\//.test(source) };
+    } catch {
+      return { api: true };
+    }
   }
   return { api: true };
 }
@@ -263,7 +273,7 @@ function hasPreviewNimbusDependency(projectRoot: string): boolean {
     };
     const spec = manifest.dependencies?.["@cloudflare/nimbus-docs"] ??
       manifest.devDependencies?.["@cloudflare/nimbus-docs"];
-    return typeof spec === "string" && /^https:\/\/pkg\.pr\.new\/@cloudflare\/nimbus-docs@/.test(spec);
+    return typeof spec === "string" && /^https:\/\/pkg\.pr\.new\/(?:[\w.-]+\/[\w.-]+\/)?@cloudflare\/nimbus-docs@/.test(spec);
   } catch {
     return false;
   }

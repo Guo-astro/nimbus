@@ -29,7 +29,10 @@ export function lintConfigIsStale(cwd: string, materialized: ValidatedLintOption
     // An invalid config fails the next build with its own message.
     return false;
   }
-  return stableJson(current) !== stableJson(materialized);
+  return (
+    stableJson(current) !==
+    stableJson({ rules: materialized.rules, collections: materialized.collections })
+  );
 }
 
 function stableJson(value: unknown): string {

@@ -132,6 +132,8 @@ test("happy path writes and transforms the project", async () => {
     assert.equal(typeof nimbus.version, "string");
     assert.equal(nimbus.lastReviewedNimbusVersion, null);
     assert.equal(nimbus.templatesTag, `templates-v${nimbus.version}`);
+    assert.equal(nimbus.registry, "https://nimbus-docs.com/registry");
+    assert.equal(fs.existsSync(path.join(target, ".env")), false);
     assert.equal(nimbus.install.root, "src");
     assert.deepEqual(nimbus.install.aliases, { "@/*": "src/*" });
     assert.deepEqual(nimbus.components, []);
@@ -225,7 +227,13 @@ test("preview mode scaffolds bundled templates and records preview provenance", 
   try {
     await scaffold(
       { ...BASE_OPTIONS, dir: "my-docs" },
-      { cwd, previewMode: true, previewPr: "42", previewTemplatesDir: templates },
+      {
+        cwd,
+        previewMode: true,
+        previewPr: "42",
+        previewTemplatesDir: templates,
+        previewRegistryUrl: "https://pr-42-nimbus-docs.example.workers.dev/registry",
+      },
     );
 
     const nimbus = JSON.parse(
@@ -233,7 +241,16 @@ test("preview mode scaffolds bundled templates and records preview provenance", 
     );
     assert.equal(nimbus.templatesTag, null);
     assert.equal(nimbus.lastReviewedNimbusVersion, null);
-    assert.deepEqual(nimbus.preview, { pr: "42", templates: "bundled" });
+    assert.deepEqual(nimbus.preview, {
+      pr: "42",
+      templates: "bundled",
+      registry: "https://pr-42-nimbus-docs.example.workers.dev/registry",
+    });
+    assert.equal(nimbus.registry, nimbus.preview.registry);
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "my-docs", ".env"), "utf8"),
+      `NIMBUS_REGISTRY_URL=${nimbus.registry}\n`,
+    );
   } finally {
     cleanup(cwd, templates);
   }

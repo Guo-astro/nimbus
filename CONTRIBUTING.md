@@ -85,13 +85,19 @@ A bare `pnpm --filter @nimbus/www build` doesn't rebuild `nimbus-docs`, so after
 
 ### Releases
 
-Merging the "chore: bump package versions" PR publishes to npm. Right after it publishes, deploy the docs site:
+Merging the "chore: bump package versions" PR publishes to npm, then automatically deploys the docs site and its registry. A run that only opens the version-bump PR does not deploy www. If npm publishes but the www deploy fails, retry the failed www job; it checks both package versions against npm `latest` and refuses to redeploy an older release. For a current published release, the manual fallback is:
 
 ```sh
 pnpm --filter @nimbus/www run deploy
 ```
 
-`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ.
+`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ. The deploy job uses repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; the token needs Workers Scripts Edit on the existing account. It is also available to same-repo PR Preview jobs, so writers who can change a PR workflow or its deploy tooling can use it against production in this shared account.
+
+### Live www Previews
+
+Every same-repo PR push deploys the docs site and its registry to a Workers Preview. The workflow comments its branch URL and `NIMBUS_REGISTRY_URL=<url>/registry` override on the PR. A push to `main` also deploys a Preview; it does not update production. Closing a PR deletes its Preview. Forks and Dependabot PRs do not deploy.
+
+The www build has no Cloudflare credentials. The deploy job has the shared-account token; its dependencies and workflow can be modified by a same-repo writer. Check Preview access and its `/registry/registry.json` after the first deployment.
 
 ### Preview releases
 
@@ -105,7 +111,7 @@ registry. A bot then comments on the PR with install commands like:
 pnpm add https://pkg.pr.new/@cloudflare/nimbus-docs@<PR#>
 ```
 
-The label is removed automatically; re-add it to publish a fresh preview.
+The label is removed automatically; re-add it to publish a fresh preview. The PR's www Preview must have deployed successfully for the same commit first. If it is still building, wait and reapply the label. An on-demand preview scaffold writes that Preview's `/registry` URL to its gitignored `.env` and to `nimbus.json`, so `nimbus-docs add` fetches components from the PR. Released scaffolds continue using the production registry. After a new push, reapply the label and reinstall the preview packages to match the new registry code. A cloned preview scaffold needs the env override set again.
 
 Preview packages carry the version the release PR would give them, as a
 pre-release such as `0.16.0-pr.<number>.sha<sha>`, so installing one on a site runs

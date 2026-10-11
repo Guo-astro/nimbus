@@ -30,9 +30,11 @@ import { updatePackageJson } from "./transformers/package.js";
 declare const __APP_VERSION__: string;
 declare const __PREVIEW__: boolean;
 declare const __PREVIEW_PR__: string | null;
+declare const __PREVIEW_REGISTRY_URL__: string | null;
 
 const IS_PREVIEW = typeof __PREVIEW__ !== "undefined" && __PREVIEW__;
 const PREVIEW_PR = typeof __PREVIEW_PR__ === "undefined" ? null : __PREVIEW_PR__;
+const PREVIEW_REGISTRY_URL = typeof __PREVIEW_REGISTRY_URL__ === "undefined" ? null : __PREVIEW_REGISTRY_URL__;
 
 // Templates ship from an orphan `templates` branch, tagged
 // `templates-v<version>`; giget fetches the variant subdir at that tag.
@@ -72,7 +74,7 @@ function writeNimbusJson(
     lastReviewedNimbusVersion: preview ? null : frameworkVersion(target),
     templatesTag: preview ? null : `templates-v${version}`,
     variant: options.content,
-    registry: DEFAULT_REGISTRY_URL,
+    registry: preview?.registry ?? DEFAULT_REGISTRY_URL,
     ...(options.output === "server"
       ? { serverOutput: { adapter: options.adapter } }
       : {}),
@@ -173,6 +175,7 @@ export interface ScaffoldInternals {
   stdoutIsTTY?: boolean;
   previewMode?: boolean;
   previewPr?: string | null;
+  previewRegistryUrl?: string | null;
   previewTemplatesDir?: string;
   /**
    * Override the template-fetch step. Tests inject a function that populates
@@ -185,6 +188,7 @@ export interface ScaffoldInternals {
 interface PreviewProvenance {
   pr: string | null;
   templates: "bundled";
+  registry?: string;
 }
 
 /** Whether dependencies are installed, so the caller knows what's left to run. */
@@ -302,6 +306,11 @@ export async function scaffold(
     }
     if (packageManager === "yarn") pinYarnBerry(target);
     writeNimbusJson(target, options, preview);
+    if (preview?.registry) {
+      const envPath = join(target, ".env");
+      const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
+      writeFileSync(envPath, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}NIMBUS_REGISTRY_URL=${preview.registry}\n`);
+    }
     stopProgress("Project configured.");
   } catch (err) {
     stopProgress("Failed.");
@@ -429,9 +438,11 @@ function isPreviewMode(internals: ScaffoldInternals): boolean {
 
 function previewProvenance(internals: ScaffoldInternals): PreviewProvenance | null {
   if (!isPreviewMode(internals)) return null;
+  const registry = internals.previewRegistryUrl ?? PREVIEW_REGISTRY_URL;
   return {
     pr: internals.previewPr ?? PREVIEW_PR,
     templates: "bundled",
+    ...(registry ? { registry } : {}),
   };
 }
 

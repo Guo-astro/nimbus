@@ -15,6 +15,8 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
     permissions:
       contents: write # push the version-bump PR branch, git tags, and the templates branch/tag
       pull-requests: write # open/update the version-bump PR
@@ -101,10 +103,12 @@ jobs:
       #     full-history secret scan), or drop this env line + `id-token: write`,
       #     before the first real release.
       - name: Create version-bump PR or publish
+        id: publish
         uses: changesets/action@3841a0683d3cfa6dae0f9bb335290003010fe3f0 # v1.9.0
         with:
           version: pnpm changeset:version
           publish: node scripts/release.mjs publish
+          createGithubReleases: false # reconcile them after the published output is recorded
           commit: "chore: bump package versions"
           title: "chore: bump package versions"
         env:
@@ -112,11 +116,64 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           NPM_CONFIG_PROVENANCE: "true"
 
-      # Changesets may fail after pushing package tags but before creating every
-      # GitHub Release. Reconcile those releases independently so a rerun heals
-      # the partial state without republishing packages.
+      - name: Push published package tags
+        if: steps.publish.outputs.published == 'true'
+        run: |
+          for pkg in nimbus-docs create-nimbus-docs; do
+            name=$(jq -r .name "packages/$pkg/package.json")
+            version=$(jq -r .version "packages/$pkg/package.json")
+            tag="$name@$version"
+            if git rev-parse --quiet --verify "refs/tags/$tag" > /dev/null; then
+              git push origin "refs/tags/$tag"
+            fi
+          done
+
+      # GitHub Releases are independent of the published output, so a Release
+      # API failure does not skip the www deploy after npm publication.
       - name: Reconcile GitHub Releases
         if: always() && steps.app-token.outcome == 'success'
         run: node scripts/reconcile-github-releases.mjs
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  deploy-www:
+    name: Deploy released www
+    needs: release
+    if: always() && needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @nimbus/www run predeploy
+
+      - name: Deploy only the current published release
+        working-directory: apps/www
+        run: |
+          for pkg in nimbus-docs create-nimbus-docs; do
+            expected=$(jq -r .version "../../packages/$pkg/package.json")
+            latest=$(npm view "@cloudflare/$pkg" dist-tags.latest --json | jq -er '.')
+            if [ "$expected" != "$latest" ]; then
+              echo "::error::@cloudflare/$pkg at this commit is $expected, but npm latest is $latest. Refusing to replace the newer site."
+              exit 1
+            fi
+          done
+          pnpm exec wrangler deploy
+          curl --fail --show-error --silent --retry 5 --retry-delay 3 \
+            https://nimbus-docs.com/registry/registry.json | jq -e \
+            --arg version "$(jq -r .version ../../packages/nimbus-docs/package.json)" \
+            '.registryVersion == $version'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

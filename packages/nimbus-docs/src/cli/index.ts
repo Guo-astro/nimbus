@@ -22,6 +22,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import mri from "mri";
 import * as p from "@clack/prompts";
@@ -461,11 +463,16 @@ async function addCommand(
     yes: flags.yes,
     overwrite: flags.overwrite,
     srcRoot,
+    recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
   });
 
   const lines: string[] = [];
-  if (report.written.length > 0) {
-    lines.push(`✓ Wrote ${report.written.length} file${report.written.length === 1 ? "" : "s"}`);
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const added = report.written.length - report.replaced.length;
+  if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
+  if (added > 0) lines.push(`✓ Added ${plural(added, "file")}`);
+  if (report.replaced.length > 0) {
+    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}:`, ...report.replaced.map((file) => `    ${file}`));
   }
   if (report.skipped.length > 0) {
     lines.push(`↷ Kept existing: ${report.skipped.join(", ")} — pass --overwrite to replace`);
@@ -504,7 +511,8 @@ async function addCommand(
     );
   }
 
-  const hint = registerHint(installed, slug, srcRoot);
+  const componentsFile = join(cwd, srcRoot, "components.ts");
+  const hint = registerHint(installed, slug, srcRoot, existsSync(componentsFile) ? readFileSync(componentsFile, "utf8") : "");
   if (hint) p.log.info(hint);
 
   if (lines.length === 0) {

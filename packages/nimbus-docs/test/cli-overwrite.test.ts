@@ -3,12 +3,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { installComponents, type InstallOptions } from "../src/cli/component.js";
+import { installComponents, localEdits, registerHint, type InstallOptions } from "../src/cli/component.js";
+import { bytesHash } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
 
 function item(
@@ -95,4 +96,56 @@ test("a fresh install writes regardless of flags (no conflict)", async () => {
     assert.deepEqual(report.written, ["src/components/ui/dialog/Dialog.astro"]);
     assert.deepEqual(report.skipped, []);
   });
+});
+
+test("reinstalling identical files writes nothing and reports the item as up to date", async () => {
+  await withProject(async (cwd) => {
+    await installComponents([dialog("V1"), cn("C1")], opts(cwd));
+    for (const overwrite of [false, true]) {
+      const report = await installComponents([dialog("V1"), cn("C1")], opts(cwd, { overwrite }));
+      assert.deepEqual(report.upToDate, ["dialog", "cn"]);
+      assert.deepEqual([report.written, report.replaced, report.skipped], [[], [], []]);
+    }
+  });
+});
+
+test("--overwrite names each replaced file and leaves identical ones alone", async () => {
+  await withProject(async (cwd) => {
+    const files = (b: string) => [
+      { path: "components/ui/dialog/Dialog.astro", content: "D1" },
+      { path: "components/ui/dialog/DialogContent.astro", content: b },
+    ];
+    await installComponents([item("dialog", "registry:ui", files("C1"))], opts(cwd));
+    const report = await installComponents([item("dialog", "registry:ui", files("C2"))], opts(cwd, { overwrite: true }));
+    assert.deepEqual(report.replaced, [path.join("src", "components/ui/dialog/DialogContent.astro")]);
+    assert.deepEqual(report.written, report.replaced);
+  });
+});
+
+test("local edits compare the installed files, not the registry's current list", async () => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "nimbus-edits-"));
+  try {
+    const installed = [{ path: "components/ui/x/X.astro", content: "<x />\n" }];
+    const write = (rel: string, content: string) => {
+      mkdirSync(path.dirname(path.join(cwd, rel)), { recursive: true });
+      writeFileSync(path.join(cwd, rel), content);
+    };
+    write("src/components/ui/x/X.astro", "<x />\n");
+    const record = { hash: bytesHash(installed), files: ["src/components/ui/x/X.astro"] };
+    // Upstream since added a file; the installed one is untouched.
+    assert.equal(localEdits(record, cwd, "src"), "none");
+    write("src/components/ui/x/X.astro", "<x edited />\n");
+    assert.equal(localEdits(record, cwd, "src"), "edited");
+    assert.equal(localEdits(undefined, cwd, "src"), "unknown");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("the register hint is skipped once components.ts imports the component", () => {
+  const tabs = item("tabs", "registry:ui", [
+    { path: "components/ui/tabs/index.ts", content: 'export { Tabs, TabItem, TabsList } from "./Tabs.astro";\n' },
+  ]);
+  assert.equal(registerHint([tabs], "tabs", "src", 'import { Tabs, TabItem } from "./components/ui/tabs";\n'), null);
+  assert.match(registerHint([tabs], "tabs", "src", "// Tabs is great\n") ?? "", /register in src\/components\.ts/);
 });

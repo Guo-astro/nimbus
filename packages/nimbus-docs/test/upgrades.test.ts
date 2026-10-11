@@ -10,6 +10,7 @@ import {
   resolveUpgradeBaseline,
   runningNimbusVersion,
   selectUpgradeEntries,
+  siteScope,
   UPGRADE_MANIFEST,
 } from "../src/_internal/upgrades.js";
 
@@ -327,6 +328,35 @@ test("installedNimbusVersion finds an installed project or workspace package", (
     );
     assert.throws(() => installedNimbusVersion(project), /invalid version/);
     assert.match(resolveUpgradeBaseline({ projectRoot: project }).error ?? "", /installed Nimbus package metadata/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("API-only reviews skip sites without an API collection", () => {
+  const all = selectUpgradeEntries("0.16.0", "0.18.0").map((entry) => entry.id);
+  assert.ok(all.includes("api-version-url"));
+  assert.deepEqual(
+    selectUpgradeEntries("0.16.0", "0.18.0", { api: true }).map((entry) => entry.id),
+    all,
+  );
+  const docsOnly = selectUpgradeEntries("0.16.0", "0.18.0", { api: false }).map((entry) => entry.id);
+  assert.ok(!docsOnly.includes("api-version-url"));
+  assert.deepEqual(docsOnly, all.filter((id) => !UPGRADE_MANIFEST.appliesTo?.api?.includes(id)));
+});
+
+test("API scope reads the content config in Astro's srcDir", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-scope-")));
+  try {
+    fs.mkdirSync(path.join(root, "site"));
+    fs.writeFileSync(
+      path.join(root, "astro.config.mjs"),
+      'import { defineConfig } from "astro/config";\nexport default defineConfig({ srcDir: "./site" });\n',
+    );
+    fs.writeFileSync(path.join(root, "site", "content.config.ts"), "export const collections = { api: apiCollection() };\n");
+    assert.deepEqual(siteScope(root), { api: true });
+    fs.writeFileSync(path.join(root, "site", "content.config.ts"), "export const collections = { docs: docsCollection() };\n");
+    assert.deepEqual(siteScope(root), { api: false });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

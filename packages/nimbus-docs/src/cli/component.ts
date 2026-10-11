@@ -21,6 +21,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import * as p from "@clack/prompts";
 
+import { bytesHash } from "./nimbus-json.js";
 import { addCommand, detectPackageManager } from "./pm.js";
 import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
@@ -35,11 +36,17 @@ export interface InstallOptions {
   yes: boolean;
   /** Src dir to write against, relative to `cwd` (default `"src"`; monorepo root from nimbus.json). */
   srcRoot?: string;
+  /** Each installed slug's record in nimbus.json, to tell local edits from upstream changes. */
+  recorded?: ReadonlyMap<string, { hash: string | null; files: readonly string[] }>;
 }
 
 export interface InstallReport {
-  /** Individual files actually written. */
+  /** Individual files actually written (new or replaced). */
   written: string[];
+  /** Existing files whose content was replaced. */
+  replaced: string[];
+  /** Registry slugs already identical to the registry: nothing written. */
+  upToDate: string[];
   /** Registry slugs skipped wholesale by the user. */
   skipped: string[];
   npmDepsInstalled: string[];
@@ -51,6 +58,8 @@ export async function installComponents(
 ): Promise<InstallReport> {
   const report: InstallReport = {
     written: [],
+    replaced: [],
+    upToDate: [],
     skipped: [],
     npmDepsInstalled: [],
   };
@@ -80,14 +89,46 @@ export async function installComponents(
         targetRel: relative(options.cwd, targetAbs),
         content: file.content,
         exists: existsSync(targetAbs),
+        path: file.path,
       };
     });
+    const onDisk = new Map(
+      filePlans.filter((f) => f.exists).map((f) => [f.targetAbs, readFileSync(f.targetAbs, "utf8")] as const),
+    );
 
-    const conflicts = filePlans.filter((f) => f.exists);
+    // Only files that differ from the registry are conflicts; identical ones
+    // are already installed.
+    const conflicts = filePlans.filter((f) => f.exists && onDisk.get(f.targetAbs) !== f.content);
+    const missing = filePlans.filter((f) => !f.exists);
+    if (conflicts.length === 0 && missing.length === 0) {
+      report.upToDate.push(item.name);
+      continue;
+    }
 
     // `--overwrite` replaces every conflicting file across the tree — the
     // explicit upgrade path. Without it we never clobber an owned file.
-    if (item.type === "registry:lib") {
+    const edits =
+      conflicts.length > 0 && options.overwrite && !options.yes && process.stdin.isTTY
+        ? localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src")
+        : "none";
+    if (edits !== "none") {
+      // `--overwrite` replaces upstream changes freely, but asks before
+      // discarding edits made since the item was installed.
+      const replace = await p.confirm({
+        message:
+          `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
+          `Replace these files?\n${conflicts.map((f) => `  ${f.targetRel}`).join("\n")}`,
+        initialValue: false,
+      });
+      if (p.isCancel(replace)) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
+      if (!replace) {
+        report.skipped.push(item.name);
+        continue;
+      }
+    } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
       // their copy when present unless an explicit upgrade asks to replace it.
       if (conflicts.length > 0 && !options.overwrite) {
@@ -129,11 +170,12 @@ export async function installComponents(
       }
     }
 
-    // Either no conflicts, --yes, or user chose overwrite. Write every file.
-    for (const plan of filePlans) {
+    // Write what's new or different; identical files stay untouched.
+    for (const plan of [...missing, ...conflicts]) {
       mkdirSync(dirname(plan.targetAbs), { recursive: true });
       writeFileSync(plan.targetAbs, plan.content);
       report.written.push(plan.targetRel);
+      if (plan.exists) report.replaced.push(plan.targetRel);
     }
   }
 
@@ -231,6 +273,28 @@ function assertResolvedInsideSrc(
 }
 
 /**
+ * Whether the files recorded at install still hash to the recorded source.
+ * Compares the installed set, not the registry's current one, so an upstream
+ * file added or removed isn't mistaken for an edit.
+ */
+export function localEdits(
+  record: { hash: string | null; files: readonly string[] } | undefined,
+  cwd: string,
+  srcRoot: string,
+): "none" | "edited" | "unknown" {
+  if (!record?.hash || record.files.length === 0) return "unknown";
+  const prefix = `${srcRoot.replace(/\/+$/, "")}/`;
+  const files: { path: string; content: string }[] = [];
+  for (const file of record.files) {
+    if (!file.startsWith(prefix)) return "unknown";
+    const abs = resolve(cwd, file);
+    if (!existsSync(abs)) return "edited";
+    files.push({ path: file.slice(prefix.length), content: readFileSync(abs, "utf8") });
+  }
+  return bytesHash(files) === record.hash ? "none" : "edited";
+}
+
+/**
  * Filter out deps already present in `dependencies` or `devDependencies`
  * of the user's package.json. If package.json is missing, returns all.
  */
@@ -294,9 +358,17 @@ function barrelExports(item: ComponentItem): string[] {
  * "register in components.ts" hint. Its registry dependencies are installed
  * too but aren't meant to be registered, so they get no hint.
  */
-export function registerHint(installed: ComponentItem[], slug: string, srcRoot: string): string | null {
+export function registerHint(
+  installed: ComponentItem[],
+  slug: string,
+  srcRoot: string,
+  registry = "",
+): string | null {
   const item = installed.find((i) => i.type === "registry:ui" && i.name === slug);
   if (!item) return null;
+  // Already imported in the user's components.ts: nothing to do.
+  const from = new RegExp(`from\\s*["'](?:\\./|@/)components/ui/${item.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/index(?:\\.ts)?)?["']`);
+  if (from.test(registry)) return null;
   if (item.docs) return item.docs;
   const names = barrelExports(item);
   const snippet = names.length > 0

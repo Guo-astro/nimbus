@@ -5,6 +5,7 @@ import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from
 
 import { CLI_PACKAGE, declaresCli, detectPackageManager, installCommand, invocation } from "../cli/pm.js";
 import { getCommand } from "../lib/pkgm.js";
+import { resolveMigrationSrcDir } from "./migrations.js";
 import rawManifest from "./upgrade-manifest.json";
 
 declare const __APP_VERSION__: string;
@@ -36,6 +37,8 @@ export interface UpgradeBaseline {
 interface UpgradeManifest {
   schemaVersion: 1;
   oldestSupportedVersion: string;
+  /** Entry ids that can only matter to sites using a feature; other sites skip them. */
+  appliesTo?: { api?: string[] };
   entries: UpgradeEntry[];
 }
 
@@ -52,7 +55,24 @@ export function runningNimbusVersion(): string {
   return version;
 }
 
-export function selectUpgradeEntries(fromVersion: string, targetVersion: string): UpgradeEntry[] {
+/** What a site uses, for skipping upgrade entries that can't apply to it. */
+export interface SiteScope {
+  api: boolean;
+}
+
+/** A site has API reference pages when its content config registers an API collection. */
+export function siteScope(projectRoot: string, srcDirOverride?: string): SiteScope {
+  const { srcDir } = resolveMigrationSrcDir(projectRoot, srcDirOverride);
+  // When the site can't be read, show every review rather than hide one.
+  if (!srcDir) return { api: true };
+  for (const name of ["content.config.ts", "content.config.mts", "content.config.js", "content.config.mjs"]) {
+    const file = path.join(srcDir, name);
+    if (fs.existsSync(file)) return { api: /\bapiCollection\s*\(/.test(fs.readFileSync(file, "utf8")) };
+  }
+  return { api: true };
+}
+
+export function selectUpgradeEntries(fromVersion: string, targetVersion: string, scope?: SiteScope): UpgradeEntry[] {
   if (!valid(fromVersion)) throw new Error(`Invalid upgrade baseline version: ${fromVersion}.`);
   if (!valid(targetVersion)) throw new Error(`Invalid installed Nimbus version: ${targetVersion}.`);
   if (isAhead(fromVersion, targetVersion)) {
@@ -71,6 +91,7 @@ export function selectUpgradeEntries(fromVersion: string, targetVersion: string)
     : fromVersion;
   return UPGRADE_MANIFEST.entries
     .filter((entry) => gt(entry.introducedIn, fromBoundary) && lte(entry.introducedIn, withoutPrerelease(targetVersion)))
+    .filter((entry) => !scope || scope.api || !UPGRADE_MANIFEST.appliesTo?.api?.includes(entry.id))
     .sort((a, b) => compare(a.introducedIn, b.introducedIn) || a.id.localeCompare(b.id));
 }
 

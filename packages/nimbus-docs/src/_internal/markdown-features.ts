@@ -23,3 +23,11 @@ export function setMarkdownFeatures(features: Features): void {
 export function markdownFeatures(): Features {
   return (globalThis as FeaturesHost)[FEATURES_KEY] ?? DEFAULT_MARKDOWN_FEATURES;
 }
+
+/**
+ * The features for reading source rather than rendering it: smart punctuation
+ * is typography for the page, so source keeps the author's characters.
+ */
+export function sourceFeatures(): Features {
+  return { ...markdownFeatures(), smartPunctuation: false };
+}

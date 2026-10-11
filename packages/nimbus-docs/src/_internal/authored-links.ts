@@ -1,4 +1,5 @@
 import { fromHtml } from "hast-util-from-html";
+import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { parseMarkdownSource } from "./markdown-source.js";
 
@@ -39,6 +40,8 @@ export interface NormalizeAuthoredLinksOptions {
   base: string;
   sourceId?: string;
   format?: "markdown" | "mdx";
+  /** The file `source` was read from, so errors give its line numbers. */
+  filePath?: string;
 }
 
 function fail(
@@ -534,10 +537,13 @@ export function normalizeAuthoredLinks(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const location = detail.match(/^(\d+):(\d+):\s*/);
-    const where = `${options.sourceId ?? "content"}${location ? `:${location[1]}:${location[2]}` : ""}`;
-    const hint = /\(mdx-(?:jsx|expression)[:)]/.test(detail)
-      ? " To write a literal `<` or `{`, escape it with a backslash or put it in backticks."
-      : "";
+    const line = location ? Number(location[1]) : 0;
+    const where = `${options.sourceId ?? "content"}${location ? `:${line + linesBefore(source, options.filePath)}:${location[2]}` : ""}`;
+    const hint = /^#{1,6}\s.*\{#[^}]*\}\s*$/.test(source.split("\n")[line - 1] ?? "")
+      ? " Heading ids like `{#install}` need `markdown.features: { headingAttributes: true }`."
+      : /\(mdx-(?:jsx|expression)[:)]/.test(detail)
+        ? " To write a literal `<` or `{`, escape it with a backslash or put it in backticks."
+        : "";
     throw new Error(
       `${format === "mdx" ? "MDX" : "Markdown"} syntax error in ${where}: ${location ? detail.slice(location[0].length) : detail}.${hint}`,
     );
@@ -626,4 +632,16 @@ export function normalizeAuthoredLinks(
     transformed = `${transformed.slice(0, offset)}${prefix}${transformed.slice(offset)}`;
   }
   return transformed;
+}
+
+/** Lines of `filePath` above `source`, such as frontmatter a loader removed. */
+function linesBefore(source: string, filePath: string | undefined): number {
+  if (!filePath) return 0;
+  try {
+    const file = readFileSync(filePath, "utf8");
+    const start = file.indexOf(source);
+    return start > 0 ? file.slice(0, start).split("\n").length - 1 : 0;
+  } catch {
+    return 0;
+  }
 }

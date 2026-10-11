@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, test } from "node:test";
 
 import { mdxToMdast } from "satteri";
@@ -83,10 +86,25 @@ test("heading ids follow the site's features", () => {
   assert.equal(parse(), null);
 });
 
-test("invalid MDX is reported as the author's syntax error, with the fix", () => {
+test("invalid MDX is reported at the file's line, with the fix", () => {
+  const body = "Intro.\n\nSet <BACKEND_URL> first.\n";
+  const filePath = path.join(mkdtempSync(path.join(tmpdir(), "nimbus-mdx-")), "setup.mdx");
+  writeFileSync(filePath, `---\ntitle: Setup\n---\n${body}`);
   assert.throws(
-    () => normalizeAuthoredLinks("Set <BACKEND_URL> first.\n", { base: "/docs", sourceId: "setup.mdx" }),
-    /^Error: MDX syntax error in setup\.mdx:1:\d+: .*escape it with a backslash or put it in backticks\.$/,
+    () => normalizeAuthoredLinks(body, { base: "/docs", sourceId: "docs:setup.mdx", filePath }),
+    /^Error: MDX syntax error in docs:setup\.mdx:6:5: .*escape it with a backslash or put it in backticks\.$/,
+  );
+  assert.throws(
+    () => normalizeAuthoredLinks("## Install {#install}\n", { base: "/docs", sourceId: "setup.mdx" }),
+    /Heading ids like `\{#install\}` need `markdown\.features: \{ headingAttributes: true \}`\.$/,
+  );
+});
+
+test("generated Markdown keeps the author's punctuation", () => {
+  setMarkdownFeatures({ ...DEFAULT_MARKDOWN_FEATURES, smartPunctuation: true });
+  assert.match(
+    renderEntryAsMarkdown({ body: "<Aside>\n\nThese aren't \"quoted\" -- here.\n\n</Aside>\n", filePath: "page.mdx" }),
+    /These aren't "quoted" -- here\./,
   );
 });
 

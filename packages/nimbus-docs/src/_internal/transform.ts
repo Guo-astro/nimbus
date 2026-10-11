@@ -22,7 +22,7 @@ import {
   type CitationIndex,
 } from "./api/citations.js";
 import { getTabs, isCommandType } from "../lib/pkgm.js";
-import { markdownFeatures } from "./markdown-features.js";
+import { sourceFeatures } from "./markdown-features.js";
 import { runtimeWarn } from "./runtime-warn.js";
 
 export interface MarkdownComponentRenderContext {
@@ -113,7 +113,7 @@ function satteri(): Parsers {
     native = moduleApi.createRequire(import.meta.url)("satteri") as NativeParsers;
   }
   const { mdxToMdast, markdownToMdast } = native;
-  const features = markdownFeatures();
+  const features = sourceFeatures();
   return {
     mdxToMdast: (source) => mdxToMdast(source, { features }),
     markdownToMdast: (source) => markdownToMdast(source, { features }),

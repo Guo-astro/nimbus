@@ -217,6 +217,7 @@ export function agentDiscoveryHeaderRules(
     ["/llms-full.txt", "text/plain"],
     ["/robots.txt", "text/plain"],
     ["/*/llms.txt", "text/plain"],
+    ["/*/llms-full.txt", "text/plain"],
     ["/*/index.md", "text/markdown"],
   ] as const) {
     // A fixed number of narrow families avoids Cloudflare's 100-rule limit

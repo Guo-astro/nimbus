@@ -1,43 +1,63 @@
 /**
- * The injected per-mount `llms.txt` route (`/<mount>/[llms].txt`). Injected
- * by the integration when the rendering policy is set and the project has no
- * route file at the mount, with `prerender` following the collection's
- * rendering mode. The pattern is dynamic so a prebuilt mount with no
- * discoverable pages emits nothing — exactly what the shared section route
- * does for an absent section — while the URL stays `/<mount>/llms.txt`. The
- * section is the path segment before `llms.txt`, so one module serves every
- * mount under any base.
+ * The injected per-mount `llms.txt` route. Injected by the integration when
+ * the rendering policy is set and the project has no route file at the
+ * mount, with `prerender` following the collection's rendering mode. Its
+ * shape follows the project's section route:
+ *
+ * - `/<mount>/[llms].txt` beside `[section]/llms.txt.ts`: the mount's one
+ *   index. The pattern is dynamic so a prebuilt mount with no discoverable
+ *   pages emits nothing, while the URL stays `/<mount>/llms.txt`.
+ * - `/<mount>/[...section]/llms.txt` beside `[...section]/llms.txt.ts`: the
+ *   mount's index (empty rest) and every nested section under it.
+ *
+ * The mount comes from the route pattern, so one module serves every mount
+ * under any base.
  */
 import type { APIRoute, GetStaticPaths } from "astro";
-import { getLlmsPayload } from "../agent-endpoints.js";
+import { getLlmsPayload, getLlmsStaticPaths } from "../agent-endpoints.js";
 
-function sectionOf(pathname: string): string | undefined {
-  const segments = pathname.split("/").filter(Boolean);
-  const encoded = segments.at(-1) === "llms.txt" ? segments.at(-2) : undefined;
-  if (encoded === undefined) return undefined;
-  try {
-    return decodeURIComponent(encoded);
-  } catch {
-    return encoded;
-  }
+/** The mount's section path: "/blog/[...section]/llms.txt" → "blog". */
+function mountOf(routePattern: string): string | undefined {
+  const segments = routePattern.split("/").filter(Boolean);
+  return segments.at(-1) === "[llms].txt"
+    ? segments.slice(0, -1).join("/")
+    : segments.at(-1) === "llms.txt" && segments.at(-2)?.startsWith("[...")
+      ? segments.slice(0, -2).join("/")
+      : undefined;
+}
+
+function sectionOf(mount: string, rest: string | undefined): string {
+  return rest ? `${mount}/${rest}` : mount;
 }
 
 export const getStaticPaths: GetStaticPaths = async ({ routePattern }) => {
-  // "/blog/[llms].txt" → section "blog". Emit the one path only when the
-  // section has an index to serve.
-  const section = routePattern.split("/").filter(Boolean).at(-2);
-  const payload = section
-    ? await getLlmsPayload({ scope: "section", surface: "index", section })
-    : null;
-  return payload ? [{ params: { llms: "llms" } }] : [];
+  const mount = mountOf(routePattern);
+  if (!mount) return [];
+  if (routePattern.endsWith("/[llms].txt")) {
+    // Emit the one path only when the section has an index to serve.
+    const payload = await getLlmsPayload({ scope: "section", surface: "index", section: mount });
+    return payload ? [{ params: { llms: "llms" } }] : [];
+  }
+  return (await getLlmsStaticPaths())
+    .filter(({ params }) => params.section === mount || params.section.startsWith(`${mount}/`))
+    .map(({ params, props }) => ({
+      params: { section: params.section === mount ? undefined : params.section.slice(mount.length + 1) },
+      props,
+    }));
 };
 
 export const GET: APIRoute = async (context) => {
-  const section = sectionOf(context.url.pathname);
+  const mount = mountOf(context.routePattern);
   try {
-    const payload = section
+    const payload = mount
       ? await getLlmsPayload(
-          { scope: "section", surface: "index", section },
+          {
+            scope: "section",
+            surface: "index",
+            section: context.routePattern.endsWith("/[llms].txt")
+              ? mount
+              : sectionOf(mount, context.params.section),
+          },
           { request: context.request },
         )
       : null;

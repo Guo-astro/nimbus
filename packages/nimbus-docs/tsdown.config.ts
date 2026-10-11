@@ -30,6 +30,7 @@ export default defineConfig({
     "_internal/mounted-markdown-route": "src/_internal/mounted-markdown-route.ts",
     "_internal/mounted-source-route": "src/_internal/mounted-source-route.ts",
     "_internal/mounted-llms-route": "src/_internal/mounted-llms-route.ts",
+    "_internal/section-llms-full-route": "src/_internal/section-llms-full-route.ts",
     "_internal/agent-discovery-middleware": "src/_internal/agent-discovery-middleware.ts",
     "_internal/request-route-inventory":
       "src/_internal/request-route-inventory.ts",

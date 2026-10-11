@@ -758,6 +758,22 @@
         "On an operation page, confirm previous and next links lead to the neighboring pages in the sidebar.",
         "Confirm 4xx and 5xx responses start closed, and that a link to a field inside one opens it."
       ]
+    },
+    {
+      "id": "nested-llms-scopes",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "nested-llms-scopes",
+      "summary": "Optionally give each sub-folder its own llms.txt, linked from its parent section's index.",
+      "affected": "Sites created from the starter that have src/pages/[section]/llms.txt.ts.",
+      "instructions": [
+        "No action is needed: a [section] route keeps serving one index per top-level section.",
+        "If src/pages/[section]/llms.txt.ts is unmodified, run nimbus-docs diff \"src/pages/[...section]/llms.txt.ts\" --apply to add the new route, then nimbus-docs diff \"src/pages/[section]/llms.txt.ts\" --apply to remove the old one.",
+        "If you've edited it, move the file to src/pages/[...section]/llms.txt.ts and keep your edits. Keep only one of the two files: the build fails when both exist."
+      ],
+      "verify": [
+        "Build, open /<section>/llms.txt for a section with sub-folders, and confirm it ends with a Sections list whose links return each sub-folder's llms.txt."
+      ]
     }
   ]
 }

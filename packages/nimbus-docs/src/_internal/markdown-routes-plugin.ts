@@ -56,7 +56,7 @@ function markdownFileSegment(route: ResolvedRouteInput): string | undefined {
   if (route.pattern.endsWith("/[llms].txt")) return "llms.txt";
   if (last.length !== 1 || last[0]!.dynamic) return undefined;
   const file = last[0]!.content;
-  return /\.mdx?$/u.test(file) || file === "llms.txt" ? file : undefined;
+  return /\.mdx?$/u.test(file) || file === "llms.txt" || file === "llms-full.txt" ? file : undefined;
 }
 
 function escapeRegExp(value: string): string {

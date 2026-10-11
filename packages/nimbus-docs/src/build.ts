@@ -93,7 +93,7 @@ export async function getPreparedLlmsStaticPaths(): Promise<
       ): artifact is Extract<
         (typeof manifest.llmsAssets)[number],
         { scope: "section" }
-      > => artifact.scope === "section",
+      > => artifact.scope === "section" && artifact.surface === "index",
     )
     .map((artifact) => ({
       params: { section: artifact.section },
@@ -112,5 +112,5 @@ export async function getPreparedLlmsStaticPaths(): Promise<
 export function getPreparedLlmsArtifact(
   reference: PreparedLlmsReference,
 ): Promise<PreparedLlmsArtifact> {
-  return readLlmsEndpointPayload(configuredRoot(), reference);
+  return readLlmsEndpointPayload(configuredRoot(), reference) as Promise<PreparedLlmsArtifact>;
 }

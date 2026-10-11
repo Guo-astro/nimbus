@@ -23,7 +23,9 @@ export interface UngeneratedAgentPage {
 const LISTED_PER_ROUTE = 10;
 
 export function llmsAssetUrl(reference: LlmsEndpointReference): string {
-  if (reference.scope === "section") return `/${reference.section}/llms.txt`;
+  if (reference.scope === "section") {
+    return `/${reference.section}/${reference.surface === "full" ? "llms-full.txt" : "llms.txt"}`;
+  }
   return reference.surface === "full" ? "/llms-full.txt" : "/llms.txt";
 }
 

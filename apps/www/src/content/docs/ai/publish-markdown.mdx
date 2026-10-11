@@ -54,18 +54,22 @@ export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
-This file is optional. Without it, Nimbus doesn't build `llms-full.txt` and `llms.txt` doesn't link to it. On a very large site, consider leaving it out: on the Cloudflare adapter the build warns when the file passes Cloudflare's 25 MiB per-file limit.
+This file is optional. Without it, Nimbus doesn't build `llms-full.txt` and `llms.txt` doesn't link to it.
+
+When the document would be over 25 MiB (Cloudflare's per-file limit), `/llms-full.txt` becomes an index of one `llms-full.txt` per section, such as `/reference/llms-full.txt`, and a section still over the limit is split again by its sub-folders. Nimbus serves those files from a route of its own, beside this one, so there's nothing to add. A section with no sub-folders that is still over the limit can't be split: the build warns that the deploy will fail, and names it. Wrapping this route's `GET` doesn't change the section files.
 
 ## 4. Add section indexes
 
-Create the route for paths such as `/writing/llms.txt`:
+Create the route for paths such as `/writing/llms.txt` and `/reference/functions/llms.txt`:
 
-```ts title="src/pages/[section]/llms.txt.ts"
+```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
 export const prerender = true;
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
+
+Each section index lists the pages directly in its folder, then links each sub-folder's own `llms.txt` under "Sections", so an agent descends one level at a time. A route in a `[section]` folder (from an older starter) still works: it serves one index per top-level section listing every page under it. Rename the folder to `[...section]` to get the nested indexes.
 
 Each `GET` returns `404` for an unknown section. Rendered on request, it returns a `500` without details when an index can't be read, and logs the error. To change what a route serves, see [Override a default](/ai/override-markdown#override-an-llmstxt-index).
 

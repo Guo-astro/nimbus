@@ -22,7 +22,7 @@ Add the same user-owned files the canonical starter ships:
 - `src/pages/[...slug]/index.mdx.ts`
 - `src/pages/llms.txt.ts`
 - `src/pages/llms-full.txt.ts`
-- `src/pages/[section]/llms.txt.ts`
+- `src/pages/[...section]/llms.txt.ts`
 - `src/pages/robots.txt.ts`
 - `src/components/AgentDirective.astro`
 
@@ -68,7 +68,7 @@ export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
-```ts title="src/pages/[section]/llms.txt.ts"
+```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
 export const prerender = true;

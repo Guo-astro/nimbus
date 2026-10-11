@@ -27,7 +27,7 @@ export interface MarkdownEndpointPayload extends MarkdownEndpointReference {
 
 export type LlmsEndpointReference =
   | { scope: "site"; surface: "index" | "full" }
-  | { scope: "section"; surface: "index"; section: string };
+  | { scope: "section"; surface: "index" | "full"; section: string };
 
 export type LlmsEndpointPayload = LlmsEndpointReference & {
   digest: string;
@@ -432,7 +432,7 @@ export interface LlmsRoute {
   GET: APIRoute;
 }
 
-/** The `{ getStaticPaths, GET }` behind `src/pages/[section]/llms.txt.ts`. */
+/** The `{ getStaticPaths, GET }` behind `src/pages/[...section]/llms.txt.ts`. */
 export interface LlmsSectionRoute {
   getStaticPaths: GetStaticPaths;
   GET: APIRoute;
@@ -477,16 +477,19 @@ export function llmsFullRoute(): LlmsRoute {
  * Every per-section `/<section>/llms.txt` index, one path per section:
  *
  * ```ts
- * // src/pages/[section]/llms.txt.ts
+ * // src/pages/[...section]/llms.txt.ts
  * import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
  *
  * export const prerender = true;
  * export const { GET, getStaticPaths } = llmsSectionRoute();
  * ```
  *
- * The route's parameter must be named `section`. On request, `GET` reads it
- * from `params.section` and returns 404 for an unknown section. Same error
- * rules as {@link llmsRoute}.
+ * The route's parameter must be named `section`. In a `[...section]` folder,
+ * each sub-folder with pages gets its own index (`/reference/functions/llms.txt`)
+ * and its parent links to it; in a `[section]` folder, one index per top-level
+ * section lists every page under it. On request, `GET` reads the section from
+ * `params.section` and returns 404 for an unknown section. Same error rules as
+ * {@link llmsRoute}.
  */
 export function llmsSectionRoute(): LlmsSectionRoute {
   return {

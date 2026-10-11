@@ -160,7 +160,7 @@ nimbus(config, {
 });
 ```
 
-With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` keep working when the heading text changes. A heading that ends in other `{…}` text, such as `## GET /accounts/{account_id}` in a `.md` file, is read as attributes too; leave the feature off if your headings end that way.
+With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` keep working when the heading text changes. A heading that ends in other `{…}` text, such as `## GET /accounts/{account_id}` in a `.md` file, is read as attributes too; leave the feature off if your headings end that way. A `.md` page's generated Markdown keeps the heading as you wrote it.
 
 With `math`, `$x^2$` inline and `$$` blocks are read as math instead of text. Pages get them as `<code class="language-math">` elements for a math renderer of your choice to typeset, and generated Markdown keeps the `$…$` source. It's off unless you turn it on, because a `$` in prose ("costs $5 and $10") would start a formula.
 

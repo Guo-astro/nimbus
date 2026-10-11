@@ -22,3 +22,9 @@ test("add hints registration only for the component that was asked for", () => {
   assert.doesNotMatch(hint ?? "", /icon/i);
   assert.equal(registerHint([ui("icon", "Icon")], "tabs", "src"), null);
 });
+
+test("an item's own next step replaces the components.ts hint", () => {
+  const layout = { ...ui("api-layout", "ApiLayout"), docs: "API pages need a route: create src/pages/api/[...slug].astro." };
+  assert.equal(registerHint([layout], "api-layout", "src"), layout.docs);
+  assert.match(registerHint([ui("badge", "Badge")], "badge", "src") ?? "", /register in src\/components\.ts/);
+});

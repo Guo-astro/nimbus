@@ -289,13 +289,15 @@ function barrelExports(item: ComponentItem): string[] {
 }
 
 /**
- * The "register in components.ts" hint for the UI component the user asked
- * for. Its registry dependencies are installed too but aren't meant to be
- * registered, so they get no hint.
+ * The next step for the UI component the user asked for: the item's own
+ * `docs` when it has one (a component that isn't used from `.mdx`), else the
+ * "register in components.ts" hint. Its registry dependencies are installed
+ * too but aren't meant to be registered, so they get no hint.
  */
 export function registerHint(installed: ComponentItem[], slug: string, srcRoot: string): string | null {
   const item = installed.find((i) => i.type === "registry:ui" && i.name === slug);
   if (!item) return null;
+  if (item.docs) return item.docs;
   const names = barrelExports(item);
   const snippet = names.length > 0
     ? `  import { ${names.join(", ")} } from "./components/ui/${item.name}";  // then add ${names.join(", ")} to the map`

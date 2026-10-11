@@ -618,6 +618,23 @@
         "On a page of a versioned API, confirm the picker shows above the sidebar and lists every version.",
         "At mobile width, open the navigation, confirm the picker sits above the tree, close it, and confirm the desktop sidebar still shows the picker above the tree."
       ]
+    },
+    {
+      "id": "version-switcher-collections",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "version-switcher-collections",
+      "summary": "Optionally hide the docs version picker on pages outside the docs versions, such as API reference and blog pages.",
+      "affected": "Sites with versioned docs that installed version-switcher before 0.18.0 and also have API reference or other non-docs pages.",
+      "instructions": [
+        "No action is needed: pages keep working; the header just shows the docs picker on non-docs pages too.",
+        "If VersionSwitcher.astro is an unmodified registry copy, update it with nimbus-docs add version-switcher --overwrite.",
+        "If VersionSwitcher.astro is customized, in its docs branch (buildDocsEntries in newer copies) compute const currentPageVersion = collection ? await getCurrentVersion(collection) : null; before the versions check, and add && !(collection && currentPageVersion === null) to the if that builds the docs entries, removing the later currentPageVersion declaration inside it."
+      ],
+      "verify": [
+        "On an API reference page of a site with versioned docs, confirm the header shows no docs version picker.",
+        "On a docs page, confirm the header picker still lists every version and switches to the same page."
+      ]
     }
   ]
 }

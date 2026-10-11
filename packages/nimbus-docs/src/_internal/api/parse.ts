@@ -154,6 +154,9 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       ]);
     }
     for (const e of validation.errors ?? []) {
+      // A tag's `parent` is OpenAPI 3.2, and Nimbus nests tags by it whatever
+      // version a spec declares, so it isn't a deviation worth a warning.
+      if (isTagParent(e)) continue;
       preDiagnostics.push({
         level: "warning",
         message: `Spec deviates from OpenAPI: ${e.message}`,
@@ -347,6 +350,30 @@ function asArray(value: unknown): unknown[] {
  * `servers` is advisory now (validation no longer gates it), so it may be any
  * shape. Extract only well-formed `{ url: string }` entries; skip the rest.
  */
+function isTagParent(error: { message?: string; path?: unknown }): boolean {
+  return (
+    error.message === "Property parent is not expected to be here" &&
+    typeof error.path === "string" &&
+    /^\/tags\/\d+$/.test(error.path)
+  );
+}
+
+// The first server's URL with each variable's `default` filled in; a variable
+// without one stays `{name}`.
+function sampleServerUrl(servers: unknown): string | undefined {
+  const server = asArray(servers).find((s) => isPlainObject(s) && typeof s.url === "string") as
+    | { url: string; variables?: unknown }
+    | undefined;
+  if (!server) return undefined;
+  const variables = isPlainObject(server.variables) ? server.variables : {};
+  return server.url.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
+    const variable = variables[name];
+    const value = isPlainObject(variable) ? variable.default : undefined;
+    // YAML reads `default: 8443` as a number; it's still the value to send.
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : whole;
+  });
+}
+
 function extractServerUrls(servers: unknown): string[] {
   const out: string[] = [];
   for (const s of asArray(servers)) {
@@ -388,6 +415,7 @@ class Walker implements ParseContext {
   readonly sampleTools: SampleTools | null;
   /** First declared server URL — derived once, prefixed onto every sample. */
   readonly firstServer?: string;
+  readonly sampleServer?: string;
 
   constructor(
     readonly collection: string,
@@ -409,6 +437,7 @@ class Walker implements ParseContext {
     );
     this.sampleTools = sampleTools ?? null;
     this.firstServer = extractServerUrls(doc.servers)[0];
+    this.sampleServer = sampleServerUrl(doc.servers);
   }
 
   walk(): DocsModel {

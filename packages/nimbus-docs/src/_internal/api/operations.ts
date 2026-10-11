@@ -418,7 +418,7 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
       method: site.sampleTarget.method,
       path: site.sampleTarget.path,
       openapiVersion: ctx.doc.openapi,
-      server: ctx.firstServer,
+      server: ctx.sampleServer,
       params: allParams,
       body: facts.example
         ? {

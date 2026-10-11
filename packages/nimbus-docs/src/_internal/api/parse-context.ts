@@ -12,6 +12,9 @@ export interface ParseContext extends FieldSink {
   readonly collection: string;
   readonly doc: OpenApiDocument;
   readonly firstServer?: string;
+  /** The first server for code samples: variables filled from their `default`;
+   *  one without a default stays `{name}` and becomes a placeholder. */
+  readonly sampleServer?: string;
   readonly sampleTools: SampleTools | null;
   readonly requireOperationId: boolean;
   /** Which languages are generated, and which are kept next to authored `x-codeSamples`. */

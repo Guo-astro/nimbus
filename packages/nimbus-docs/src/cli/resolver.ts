@@ -39,6 +39,8 @@ export interface ComponentItem {
   version?: string;
   dependencies: string[];
   registryDependencies: string[];
+  /** Next step to show after installing, in place of the `components.ts` hint. */
+  docs?: string;
   files: RegistryFile[];
 }
 
@@ -78,6 +80,7 @@ const componentItemSchema = z.object({
   registryDependencies: z.array(
     z.string().regex(SLUG_RE, "is not a valid registry slug"),
   ),
+  docs: z.string().optional(),
   files: z.array(registryFileSchema),
 });
 

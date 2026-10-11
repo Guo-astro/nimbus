@@ -105,7 +105,6 @@ export const GENERATED_SAMPLE_LANGS: readonly ApiSampleLang[] = LANGS.map((l) =>
 // names are not aliases of `curl`: an authored shell sample is often a CLI call.
 const LANG_ALIASES: Record<string, ApiSampleLang> = { py: "python", ts: "typescript" };
 
-const DEFAULT_SERVER = "https://api.example.com";
 // Bounds sampler work on deep or self-referential schemas; a runaway sample
 // would otherwise not be caught by try/catch.
 const MAX_SAMPLE_DEPTH = 8;
@@ -654,7 +653,7 @@ function buildHar(
   values: ParamValues,
   placeholder: (name: string) => string,
 ): HarRequestInput {
-  const base = (input.server ?? DEFAULT_SERVER).replace(/\/+$/, "");
+  const base = sampleBase(input.server, placeholder);
   const bodyExample = input.body?.value;
 
   let filledPath = input.path;
@@ -724,6 +723,19 @@ function buildHar(
 
 function bareMediaType(mediaType: string): string {
   return mediaType.split(";")[0]!.trim().toLowerCase();
+}
+
+// The URL a sample is sent to. With no server, or a relative one, the host is
+// the reader's to fill in, as `<base-url>`; a server variable left without a
+// default becomes `<name>`.
+function sampleBase(server: string | undefined, placeholder: (name: string) => string): string {
+  if (server === undefined) return placeholder("base-url");
+  let url = server.replace(/\/+$/, "").replace(/\{([^{}]+)\}/g, (_whole, name: string) => placeholder(name));
+  if (url.startsWith("//")) url = `https:${url}`;
+  else if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return `${placeholder("base-url")}${url.startsWith("/") || url === "" ? "" : "/"}${url}`;
+  // A placeholder where a URL can't hold one, such as the port, leaves no
+  // valid URL; the whole base is then the reader's to fill in.
+  return URL.canParse(url) ? url : placeholder("base-url");
 }
 
 function isFormMediaType(mediaType: string): boolean {

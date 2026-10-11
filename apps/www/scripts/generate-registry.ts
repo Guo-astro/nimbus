@@ -103,6 +103,7 @@ interface RegistryItem {
   version: string;
   dependencies: string[];
   registryDependencies: string[];
+  docs?: string;
   files: RegistryFile[];
 }
 
@@ -400,6 +401,7 @@ function main(): void {
       version: REGISTRY_VERSION,
       dependencies: entry.dependencies ?? [],
       registryDependencies: entry.registryDependencies ?? [],
+      ...(entry.type === "registry:ui" && entry.docs ? { docs: entry.docs } : {}),
       files,
     };
 

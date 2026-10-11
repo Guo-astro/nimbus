@@ -180,6 +180,30 @@ const HELP = `
     Full coverage (types+links): <your build> && nimbus-docs check
 `;
 
+function checkHelp(usage: string): string {
+  return `
+  Usage:  ${usage}
+
+  Build-free preflight. Exits 1 only when an error-severity finding remains.
+  Run it after a build for full coverage (page collections and links).
+
+  Categories (default: all):
+    --env                  dependencies, adapter and environment
+    --structure            config, routes and content layout
+    --lint                 the authoring rules \`nimbus-docs lint\` runs
+    --types                type-check .ts and .tsx files (for .astro files, run \`astro check\`)
+    --migrations           package API migrations since nimbus.json's version
+
+  Flags:
+    --fix                  apply safe fixes, prompt for the rest
+    --yes, -y              let fixes install packages
+    --json                 machine-readable output (same as --format json)
+    --quiet                errors only, suppress warnings
+    --src-dir <dir>        source dir for the migration scan when the Astro config is computed
+    --color, --no-color    force color on or off (default: auto)
+`;
+}
+
 async function main(): Promise<void> {
   const args = mri(process.argv.slice(2), {
     boolean: ["yes", "print", "help", "version", "quiet", "color", "fix", "force", "overwrite", "all", "apply", "diff", "dry-run", "env", "structure", "lint", "types", "migrations", "json"],
@@ -188,6 +212,10 @@ async function main(): Promise<void> {
     alias: { y: "yes", h: "help", v: "version" },
   }) as unknown as CliArgs;
 
+  if (args.help && args._[0] === "check") {
+    process.stdout.write(checkHelp(invocation("check [--fix] [--json]")));
+    return;
+  }
   if (args.help && args._[0] === "lint") {
     process.stdout.write(lintHelp(invocation("lint [--fix] [--rule <code>] [--format json]")));
     return;

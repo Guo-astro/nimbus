@@ -22,6 +22,8 @@ import type { Features } from "satteri";
 
 import { setMarkdownFeatures } from "../_internal/markdown-features.js";
 import { materializedFeatures } from "../check/authoring.js";
+import { isBuildValidator } from "../lint/diagnostic.js";
+import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import {
   findMdxFiles,
   fixPaths,
@@ -83,10 +85,16 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     // Build validators run inside `astro build`; this command accepts only
     // authoring rules with an available rule module.
     if (!IMPLEMENTED_CODES.has(flags.rule)) {
+      // Build validators can't be picked or turned off: they always run.
+      const always =
+        flags.rule === "nimbus/mdx-syntax"
+          ? "always runs: `lint` reports any file that fails to parse, and so does `astro build`. "
+          : "always runs inside `astro build`, not here. ";
       process.stderr.write(
-        `Rule \`${flags.rule}\` is not an implemented lint rule. ` +
-          `Build validators run inside \`astro build\`, not here. ` +
-          `Implemented authoring rules: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
+        (isBuildValidator(flags.rule)
+          ? `Rule \`${flags.rule}\` ${always}`
+          : `Rule \`${flags.rule}\` is not an implemented lint rule. `) +
+          `Rules \`--rule\` can run: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
       );
       process.exit(1);
     }
@@ -111,6 +119,9 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
       "nimbus-docs: `.nimbus/lint.json` is from an older build, so lint reads Markdown with the default features. " +
         "Run `astro build` to use the site's `markdown.features`.\n",
     );
+  }
+  if (found && lintConfigIsStale(cwd, { rules, collections })) {
+    process.stderr.write(`nimbus-docs: ${STALE_LINT_CONFIG_MESSAGE}\n`);
   }
   if (!found && !flags.rule) {
     // Exit nonzero for the same reason as no `.mdx` files: with no

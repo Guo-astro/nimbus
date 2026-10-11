@@ -4,7 +4,8 @@
  * `notes`, a per-scope `scopes[]` (derived status + notes + optional reason),
  * and the flat `findings[]`. The pretty form is a *lookup* from those signals,
  * never a guess from an error count: the scope glyph is `✗ / ○ / ✓` off
- * `status`, notes render as dim trailing text on a `✓` line, and the headline
+ * `status` (`◐` for an evaluated scope with notes, which render as dim
+ * trailing text), and the headline
  * says "Ready" / "Buildable" / "Couldn't fully verify" / "Not buildable"
  * strictly per the glyph rule.
  */
@@ -39,6 +40,11 @@ const SCOPE_LABELS: Record<CheckScope, string> = {
   migrations: "Migrations",
   authoring: "Authoring",
   types: "Types",
+};
+
+/** What an evaluated scope covers, when that's less than its name suggests. */
+const SCOPE_COVERAGE: Partial<Record<CheckScope, string>> = {
+  types: "(.ts and .tsx files). .astro files aren't type-checked here: run `astro check`.",
 };
 
 export function formatCheckJson(result: CheckResult): string {
@@ -136,11 +142,14 @@ function renderScope(
     return [`  ${label}${paint(COLORS.yellow, "○")} not evaluated — ${paint(COLORS.dim, reason)}`];
   }
 
+  // A scope that ran but skipped some of its checks is only partly checked.
   const trailing = scope.notes.map((n) => noteTrail(n)).join(" · ");
-  const summary = trailing
-    ? `ok · ${paint(COLORS.dim, trailing)}`
-    : "ok";
-  const out = [`  ${label}${paint(COLORS.green, "✓")} ${summary}`];
+  const coverage = SCOPE_COVERAGE[scope.scope];
+  const out = [
+    trailing
+      ? `  ${label}${paint(COLORS.yellow, "◐")} ok, partly checked · ${paint(COLORS.dim, trailing)}`
+      : `  ${label}${paint(COLORS.green, "✓")} ok${coverage ? ` ${paint(COLORS.dim, coverage)}` : ""}`,
+  ];
   for (const f of [...warns, ...infos]) out.push(...renderFinding(f, paint));
   return out;
 }

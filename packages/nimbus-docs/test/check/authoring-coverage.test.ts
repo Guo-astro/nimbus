@@ -181,3 +181,19 @@ test("zero .mdx project → evaluated true, no notes (a config-only check still 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("lint rules edited since lint.json was written → one lint-config-stale warning", () => {
+  const dir = project({ body: "Fine.", lintJson: { rules: { "nimbus/single-h1": "warn" }, collections: {} } });
+  try {
+    fs.writeFileSync(
+      path.join(dir, "astro.config.ts"),
+      'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ title: "Docs" }, { rules: { "nimbus/single-h1": "off" } })] };\n',
+    );
+    const stale = checkAuthoring(dir).findings.filter((f) => f.code === "nimbus/lint-config-stale");
+    assert.equal(stale.length, 1);
+    assert.equal(stale[0]!.severity, "warn");
+    assert.match(stale[0]!.message, /astro sync/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

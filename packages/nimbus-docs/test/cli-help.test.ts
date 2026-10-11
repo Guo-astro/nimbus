@@ -16,3 +16,16 @@ test("lint --help lists the lint rules instead of the global help", () => {
   assert.match(result.stdout, /^ {4}nimbus\/internal-link$/m);
   assert.doesNotMatch(result.stdout, /Commands:/);
 });
+
+test("check --help lists check's own flags instead of the global help", () => {
+  const result = spawnSync(process.execPath, ["--import", TSX, CLI, "check", "--help"], {
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  for (const flag of ["--env", "--structure", "--lint", "--types", "--migrations", "--fix", "--yes", "--json", "--quiet", "--src-dir"]) {
+    assert.match(result.stdout, new RegExp(`^ {4}${flag}\\b`, "m"), flag);
+  }
+  assert.match(result.stdout, /--types .*astro check/);
+  assert.doesNotMatch(result.stdout, /Commands:/);
+});

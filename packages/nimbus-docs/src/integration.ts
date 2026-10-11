@@ -51,7 +51,8 @@ import {
   type ResolvedRouteLike,
   type UserRouteDeclaration,
 } from "./_internal/build-report.js";
-import { authorError } from "./_internal/author-error.js";
+import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
+import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
 import { parseComponentsRegistry } from "./_internal/parse-components-registry.js";
@@ -514,6 +515,10 @@ export function nimbus(
   let clientDirectory = new URL("file:///tmp/nimbus-client/");
   let serverDirectory = new URL("file:///tmp/nimbus-server/");
   let resolvedRoutesForBuild: ResolvedRouteLike[] = [];
+  // Request-rendered-by-policy routes that export `getStaticPaths`, which
+  // Astro warns about; see `astro:routes:resolved`.
+  let policyRoutesWithStaticPaths = new Set<string>();
+  let reportedPolicyRoutesWithStaticPaths = "";
   let endpointRoutesForBuild: EndpointRouteRecord[] = [];
   // Whether a route serves llms-full.txt; unknown until routes resolve.
   let servesFullDocument: boolean | undefined;
@@ -958,7 +963,8 @@ export function nimbus(
   return {
     name: "@cloudflare/nimbus-docs",
     hooks: {
-      "astro:config:setup": async (params) => {
+      // An invalid API spec is the author's to fix: message and hint, no stack.
+      "astro:config:setup": (params) => withApiErrorsAsAuthorErrors(async () => {
         const {
           updateConfig,
           injectRoute,
@@ -1474,10 +1480,14 @@ export function nimbus(
         );
         apiCollectionsForBuild = apiCollections;
         // A failed or interrupted build must not leave a stale list for
-        // `nimbus-docs check` to trust (same rule as `routes.json`).
-        fs.rmSync(pageCollectionsFilePath(projectRoot), { force: true });
+        // `nimbus-docs check` to trust (same rule as `routes.json`). Only a
+        // build rewrites it, so `astro dev` and `astro check` leave it alone.
+        if (command === "build") {
+          fs.rmSync(pageCollectionsFilePath(projectRoot), { force: true });
+        }
 
         renderingRoutes = new Map();
+        policyRoutesWithStaticPaths = new Set();
         requestRenderingConfigured = false;
         requestRenderingCollections = new Set();
         contentRoutePatternsForBuild = new Set();
@@ -2420,7 +2430,7 @@ export function nimbus(
             },
           },
         });
-      },
+      }),
       "astro:route:setup": ({ route }) => {
         const component = normalizeRouteComponent(route.component);
         // The homepage renders on request only when some collection already
@@ -2432,9 +2442,20 @@ export function nimbus(
           route.prerender = true;
           return;
         }
+        const noteStaticPaths = (mode: RenderingMode) => {
+          if (mode !== "request") return;
+          try {
+            const source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
+            // The same test Astro uses to warn, so this line explains exactly its warnings.
+            if (source.includes("getStaticPaths")) policyRoutesWithStaticPaths.add(route.component);
+          } catch {
+            // Unreadable route: Astro reports it.
+          }
+        };
         const mode = renderingRoutes.get(component);
         if (mode) {
           route.prerender = mode === "build";
+          noteStaticPaths(mode);
           return;
         }
         // Project-owned agent route files are policy-managed when they call
@@ -2444,7 +2465,10 @@ export function nimbus(
         // keep their own `prerender`.
         if (!agentRenderingForBuild) return;
         const agentMode = agentRouteMode(component);
-        if (agentMode) route.prerender = agentMode === "build";
+        if (agentMode) {
+          route.prerender = agentMode === "build";
+          noteStaticPaths(agentMode);
+        }
       },
       "astro:config:done": ({
         injectTypes,
@@ -2452,6 +2476,14 @@ export function nimbus(
         buildOutput,
         logger,
       }) => {
+        if (building) {
+          const trailingSlashWarning = cloudflareTrailingSlashWarning(projectRootForBuild, {
+            output: buildOutput,
+            trailingSlash: astroConfig.trailingSlash,
+            format: astroConfig.build?.format,
+          });
+          if (trailingSlashWarning) logger?.warn(trailingSlashWarning);
+        }
         const migrationRoot = astroConfig.root
           ? fileURLToPath(astroConfig.root)
           : projectRootForBuild;
@@ -2865,7 +2897,17 @@ export function nimbus(
           await stagePageAssetDeployment(projectRootForBuild, target);
         }
       },
-      "astro:routes:resolved": ({ routes }) => {
+      "astro:routes:resolved": ({ routes, logger }) => {
+        // Astro's own warning advises `export const prerender`, which the
+        // rendering policy overrides. Say so once per change of the set.
+        const staticPaths = [...policyRoutesWithStaticPaths].sort().join(", ");
+        if (staticPaths && staticPaths !== reportedPolicyRoutesWithStaticPaths) {
+          logger.info(
+            `The rendering policy renders ${staticPaths} on request, so Astro ignores their getStaticPaths(). ` +
+              "That's expected: don't add `export const prerender`; set `rendering` in the Nimbus config to change it.",
+          );
+        }
+        reportedPolicyRoutesWithStaticPaths = staticPaths;
         markdownRoutes.update(
           recordMarkdownRoutes(
             routes,

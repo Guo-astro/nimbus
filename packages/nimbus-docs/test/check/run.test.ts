@@ -134,7 +134,50 @@ test("an installed adapter outside the supported range warns with the install co
   const pnpm = await adapterFinding(adapterProject(true, "14.1.2", "pnpm-lock.yaml"));
   assert.match(pnpm?.message ?? "", /`pnpm add (--ignore-workspace-root-check )?@astrojs\/cloudflare@~14\.3\.0`/);
 
+  assert.match(finding?.message ?? "", /`astro dev` and server builds can fail/);
+  // 14.2.x builds fine; only a cold `astro dev` can fail.
+  const near = await adapterFinding(adapterProject(true, "14.2.4"));
+  assert.match(near?.message ?? "", /a cold `astro dev` can fail to start\. Builds aren't affected\./);
+
   assert.equal(await adapterFinding(adapterProject(true, "14.3.2")), undefined);
   assert.equal(await adapterFinding(adapterProject(true, null)), undefined);
   assert.equal(await adapterFinding(adapterProject(false, "14.1.2")), undefined);
+});
+
+test("static Cloudflare site with trailingSlash always and file format: check warns before the deploy", async () => {
+  const write = (astroFields: string, wrangler: string | null) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-run-slash-"));
+    fs.writeFileSync(path.join(dir, "package.json"), `{ "name": "fixture" }`);
+    fs.writeFileSync(
+      path.join(dir, "astro.config.ts"),
+      `import { defineConfig } from "astro/config";
+import nimbus from "@cloudflare/nimbus-docs";
+export default defineConfig({ ${astroFields} integrations: [nimbus({ site: "https://docs.example.com", title: "X", search: false })] });`,
+    );
+    if (wrangler !== null) fs.writeFileSync(path.join(dir, "wrangler.jsonc"), wrangler);
+    return dir;
+  };
+  const finding = async (dir: string) => {
+    try {
+      const r = await runChecks(dir, { env: false, structure: true, authoring: false, types: false });
+      return r.findings.find((f) => f.code === "nimbus/cloudflare-trailing-slash");
+    } finally {
+      cleanup(dir);
+    }
+  };
+  const assets = `{ "assets": { "directory": "./dist" } }`;
+  const warned = await finding(write(`trailingSlash: "always", build: { format: "file" },`, assets));
+  assert.equal(warned?.severity, "warn");
+  assert.match(warned?.message ?? "", /force-trailing-slash/);
+
+  assert.equal(await finding(write(`trailingSlash: "always",`, assets)), undefined);
+  assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" },`, null)), undefined);
+  assert.equal(await finding(write(`trailingSlash: slash, build: { format: "file" },`, assets)), undefined);
+  assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" }, ...overrides,`, assets)), undefined);
+  assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file", ...build },`, assets)), undefined);
+  assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" }, trailingSlash: "never",`, assets)), undefined);
+  assert.equal(
+    await finding(write(`trailingSlash: "always", build: { format: "file" },`, `{ "assets": { "html_handling": "force-trailing-slash" } }`)),
+    undefined,
+  );
 });

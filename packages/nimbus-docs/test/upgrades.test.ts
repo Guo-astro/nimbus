@@ -47,6 +47,7 @@ test("only universally skippable entries are optional", () => {
       "page-urls-and-llms-routes",
       "publish-agent-skills",
       "shared-markdown-routes",
+      "version-switcher-collections",
     ],
   );
   assert.equal(

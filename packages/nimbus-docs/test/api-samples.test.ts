@@ -107,7 +107,7 @@ describe("derived example + code samples", () => {
     assert.match(md, /### cURL/);
     assert.match(md, /### TypeScript/);
     assert.match(md, /### Python/);
-    assert.match(md, /```curl/);
+    assert.match(md, /```bash\ncurl/);
     assert.doesNotMatch(md, /^# /m, "no H1 that would collide with the page title");
   });
 
@@ -708,7 +708,7 @@ describe("parameter and credential placeholders", () => {
         { name: "h", in: "path", required: true, schema: { type: "string", example: "a/b" } },
       ],
     });
-    assert.match(lang(out, "curl"), /\/x%20y\/ex1\/sx\/s1\/main\/7\/v1\/a%2Fb$/);
+    assert.match(lang(out, "curl"), /\/x%20y\/ex1\/sx\/s1\/main\/7\/v1\/a%2Fb'?$/);
   });
 
   test("schema composition is the sampler's: allOf, then the first oneOf or anyOf branch", async () => {
@@ -726,7 +726,7 @@ describe("parameter and credential placeholders", () => {
         { name: "d", in: "path", required: true, schema: { oneOf: [identifier], anyOf: [identifier] } },
       ],
     });
-    assert.match(lang(out, "curl"), /\/acc_123\/deep\/outer\/acc_123$/);
+    assert.match(lang(out, "curl"), /\/acc_123\/deep\/outer\/acc_123'?$/);
   });
 
   test("required query and header params use a declared value, else the sampler's; optional ones stay omitted", async () => {
@@ -935,7 +935,7 @@ describe("parameter and credential placeholders", () => {
         },
       ],
     });
-    assert.match(lang(out, "curl"), /\/items\/FIRST$/);
+    assert.match(lang(out, "curl"), /\/items\/FIRST'?$/);
   });
 
   test("a declared value that matches the internal marker stays as declared", async () => {
@@ -976,7 +976,7 @@ describe("parameter and credential placeholders", () => {
     });
     const expected = schemas.map((schema) => String(tools.sampler.sample(schema, { quiet: true }))).join("/");
     assert.equal(expected, "a/c/f/i/second/l/outer");
-    assert.match(lang(out, "curl"), new RegExp(`/${expected}$`));
+    assert.match(lang(out, "curl"), new RegExp(`/${expected}'?$`));
   });
 
   test("a guess the sampler keeps over a declaration renders the placeholder; a non-scalar value too; a parameter example wins", async () => {
@@ -1151,6 +1151,7 @@ describe("generated request bodies", () => {
     const out = buildOperationSamples(tools, {
       method,
       path: "/items",
+      server: "https://api.example.com",
       auth: [],
       params: [],
       body: { mediaType, value },

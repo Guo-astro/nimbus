@@ -386,7 +386,8 @@ export function renderApiPageMarkdown(props: ApiPageProps, options?: { base?: st
         out.push("## Code samples", "");
         for (const sample of props.samples) {
           out.push(`### ${inlineText(sample.label)}`, "");
-          fenced(sample.lang, sample.source, out);
+          // A cURL sample is a shell command, fenced as the page highlights it.
+          fenced(sample.lang === "curl" ? "bash" : sample.lang, sample.source, out);
         }
       }
       renderResponses(props.responses, out, base);

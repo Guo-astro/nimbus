@@ -77,9 +77,10 @@ if (apiCollection) {
 async function buildDocsEntries() {
 const versions = await getVersions();
 
-if (versions && versions.all.length >= 2) {
-  const currentPageVersion =
-    collection ? await getCurrentVersion(collection) : null;
+// A page in a collection outside the docs versions (an API reference, a blog)
+// gets no docs picker: it has no version to switch.
+const currentPageVersion = collection ? await getCurrentVersion(collection) : null;
+if (versions && versions.all.length >= 2 && !(collection && currentPageVersion === null)) {
   const visible = versions.all.filter((v) => !versions.hidden.includes(v));
 
   // Fallback landing URL per version, used when the current page has no same-logical-page sibling.

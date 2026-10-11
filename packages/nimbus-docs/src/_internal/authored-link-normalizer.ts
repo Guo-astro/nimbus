@@ -4,6 +4,7 @@ export type AuthoredLinkNormalizer = (
     base: string;
     sourceId?: string;
     format?: "markdown" | "mdx";
+    filePath?: string;
   },
 ) => string;
 

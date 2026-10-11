@@ -5,7 +5,7 @@
  */
 
 import type { RoutePolicy } from "./route-policy.js";
-import type { ApiExtensionValues, ApiJsonValue, ApiSamples } from "../../types.js";
+import type { ApiExtensionValues, ApiJsonValue, ApiSamples, PrevNext } from "../../types.js";
 
 export const apiSchemaVersion = 1;
 
@@ -357,6 +357,9 @@ export interface ApiNav {
    *  (`title`, `method`, `path`, `url`), for filtering pages the sidebar
    *  hasn't loaded. Root-relative, without the site base, like `href`. */
   listHref?: string;
+  /** The pages before and after the current one in sidebar order, including
+   *  pages a bounded sidebar doesn't list. Absent on a nav with no current page. */
+  prevNext?: PrevNext;
 }
 
 export interface ApiPageIndexEntry {

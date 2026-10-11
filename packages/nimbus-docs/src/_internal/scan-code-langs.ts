@@ -10,13 +10,12 @@
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
 import { bundledLanguagesInfo, isSpecialLang } from "shiki";
-import { markdownToMdast, mdxToMdast } from "satteri";
-
 import { walkFiles } from "./fs-walk.js";
+import { parseMarkdownSource } from "./markdown-source.js";
 
 function fencedCodeBlocks(content: string, extension: string): ScannedCodeBlock[] {
   const blocks: ScannedCodeBlock[] = [];
-  const tree = (extension === ".mdx" ? mdxToMdast(content) : markdownToMdast(content)) as {
+  const tree = parseMarkdownSource(content, extension === ".mdx" ? "mdx" : "markdown") as {
     type: string;
     lang?: string | null;
     value?: string;

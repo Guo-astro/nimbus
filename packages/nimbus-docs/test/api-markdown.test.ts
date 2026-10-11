@@ -153,8 +153,8 @@ describe("api markdown emitter", () => {
   test("each field row is titled by its full coordinate, so an agent can cite it", () => {
     const props = getApiPageProps(smallco, "create") as ApiOperationPage;
     const md = renderApiPageMarkdown(props);
-    // The body field `amount` is addressable as `create.amount`, not bare `amount`.
-    assert.match(md, /- `create\.amount` \(/);
+    // The body field `amount` is named as on the page, with `create.amount` beside it to cite.
+    assert.match(md, /- `amount` \(`create\.amount`; /);
     const amount = props.body.find((f) => f.name === "amount");
     assert.equal(amount!.coordinate, "create.amount");
   });
@@ -316,8 +316,8 @@ describe("api markdown emitter", () => {
         }),
       ],
     });
-    assert.match(md, /^- `c\.parent`/m);
-    assert.match(md, /^ {2}- `c\.parent\.child`/m);
+    assert.match(md, /^- `parent` \(`c\.parent`;/m);
+    assert.match(md, /^ {2}- `child` \(`c\.parent\.child`;/m);
   });
 
   test("truncated children emit an omitted-count note", () => {

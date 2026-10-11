@@ -108,13 +108,13 @@ export async function mergePartialHeadings(
   render: (entry: unknown) => Promise<{ headings: Heading[] }>,
   options?: PartialHeadingOptions,
 ): Promise<Heading[]> {
-  const { mdxToMdast } = await import("satteri");
+  const { parseMarkdownSource } = await import("./markdown-source.js");
   return mergePartialHeadingsWithParser(
     body,
     astroHeadings,
     getEntry,
     render,
-    (source) => mdxToMdast(source) as unknown as MdNode,
+    (source) => parseMarkdownSource(source) as unknown as MdNode,
     options,
   );
 }

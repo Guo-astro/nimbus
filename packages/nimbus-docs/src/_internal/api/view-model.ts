@@ -56,6 +56,7 @@ import {
 import type { ApiExtensionValues } from "../../types.js";
 import { renderMarkdown } from "../../markdown/render.js";
 import { toDocumentHref } from "../url.js";
+import { apiPrevNext } from "./nav-bounds.js";
 
 export * from "./api-view-types.js";
 
@@ -893,10 +894,12 @@ export function projectNav(
     return next;
   };
 
+  const prevNext = apiPrevNext(base, activeCoordinate);
   return {
     apiSchemaVersion,
     collection: model.collection,
     items: base.map(overlay),
+    ...(prevNext && { prevNext }),
   };
 }
 

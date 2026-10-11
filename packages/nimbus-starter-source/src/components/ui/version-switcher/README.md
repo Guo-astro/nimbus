@@ -46,19 +46,19 @@ const { collection, entryId } = Astro.props;
 ### 2. Mobile sidebar
 
 Edit `src/layouts/DocsLayout.astro`. Inside the mobile sidebar drawer
-(the `<dialog data-mobile-sidebar>` block), add the picker above the
-sidebar nav:
+(the `<dialog data-mobile-sidebar>` block), add the picker between the
+"Navigation" header bar and the `data-nb-sidebar-drawer-slot` div. Leave
+the slot empty: the rail's sidebar tree moves into it while the drawer is
+open.
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  <VersionSwitcher
-    collection={collection}
-    entryId={entryId}
-    variant="sidebar"
-  />
-  <SidebarFilter />
-  <Sidebar items={sidebar} />
-</nav>
+<VersionSwitcher
+  collection={collection}
+  entryId={entryId}
+  variant="sidebar"
+  class="mx-4 mt-4"
+/>
+<div data-nb-sidebar-drawer-slot class="..."></div>
 ```
 
 The `variant="sidebar"` mode has no built-in breakpoint gating — it

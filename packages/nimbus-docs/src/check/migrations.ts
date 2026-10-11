@@ -1,5 +1,5 @@
 import { discoverMigrations } from "../_internal/migrations.js";
-import { dependenciesMissing, resolveUpgradeBaseline, selectUpgradeEntries } from "../_internal/upgrades.js";
+import { dependenciesMissing, resolveUpgradeBaseline, selectUpgradeEntries, siteScope } from "../_internal/upgrades.js";
 import { selfCommand } from "../cli/pm.js";
 import type { ScopeReport } from "./finding.js";
 
@@ -15,7 +15,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
   }
   const baseline = resolveUpgradeBaseline({ projectRoot: cwd });
   const entries = baseline.fromVersion && !baseline.error
-    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion)
+    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, siteScope(cwd, srcDirOverride))
     : [];
   const discovery = discoverMigrations({
     projectRoot: cwd,

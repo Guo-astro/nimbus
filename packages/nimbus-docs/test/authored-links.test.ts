@@ -179,7 +179,7 @@ test("parses .md comments and literal braces as Markdown", () => {
         base: "/docs",
         sourceId: "generated.mdx",
       }),
-    /generated\.mdx:1:1: could not parse source/,
+    /MDX syntax error in generated\.mdx:1:1: /,
   );
 });
 
@@ -228,7 +228,7 @@ const value = "{";
 test("fails closed at the root base", () => {
   assert.throws(
     () => normalizeAuthoredLinks("<Card href={", { base: "/" }),
-    /could not parse source/,
+    /MDX syntax error in content:1:1: /,
   );
 });
 
@@ -313,7 +313,7 @@ test("fails closed with source location on malformed MDX", () => {
         base: "/docs",
         sourceId: "broken.mdx",
       }),
-    /broken\.mdx:3:1: could not parse source/,
+    /MDX syntax error in broken\.mdx:3:1: .*escape it with a backslash/,
   );
 });
 

@@ -16,6 +16,7 @@
  *   --version, -v
  */
 
+import { resolve } from "node:path";
 import * as p from "@clack/prompts";
 import mri from "mri";
 import { scaffold, ScaffoldError, type ScaffoldResult } from "./scaffold.js";
@@ -27,8 +28,12 @@ import {
   type PackageManager,
 } from "./prompts.js";
 
+const INTRO = "Create a Nimbus docs site";
+let introShown = false;
+
 /** Print a one-line message and exit nonzero — never leak a raw stack. */
 function die(message: string): never {
+  if (!introShown) p.intro(INTRO);
   p.log.error(message);
   process.exit(1);
 }
@@ -67,10 +72,13 @@ for (let i = 0; i < argv.length; i++) {
     ? BOOLEAN_FLAGS.includes(bare) || STRING_FLAGS.includes(name)
     : [...name].every((char) => char in SHORT_FLAGS);
   if (!known) {
+    const flags = [...STRING_FLAGS, ...BOOLEAN_FLAGS, "no-git"];
+    const near = long ? nearestFlag(name, flags) : undefined;
     die(
-      `Unknown flag ${long ? "--" : "-"}${name}. Valid flags: ` +
-        [...STRING_FLAGS, ...BOOLEAN_FLAGS, "no-git"].map((flag) => `--${flag}`).join(", ") +
-        `, and -y, -h, -v. Run create-nimbus-docs --help for details.`,
+      `Unknown flag ${long ? "--" : "-"}${name}. ` +
+        (near
+          ? `Did you mean --${near}?`
+          : `Valid flags: ${flags.map((flag) => `--${flag}`).join(", ")}, and -y, -h, -v. Run create-nimbus-docs --help for details.`),
     );
   }
   if (long && BOOLEAN_FLAGS.includes(bare)) {
@@ -132,7 +140,8 @@ if (Number(nodeMajor) < Number(minMajor)) {
   process.exit(1);
 }
 
-p.intro("Create a Nimbus docs site");
+p.intro(INTRO);
+introShown = true;
 
 const DEPLOY_TARGETS = ["cloudflare", "other"] as const;
 const deploy = args.deploy as string | undefined;
@@ -185,7 +194,7 @@ try {
 
 const { packageManager: pm } = responses;
 const nextSteps = [
-  `cd ${shellArg(responses.dir)}`,
+  ...(resolve(responses.dir) === process.cwd() ? [] : [`cd ${shellArg(responses.dir)}`]),
   ...(result.install === "done" ? [] : [`${pm} install`]),
   `${pm === "yarn" ? "yarn" : `${pm} run`} dev`,
 ].map((step) => `    ${step}`);
@@ -207,4 +216,31 @@ function shellArg(value: string): string {
   const path = value.startsWith("-") ? `./${value}` : value;
   if (/^[A-Za-z0-9_./-]+$/.test(path)) return path;
   return `'${path.replaceAll("'", `'\\''`)}'`;
+}
+
+/** The flag a typo most likely meant: a unique prefix, else the closest within a short edit. */
+function nearestFlag(typed: string, flags: string[]): string | undefined {
+  const prefixed = typed.length >= 3 ? flags.filter((flag) => flag.startsWith(typed)) : [];
+  if (prefixed.length === 1) return prefixed[0];
+  const limit = typed.length <= 4 ? 1 : 2;
+  let best: string | undefined;
+  let bestDistance = limit + 1;
+  for (const flag of flags) {
+    const d = distance(typed, flag);
+    if (d < bestDistance) [best, bestDistance] = [flag, d];
+  }
+  return best;
+}
+
+/** Edit distance with swapped neighbours counting once, for "did you mean". */
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]!;
 }

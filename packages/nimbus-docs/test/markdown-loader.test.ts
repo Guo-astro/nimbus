@@ -349,6 +349,28 @@ describe("Markdown loader preparation", () => {
     assert.match(prepared?.capability.digest ?? "", /^sha256:[a-f0-9]{64}$/u);
   });
 
+  test("reuses warm preparation when a page has no body", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-loader-empty-"));
+    temporaryRoots.push(root);
+    const loader = {
+      name: "empty-loader",
+      load(context: LoaderContext) {
+        context.store.set({ id: "a", body: "Hello", data: {} });
+        context.store.set({ id: "b", data: {} });
+      },
+    };
+    const wrapped = prepareMarkdownLoader(loader, {
+      generation: 1,
+      base: "/docs",
+      transform: (source) => source,
+    });
+    const harness = createHarness(root);
+    await wrapped.load(harness.context);
+    assert.equal(harness.clearCount, 1);
+    await wrapped.load(harness.context);
+    assert.equal(harness.clearCount, 1);
+  });
+
   test("invalidates warm preparation when a source changes format", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-loader-format-"));
     temporaryRoots.push(root);

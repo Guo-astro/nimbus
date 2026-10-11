@@ -299,7 +299,9 @@ test("synthetic optional entries are informational across migrate, check, and ou
   assert.deepEqual(outdatedResult.packageApis.map((entry: { mode: string }) => entry.mode), ["optional", "optional"]);
   const outdatedHuman = runWithManifest(root, ["outdated", "--template-dir", template], entries);
   assert.equal(outdatedHuman.status, 0, outdatedHuman.stderr);
-  assert.match(outdatedHuman.stdout, /Package APIs: up to date/);
+  // Optional-only reviews change nothing, but the baseline is behind until recorded.
+  assert.match(outdatedHuman.stdout, /Package APIs: nothing to change; review not recorded/);
+  assert.ok(outdatedResult.warnings.some((warning: { code: string }) => warning.code === "reviewed-behind"));
   assert.match(outdatedHuman.stdout, /Optional upgrade entries: 2/);
 
   const completed = runWithManifest(root, ["migrate", "--yes", "--json"], entries);

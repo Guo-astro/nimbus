@@ -678,7 +678,7 @@ function buildHar(
 
   const har: HarRequestInput = {
     method: input.method.toUpperCase(),
-    url: `${base}${filledPath}`,
+    url: withPath(base, filledPath),
     httpVersion: "HTTP/1.1",
     cookies: [],
     headers,
@@ -723,6 +723,13 @@ function buildHar(
 
 function bareMediaType(mediaType: string): string {
   return mediaType.split(";")[0]!.trim().toLowerCase();
+}
+
+/** `base` + `path`, keeping a query the server URL carries after the path. */
+function withPath(base: string, path: string): string {
+  const at = base.search(/[?#]/);
+  if (at < 0) return `${base}${path}`;
+  return `${base.slice(0, at).replace(/\/+$/, "")}${path}${base.slice(at)}`;
 }
 
 // The URL a sample is sent to. With no server, or a relative one, the host is

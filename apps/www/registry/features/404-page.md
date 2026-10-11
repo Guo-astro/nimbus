@@ -17,7 +17,7 @@ Read this entire file before making any changes.
 
 Inspect the user's repo to learn the site's conventions:
 
-- `package.json` — confirm this is a Nimbus project (it should depend on `nimbus-docs`).
+- `package.json` — confirm this is a Nimbus project (it should depend on `@cloudflare/nimbus-docs`).
 - `astro.config.ts` — read the Nimbus config (`defineNimbusConfig(...)`) to learn the site `title`, `logo`, `description`.
 - `src/layouts/` — note which layouts exist (`BaseLayout.astro`, `DocsLayout.astro`, or similar). Pick the one that wraps marketing-style pages (`BaseLayout`) over `DocsLayout` for the 404.
 - `src/pages/index.astro` — model the JSX/HTML structure on the existing landing page so the 404 inherits the same wrapping pattern (imports, frontmatter, layout usage).

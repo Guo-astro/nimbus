@@ -18,15 +18,16 @@ const OG_IMAGE_ROUTE = "/og/";
 /** `ogImageUrl` is `/og/<route>.png`, with `index` for the site root. */
 export function pageUrls(
   prefix: string,
-  entry: { id: string; body?: unknown },
+  entry: { id: string; body?: unknown; filePath?: string },
 ): PageUrls {
   const route = entryRouteUrl(prefix, entry.id);
   const page = route === "/" ? "" : route;
   return {
     url: toDocumentHref(route),
     markdownUrl: `${page}/index.md`,
+    // A frontmatter-only Markdown file has no body but still has a source.
     sourceUrl:
-      typeof entry.body === "string" && entry.body.length > 0
+      (typeof entry.body === "string" && entry.body.length > 0) || /\.mdx?$/iu.test(entry.filePath ?? "")
         ? `${page}/index.mdx`
         : undefined,
     ogImageUrl: `${OG_IMAGE_ROUTE}${page.slice(1) || "index"}.png`,

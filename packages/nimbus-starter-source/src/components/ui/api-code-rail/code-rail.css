@@ -122,8 +122,10 @@
   /* Same 0.5rem padding as the request header. */
   padding: 0.5rem;
 }
+/* Muted text on the muted track needs a step toward the foreground for
+   4.5:1 contrast; in dark mode that only raises it further. */
 [data-nb-api-coderail] .nb-cr-resptext {
-  color: var(--color-muted-foreground);
+  color: color-mix(in oklch, var(--color-muted-foreground) 85%, var(--color-foreground));
   font-weight: 500;
 }
 /* Status toggle — a compact segmented control: a 26px recessed track with 6px
@@ -148,7 +150,7 @@
   font-family: inherit;
   font-size: 0.75rem;
   font-weight: 500;
-  color: var(--color-muted-foreground);
+  color: color-mix(in oklch, var(--color-muted-foreground) 85%, var(--color-foreground));
   cursor: pointer;
 }
 [data-nb-api-coderail] .nb-cr-respbtn:hover {

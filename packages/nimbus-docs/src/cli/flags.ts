@@ -9,7 +9,7 @@ import { suggest } from "../_internal/levenshtein.js";
 // Every flag each command reads in `index.ts`. Keep in step with its dispatch.
 const COMMAND_FLAGS: Record<string, readonly string[]> = {
   list: ["type"],
-  add: ["type", "print", "overwrite", "adapter"],
+  add: ["type", "print", "overwrite", "adapter", "template-dir"],
   check: ["env", "structure", "lint", "types", "migrations", "fix", "json", "format", "quiet", "src-dir"],
   lint: ["format", "quiet", "rule", "fix"],
   init: ["force", "root"],

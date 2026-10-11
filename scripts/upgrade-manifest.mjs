@@ -68,6 +68,14 @@ export function validateUpgradeManifest(value) {
       throw new Error(`${entry.id} has an invalid changeset ID.`);
     }
   }
+  for (const [feature, entryIds] of Object.entries(value.appliesTo ?? {})) {
+    if (feature !== "api")
+      throw new Error(`appliesTo.${feature} is not a known feature (api).`);
+    for (const id of Array.isArray(entryIds) ? entryIds : [null]) {
+      if (!ids.has(id))
+        throw new Error(`appliesTo.${feature} names ${id}, which is not an upgrade entry.`);
+    }
+  }
   return value;
 }
 

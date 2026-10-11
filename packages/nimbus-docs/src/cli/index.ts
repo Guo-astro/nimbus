@@ -22,6 +22,8 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import mri from "mri";
 import * as p from "@clack/prompts";
@@ -33,7 +35,7 @@ import {
 } from "./adapter.js";
 import { BUNDLED_INDEX } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents, registerHint } from "./component.js";
+import { installComponents, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
 import { installFeature, shouldUseAgentHandoff } from "./feature.js";
 import { initCommand } from "./init.js";
@@ -128,7 +130,7 @@ const HELP = `
     --diff                         \`migrate\`: print proposed edits without prompting or writing
     --all                          \`outdated\`/\`diff\`: include content files (hidden by default)
     --to <templates-vX.Y.Z>        \`outdated\`/\`diff\`: compare against a specific tag (default latest)
-    --template-dir <path>          \`outdated\`/\`diff\`: compare against a local checkout (offline)
+    --template-dir <path>          \`outdated\`/\`diff\`/\`add\`: compare against a local checkout (offline)
     --print                        \`add\`/\`migrate\`: print an agent task without writing
     --force                        \`init\`: rebuild an existing nimbus.json
     --root <dir>                   \`init\`: src dir to scan (monorepo; default src)
@@ -289,6 +291,7 @@ async function main(): Promise<void> {
       print: args.print,
       overwrite: args.overwrite,
       adapter: args.adapter,
+      templateDir: args["template-dir"],
     });
     return;
   }
@@ -375,7 +378,7 @@ const ADAPTER_SLUGS: Record<string, AdapterId> = Object.fromEntries(
 
 async function addCommand(
   slug: string,
-  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string },
+  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
 ): Promise<void> {
   if (slug === "server-output") {
     const adapterId = parseAdapterFlag(flags.adapter);
@@ -456,19 +459,31 @@ async function addCommand(
   const skew = registryVersionWarning(items.find((i) => i.name === slug)?.version, projectVersion);
   if (skew) p.log.warn(skew);
 
+  const starter = starterBaseline(nimbus, srcRoot, flags.templateDir);
+  process.once("exit", () => starter?.cleanup());
   const report = await installComponents(items, {
     cwd,
     yes: flags.yes,
     overwrite: flags.overwrite,
     srcRoot,
+    recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
+    starter,
   });
+  starter?.cleanup();
 
   const lines: string[] = [];
-  if (report.written.length > 0) {
-    lines.push(`✓ Wrote ${report.written.length} file${report.written.length === 1 ? "" : "s"}`);
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const added = report.written.filter((file) => !report.replaced.includes(file));
+  if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
+  if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
+  if (report.replaced.length > 0) {
+    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  if (report.skipped.length > 0) {
-    lines.push(`↷ Kept existing: ${report.skipped.join(", ")} — pass --overwrite to replace`);
+  if (report.kept.length > 0) {
+    lines.push(
+      `↷ Kept ${plural(report.kept.length, "file")} that ${report.kept.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
+      ...report.kept.map((file) => `    ${file}`),
+    );
   }
   if (report.npmDepsInstalled.length > 0) {
     lines.push(
@@ -504,7 +519,8 @@ async function addCommand(
     );
   }
 
-  const hint = registerHint(installed, slug, srcRoot);
+  const componentsFile = join(cwd, srcRoot, "components.ts");
+  const hint = registerHint(installed, slug, srcRoot, existsSync(componentsFile) ? readFileSync(componentsFile, "utf8") : "");
   if (hint) p.log.info(hint);
 
   if (lines.length === 0) {

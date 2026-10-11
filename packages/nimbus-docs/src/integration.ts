@@ -2500,7 +2500,9 @@ export function nimbus(
             throw new Error(`nimbus-docs: ${message}`);
           }
           if (baseline.fromVersion) {
-            const reviews = selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion);
+            const reviews = selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, {
+              api: (config.api?.length ?? 0) > 0,
+            });
             const requiredReviews = reviews.filter((entry) => entry.mode !== "optional");
             if (requiredReviews.length > 0) {
               const message =

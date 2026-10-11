@@ -10,6 +10,7 @@ import {
   resolveUpgradeBaseline,
   runningNimbusVersion,
   selectUpgradeEntries,
+  siteScope,
   UPGRADE_MANIFEST,
 } from "../src/_internal/upgrades.js";
 
@@ -237,6 +238,11 @@ test("resolveUpgradeBaseline prefers --from and validates persisted baselines", 
       JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/@cloudflare/nimbus-docs@123" } }),
     );
     assert.equal(resolveUpgradeBaseline({ projectRoot: root, targetVersion: "0.13.1" }).source, "preview");
+    fs.writeFileSync(
+      path.join(root, "package.json"),
+      JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/cloudflare/nimbus/@cloudflare/nimbus-docs@123" } }),
+    );
+    assert.equal(resolveUpgradeBaseline({ projectRoot: root, targetVersion: "0.13.1" }).source, "preview");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -327,6 +333,57 @@ test("installedNimbusVersion finds an installed project or workspace package", (
     );
     assert.throws(() => installedNimbusVersion(project), /invalid version/);
     assert.match(resolveUpgradeBaseline({ projectRoot: project }).error ?? "", /installed Nimbus package metadata/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("API-only reviews skip sites without an API collection", () => {
+  const all = selectUpgradeEntries("0.16.0", "0.18.0").map((entry) => entry.id);
+  assert.ok(all.includes("api-version-url"));
+  assert.deepEqual(
+    selectUpgradeEntries("0.16.0", "0.18.0", { api: true }).map((entry) => entry.id),
+    all,
+  );
+  const docsOnly = selectUpgradeEntries("0.16.0", "0.18.0", { api: false }).map((entry) => entry.id);
+  assert.ok(!docsOnly.includes("api-version-url"));
+  assert.deepEqual(docsOnly, all.filter((id) => !UPGRADE_MANIFEST.appliesTo?.api?.includes(id)));
+});
+
+test("API scope reads the content config in Astro's srcDir", () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-scope-")));
+  try {
+    fs.mkdirSync(path.join(root, "site"));
+    fs.writeFileSync(
+      path.join(root, "astro.config.mjs"),
+      'import { defineConfig } from "astro/config";\nexport default defineConfig({ srcDir: "./site" });\n',
+    );
+    fs.writeFileSync(path.join(root, "site", "content.config.ts"), "export const collections = { api: apiCollection() };\n");
+    assert.deepEqual(siteScope(root), { api: true });
+    fs.writeFileSync(path.join(root, "site", "content.config.ts"), "export const collections = { docs: docsCollection() };\n");
+    assert.deepEqual(siteScope(root), { api: false });
+    const config = (source: string) => {
+      fs.writeFileSync(path.join(root, "site", "content.config.ts"), source);
+      return siteScope(root).api;
+    };
+    assert.equal(config('import { apiCollection as api } from "@cloudflare/nimbus-docs/api";\nexport const collections = { api: api() };\n'), true);
+    // Collections defined in a local module could include one.
+    assert.equal(config('import { collections } from "./collections";\nexport { collections };\n'), true);
+    assert.equal(config("// apiCollection() later\nexport const collections = { docs: docsCollection() };\n"), false);
+    // Through the starter's own path alias, too.
+    assert.equal(config('import { collections } from "@/collections";\nexport { collections };\n'), true);
+    assert.equal(config('const note = "apiCollection() someday";\nexport const collections = { docs: docsCollection() };\n'), false);
+    assert.equal(config("export const { collections } = await import(`./collections`);\n"), true);
+    assert.equal(config("const note = `${apiCollection()}`;\nexport const collections = {};\n"), true);
+    // The starter's own imports prove nothing is defined elsewhere.
+    assert.equal(
+      config('import { defineCollection } from "astro:content";\nimport { z } from "astro/zod";\nimport { docsCollection } from "@cloudflare/nimbus-docs/content";\nexport const collections = { docs: defineCollection(docsCollection()) };\n'),
+      false,
+    );
+    if (process.getuid?.() !== 0) {
+      fs.chmodSync(path.join(root, "site", "content.config.ts"), 0o000);
+      assert.deepEqual(siteScope(root), { api: true });
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

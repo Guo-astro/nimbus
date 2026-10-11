@@ -14,6 +14,7 @@ import {
   resolveUpgradeBaseline,
   runningNimbusVersion,
   selectUpgradeEntries,
+  siteScope,
   type UpgradeBaseline,
   type UpgradeEntry,
 } from "../_internal/upgrades.js";
@@ -110,7 +111,7 @@ export async function migrateCommand(input: MigrateOptions): Promise<void> {
     : (JSON.parse(baselinePreimage) as { lastReviewedNimbusVersion?: unknown }).lastReviewedNimbusVersion;
   const baselineNeedsRecording = baseline.source !== "preview" && recordedVersion !== baseline.targetVersion;
   const entries = baseline.fromVersion
-    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion)
+    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, siteScope(projectRoot, options.srcDir))
     : [];
   const reviews = entries;
   const requiredReviews = reviews.filter((entry) => entry.mode !== "optional");
@@ -371,6 +372,9 @@ function finish(
   if (!report.baseline.fromVersion && report.baseline.source !== "preview" && report.errors.length === 0) {
     console.error(`Upgrade baseline unknown. Rerun with --from <version>, complete every review, then rerun with consent.`);
   }
+  if (report.baseline.source === "preview" && report.migrations.length === 0 && report.errors.length === 0) {
+    console.log(previewMessage(report.baseline));
+  }
   if (report.migrations.length === 0 && report.reviews.length === 0 && report.errors.length === 0 && report.baseline.fromVersion && !reviewsCompleted) {
     if (report.baseline.recorded) {
       console.log(`Nimbus ${report.baseline.targetVersion} is up to date: no migrations or upgrade reviews.`);
@@ -396,6 +400,10 @@ function finish(
   }
 }
 
+function previewMessage(baseline: UpgradeBaseline): string {
+  return `This site runs a preview build (${baseline.targetVersion}). Upgrade reviews start once it's on a released version.`;
+}
+
 function printHumanPlan(
   plans: MigrationPlan[],
   reviews: UpgradeEntry[],
@@ -409,6 +417,8 @@ function printHumanPlan(
   if (!baseline.fromVersion && baseline.source !== "preview") {
     console.error("Upgrade baseline unknown. Pass --from <version> to include every crossed breaking change.");
   }
+  // With a prompt to follow, `finish` says it.
+  if (baseline.source === "preview" && plans.length === 0 && !prompting) console.log(previewMessage(baseline));
   if (baseline.fromVersion && plans.length === 0 && reviews.length === 0) {
     // With a prompt to follow, `finish` reports the outcome.
     if (!baselineNeedsRecording) {

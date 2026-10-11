@@ -1072,9 +1072,16 @@ export function nimbus(
               partialResolver,
               fullDocument: servesFullDocument ?? true,
               nestedSections: nestedLlmsSections ?? false,
-              // The size limit it reports is Cloudflare's.
+              // The size limit it reports is Cloudflare's: warn when the site
+              // deploys there, through the adapter or a wrangler file (the
+              // default starter deploys static output with no adapter).
               warn: (message) => {
-                if (adapterNameForBuild === "@astrojs/cloudflare")
+                if (
+                  adapterNameForBuild === "@astrojs/cloudflare" ||
+                  ["wrangler.json", "wrangler.jsonc", "wrangler.toml"].some((file) =>
+                    fs.existsSync(path.join(projectRoot, file)),
+                  )
+                )
                   logger.warn(message);
               },
               info: (message) => logger.info(message),
@@ -1592,10 +1599,23 @@ export function nimbus(
                 /^\[\.\.\..+\]$/u.test(entry.name) &&
                 routeExtensions.some((ext) => fs.existsSync(path.join(dir, entry.name, `${base}.${ext}`))),
             );
-        const sectionLlmsFullEntrypoint = new URL(
-          `./_internal/section-llms-full-route.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`,
-          import.meta.url,
-        );
+        // Astro keeps one `prerender` per entrypoint, so a Nimbus route
+        // module injected in both modes (at the root and at mounts) goes
+        // through one re-exporting file per mode.
+        const routeModuleFor = (name: string, mode: RenderingMode): URL => {
+          const module = new URL(
+            `./_internal/${name}.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`,
+            import.meta.url,
+          );
+          const dir = path.join(projectRoot, ".astro", "nimbus", "agent-route-shims");
+          const file = path.join(dir, `${name}-${mode}.mjs`);
+          const body = `export * from ${JSON.stringify(module.href)};\n`;
+          fs.mkdirSync(dir, { recursive: true });
+          if (!fs.existsSync(file) || fs.readFileSync(file, "utf8") !== body) {
+            fs.writeFileSync(file, body, "utf8");
+          }
+          return pathToFileURL(file);
+        };
         agentRenderingForBuild = null;
         if (config.rendering) {
           const mountModes = new Map<string, RenderingMode>();
@@ -1614,7 +1634,6 @@ export function nimbus(
           const hiddenVersionMounts = new Set(
             (config.versions?.hidden ?? []).map((version) => `/${version}`),
           );
-          const agentExtension = import.meta.url.endsWith(".ts") ? "ts" : "js";
           const routeFileExists = (pattern: string) =>
             ["ts", "js", "mjs", "cjs", "mts", "cts"].some((ext) =>
               fs.existsSync(path.join(srcDir, "pages", `${pattern}.${ext}`)),
@@ -1785,10 +1804,11 @@ export function nimbus(
               !mountOwns(mount, "llms-full.txt")
             ) {
               const pattern = `${mount}/[...section]/llms-full.txt`;
-              injectRoute({ pattern, entrypoint: sectionLlmsFullEntrypoint, prerender: mode === "build" });
+              const entrypoint = routeModuleFor("section-llms-full-route", mode);
+              injectRoute({ pattern, entrypoint, prerender: mode === "build" });
               managedRoutesForBuild.push({
                 pattern,
-                entrypoint: normalizeRouteEntrypoint(projectRoot, sectionLlmsFullEntrypoint.href)!,
+                entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
                 owner: "infrastructure",
                 rendering: mode,
               });
@@ -1888,17 +1908,16 @@ export function nimbus(
                 : []),
               // A hidden version is absent from discovery, so it has no
               // llms index to serve; its Markdown URLs 404 as today. The
-              // dynamic pattern lets a prebuilt mount with no discoverable
-              // pages emit nothing instead of a bogus file. The section
-              // factory's static paths are keyed by [section], so this one
-              // never reuses the project module.
+              // rest pattern lets a prebuilt mount with no discoverable pages
+              // emit nothing instead of a bogus file, and serves the mount's
+              // nested sections when the bake has them (a dynamic
+              // `[llms].txt` would also match, and outrank, the mount's
+              // `llms-full.txt`). The section factory's static paths are keyed
+              // by [section], so this one never reuses the project module.
               ...(rootAgentFiles.llms?.shared && !hiddenVersionMounts.has(mount)
                 ? [
                     {
-                      // Nested sections follow the root route's shape.
-                      pattern: rootAgentFiles.llms.dir.startsWith("[...")
-                        ? `${mount}/[...section]/llms.txt`
-                        : `${mount}/[llms].txt`,
+                      pattern: `${mount}/[...section]/llms.txt`,
                       name: "mounted-llms-route",
                       kind: "llms.txt" as const,
                     },
@@ -1921,10 +1940,7 @@ export function nimbus(
                       `${mount.slice(1).replaceAll(/[^A-Za-z0-9_-]/gu, "_")}-${createHash("sha256").update(mount).digest("hex").slice(0, 8)}-${kind.replaceAll(".", "-")}.mjs`,
                     ),
                   )
-                : new URL(
-                    `./_internal/${name}.${agentExtension}`,
-                    import.meta.url,
-                  );
+                : routeModuleFor(name, mode);
               injectRoute({
                 pattern,
                 entrypoint,
@@ -1953,11 +1969,12 @@ export function nimbus(
             : (declared ?? String(astroConfig.output !== "server")) === "true"
               ? "build"
               : "request";
-          injectRoute({ pattern, entrypoint: sectionLlmsFullEntrypoint, prerender: mode === "build" });
+          const entrypoint = routeModuleFor("section-llms-full-route", mode);
+          injectRoute({ pattern, entrypoint, prerender: mode === "build" });
           if (config.rendering) {
             managedRoutesForBuild.push({
               pattern,
-              entrypoint: normalizeRouteEntrypoint(projectRoot, sectionLlmsFullEntrypoint.href)!,
+              entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
               owner: "infrastructure",
               rendering: mode,
             });

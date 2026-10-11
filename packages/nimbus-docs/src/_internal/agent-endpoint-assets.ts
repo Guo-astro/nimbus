@@ -20,6 +20,7 @@ import {
   collectionMountPrefix,
   PRIMARY_COLLECTION,
 } from "./collection-mount.js";
+import { llmsAssetUrl } from "./agent-endpoint-coverage.js";
 import {
   buildLlmsFullMarkdown,
   llmsFullBlockBytes,
@@ -959,9 +960,10 @@ function llmsFullBodies(
   };
   const pageLine = (page: PreparedLlmsPage) =>
     `- [${page.title}](${llmsFullUrl(header, page.markdownUrl)})`;
+  // A size is only given for a file served whole; an index says it's split.
   const sectionLine = (group: PreparedLlmsGroup) => {
     const bytes = sizeOf(group);
-    return `- [${group.label}](${llmsFullUrl(header, `/${group.slug}/llms-full.txt`)}) (${mebibytes(bytes)}${bytes > limit ? ", split further" : ""})`;
+    return `- [${group.label}](${llmsFullUrl(header, `/${group.slug}/llms-full.txt`)}) (${bytes > limit ? "split further" : mebibytes(bytes)})`;
   };
   const indexBody = (
     title: string,
@@ -982,63 +984,47 @@ function llmsFullBodies(
     ].join("\n");
 
   const report: string[] = [];
-  // An index only links, so it outgrows the limit only with a vast number of
-  // entries in one folder; say so rather than ship a file that can't deploy.
-  const indexed = (url: string, body: string) => {
-    const bytes = utf8Length(body);
-    report.push(`  ${url} ${mebibytes(bytes)} (index)`);
-    if (bytes > limit) {
-      options.warn?.(
-        `${url} lists so many pages and sections that it is ${mebibytes(bytes)}, over Cloudflare's 25 MiB file limit, so the deploy will fail. Group its pages into sub-folders.`,
-      );
-    }
-    return body;
-  };
   const bodies: Array<{ reference: LlmsEndpointReference; body: string }> = [
     {
       reference: { scope: "site", surface: "full" },
-      body: indexed(
-        "/llms-full.txt",
-        indexBody(
-          options.title,
-          `The full documentation is over ${mebibytes(limit)}, so it's split by section. Fetch the sections you need.`,
-          "/llms.txt",
-          groups,
-          leaves,
-        ),
+      body: indexBody(
+        options.title,
+        `The full documentation is over ${mebibytes(limit)}, so it's split by section. Fetch the sections you need.`,
+        "/llms.txt",
+        groups,
+        leaves,
       ),
     },
   ];
+  report.push(`  /llms-full.txt ${mebibytes(utf8Length(bodies[0]!.body))} (index)`);
   const emit = (group: PreparedLlmsGroup) => {
     const bytes = sizeOf(group);
     const reference = { scope: "section" as const, surface: "full" as const, section: group.slug };
-    if (bytes <= limit || group.children.length === 0) {
+    if (bytes <= limit) {
       bodies.push({
         reference,
         body: buildLlmsFullMarkdown(pagesUnder(group).map((page) => blocks.get(page)!), sectionHeader(group)),
       });
       report.push(`  /${group.slug}/llms-full.txt ${mebibytes(bytes)}`);
-      if (bytes > limit) {
-        options.warn?.(
-          `/${group.slug}/llms-full.txt is ${mebibytes(bytes)}, over Cloudflare's 25 MiB file limit, and its pages have no sub-folders to split it by, so the deploy will fail. Move some of its pages into sub-folders.`,
-        );
-      }
       return;
     }
+    // Over the limit: an index of its sub-sections' files and links to its
+    // own pages. With no sub-folders it's a list of links, so no file it
+    // writes can be over the limit.
     const header = sectionHeader(group);
-    bodies.push({
-      reference,
-      body: indexed(
-        `/${group.slug}/llms-full.txt`,
-        indexBody(
-          header.title,
-          `This section is over ${mebibytes(limit)}, so it's split further. Fetch the parts you need.`,
-          header.index!,
-          group.children,
-          group.members,
-        ),
-      ),
-    });
+    const body = indexBody(
+      header.title,
+      `This section is over ${mebibytes(limit)}, so it's split further. Fetch the parts you need.`,
+      header.index!,
+      group.children,
+      group.members,
+    );
+    bodies.push({ reference, body });
+    report.push(
+      `  /${group.slug}/llms-full.txt ${mebibytes(utf8Length(body))} (index${
+        group.children.length > 0 ? "" : `; its pages total ${mebibytes(bytes)} with no sub-folders to split by`
+      })`,
+    );
     for (const child of group.children) emit(child);
   };
   for (const group of groups) emit(group);
@@ -1807,6 +1793,22 @@ export async function bakeAgentEndpointAssets(
       body: sectionIndexAsset(group, options),
     })),
   ];
+  // Every agent file is one static file on most hosts; one over the limit
+  // fails a Cloudflare deploy. A UTF-8 byte is at most three UTF-16 units,
+  // so most bodies are cleared without encoding them.
+  const limit = options.llmsFullLimitBytes ?? LLMS_FULL_LIMIT_BYTES;
+  for (const [url, body] of [
+    ...records.map((record) => [record.url, record.body] as const),
+    ...llmsBodies.map(({ reference, body }) => [llmsAssetUrl(reference), body] as const),
+  ]) {
+    if (body.length * 3 <= limit) continue;
+    const bytes = utf8Length(body);
+    if (bytes > limit) {
+      options.warn?.(
+        `${url} is ${mebibytes(bytes)}, over Cloudflare's 25 MiB file limit, so the deploy will fail.`,
+      );
+    }
+  }
   const llmsRecords: Array<LlmsEndpointAsset & { body: string }> =
     llmsBodies.map(({ reference, body }) => {
       const fingerprint = digest(

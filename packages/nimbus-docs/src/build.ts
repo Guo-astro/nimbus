@@ -109,8 +109,15 @@ export async function getPreparedLlmsStaticPaths(): Promise<
 }
 
 /** @deprecated Use `getLlmsPayload` from `@cloudflare/nimbus-docs/agent-endpoints`. */
-export function getPreparedLlmsArtifact(
+export async function getPreparedLlmsArtifact(
   reference: PreparedLlmsReference,
 ): Promise<PreparedLlmsArtifact> {
-  return readLlmsEndpointPayload(configuredRoot(), reference) as Promise<PreparedLlmsArtifact>;
+  const payload = await readLlmsEndpointPayload(configuredRoot(), reference);
+  // This API only takes index references; a section's split `llms-full.txt`
+  // is never asked for here.
+  if (payload.scope === "site") return payload;
+  if (payload.surface !== "index") {
+    throw new Error(`nimbus-docs: expected the "${payload.section}" llms.txt index.`);
+  }
+  return { ...payload, surface: "index" };
 }

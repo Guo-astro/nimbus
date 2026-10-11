@@ -1404,7 +1404,9 @@ test("llms-full.txt over the limit splits by section, recursing where a section 
   const rootIndex = bodies.get("")!;
   assert.match(rootIndex, /^# Test\n\n> The full documentation is over 4 KiB, so it's split by section\./);
   assert.match(rootIndex, /Index: https:\/\/example\.test\/docs\/llms\.txt/);
-  assert.match(rootIndex, /- \[Reference\]\(https:\/\/example\.test\/docs\/reference\/llms-full\.txt\) \(\d+ KiB, split further\)/);
+  // Sizes only for files served whole; an index just says it's split.
+  assert.match(rootIndex, /- \[Reference\]\(https:\/\/example\.test\/docs\/reference\/llms-full\.txt\) \(split further\)/);
+  assert.match(rootIndex, /- \[Concepts\]\(https:\/\/example\.test\/docs\/concepts\/llms-full\.txt\) \(\d+ KiB\)/);
   assert.match(rootIndex, /## Pages\n\n- \[Welcome\]\(https:\/\/example\.test\/docs\/welcome\/index\.md\)/);
   // An over-limit section is an index of its sub-sections and links to its own pages.
   assert.match(bodies.get("reference")!, /## Sections[\s\S]*functions\/llms-full\.txt[\s\S]*settings\/llms-full\.txt[\s\S]*## Pages\n\n- \[Reference\]/);
@@ -1420,13 +1422,21 @@ test("llms-full.txt over the limit splits by section, recursing where a section 
   }
   // Older docs versions stay out of the full document, as before the split.
   assert.ok([...bodies.values()].every((body) => !body.includes("Old")));
-  // Only the section with no sub-folders to split by is over the limit, and it says so.
+  // A folder over the limit with no sub-folders is a list of links, so no
+  // llms-full.txt is over the limit.
   for (const [section, body] of bodies) {
-    assert.ok(section === "huge" || Buffer.byteLength(body) <= 4000, section);
+    assert.ok(Buffer.byteLength(body) <= 4000, section);
   }
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0]!, /\/huge\/llms-full\.txt is .* the deploy will fail/);
-  assert.match(infos[0]!, /split by section:[\s\S]*\/reference\/functions\/llms-full\.txt/);
+  assert.match(bodies.get("huge")!, /split further[\s\S]*## Pages\n\n- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/only\/index\.md\)/);
+  assert.match(rootIndex, /- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/llms-full\.txt\) \(split further\)/);
+  assert.match(infos[0]!, /split by section:[\s\S]*\/reference\/functions\/llms-full\.txt \d+ KiB/);
+  assert.match(infos[0]!, /\/llms-full\.txt \d+ KiB \(index\)/);
+  assert.match(infos[0]!, /\/huge\/llms-full\.txt \d+ KiB \(index; its pages total \d+ KiB with no sub-folders to split by\)/);
+  // Only that page's own Markdown files are over the limit, and the build says so.
+  assert.ok(warnings.length > 0);
+  for (const warning of warnings) {
+    assert.match(warning, /^\/huge\/only\/index\.mdx? is .* over Cloudflare's 25 MiB file limit, so the deploy will fail\.$/);
+  }
 
   const site = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" })).body;
   assert.match(site, /Full documentation \(discoverable current pages, split by section\)/);
@@ -1470,4 +1480,25 @@ test("a split of top-level pages only still says llms-full.txt is split", async 
   assert.match(site, /split by section/);
   const full = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "full" })).body;
   assert.match(full, /## Pages\n\n- \[A\][\s\S]*- \[B\]/);
+});
+
+test("an index listing too many entries warns that the deploy will fail", async () => {
+  const projectRoot = await root();
+  commit(
+    projectRoot,
+    "docs",
+    Array.from({ length: 40 }, (_, i) => ({ id: `page-${i}`, body: "x ".repeat(40), data: { title: `Page ${i}` } })),
+  );
+  const warnings: string[] = [];
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    llmsFullLimitBytes: 1500,
+    warn: (message: string) => warnings.push(message),
+  };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  assert.ok(warnings.some((warning) => /^\/llms-full\.txt is \d+ KiB, over Cloudflare's 25 MiB file limit, so the deploy will fail\.$/.test(warning)), warnings.join("\n"));
 });

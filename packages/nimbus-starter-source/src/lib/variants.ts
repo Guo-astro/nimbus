@@ -1,3 +1,4 @@
+import type { ClassValue } from "clsx";
 import { cn } from "./cn";
 
 type VariantMap = Record<string, Record<string, string>>;
@@ -23,7 +24,7 @@ interface Config<V extends VariantMap> {
  *   badge({ tone: "danger" });
  */
 export function variants<V extends VariantMap>(config: Config<V>) {
-  return (selection: Selection<V> = {}, className?: string): string => {
+  return (selection: Selection<V> = {}, className?: ClassValue): string => {
     const picked = { ...config.defaults, ...stripUndefined(selection) } as Record<keyof V, string>;
     const classes = Object.keys(config.variants).map((key) => {
       const table = config.variants[key];

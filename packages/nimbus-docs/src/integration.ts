@@ -3093,6 +3093,14 @@ export function nimbus(
         const ownerHeaders = fs.existsSync(ownerHeadersPath)
           ? fs.readFileSync(ownerHeadersPath, "utf8")
           : "";
+        let emittedPaths: string[] = [];
+        try {
+          emittedPaths = emittedFileRoutes(distDir, assetsDirForBuild);
+        } catch (err) {
+          logger.warn(
+            `failed to collect emitted files for agent text headers; UTF-8 rules for those files were not generated: ${(err as Error).message}`,
+          );
+        }
         fs.writeFileSync(
           headersPath,
           appendAgentDiscoveryHeaders(
@@ -3102,7 +3110,7 @@ export function nimbus(
               discovery.options,
               discovery.specFiles.map((spec) => ({ pathname: new URL(spec.url).pathname, type: spec.type })),
               {
-                paths: emittedFileRoutes(distDir, assetsDirForBuild),
+                paths: emittedPaths,
                 ownerHeaders,
                 warn: (message) => logger.warn(message),
               },

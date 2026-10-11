@@ -249,15 +249,26 @@ async function expand(
     }
     validateParams(partial, invocation.params);
     const [start, end] = range(render, options.sourceId);
+    // A partial inside a list item or quote continues it: every line after
+    // the first takes the container's prefix (quote markers kept, list
+    // markers turned into the spaces that align with the item's text).
+    const lineStart = prepared.lastIndexOf("\n", start - 1) + 1;
+    const container = /^(?:[ \t]*>[ \t]?|[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+|[ \t]+)*/u
+      .exec(prepared.slice(lineStart, start))![0]
+      .replace(/[-*+]|\d{1,9}[.)]/gu, (marker) => " ".repeat(marker.length));
+    const body = await expand(
+      partial.body,
+      invocation.params,
+      { ...options, sourceId: `partials:${partial.filePath ?? partial.id}` },
+      [...chain, invocation.file],
+    );
     replacements.push({
       start,
       end,
-      value: await expand(
-        partial.body,
-        invocation.params,
-        { ...options, sourceId: `partials:${partial.filePath ?? partial.id}` },
-        [...chain, invocation.file],
-      ),
+      value: body
+        .split("\n")
+        .map((line, i) => (i === 0 ? line : line ? container + line : container.trimEnd()))
+        .join("\n"),
     });
   }
   return replace(prepared, replacements);

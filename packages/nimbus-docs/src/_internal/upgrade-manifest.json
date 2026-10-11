@@ -60,6 +60,22 @@
       ]
     },
     {
+      "id": "page-actions-out-of-search",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "agent-output-fixes",
+      "summary": "Optionally keep page actions out of search excerpts.",
+      "affected": "Sites with src/components/ui/page-actions/PageActions.astro from the starter or the registry.",
+      "instructions": [
+        "No action is needed: search keeps working, but excerpts can include \"Copy page\" and \"View as Markdown\".",
+        "If PageActions.astro is unmodified, update it with nimbus-docs diff src/components/ui/page-actions/PageActions.astro --apply.",
+        "Otherwise add data-pagefind-ignore to its root element (the one with data-nb-page-actions)."
+      ],
+      "verify": [
+        "Search for a page and confirm its excerpt doesn't start with \"Copy page\"."
+      ]
+    },
+    {
       "id": "compact-coordinate-manifest",
       "introducedIn": "0.14.0",
       "mode": "review-required",

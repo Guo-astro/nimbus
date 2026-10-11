@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
 import nimbus from "@cloudflare/nimbus-docs";
-import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
+import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
 import nimbusConfig from "./nimbus.config";
 
 export default defineConfig({
@@ -33,12 +33,16 @@ export default defineConfig({
       },
       markdown: {
         // Wrap wide tables so they scroll instead of overflowing the page
-        // (styled by `.nb-table-scroll` in src/styles/prose.css).
-        hastPlugins: [tableScroll()],
+        // (styled by `.nb-table-scroll` in src/styles/prose.css), and typeset
+        // math as MathML (remove `math()` to use your own renderer).
+        hastPlugins: [tableScroll(), math()],
         // `## Install {#install}` gives a heading a fixed id. A heading that
         // ends in other `{…}` text, such as `{account_id}` in a .md file, is
         // read as attributes too; remove this to keep it as text.
-        features: { headingAttributes: true },
+        // `$x^2$` and `$$…$$` are math. If your prose has prices or shell
+        // variables (`$5`, `$HOME`), use `math: { singleDollarTextMath: false }`
+        // and write inline math as `$$x^2$$`.
+        features: { headingAttributes: true, math: true },
       },
     }),
   ],

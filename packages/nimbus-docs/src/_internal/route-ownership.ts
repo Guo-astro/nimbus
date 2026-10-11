@@ -62,13 +62,6 @@ export const STARTER_ROUTE_INVENTORY: readonly StarterRouteDeclaration[] = [
     role: "user-owned",
     publishesAgentEndpointAssets: true,
   },
-  // Starters before nested sections.
-  {
-    pattern: "/[section]/llms.txt",
-    entrypoint: "pages/[section]/llms.txt.ts",
-    role: "user-owned",
-    publishesAgentEndpointAssets: true,
-  },
   {
     pattern: "/llms-full.txt",
     entrypoint: "pages/llms-full.txt.ts",

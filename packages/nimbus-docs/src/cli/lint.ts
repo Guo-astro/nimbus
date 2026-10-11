@@ -18,6 +18,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Features } from "satteri";
+
+import { setMarkdownFeatures } from "../_internal/markdown-features.js";
+import { materializedFeatures } from "../check/authoring.js";
 import {
   findMdxFiles,
   fixPaths,
@@ -100,7 +104,14 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     process.exit(1);
   }
 
-  const { rules, collections, site, found } = loadMaterializedConfig(cwd);
+  const { rules, collections, site, markdownFeatures, found } = loadMaterializedConfig(cwd);
+  if (markdownFeatures) setMarkdownFeatures(markdownFeatures);
+  else if (found) {
+    process.stderr.write(
+      "nimbus-docs: `.nimbus/lint.json` is from an older build, so lint reads Markdown with the default features. " +
+        "Run `astro build` to use the site's `markdown.features`.\n",
+    );
+  }
   if (!found && !flags.rule) {
     // Exit nonzero for the same reason as no `.mdx` files: with no
     // materialized config every authoring rule is off, so a "clean" result
@@ -214,6 +225,7 @@ interface MaterializedConfig {
   rules: RulesConfig;
   collections: CollectionsConfig;
   site?: string;
+  markdownFeatures?: Features;
   /** False when `.nimbus/lint.json` doesn't exist. */
   found: boolean;
 }
@@ -239,7 +251,7 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
     return { rules: {}, collections: {}, found: false };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown };
+  let parsed: { rules?: unknown; collections?: unknown; site?: unknown; markdownFeatures?: unknown };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -268,5 +280,11 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
   }
 
   const site = typeof parsed.site === "string" ? parsed.site : undefined;
-  return { rules: validated.rules, collections: validated.collections, site, found: true };
+  return {
+    rules: validated.rules,
+    collections: validated.collections,
+    site,
+    markdownFeatures: materializedFeatures(parsed.markdownFeatures),
+    found: true,
+  };
 }

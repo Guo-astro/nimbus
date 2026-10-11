@@ -182,6 +182,9 @@ function wrapNimbusMarkdown<T extends Loader>(
           sourceId: sourceId
             ? `${context.collection}:${sourceId}`
             : context.collection,
+          filePath: sourceId
+            ? fileURLToPath(new URL(sourceId, context.config.root))
+            : undefined,
         }),
     });
     await Reflect.apply(

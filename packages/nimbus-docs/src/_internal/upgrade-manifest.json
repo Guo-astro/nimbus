@@ -3,6 +3,44 @@
   "oldestSupportedVersion": "0.11.0",
   "entries": [
     {
+      "id": "markdown-features",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "markdown-features",
+      "summary": "Turn on heading ids or math with markdown.features, and drop Markdown processor workarounds.",
+      "affected": "Projects that override the satteri version under @cloudflare/nimbus-docs, patch @cloudflare/nimbus-docs to parse heading ids or math, or replace markdown.processor only to turn on Sätteri features.",
+      "instructions": [
+        "No action is needed: pages render exactly as before, and generated Markdown changes only by dropping {/* comments */}.",
+        "To give headings fixed ids (## Install {#install}), add features: { headingAttributes: true } to the markdown option of the Nimbus integration, as new sites have. In .md files a heading that ends in other {…} text, such as {account_id}, is then read as attributes and loses that text, so leave it off for those sites. Add math: true for $…$ math.",
+        "Remove any package-manager override that pins satteri for @cloudflare/nimbus-docs (for example '@cloudflare/nimbus-docs>satteri' in pnpm overrides), and any patch to @cloudflare/nimbus-docs that adds heading attributes or math to its internal parsing.",
+        "If markdown.processor is a satteri() call that exists only to set features, replace it with markdown.features, and move its hastPlugins and mdastPlugins to markdown.hastPlugins and markdown.mdastPlugins. Keep a satteri() processor that does more than that: Nimbus reads its features for its own passes, though not its plugins. With a processor other than satteri(), Nimbus's own passes use only Astro's gfm and smartypants settings."
+      ],
+      "verify": [
+        "Run the production build and confirm pages with {#id} headings or math render as before.",
+        "Open a page's generated .md version and confirm it has no raw MDX comments or imports.",
+        "Run nimbus-docs lint and confirm no parse errors are reported for pages with heading ids or math."
+      ]
+    },
+    {
+      "id": "starter-component-fixes",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "starter-component-fixes",
+      "summary": "Pick up accessibility and behaviour fixes in starter components.",
+      "affected": "Sites created from the starter that still have any of these files: src/layouts/BaseLayout.astro, src/components/ui/theme-toggle/ThemeToggle.astro, src/components/ui/theme-toggle/theme-toggle.client.ts, src/components/ui/dialog/dialog.client.ts, src/components/ui/page-actions/page-actions.client.ts, src/components/ui/package-managers/PackageManagers.astro, src/components/ui/package-managers/package-managers.client.ts, src/components/ui/search/SearchDialog.astro, src/components/ui/search/search.client.ts, src/components/Render.astro, src/components/ui/breadcrumbs/Breadcrumbs.astro, src/components/ui/toc/MobileTOC.astro, src/components/ui/banner/Banner.astro.",
+      "instructions": [
+        "Run nimbus-docs outdated to see which of these files differ from the new starter.",
+        "For a file you haven't edited, apply the update with nimbus-docs diff <file> --apply.",
+        "For a file you have edited, read its diff and carry over the fix by hand: theme-toggle files go together with BaseLayout.astro, but each works with the old version of the other.",
+        "Banner.astro no longer strips scripts or event handlers from banner content. Keep the old file if banner HTML comes from anywhere other than the site's authors."
+      ],
+      "verify": [
+        "Toggle the theme inside a form and confirm the form isn't submitted.",
+        "Use Copy page in Safari and confirm the page's Markdown is on the clipboard.",
+        "Open and close search with the keyboard, pressing Enter on the close button, and confirm it closes."
+      ]
+    },
+    {
       "id": "compact-coordinate-manifest",
       "introducedIn": "0.14.0",
       "mode": "review-required",

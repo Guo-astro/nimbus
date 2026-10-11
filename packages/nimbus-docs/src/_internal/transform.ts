@@ -11,8 +11,10 @@
  */
 
 import { gfmToMarkdown } from "mdast-util-gfm";
+import { mathToMarkdown } from "mdast-util-math";
 import { mdxToMarkdown } from "mdast-util-mdx";
 import { toMarkdown } from "mdast-util-to-markdown";
+import type { Features } from "satteri";
 
 import {
   hasCitation,
@@ -20,6 +22,7 @@ import {
   type CitationIndex,
 } from "./api/citations.js";
 import { getTabs, isCommandType } from "../lib/pkgm.js";
+import { sourceFeatures } from "./markdown-features.js";
 import { runtimeWarn } from "./runtime-warn.js";
 
 export interface MarkdownComponentRenderContext {
@@ -88,7 +91,10 @@ interface Parsers {
   mdxToMdast: (source: string) => MdNode;
   markdownToMdast: (source: string) => MdNode;
 }
-let parsers: Parsers | undefined;
+type NativeParsers = {
+  [K in keyof Parsers]: (source: string, options: { features: Features }) => MdNode;
+};
+let native: NativeParsers | undefined;
 
 /**
  * Sätteri is native code, so it's loaded on first use and never by an
@@ -96,7 +102,7 @@ let parsers: Parsers | undefined;
  * `/runtime`), where nothing renders Markdown from MDX.
  */
 function satteri(): Parsers {
-  if (!parsers) {
+  if (!native) {
     const moduleApi = globalThis.process?.getBuiltinModule?.("node:module");
     if (!moduleApi) {
       throw new Error(
@@ -104,9 +110,14 @@ function satteri(): Parsers {
           "Serve request-time Markdown from the build's prepared Markdown instead.",
       );
     }
-    parsers = moduleApi.createRequire(import.meta.url)("satteri") as Parsers;
+    native = moduleApi.createRequire(import.meta.url)("satteri") as NativeParsers;
   }
-  return parsers;
+  const { mdxToMdast, markdownToMdast } = native;
+  const features = sourceFeatures();
+  return {
+    mdxToMdast: (source) => mdxToMdast(source, { features }),
+    markdownToMdast: (source) => markdownToMdast(source, { features }),
+  };
 }
 
 const isJsx = (node: MdNode): node is JsxElement =>
@@ -122,10 +133,28 @@ function containsComponent(node: MdNode, ctx: Context): boolean {
 }
 
 const LITERAL = /^\s*(["'`])([^"'`$]*)\1\s*$/;
+// `{/* note */}` and `{}`: nothing for a reader.
+function isEmpty(expression: string): boolean {
+  let rest = expression.trim();
+  while (rest) {
+    if (rest.startsWith("/*")) {
+      const end = rest.indexOf("*/", 2);
+      if (end < 0) return false;
+      rest = rest.slice(end + 2).trimStart();
+    } else if (rest.startsWith("//")) {
+      const end = rest.indexOf("\n");
+      rest = end < 0 ? "" : rest.slice(end + 1).trimStart();
+    } else return false;
+  }
+  return true;
+}
 
-/** Whether `node` holds a string expression (JSX's `{" "}`), written as text. */
+const isExpression = (node: MdNode): boolean =>
+  node.type === "mdxTextExpression" || node.type === "mdxFlowExpression";
+
+/** Whether `node` holds an expression written as text: a string (JSX's `{" "}`) or nothing at all. */
 function containsLiteralExpression(node: MdNode): boolean {
-  if ((node.type === "mdxTextExpression" || node.type === "mdxFlowExpression") && LITERAL.test(String(node.value))) return true;
+  if (isExpression(node) && (LITERAL.test(String(node.value)) || isEmpty(String(node.value)))) return true;
   return node.children?.some(containsLiteralExpression) ?? false;
 }
 
@@ -223,12 +252,31 @@ function packageManagersCode(attrs: Record<string, string | boolean>): MdNode[] 
 // ── transform ──────────────────────────────────────────────────────────────
 
 function transformChildren(nodes: MdNode[], ctx: Context): MdNode[] {
-  return joinCardLists(nodes.flatMap((node) => transformNode(node, ctx)));
+  const out: MdNode[] = [];
+  let dropped = false;
+  for (const node of nodes) {
+    const rendered = transformNode(node, ctx);
+    if (rendered.length === 0) {
+      dropped = true;
+      continue;
+    }
+    // A comment dropped from between two spaces leaves one.
+    const [first] = rendered;
+    const before = out.at(-1);
+    if (dropped && first?.type === "text" && before?.type === "text" && /\s$/.test(String(before.value))) {
+      const value = String(first.value).replace(/^\s+/, "");
+      if (!value && rendered.length === 1) continue;
+      rendered[0] = { ...first, value };
+    }
+    dropped = false;
+    out.push(...rendered);
+  }
+  return joinCardLists(out);
 }
 
 const PHRASING = new Set([
   "text", "emphasis", "strong", "delete", "inlineCode", "break", "link", "linkReference",
-  "image", "imageReference", "footnoteReference", "mdxJsxTextElement", "mdxTextExpression",
+  "image", "imageReference", "footnoteReference", "mdxJsxTextElement", "mdxTextExpression", "inlineMath",
 ]);
 
 /**
@@ -264,10 +312,11 @@ function blockChildren(node: JsxElement, ctx: Context): MdNode[] {
 
 function transformNode(node: MdNode, ctx: Context): MdNode[] {
   if (isJsx(node)) return renderElement(node, ctx);
-  // A string expression (JSX's `{" "}`) is just its text.
-  if (node.type === "mdxTextExpression" || node.type === "mdxFlowExpression") {
+  // A string expression (JSX's `{" "}`) is just its text; a comment is nothing.
+  if (isExpression(node)) {
     const literal = LITERAL.exec(String(node.value));
     if (literal) return [text(literal[2]!)];
+    if (isEmpty(String(node.value))) return [];
   }
   if (!node.children) return [node];
   // A paragraph made only of block components (`<Aside>…</Aside><Aside>…</Aside>`
@@ -566,12 +615,12 @@ function htmlElement(node: JsxElement, content: MdNode[], ctx: Context): MdNode[
   return [{ type: "html", value: open }, ...content, { type: "html", value: `</${node.name}>` }];
 }
 
-let extensions: ReturnType<typeof mdxToMarkdown>[] | undefined;
+let extensions: ReturnType<typeof mdxToMarkdown | typeof mathToMarkdown>[] | undefined;
 
 function serialize(nodes: MdNode[]): string {
   const root = { type: "root", children: nodes } as unknown as Parameters<typeof toMarkdown>[0];
   // Unpadded tables: column alignment only adds bytes for an agent to read.
-  extensions ??= [gfmToMarkdown({ tablePipeAlign: false }), mdxToMarkdown()];
+  extensions ??= [gfmToMarkdown({ tablePipeAlign: false }), mdxToMarkdown(), mathToMarkdown()];
   return toMarkdown(root, {
     extensions,
     bullet: "-",

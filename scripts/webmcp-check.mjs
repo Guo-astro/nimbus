@@ -499,7 +499,7 @@ try {
       await page.keyboard.press("Control+k");
       await page.locator("[data-search-input]").fill("Nimbus");
       await page.waitForFunction(() =>
-        document.querySelector("[data-search-results]")?.textContent?.includes("Check your connection and reload"),
+        document.querySelector("[data-search-empty]")?.textContent?.includes("Check your connection and reload"),
       );
       await page.keyboard.press("Escape");
       await page.reload();

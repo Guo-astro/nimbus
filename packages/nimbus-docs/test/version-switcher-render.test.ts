@@ -7,7 +7,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -24,8 +23,13 @@ const starter = path.resolve(
 const source = path.resolve(import.meta.dirname, "../src");
 
 test("version navigation exposes links and the current page in both variants", async () => {
+  const fixtureDirectory = path.resolve(
+    import.meta.dirname,
+    "../../../.generated",
+  );
+  await mkdir(fixtureDirectory, { recursive: true });
   const root = await mkdtemp(
-    path.join(os.tmpdir(), "nimbus-version-navigation-"),
+    path.join(fixtureDirectory, "nimbus-version-navigation-"),
   );
   const originalCwd = process.cwd();
   const write = async (file: string, content: string) => {

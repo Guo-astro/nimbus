@@ -1345,9 +1345,11 @@ export function nimbus(
           },
         );
         setMarkdownFeatures(features);
-        // `math()` renders MathML that needs Temml's stylesheet and the font stack.
+        // `math()` renders MathML that needs Temml's stylesheet and the font
+        // stack; a site with math switched off ships neither.
         if (
           !options.markdown?.processor &&
+          options.markdown?.features?.math &&
           (options.markdown?.hastPlugins as unknown[] | undefined)
             ?.flat(Infinity)
             .some((plugin) => typeof plugin === "function" && MATH_PLUGIN in plugin)

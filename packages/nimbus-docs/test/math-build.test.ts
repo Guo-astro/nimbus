@@ -33,7 +33,7 @@ As $\\eqref{eq:quadratic}$ shows.
 Broken: $\\frac{1}{$ and $\\nosuchcommand$.
 `;
 
-async function site(hastPlugins: unknown[]) {
+async function site(hastPlugins: unknown[], features: Record<string, unknown> = { math: true }, page = PAGE) {
   // The real path: Astro only adds injected page styles to files under its root as written.
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "nimbus-math-")));
   const write = async (file: string, body: string) => {
@@ -51,7 +51,7 @@ export const collections = { docs: defineCollection(docsCollection()) };
 `,
   );
   await write("src/components.ts", "export const components = {};\n");
-  await write("src/content/docs/physics.mdx", PAGE);
+  await write("src/content/docs/physics.mdx", page);
   await write("src/content/docs/plain.md", "---\ntitle: Plain\n---\nIt costs $5.\n");
   await write(
     "src/pages/[...slug].astro",
@@ -90,7 +90,7 @@ export const { GET, getStaticPaths } = markdownRoute();
       integrations: [
         nimbus(
           { site: "https://example.test", title: "Example", search: false },
-          { sitemap: false, icons: false, markdown: { features: { math: true }, hastPlugins } },
+          { sitemap: false, icons: false, markdown: { features, hastPlugins } },
         ),
       ],
     });
@@ -143,6 +143,17 @@ test("without math(), math stays code and no math stylesheet ships", async () =>
   const s = await site([]);
   try {
     assert.match(await s.read("dist/physics/index.html"), /class="language-math math-inline"/);
+    assert.doesNotMatch(await s.css(), /Nimbus Math|tml-eqn/);
+  } finally {
+    await rm(s.root, { recursive: true, force: true });
+  }
+});
+
+test("with math() but math off, no math stylesheet ships", async () => {
+  // A page without math, as on a site that hasn't turned it on; prices stay text.
+  const s = await site([math()], {}, "---\ntitle: Physics\n---\nIt costs $5 and $10.\n");
+  try {
+    assert.match(await s.read("dist/physics/index.html"), /It costs \$5 and \$10\./);
     assert.doesNotMatch(await s.css(), /Nimbus Math|tml-eqn/);
   } finally {
     await rm(s.root, { recursive: true, force: true });

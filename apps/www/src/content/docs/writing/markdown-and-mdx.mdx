@@ -152,7 +152,7 @@ files, raw imports and files outside `admonitions.contentDirs` are unchanged. Us
 
 ## Heading ids and math
 
-Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids and math on:
+Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids on. For math, add the `math()` plugin and `math: true`:
 
 ```ts title="astro.config.ts"
 import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
@@ -171,7 +171,7 @@ Pages, generated Markdown, reusable snippets and `nimbus-docs lint` all read Mar
 
 ### Math
 
-With `features.math` and the `math()` plugin, write math in TeX:
+With `features.math` and the `math()` plugin, write math in TeX. Math is off unless you turn it on, so prose with `$` is never misread on sites that don't use it:
 
 ```md
 The energy is $E = mc^2$.

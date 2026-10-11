@@ -1,6 +1,5 @@
 ---
 "@cloudflare/nimbus-docs": minor
-"@cloudflare/create-nimbus-docs": patch
 ---
 
-- New `math()` Markdown plugin typesets `$…$`, `$$…$$` and ` ```math ` at build time as native MathML, with no math JavaScript. New sites have it on.
+- New `math()` Markdown plugin typesets `$…$`, `$$…$$` and ` ```math ` at build time as native MathML, with no math JavaScript. Add `math()` to `markdown.hastPlugins` and `math: true` to `markdown.features` to use it.

@@ -150,17 +150,6 @@ try {
     "Native Document.modelContext:",
     await native.evaluate(() => typeof document.modelContext),
   );
-  // The starter typesets math. On a machine with no math font (CI's Linux),
-  // the math stylesheet's webfont must load for formulas to render.
-  await native.evaluate(() => {
-    document.body.insertAdjacentHTML("beforeend", "<math><msqrt><mi>x</mi></msqrt></math>");
-  });
-  const mathFont = await native.evaluate(async () => {
-    await document.fonts.ready;
-    return [...document.fonts].filter((face) => face.family.includes("Nimbus Math")).map((face) => face.status);
-  });
-  assert.ok(mathFont.includes("loaded"), `math font: ${mathFont.join(", ") || "not in the stylesheet"}`);
-  console.log("Math font:", mathFont.join(", "));
   await native.close();
   const unsupported = await browser.newContext();
   await unsupported.addInitScript(() =>

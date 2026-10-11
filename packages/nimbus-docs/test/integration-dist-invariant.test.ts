@@ -608,7 +608,7 @@ test("when routes.json can't be deleted or overwritten, the build fails", { skip
 test("a route truth failure is a warning and leaves no routes.json", { skip: asRoot }, async (t) => {
   // An unreadable directory in the output makes the walk fail.
   const { projectRoot, distDir, warnings, runBuild } = await driveBuild(t, {
-    seedDist: { "locked/file.txt": "" },
+    seedDist: { "locked/file.txt": "", "llms.txt": "Docs\n" },
     skipBuildDone: true,
   });
   await chmod(path.join(distDir, "locked"), 0o000);
@@ -622,6 +622,15 @@ test("a route truth failure is a warning and leaves no routes.json", { skip: asR
     warnings.some((w) => /failed to write \.nimbus\/routes\.json/.test(w)),
     warnings.join("\n"),
   );
+  assert.ok(
+    warnings.some((w) =>
+      /failed to collect emitted files for agent text headers/.test(w),
+    ),
+    warnings.join("\n"),
+  );
+  const headers = await readFile(path.join(distDir, "_headers"), "utf8");
+  assert.match(headers, /application\/json/);
+  assert.doesNotMatch(headers, /\/llms\.txt\n  Content-Type:/);
   await assert.rejects(
     readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
     { code: "ENOENT" },

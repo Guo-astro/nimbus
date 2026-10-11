@@ -62,7 +62,11 @@ test("discovery and API documentation links exclude hidden collections", () => {
     llmsUrl: minimal.llmsUrl,
     homepageMarkdownUrl: minimal.homepageMarkdownUrl,
     apis: [
-      { collection: "pets", docsUrl: `${options.site}/docs/pets/`, markdownUrl: `${options.site}/docs/pets/index.md` },
+      {
+        collection: "pets",
+        docsUrl: `${options.site}/docs/pets/`,
+        markdownUrl: `${options.site}/docs/pets/index.md`,
+      },
       {
         collection: "private",
         docsUrl: `${options.site}/private/`,
@@ -172,7 +176,10 @@ test("discovery headers share existing exact-path rules without replacing owner 
       const merged = appendAgentDiscoveryHeaders(owner, generated);
       const paths = merged.split(/\r?\n/).filter((line) => line === home);
       assert.equal(paths.length, 1);
-      const block = merged.slice(merged.indexOf(`${home}${newline}`), merged.indexOf("/custom"));
+      const block = merged.slice(
+        merged.indexOf(`${home}${newline}`),
+        merged.indexOf("/custom"),
+      );
       assert.match(block, /rel="author"/);
       assert.match(block, /rel="ard"/);
       assert.match(block, /X-Owner: retained/);
@@ -181,11 +188,17 @@ test("discovery headers share existing exact-path rules without replacing owner 
       assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged);
       const updated = appendAgentDiscoveryHeaders(
         merged,
-        agentDiscoveryHeaderRules({ ...minimal, homepageDiscoverable: false }, settings),
+        agentDiscoveryHeaderRules(
+          { ...minimal, homepageDiscoverable: false },
+          settings,
+        ),
       );
       assert.match(updated, /rel="author"/);
       assert.doesNotMatch(updated, /rel="alternate"/);
-      assert.equal(updated.split(/\r?\n/).filter((line) => line === home).length, 1);
+      assert.equal(
+        updated.split(/\r?\n/).filter((line) => line === home).length,
+        1,
+      );
     }
   }
 });
@@ -275,4 +288,137 @@ test("browser search capabilities follow the provider and exclude hidden version
     }).versions,
     ["current", "old"],
   );
+});
+
+test("agent text header rules stay bounded as the number of emitted pages grows", () => {
+  const paths = [
+    "/llms.txt",
+    "/llms-full.txt",
+    "/robots.txt",
+    "/setup/llms.txt",
+    ...Array.from({ length: 400 }, (_, index) => `/guide/${index}/index.md`),
+  ];
+  const generated = agentDiscoveryHeaderRules(minimal, options, [], { paths });
+  for (const rule of [
+    "/docs/llms.txt",
+    "/docs/llms-full.txt",
+    "/docs/robots.txt",
+    "/docs/*/llms.txt",
+    "/docs/*/index.md",
+  ])
+    assert.ok(
+      generated.includes(
+        `${rule}\n  Content-Type: text/${rule.endsWith(".md") ? "markdown" : "plain"}; charset=utf-8`,
+      ),
+      rule,
+    );
+  assert.equal(
+    generated.split("\n").filter((line) => line.startsWith("/")).length,
+    10,
+  );
+  assert.doesNotMatch(generated, /^\/docs\/\*\.(md|txt)$/m);
+  assert.doesNotMatch(
+    agentDiscoveryHeaderRules(minimal, options, [], { paths: [] }),
+    /llms.txt\n  Content-Type|\*\/index.md|robots.txt\n/,
+  );
+});
+
+test("owner Content-Type rules take precedence without comma-joining generated text types", () => {
+  const paths = [
+    "/llms.txt",
+    "/llms-full.txt",
+    "/guide/index.md",
+    "/setup/start/index.md",
+  ];
+  for (const newline of ["\n", "\r\n"]) {
+    const ownerHeaders = [
+      "/*.txt",
+      "  Content-Type: text/plain; charset=utf-8",
+      "",
+      "/*.md",
+      "  content-type: text/markdown; charset=utf-8",
+      "",
+    ].join(newline);
+    const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+      paths,
+      ownerHeaders,
+    });
+    assert.doesNotMatch(generated, /Content-Type: text\/(plain|markdown)/);
+    const merged = appendAgentDiscoveryHeaders(ownerHeaders, generated);
+    assert.ok(merged.startsWith(ownerHeaders));
+    assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged);
+  }
+  const warnings: string[] = [];
+  const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+    paths,
+    ownerHeaders:
+      "/docs/guide/index.md\n  Content-Type: application/octet-stream\n/docs/index.md\n  Content-Type: text/plain",
+    warn: (message) => warnings.push(message),
+  });
+  assert.doesNotMatch(generated, /Content-Type: text\/markdown/);
+  assert.match(
+    generated,
+    /\/docs\/llms.txt\n  Content-Type: text\/plain; charset=utf-8/,
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /\/docs\/\*\/index.md/);
+  for (const pattern of [
+    "/docs/:section/index.md",
+    "https://preview.example.com/docs/*.md",
+  ]) {
+    const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+      paths,
+      ownerHeaders: `${pattern}\n  Content-Type: application/octet-stream`,
+    });
+    assert.doesNotMatch(generated, /^\/docs\/\*\/index.md$/m);
+  }
+  const encodedOwner = agentDiscoveryHeaderRules(minimal, options, [], {
+    paths: ["/café/index.md", "/my guide/index.md"],
+    ownerHeaders:
+      "/docs/caf%C3%A9/index.md\n  Content-Type: application/octet-stream",
+  });
+  assert.doesNotMatch(encodedOwner, /^\/docs\/\*\/index.md$/m);
+});
+
+test("text header patterns serialize Unicode and spaces in the base once", () => {
+  for (const base of ["/café", "/caf%C3%A9", "/my docs", "/my%20docs"]) {
+    const prefix = base.includes("caf") ? "/caf%C3%A9" : "/my%20docs";
+    const generated = agentDiscoveryHeaderRules(
+      createAgentCapabilities({}),
+      { ...options, base },
+      [],
+      { paths: ["/llms.txt", "/guide/index.md"] },
+    );
+    assert.ok(
+      generated.includes(
+        `${prefix}/llms.txt\n  Content-Type: text/plain; charset=utf-8`,
+      ),
+    );
+    assert.ok(
+      generated.includes(
+        `${prefix}/*/index.md\n  Content-Type: text/markdown; charset=utf-8`,
+      ),
+    );
+  }
+});
+
+test("raw and encoded owner paths do not duplicate generated text Content-Type", () => {
+  for (const [pathname, ownerPath] of [
+    ["/café/index.md", "/docs/café/index.md"],
+    ["/café/index.md", "/docs/caf%C3%A9/index.md"],
+    ["/my guide/index.md", "/docs/my guide/index.md"],
+    ["/my guide/index.md", "/docs/my%20guide/index.md"],
+  ]) {
+    const ownerHeaders = `${ownerPath}\n  Content-Type: application/octet-stream`;
+    const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+      paths: [pathname!],
+      ownerHeaders,
+    });
+    assert.doesNotMatch(generated, /^\/docs\/\*\/index.md$/m, ownerPath);
+    assert.ok(
+      appendAgentDiscoveryHeaders(ownerHeaders, generated).startsWith(
+        ownerHeaders,
+      ),
+    );
+  }
 });

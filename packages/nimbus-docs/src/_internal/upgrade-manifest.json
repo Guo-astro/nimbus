@@ -724,6 +724,24 @@
         "On an API reference page of a site with versioned docs, confirm the header shows no docs version picker.",
         "On a docs page, confirm the header picker still lists every version and switches to the same page."
       ]
+    },
+    {
+      "id": "api-reference-polish",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "api-reference-polish",
+      "summary": "Optionally update the API reference components: previous and next links, error responses that start collapsed, readable response toggles in light mode, field anchors on touch screens, and server URLs with a query.",
+      "affected": "Sites with the api-layout registry components installed before 0.18.0.",
+      "instructions": [
+        "No action is needed: API pages keep working.",
+        "Update @cloudflare/nimbus-docs first: the previous and next links read nav.prevNext.",
+        "If the api-layout, api-code-rail and api-field-row folders are unmodified registry copies, update them with nimbus-docs add api-layout --overwrite. It also installs the pagination component.",
+        "If they're customized: render <Pagination prevNext={nav.prevNext} /> after ApiBody in ApiLayout.astro; in ApiBody.astro, wrap each 4xx and 5xx response in <details> with its heading in <summary>, mark the Returns section data-api-responses and import responses.client.ts from the current registry version; in ApiEndpointCard.astro, put the path before a query in the server URL; take field-list.css and api-field-row.client.ts for touch anchors and code-rail.css for the toggle contrast."
+      ],
+      "verify": [
+        "On an operation page, confirm previous and next links lead to the neighboring pages in the sidebar.",
+        "Confirm 4xx and 5xx responses start closed, and that a link to a field inside one opens it."
+      ]
     }
   ]
 }

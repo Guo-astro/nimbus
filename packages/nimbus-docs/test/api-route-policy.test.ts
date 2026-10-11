@@ -878,3 +878,21 @@ describe("routes config validation — rejected", () => {
     });
   }
 });
+
+describe("fallback routes in the build log", () => {
+  test("many fallbacks print one summary and never hide other warnings", async (t) => {
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (message: string) => void lines.push(message));
+    const paths: Record<string, PathItem> = {
+      "/v1/charges": { get: { operationId: "listCharge", ...OK } },
+      "/v1/refunds": { get: { operationId: "listcharge", ...OK } },
+    };
+    for (let i = 0; i < 30; i++) paths[`/v1/${"_".repeat(i + 3)}`] = { get: { operationId: `doThing${i}`, ...OK } };
+    const { diagnostics } = await parseWith("rp-fallback-log", paths);
+    assert.equal(diagnostics.filter((d) => d.code === "route-fallback").length, 30);
+    const fallbackLines = lines.filter((line) => /coordinate as the URL slug|falling back/.test(line));
+    assert.equal(fallbackLines.length, 1);
+    assert.match(fallbackLines[0]!, /30 operation\(s\).*doThing0, doThing1, doThing2, doThing3, doThing4, …/);
+    assert.ok(lines.some((line) => /case/i.test(line)), "the case warning stays visible");
+  });
+});

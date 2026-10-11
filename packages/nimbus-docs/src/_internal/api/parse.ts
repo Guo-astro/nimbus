@@ -120,7 +120,22 @@ async function loadParser(): Promise<ScalarParserModule> {
   }
 }
 
-export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
+// A build parses each spec in two module graphs (config setup, then content
+// sync), so the once-only record lives on globalThis.
+const surfaced: Set<string> = ((globalThis as Record<symbol, unknown>)[Symbol.for("nimbus.api.surfaced")] ??= new Set<string>()) as Set<string>;
+
+/**
+ * `onceKey` names an identical parse (same spec, collection and options);
+ * its warnings print only the first time it's parsed in this process.
+ */
+export async function parseOpenApi(source: SpecSource, onceKey?: string): Promise<ParseResult> {
+  const surface = (collection: string, diagnostics: readonly Diagnostic[]) => {
+    if (onceKey !== undefined) {
+      if (surfaced.has(onceKey)) return;
+      surfaced.add(onceKey);
+    }
+    surfaceWarnings(collection, diagnostics);
+  };
   const parser = await loadParser();
   const label = source.label ?? source.collection;
 
@@ -224,13 +239,13 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];
-    surfaceWarnings(source.collection, diagnostics);
+    surface(source.collection, diagnostics);
     return { model, diagnostics };
   } catch (err) {
     // Warnings gathered before the abort explain *why* it aborted — a lowercase
     // `4xx` key, an unresolved `$ref`. Never swallow them just because a later
     // stage threw; surface them alongside the failure.
-    surfaceWarnings(source.collection, [
+    surface(source.collection, [
       ...preDiagnostics,
       ...(walker?.registry.getDiagnostics() ?? []),
     ]);

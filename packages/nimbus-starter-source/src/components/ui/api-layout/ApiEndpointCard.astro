@@ -25,8 +25,8 @@ interface Props {
 
 const { method, path, server, isWebhook, class: className } = Astro.props;
 
-// A server URL can carry a query (`…/v1?key=1`); the path goes before it.
-const at = server?.indexOf("?") ?? -1;
+// A server URL can carry a query or fragment (`…/v1?key=1`); the path goes before it.
+const at = server?.search(/[?#]/) ?? -1;
 const serverQuery = at < 0 ? "" : server!.slice(at);
 const base = at < 0 ? (server ?? "") : server!.slice(0, at).replace(/\/+$/, "");
 const url = `${base}${path}${serverQuery}`;

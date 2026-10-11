@@ -727,7 +727,7 @@ function bareMediaType(mediaType: string): string {
 
 /** `base` + `path`, keeping a query the server URL carries after the path. */
 function withPath(base: string, path: string): string {
-  const at = base.indexOf("?");
+  const at = base.search(/[?#]/);
   if (at < 0) return `${base}${path}`;
   return `${base.slice(0, at).replace(/\/+$/, "")}${path}${base.slice(at)}`;
 }

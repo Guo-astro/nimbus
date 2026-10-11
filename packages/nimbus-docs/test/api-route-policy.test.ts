@@ -895,4 +895,18 @@ describe("fallback routes in the build log", () => {
     assert.match(fallbackLines[0]!, /30 operation\(s\).*doThing0, doThing1, doThing2, doThing3, doThing4, …/);
     assert.ok(lines.some((line) => /case/i.test(line)), "the case warning stays visible");
   });
+
+  test("an identical parse in the same build prints its warnings once", async (t) => {
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (message: string) => void lines.push(message));
+    const source = { collection: "rp-once", spec: spec({ "/v1/___": { get: { operationId: "doThing", ...OK } } }), routes: RESOURCE_ACTION_V1 };
+    await parseOpenApi(source, "rp-once-key");
+    const first = lines.length;
+    assert.ok(first > 0);
+    await parseOpenApi(source, "rp-once-key");
+    assert.equal(lines.length, first);
+    // A direct parse without a key always reports.
+    await parseOpenApi(source);
+    assert.equal(lines.length, first * 2);
+  });
 });

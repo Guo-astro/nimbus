@@ -64,6 +64,11 @@ describe("sample servers", () => {
     assert.doesNotMatch(all, /key=1\/zones/);
   });
 
+  test("a server URL's fragment stays after the path", async () => {
+    const { curl } = await samples([{ url: "https://api.acme.test/v1#docs" }]);
+    assert.match(curl, /--url 'https:\/\/api\.acme\.test\/v1\/zones\/<id>#docs'/);
+  });
+
   test("the page still shows the spec's own server", async () => {
     const { page } = await samples([{ url: "https://{region}.api.acme.test", variables: { region: { default: "eu" } } }]);
     assert.equal(page.server, "https://{region}.api.acme.test");

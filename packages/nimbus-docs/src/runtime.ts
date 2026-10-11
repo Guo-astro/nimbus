@@ -829,6 +829,11 @@ async function buildStructuralTree(
       ? { ...runtimeConfig.sidebar, items: rewrittenItems }
       : undefined,
     primaryPrefix,
+    new Set([
+      ...(runtimeConfig.api ?? []).map((api) => `/${api.collection}`),
+      ...(versions?.others ?? []).map((version) => `/${version}`),
+      ...collections.map((collection) => resolveCollectionPrefix(collection, versions)).filter(Boolean),
+    ]),
   );
 
   // Frozen because it's shared across pages and its nodes reach user

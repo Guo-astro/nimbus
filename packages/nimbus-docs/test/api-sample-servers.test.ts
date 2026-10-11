@@ -57,6 +57,18 @@ describe("sample servers", () => {
     assert.match(noPort.curl, /--url '<base-url>\/zones\/<id>'/);
   });
 
+  test("a server URL's query stays after the path", async () => {
+    const { curl, all, page } = await samples([{ url: "https://api.acme.test/v1/?key=1" }]);
+    assert.match(curl, /--url 'https:\/\/api\.acme\.test\/v1\/zones\/<id>\?key=1'/);
+    for (const sample of page.samples) assert.match(sample.source, /v1\/zones\/<id>/, sample.lang);
+    assert.doesNotMatch(all, /key=1\/zones/);
+  });
+
+  test("a server URL's fragment stays after the path", async () => {
+    const { curl } = await samples([{ url: "https://api.acme.test/v1#docs" }]);
+    assert.match(curl, /--url 'https:\/\/api\.acme\.test\/v1\/zones\/<id>#docs'/);
+  });
+
   test("the page still shows the spec's own server", async () => {
     const { page } = await samples([{ url: "https://{region}.api.acme.test", variables: { region: { default: "eu" } } }]);
     assert.equal(page.server, "https://{region}.api.acme.test");

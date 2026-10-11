@@ -37,13 +37,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # remove the trigger label; the bot's PR comment uses the App's own token
-      statuses: read # find the successful www Preview for this PR head
       id-token: write # pkg.pr.new authenticates the publish via GitHub OIDC (no npm token, no secret)
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # changelog-github finds the commit that added each changeset
+          persist-credentials: false
 
       # The preview version comes from the branch's package versions. A branch
       # behind the latest release would be stamped as a pre-release of a version
@@ -70,18 +70,11 @@ jobs:
           sha=$(git rev-parse HEAD)
           current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
           read -r state head_sha <<< "$current"
-          url=$(gh api "repos/$REPO/commits/$sha/status" | jq -er \
-            '[.statuses[] | select(.context == "www/preview")][0] | select(.state == "success") | .target_url | select(type == "string" and startswith("https://"))') || true
-          served_sha=''
-          if [ -n "$url" ]; then
-            served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-              "$url/_nimbus-preview-sha.txt") || true
-          fi
-          registry_version=''
-          if [ -n "$url" ]; then
-            registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-              "$url/registry/registry.json" | jq -er '.registryVersion') || true
-          fi
+          url="https://pr-$PR.nimbus-docs.com"
+          served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+            "$url/_nimbus-preview-sha.txt") || true
+          registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+            "$url/registry/registry.json" | jq -er '.registryVersion') || true
           if [ "$state" != 'open' ] || [ "$head_sha" != "$sha" ] || [ "$served_sha" != "$sha" ] || \
             [ "$registry_version" != "$(jq -r .version packages/nimbus-docs/package.json)" ]; then
             gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'

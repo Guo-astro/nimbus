@@ -1,0 +1,182 @@
+name: Deploy www Preview
+
+on:
+  workflow_run:
+    workflows: [www Preview]
+    types: [completed]
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      mode: ${{ steps.target.outputs.mode }}
+      pr: ${{ steps.target.outputs.pr }}
+      sha: ${{ steps.target.outputs.sha }}
+      run_id: ${{ steps.target.outputs.run_id }}
+    steps:
+      - name: Identify the Preview
+        id: target
+        run: |
+          if [ "$EVENT" = 'pull_request_target' ]; then
+            if [ "$HEAD_REPO" != "$REPO" ]; then exit 0; fi
+            [[ "$PR" =~ ^[0-9]+$ ]]
+            echo "mode=delete" >> "$GITHUB_OUTPUT"
+            echo "pr=$PR" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$RUN_PATH" != '.github/workflows/www-preview.yml' ] || \
+            [ "$RUN_REPO" != "$REPO" ] || [ "$RUN_CONCLUSION" != 'success' ]; then exit 0; fi
+          [[ "$RUN_ID" =~ ^[0-9]+$ && "$RUN_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [ "$RUN_EVENT" = 'push' ]; then
+            if [ "$RUN_BRANCH" != 'main' ]; then exit 0; fi
+            echo 'mode=deploy' >> "$GITHUB_OUTPUT"
+          elif [ "$RUN_EVENT" = 'pull_request' ]; then
+            pr=$(gh api "repos/$REPO/commits/$RUN_SHA/pulls" | jq -r --arg repo "$REPO" --arg sha "$RUN_SHA" \
+              '[.[] | select(.state == "open" and .base.ref == "main" and .head.repo.full_name == $repo and .head.sha == $sha) | .number] | if length == 1 then .[0] else empty end')
+            if [ -z "$pr" ]; then exit 0; fi
+            echo 'mode=deploy' >> "$GITHUB_OUTPUT"
+            echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          else
+            exit 0
+          fi
+          echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          RUN_PATH: ${{ github.event.workflow_run.path }}
+          RUN_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+
+  deploy:
+    needs: resolve
+    if: needs.resolve.outputs.mode != '' && !cancelled()
+    concurrency:
+      group: www-preview-deploy-${{ needs.resolve.outputs.pr || 'main' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: cloudflare
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install Wrangler
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.resolve.outputs.mode == 'deploy'
+        with:
+          name: www-dist
+          path: apps/www/dist
+          run-id: ${{ needs.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Deploy and probe Preview
+        if: needs.resolve.outputs.mode == 'deploy'
+        id: preview
+        working-directory: apps/www
+        run: |
+          test "$(< dist/_nimbus-preview-sha.txt)" = "$SHA"
+          registry_version=$(jq -er '.registryVersion' dist/registry/registry.json)
+          name='main'
+          if [ -n "$PR" ]; then
+            current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha, .base.ref] | join(" ")')
+            read -r state head_sha base_ref <<< "$current"
+            if [ "$state" != 'open' ] || [ "$head_sha" != "$SHA" ] || [ "$base_ref" != 'main' ]; then exit 0; fi
+            name="pr-$PR"
+          else
+            current=$(gh api "repos/$REPO/git/ref/heads/main" --jq '.object.sha')
+            if [ "$current" != "$SHA" ]; then exit 0; fi
+          fi
+          output_file="$RUNNER_TEMP/www-preview-output.jsonl"
+          WRANGLER_OUTPUT_FILE_PATH="$output_file" pnpm exec wrangler preview --name "$name" --json
+          url=$(jq -er --arg expected "https://$name.nimbus-docs.com" 'select(.type == "preview") | .preview_urls[] | select(. == $expected)' "$output_file")
+          for attempt in {1..12}; do
+            if served_sha=$(curl --fail --show-error --silent --max-time 10 "$url/_nimbus-preview-sha.txt") && [ "$served_sha" = "$SHA" ]; then break; fi
+            if [ "$attempt" -eq 12 ]; then echo "::error::Preview did not serve commit $SHA"; exit 1; fi
+            sleep 5
+          done
+          curl --fail --show-error --silent --retry 5 --retry-delay 3 \
+            "$url/registry/registry.json" | jq -e --arg version "$registry_version" '.registryVersion == $version'
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Link the successful PR Preview
+        if: steps.preview.outputs.url != '' && needs.resolve.outputs.pr != ''
+        run: |
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
+          read -r state head_sha <<< "$current"
+          if [ "$state" != 'open' ] || [ "$head_sha" != "$SHA" ]; then exit 0; fi
+          body=$(printf '<!-- nimbus-www-preview -->\nwww Preview: %s (commit `%s`)\n\nTest its registry: `NIMBUS_REGISTRY_URL=%s/registry`\n' "$URL" "$SHA" "$URL")
+          comment=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- nimbus-www-preview -->"))) | .id')
+          if [ -n "$comment" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$(printf '%s\n' "$comment" | sort -n | tail -1)" -f body="$body" --jq '.id'
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" --jq '.id'
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          SHA: ${{ needs.resolve.outputs.sha }}
+          URL: ${{ steps.preview.outputs.url }}
+
+      - name: Delete closed PR Preview
+        if: needs.resolve.outputs.mode == 'delete'
+        working-directory: apps/www
+        run: |
+          state=$(gh api "repos/$REPO/pulls/$PR" --jq '.state')
+          if [ "$state" != 'closed' ]; then exit 0; fi
+          name="pr-$PR"
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/nimbus-docs/previews/$name")
+          if [ "$status" = '404' ]; then
+            echo 'Preview already absent.'
+          elif [ "$status" = '200' ]; then
+            pnpm exec wrangler preview delete --name "$name" --skip-confirmation
+          else
+            echo "::error::Could not check Preview before deletion (HTTP $status)."
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.resolve.outputs.pr }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

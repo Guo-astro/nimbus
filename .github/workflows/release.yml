@@ -15,6 +15,7 @@ jobs:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: release
     outputs:
       published: ${{ steps.publish.outputs.published }}
     permissions:
@@ -100,8 +101,8 @@ jobs:
       #     each package's `repository.url`. Going public is also the hard
       #     requirement for unauthenticated giget scaffolds (this design cannot
       #     expose templates without exposing source) — flip it public (after a
-      #     full-history secret scan), or drop this env line + `id-token: write`,
-      #     before the first real release.
+      #     full-history secret scan), or disable explicit provenance before the
+      #     first real release. Keep `id-token: write` for npm Trusted Publishing.
       - name: Create version-bump PR or publish
         id: publish
         uses: changesets/action@3841a0683d3cfa6dae0f9bb335290003010fe3f0 # v1.9.0
@@ -117,7 +118,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: "true"
 
       - name: Push published package tags
-        if: steps.publish.outputs.published == 'true'
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
         run: |
           for pkg in nimbus-docs create-nimbus-docs; do
             name=$(jq -r .name "packages/$pkg/package.json")
@@ -131,21 +132,23 @@ jobs:
       # GitHub Releases are independent of the published output, so a Release
       # API failure does not skip the www deploy after npm publication.
       - name: Reconcile GitHub Releases
-        if: always() && steps.app-token.outcome == 'success'
+        if: ${{ !cancelled() && steps.app-token.outcome == 'success' }}
         run: node scripts/reconcile-github-releases.mjs
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
-  deploy-www:
-    name: Deploy released www
+  build-www:
+    name: Build released www
     needs: release
-    if: always() && needs.release.outputs.published == 'true'
+    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -158,9 +161,47 @@ jobs:
 
       - run: pnpm --filter @nimbus/www run predeploy
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: released-www-dist
+          path: apps/www/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 7
+
+  deploy-www:
+    name: Deploy released www
+    needs: [release, build-www]
+    if: ${{ !cancelled() && needs.release.outputs.published == 'true' && needs.build-www.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install Wrangler
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: released-www-dist
+          path: apps/www/dist
+
       - name: Deploy only the current published release
         working-directory: apps/www
         run: |
+          set -o pipefail
           for pkg in nimbus-docs create-nimbus-docs; do
             expected=$(jq -r .version "../../packages/$pkg/package.json")
             latest=$(npm view "@cloudflare/$pkg" dist-tags.latest --json | jq -er '.')

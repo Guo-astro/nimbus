@@ -26,6 +26,8 @@ interface Project {
   collections?: Record<string, unknown>;
   /** `null` writes no file; a string is written as-is. */
   routes?: string | null;
+  /** Written as `astro.config.ts`. */
+  astroConfig?: string;
 }
 
 interface Envelope {
@@ -63,6 +65,9 @@ function run(
           site: "https://example.test",
         }),
       );
+    }
+    if (project.astroConfig) {
+      fs.writeFileSync(path.join(dir, "astro.config.ts"), project.astroConfig);
     }
     if (typeof project.routes === "string") {
       fs.writeFileSync(path.join(dir, ".nimbus/routes.json"), project.routes);
@@ -187,4 +192,56 @@ test("lint.json with every rule off is a clean run, not an error", () => {
   const result = lint({ rules: { "nimbus/internal-link": "off" }, routes: null });
   assert.equal(result.status, 0);
   assert.deepEqual(result.json.diagnostics, []);
+});
+
+function astroConfig(options: string): string {
+  return [
+    'import { defineConfig } from "astro/config";',
+    'import nimbus from "@cloudflare/nimbus-docs";',
+    `export default defineConfig({ integrations: [nimbus({ title: "Docs" }, ${options})] });`,
+  ].join("\n");
+}
+
+const STALE = /Lint rules changed since \.nimbus\/lint\.json was written[\s\S]*astro sync/;
+
+test("rules edited since lint.json was written: lint says it used the old ones", () => {
+  const res = run({
+    rules: { "nimbus/single-h1": "warn" },
+    astroConfig: astroConfig(`{
+      // comments and quoted rule codes are fine
+      rules: { "nimbus/single-h1": "error" },
+    }`),
+  });
+  assert.match(res.stderr, STALE);
+});
+
+test("only a collection override edited: lint says it used the old rules", () => {
+  const res = run({
+    rules: { "nimbus/single-h1": "warn" },
+    astroConfig: astroConfig(`{
+      rules: { "nimbus/single-h1": "warn" },
+      collections: { docs: { rules: { "nimbus/single-h1": "off" } } },
+    }`),
+  });
+  assert.match(res.stderr, STALE);
+});
+
+test("rules unchanged, or not literal: no stale-rules notice", () => {
+  for (const options of [
+    `{ rules: { "nimbus/single-h1": "warn" } }`,
+    `{ rules: sharedRules }`,
+    `{ ...shared }`,
+  ]) {
+    const res = run({
+      rules: { "nimbus/single-h1": "warn" },
+      astroConfig: astroConfig(options),
+    });
+    assert.doesNotMatch(res.stderr, STALE, options);
+  }
+});
+
+test("--rule nimbus/mdx-syntax says the syntax check always runs", () => {
+  const res = run({}, ["--rule", "nimbus/mdx-syntax"]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /`nimbus\/mdx-syntax` always runs: `lint` reports any file that fails to parse/);
 });

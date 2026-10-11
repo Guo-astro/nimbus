@@ -331,17 +331,28 @@ function describeType(value: unknown): string {
  * Surface warnings to the build log — loud, but capped so a single deviant spec
  * cannot flood the console with thousands of lines.
  */
-function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
+export function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
   // Fallback routes get one summary line below, so they can't push the
   // warnings that need attention past the cap.
   const fallbacks = diagnostics.filter((d) => d.level === "warning" && d.code === "route-fallback");
   const warnings = diagnostics.filter((d) => d.level === "warning" && d.code !== "route-fallback");
-  const CAP = 20;
-  for (const d of warnings.slice(0, CAP)) {
-    console.warn(`[nimbus:api:${collection}] ${d.message}${d.source ? ` (${d.source})` : ""}`);
+  // The same message from many sources is one line: the first source and a count.
+  const groups = new Map<string, { first: Diagnostic; count: number }>();
+  for (const d of warnings) {
+    const group = groups.get(d.message);
+    if (group) group.count++;
+    else groups.set(d.message, { first: d, count: 1 });
   }
-  if (warnings.length > CAP) {
-    console.warn(`[nimbus:api:${collection}] …and ${warnings.length - CAP} more warning(s).`);
+  const CAP = 20;
+  const lines = [...groups.values()];
+  for (const { first, count } of lines.slice(0, CAP)) {
+    const where = [first.source, count > 1 ? `×${count.toLocaleString("en-US")}` : ""]
+      .filter(Boolean)
+      .join(", ");
+    console.warn(`[nimbus:api:${collection}] ${first.message}${where ? ` (${where})` : ""}`);
+  }
+  if (lines.length > CAP) {
+    console.warn(`[nimbus:api:${collection}] …and ${lines.length - CAP} more warning(s).`);
   }
   if (fallbacks.length > 0) {
     const shown = fallbacks.slice(0, 5).map((d) => d.coordinate ?? d.source ?? "?");

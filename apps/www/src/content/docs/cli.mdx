@@ -183,6 +183,8 @@ pnpm nimbus-docs check
 
 Pass `--env`, `--structure`, `--migrations`, `--lint`, or `--types` to run only those categories. `--fix` applies the fixes it can make safely and asks before any fix that needs a value or installs a dependency. Without a terminal it skips the questions and installs only with `--yes`. `--quiet` shows errors only.
 
+`--types` type-checks your `.ts` and `.tsx` files with your own TypeScript. It doesn't read `.astro` files; run `astro check` for those.
+
 `check` exits `1` when an error-severity finding remains, and `0` otherwise. Warnings, informational findings, and checks that couldn't run never change the exit code.
 
 Pass `--json` for agent-readable output. `status` is `passed`, `failed`, or `partial` (some checks couldn't run), and `readiness` is `buildable`, `blocked`, or `unknown`. Each finding has one of three severities:
@@ -193,7 +195,7 @@ Pass `--json` for agent-readable output. `status` is `passed`, `failed`, or `par
 | `warn` | Advisory, such as the placeholder `site` URL. Counted in `summary.warnings`. |
 | `info` | Informational only, such as an optional upgrade entry from `migrate`. Not counted in the summary. |
 
-Checks that couldn't run are listed as `notes` on their scope rather than as findings, each with the reason it was skipped.
+Checks that couldn't run are listed as `notes` on their scope rather than as findings, each with the reason it was skipped. In the terminal, a scope with notes shows `◐ ok, partly checked`.
 
 `check` checks links only when an earlier `astro build` left `.nimbus/routes.json`; without it, link checking is a note, not an error. To gate CI on links, run `astro build` and then `nimbus-docs lint`; see [Check links](/writing/linting#check-links).
 
@@ -212,7 +214,7 @@ Flags — combine with `lint`:
 | `--fix` | apply auto-fixes in place |
 | `--quiet` | errors only, suppress warnings |
 
-Severity overrides live with the integration (`nimbus(config, { rules })`), and `astro build` or `astro dev` writes them to `.nimbus/lint.json`. Without that file, `lint` exits `1` and asks you to build first, unless `--rule` names a rule to run. In-file disables (`nimbusDisableRules` frontmatter, inline comments) work with no config.
+Severity overrides live with the integration (`nimbus(config, { rules })`), and `astro build`, `astro dev` or `astro sync` writes them to `.nimbus/lint.json`. If you've changed the rules since, `lint` says so and asks you to run `astro sync`. Without that file, `lint` exits `1` and asks you to build first, unless `--rule` names a rule to run. In-file disables (`nimbusDisableRules` frontmatter, inline comments) work with no config.
 
 `nimbus/internal-link` and `nimbus/redirected-link` need `astro build` to run first. Without the route list the build writes, lint exits `1` with an error on `.nimbus/routes.json`.
 

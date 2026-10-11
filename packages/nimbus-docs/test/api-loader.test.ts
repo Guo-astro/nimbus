@@ -3,7 +3,9 @@
 
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -903,3 +905,52 @@ function smallcoAsObject(): Record<string, unknown> {
     },
   };
 }
+
+describe("apiCollection loader — an invalid spec is the author's error", () => {
+  const swagger = 'swagger: "2.0"\ninfo: { title: Pets, version: "1" }\npaths: {}\n';
+
+  test("fails with the message and no stack, logged by nobody else", async () => {
+    const dir = mkdtempSync(`${tmpdir()}/nimbus-api-author-`);
+    try {
+      writeFileSync(`${dir}/swagger.yaml`, swagger);
+      const store = makeStore();
+      const { logs, context } = makeContext("pets", store);
+      const { loader } = apiCollection({ collection: "pets", spec: `${dir}/swagger.yaml` });
+      const error = await loader.load(context).then(
+        () => assert.fail("expected the load to fail"),
+        (err: unknown) => err as Error,
+      );
+      assert.equal(error.name, "AstroUserError");
+      assert.equal(error.stack, "");
+      assert.equal(error.cause, undefined);
+      assert.match(error.message, /Failed to build the API reference for "pets"[\s\S]*Swagger 2\.0 isn't supported/);
+      assert.deepEqual(logs.filter((l) => l.level === "error"), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("in dev, a spec edit that breaks it logs the message once", async () => {
+    const dir = mkdtempSync(`${tmpdir()}/nimbus-api-author-dev-`);
+    try {
+      const spec = `${dir}/api.yaml`;
+      writeFileSync(spec, fixtureText("smallco.yaml"));
+      const store = makeStore();
+      const { logs, context } = makeContext("devapi", store);
+      const watcher = Object.assign(new EventEmitter(), { closed: false, add() {} });
+      const { loader } = apiCollection({ collection: "devapi", spec });
+      await loader.load({ ...context, watcher } as never);
+
+      writeFileSync(spec, swagger);
+      watcher.emit("change", spec);
+      for (let i = 0; i < 100 && !logs.some((l) => l.level === "error"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      const errors = logs.filter((l) => l.level === "error");
+      assert.equal(errors.length, 1);
+      assert.match(errors[0]!.msg, /^Failed to build the API reference for "devapi":[\s\S]*Swagger 2\.0 isn't supported/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

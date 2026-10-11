@@ -1455,3 +1455,38 @@ test("the build writes .nimbus/page-collections.json for nimbus-docs check", asy
     mdxFiles: [],
   });
 });
+
+test("policy-rendered routes that export getStaticPaths get one explaining line", async (t) => {
+  const integration = await setupIntegration(t, {
+    default: "request",
+    collections: { docs: "request", blog: "build" },
+  });
+  // A glob string that looks like a comment opener mustn't hide the export.
+  const withStaticPaths =
+    '---\nconst pages = import.meta.glob("/src/*.md");\nexport function getStaticPaths() { return []; }\n/* one entry per page */\n---\n';
+  const mentionsOnly = "---\n// getStaticPaths isn't needed: this renders on request.\n---\n";
+  await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), mentionsOnly, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), withStaticPaths, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), withStaticPaths, "utf8");
+  await integration.routeSetup({
+    route: { component: "src/pages/[...slug].astro", prerender: true },
+  } as never);
+  await integration.routeSetup({
+    route: { component: "src/pages/blog/[...slug].astro", prerender: false },
+  } as never);
+  await integration.routeSetup({
+    route: { component: "src/pages/v1/[...slug].astro", prerender: true },
+  } as never);
+  const infos: string[] = [];
+  const logger = { info: (message: string) => infos.push(message), warn() {}, error() {}, debug() {} };
+  integration.routesResolved({ routes: [], logger } as never);
+  integration.routesResolved({ routes: [], logger } as never);
+
+  // Only the request-rendered docs route; the blog renders at build.
+  assert.equal(infos.length, 1);
+  assert.match(infos[0]!, /renders src\/pages\/\[\.\.\.slug\]\.astro on request/);
+  assert.doesNotMatch(infos[0]!, /blog/);
+  // A comment mentioning getStaticPaths isn't an export; Astro doesn't warn.
+  assert.doesNotMatch(infos[0]!, /v1/);
+  assert.match(infos[0]!, /don't add `export const prerender`/);
+});

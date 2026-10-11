@@ -1462,6 +1462,8 @@ test("policy-rendered routes that export getStaticPaths get one explaining line"
     collections: { docs: "request", blog: "build" },
   });
   const withStaticPaths = "---\nexport function getStaticPaths() { return []; }\n---\n";
+  const mentionsOnly = "---\n// getStaticPaths isn't needed: this renders on request.\n---\n";
+  await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), mentionsOnly, "utf8");
   await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), withStaticPaths, "utf8");
   await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), withStaticPaths, "utf8");
   await integration.routeSetup({
@@ -1469,6 +1471,9 @@ test("policy-rendered routes that export getStaticPaths get one explaining line"
   } as never);
   await integration.routeSetup({
     route: { component: "src/pages/blog/[...slug].astro", prerender: false },
+  } as never);
+  await integration.routeSetup({
+    route: { component: "src/pages/v1/[...slug].astro", prerender: true },
   } as never);
   const infos: string[] = [];
   const logger = { info: (message: string) => infos.push(message), warn() {}, error() {}, debug() {} };
@@ -1479,5 +1484,7 @@ test("policy-rendered routes that export getStaticPaths get one explaining line"
   assert.equal(infos.length, 1);
   assert.match(infos[0]!, /renders src\/pages\/\[\.\.\.slug\]\.astro on request/);
   assert.doesNotMatch(infos[0]!, /blog/);
+  // A comment mentioning getStaticPaths isn't an export; Astro doesn't warn.
+  assert.doesNotMatch(infos[0]!, /v1/);
   assert.match(infos[0]!, /don't add `export const prerender`/);
 });

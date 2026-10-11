@@ -173,6 +173,14 @@ export default defineConfig({ ${astroFields} integrations: [nimbus({ site: "http
   assert.equal(await finding(write(`trailingSlash: "always",`, assets)), undefined);
   assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" },`, null)), undefined);
   assert.equal(await finding(write(`trailingSlash: slash, build: { format: "file" },`, assets)), undefined);
+  // A wrapper other than defineConfig may rewrite the config, so it isn't read.
+  const wrapped = (wrapper: string) => {
+    const dir = write(`trailingSlash: "always", build: { format: "file" },`, assets);
+    const file = path.join(dir, "astro.config.ts");
+    fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("defineConfig({", `defineConfig(${wrapper}({`).replace("] });", "] }));"));
+    return dir;
+  };
+  assert.equal(await finding(wrapped("withDefaults")), undefined);
   assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" }, ...overrides,`, assets)), undefined);
   assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file", ...build },`, assets)), undefined);
   assert.equal(await finding(write(`trailingSlash: "always", build: { format: "file" }, trailingSlash: "never",`, assets)), undefined);

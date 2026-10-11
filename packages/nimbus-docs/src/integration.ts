@@ -2446,8 +2446,14 @@ export function nimbus(
           if (mode !== "request") return;
           try {
             const source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
-            // The same test Astro uses to warn, so this line explains exactly its warnings.
-            if (source.includes("getStaticPaths")) policyRoutesWithStaticPaths.add(route.component);
+            // Astro warns only when the compiled route still has
+            // `getStaticPaths`, so look for an export, not a mention.
+            const code = source.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/(^|[^:])\/\/.*$/gmu, "$1");
+            if (
+              /\bexport\s+(?:async\s+)?(?:function\s*\*?\s*|const\s+|let\s+|var\s+)getStaticPaths\b|\bexport\s*\{[^}]*\bgetStaticPaths\b/u.test(code)
+            ) {
+              policyRoutesWithStaticPaths.add(route.component);
+            }
           } catch {
             // Unreadable route: Astro reports it.
           }

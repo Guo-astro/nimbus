@@ -182,8 +182,22 @@ export function parseAstroConfigFields(cwd: string): {
   if (!found) return null;
   const sourceFile = ts.createSourceFile(found.file, found.source, ts.ScriptTarget.Latest, true, configScriptKind(found.file));
   const constants = new Map<string, ts.Expression>();
+  // Only Astro's `defineConfig` passes the config through unchanged; any
+  // other call may rewrite it, so its fields are unknown.
+  const passThrough = new Set<string>();
   let exported: ts.Expression | undefined;
   for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === "astro/config" &&
+      statement.importClause?.namedBindings &&
+      ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      for (const element of statement.importClause.namedBindings.elements) {
+        if ((element.propertyName ?? element.name).text === "defineConfig") passThrough.add(element.name.text);
+      }
+    }
     if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name) && declaration.initializer) {
@@ -199,7 +213,11 @@ export function parseAstroConfigFields(cwd: string): {
       return objectOf(expression.expression, depth + 1);
     }
     if (ts.isObjectLiteralExpression(expression)) return expression;
-    if (ts.isCallExpression(expression)) return objectOf(expression.arguments[0], depth + 1);
+    if (ts.isCallExpression(expression)) {
+      return ts.isIdentifier(expression.expression) && passThrough.has(expression.expression.text)
+        ? objectOf(expression.arguments[0], depth + 1)
+        : undefined;
+    }
     if (ts.isIdentifier(expression)) return objectOf(constants.get(expression.text), depth + 1);
     return undefined;
   };

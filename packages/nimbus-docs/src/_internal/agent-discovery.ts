@@ -88,7 +88,9 @@ export function agentDiscoveryManifest(
     );
   for (const api of capabilities.apis) {
     if (!api.spec) continue;
-    const name = api.version ? `${api.collection} ${api.version}` : api.collection;
+    const name = api.version
+      ? `${api.collection} ${api.version}`
+      : api.collection;
     add(
       `api-${token(api.collection)}${api.version ? `-${token(api.version)}` : ""}`,
       `${options.title} ${name} API specification`,
@@ -160,9 +162,17 @@ export function agentDiscoveryHeaderRules(
   capabilities: AgentCapabilities,
   options: AgentDiscoveryOptions,
   /** Published files needing a media type, hidden versions' included. */
-  files: { pathname: string; type: string }[] = capabilities.apis.flatMap((api) =>
-    api.spec ? [{ pathname: new URL(api.spec.url).pathname, type: api.spec.type }] : [],
+  files: { pathname: string; type: string }[] = capabilities.apis.flatMap(
+    (api) =>
+      api.spec
+        ? [{ pathname: new URL(api.spec.url).pathname, type: api.spec.type }]
+        : [],
   ),
+  text: {
+    paths?: readonly string[];
+    ownerHeaders?: string;
+    warn?: (message: string) => void;
+  } = {},
 ): string {
   const home = withBase("/", options.base).replace(/\/$/, "");
   const homePaths = new Set([home || "/", `${home}/`]);
@@ -180,10 +190,55 @@ export function agentDiscoveryHeaderRules(
       `${path}\n  Content-Type: application/json\n  Access-Control-Allow-Origin: *`,
     );
   }
-  if (capabilities.homepageMarkdownUrl)
-    rules.push(
-      `${new URL(capabilities.homepageMarkdownUrl).pathname}\n  Content-Type: text/markdown; charset=utf-8`,
+  const ownerTypes = ownerContentTypePatterns(text.ownerHeaders ?? "");
+  const addTextRule = (pattern: string, type: string, members: string[]) => {
+    if (!members.length) return;
+    const covered = members.filter((pathname) =>
+      ownerTypes.some((rule) => headerPatternMatches(rule, pathname)),
     );
+    // Matching Content-Type values are comma-joined by static hosts. Keep
+    // explicit owner policies, including the original issue's wildcard fix.
+    if (covered.length) {
+      if (covered.length < members.length)
+        text.warn?.(
+          `Owner Content-Type rules overlap ${pattern}; set the UTF-8 charset for this family in public/_headers.`,
+        );
+      return;
+    }
+    rules.push(`${pattern}\n  Content-Type: ${type}; charset=utf-8`);
+  };
+  if (capabilities.homepageMarkdownUrl) {
+    const pathname = new URL(capabilities.homepageMarkdownUrl).pathname;
+    addTextRule(pathname, "text/markdown", [pathname]);
+  }
+  const paths = text.paths ?? [];
+  for (const [pattern, type] of [
+    ["/llms.txt", "text/plain"],
+    ["/llms-full.txt", "text/plain"],
+    ["/robots.txt", "text/plain"],
+    ["/*/llms.txt", "text/plain"],
+    ["/*/index.md", "text/markdown"],
+  ] as const) {
+    // A fixed number of narrow families avoids Cloudflare's 100-rule limit
+    // without changing unrelated .txt or .md downloads.
+    const members = paths
+      .filter((pathname) => headerPatternMatches(pattern, pathname))
+      .map(
+        (pathname) =>
+          new URL(
+            withBase(
+              pathname.split("/").map(encodeURIComponent).join("/"),
+              options.base,
+            ),
+            options.site,
+          ).pathname,
+      );
+    addTextRule(
+      new URL(withBase(pattern, options.base), options.site).pathname,
+      type,
+      members,
+    );
+  }
   if (capabilities.apis.length) {
     // Extensionless, so no host can infer its type; HEAD carries the Link too.
     rules.push(
@@ -191,7 +246,9 @@ export function agentDiscoveryHeaderRules(
     );
   }
   for (const file of files)
-    rules.push(`${file.pathname}\n  Content-Type: ${file.type}\n  Access-Control-Allow-Origin: *`);
+    rules.push(
+      `${file.pathname}\n  Content-Type: ${file.type}\n  Access-Control-Allow-Origin: *`,
+    );
   if (capabilities.skillsIndexUrl) {
     // Static hosts infer SKILL.md and .tar.gz types from the extension; the
     // RFC wants CORS on everything and application/json on the index.
@@ -208,15 +265,7 @@ export function appendAgentDiscoveryHeaders(
   ownerHeaders: string,
   generated: string,
 ): string {
-  let owner = ownerHeaders
-    .replace(
-      /\r?\n# Nimbus agent discovery headers \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery headers/g,
-      "",
-    )
-    .replace(
-      /^# Nimbus agent discovery \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery\r?\n?/gm,
-      "",
-    );
+  let owner = withoutGeneratedHeaders(ownerHeaders);
   const rules = new Map(
     generated
       .replace(/^#.*\r?\n?/gm, "")
@@ -254,4 +303,47 @@ export function appendAgentDiscoveryHeaders(
         ? "\n"
         : "\n\n";
   return `${owner}${separator}${remaining}`;
+}
+
+function withoutGeneratedHeaders(headers: string): string {
+  return headers
+    .replace(
+      /\r?\n# Nimbus agent discovery headers \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery headers/g,
+      "",
+    )
+    .replace(
+      /^# Nimbus agent discovery \(generated\)\r?\n[\s\S]*?# End Nimbus agent discovery\r?\n?/gm,
+      "",
+    );
+}
+
+function ownerContentTypePatterns(headers: string): string[] {
+  const patterns = new Set<string>();
+  let pattern = "";
+  for (const line of withoutGeneratedHeaders(headers).split(/\r?\n/)) {
+    if (!line || line.startsWith("#")) continue;
+    if (!/^\s/.test(line)) pattern = line.trimEnd();
+    else if (/^\s+Content-Type:/i.test(line)) patterns.add(pattern);
+  }
+  return [...patterns];
+}
+
+function headerPatternMatches(pattern: string, pathname: string): boolean {
+  // Path-only generated rules apply on preview hosts too. Conservatively
+  // honor an absolute owner policy even when its hostname differs from site.
+  if (pattern.startsWith("https://")) {
+    const pathStart = pattern.indexOf("/", "https://".length);
+    pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
+  }
+  let source = "";
+  let offset = 0;
+  for (const token of pattern.matchAll(/\*|:[A-Za-z]\w*/g)) {
+    source += pattern
+      .slice(offset, token.index)
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    source += token[0] === "*" ? ".*" : "[^/]+";
+    offset = token.index + token[0].length;
+  }
+  source += pattern.slice(offset).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${source}$`).test(pathname);
 }

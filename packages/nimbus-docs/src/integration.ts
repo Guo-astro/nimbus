@@ -3101,6 +3101,11 @@ export function nimbus(
               discovery.capabilities,
               discovery.options,
               discovery.specFiles.map((spec) => ({ pathname: new URL(spec.url).pathname, type: spec.type })),
+              {
+                paths: emittedFileRoutes(distDir, assetsDirForBuild),
+                ownerHeaders,
+                warn: (message) => logger.warn(message),
+              },
             ),
           ),
         );

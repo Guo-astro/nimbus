@@ -81,20 +81,20 @@ describe("request body: required and description", () => {
     const page = getApiPageProps(m, "addNote") as ApiOperationPage;
     assert.equal(page.bodyRequired, false);
     assert.equal("bodyDescription" in page, false);
-    assert.match(renderApiPageMarkdown(page), /## Request body\n\n_Optional\._\n\n- `addNote\.text`/);
+    assert.match(renderApiPageMarkdown(page), /## Request body\n\n_Optional\._\n\n- `text` \(`addNote\.text`;/);
   });
 
   test("Markdown states required-ness and the description under the body heading", () => {
     const out = md("createWidget");
     assert.match(
       out,
-      /## Request body\n\n_Required\._\n\nThe widget to create\. Names must be \*\*unique\*\* within an account\.\n\nSee \[naming rules\]\(https:\/\/example\.com\/naming\) for details\.\n\n- `createWidget\.name` \(string, required\)/,
+      /## Request body\n\n_Required\._\n\nThe widget to create\. Names must be \*\*unique\*\* within an account\.\n\nSee \[naming rules\]\(https:\/\/example\.com\/naming\) for details\.\n\n- `name` \(`createWidget\.name`; string, required\)/,
     );
   });
 
   test("Markdown for a body with neither is unchanged: no required line, no description", () => {
     const out = md("updateWidget");
-    assert.match(out, /## Request body\n\n- `updateWidget\.name` \(string, optional\)/);
+    assert.match(out, /## Request body\n\n- `name` \(`updateWidget\.name`; string, optional\)/);
     assert.doesNotMatch(out, /_Required\._|_Optional\._/);
   });
 
@@ -195,13 +195,13 @@ describe("responses: every media type renders", () => {
     const ok = out.slice(out.indexOf("### 200"), out.indexOf("### 404"));
     assert.match(
       ok,
-      /^### 200\n\nEvery widget, as JSON or CSV\.\n\n#### Body \(application\/json\)\n\n- `exportWidgets\.response\.200\.widgets`/,
+      /^### 200\n\nEvery widget, as JSON or CSV\.\n\n#### Body \(application\/json\)\n\n- `widgets` \(`exportWidgets\.response\.200\.widgets`;/,
     );
     assert.ok(
       ok.indexOf("#### Body (application/json)") < ok.indexOf("#### Body (text/csv)"),
       "primary before additional",
     );
-    assert.match(ok, /#### Body \(text\/csv\)\n\n- `exportWidgets\.response\.200\.text-csv\.id` \(string, optional\) — Widget ID column\./);
+    assert.match(ok, /#### Body \(text\/csv\)\n\n- `id` \(`exportWidgets\.response\.200\.text-csv\.id`; string, optional\) — Widget ID column\./);
     assert.match(ok, /##### Example\n\n```json\n\{\n  "widgets"/);
     assert.match(ok, /##### Example\n\n```text\nid,name\nwgt_1,Gear\n/);
     assert.doesNotMatch(ok, /^#### Example$/m, "single-media example heading is not used");

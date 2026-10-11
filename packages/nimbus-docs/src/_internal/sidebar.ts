@@ -1400,7 +1400,7 @@ function pinSectionOverviewFirst(
   return next;
 }
 
-function formatLabel(segment: string): string {
+export function formatLabel(segment: string): string {
   return segment.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 

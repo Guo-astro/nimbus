@@ -74,12 +74,9 @@ export function buildLlmsFullMarkdown(
   for (const block of sorted) {
     lines.push(`# ${block.title}`, "");
     if (block.description) lines.push(`> ${block.description}`, "");
-    lines.push(
-      `Source: ${abs(block.url)} · Markdown: ${abs(block.markdownUrl)}`,
-      "",
-      block.markdown,
-      "",
-    );
+    lines.push(`Source: ${abs(block.url)} · Markdown: ${abs(block.markdownUrl)}`, "");
+    // A page with no body adds no blank run.
+    if (block.markdown.trim()) lines.push(block.markdown, "");
   }
 
   return lines.join("\n");

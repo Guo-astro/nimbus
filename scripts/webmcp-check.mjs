@@ -245,7 +245,8 @@ try {
         section.url.startsWith("https://example.com/docs/"),
         section.url,
       );
-      assert.ok(section.url.includes("#"));
+      assert.ok(!section.url.endsWith("#"), section.url);
+      assert.ok(!/Copy page|View as Markdown/.test(section.excerpt), section.excerpt);
       assert.ok(section.excerpt.length <= 2000);
       assert.ok(!section.excerpt.includes("<mark>"));
     }

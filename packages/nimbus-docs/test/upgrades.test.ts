@@ -46,6 +46,7 @@ test("only universally skippable entries are optional", () => {
       "lighter-sidebar-markup",
       "markdown-features",
       "math-rendering",
+      "page-actions-out-of-search",
       "page-urls-and-llms-routes",
       "publish-agent-skills",
       "shared-markdown-routes",

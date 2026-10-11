@@ -141,4 +141,9 @@ describe("buildLlmsFullMarkdown", () => {
     assert.equal(out.match(/^# One$/gm)?.length, 1);
     assert.equal(out.match(/^# Two$/gm)?.length, 1);
   });
+
+  test("a page with no body adds no blank run", () => {
+    const out = buildLlmsFullMarkdown([block({ title: "Empty", markdown: "" })], HEADER);
+    assert.match(out, /# Empty\n\nSource: https:\/\/docs\.acme\.dev\/page\/ · Markdown: https:\/\/docs\.acme\.dev\/page\/index\.md\n$/);
+  });
 });

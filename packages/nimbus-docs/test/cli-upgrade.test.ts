@@ -447,3 +447,21 @@ test("diff names a project file it doesn't track", async () => {
     fixture.cleanup();
   }
 });
+
+test("diff on a file that doesn't exist fails, with or without --apply", async () => {
+  const fixture = starterFixture();
+  try {
+    const { project, source } = fixture;
+    const { log } = await import("@clack/prompts");
+    const original = log.error;
+    log.error = () => {};
+    try {
+      assert.equal((await runDiff("src/pages/typo.astro", {}, { cwd: project, source })).exitCode, 1);
+      assert.equal((await runDiff("src/pages/typo.astro", { apply: true }, { cwd: project, source })).exitCode, 1);
+    } finally {
+      log.error = original;
+    }
+  } finally {
+    fixture.cleanup();
+  }
+});

@@ -25,7 +25,11 @@ interface Props {
 
 const { method, path, server, isWebhook, class: className } = Astro.props;
 
-const url = `${server ?? ""}${path}`;
+// A server URL can carry a query or fragment (`…/v1?key=1`); the path goes before it.
+const at = server?.search(/[?#]/) ?? -1;
+const serverQuery = at < 0 ? "" : server!.slice(at);
+const base = at < 0 ? (server ?? "") : server!.slice(0, at).replace(/\/+$/, "");
+const url = `${base}${path}${serverQuery}`;
 const copyLabel = server ? "Copy request URL" : "Copy path";
 const variant = methodVariant(method);
 ---
@@ -39,7 +43,7 @@ const variant = methodVariant(method);
   </LayerCardHeader>
   <LayerCardContent class="flex-row items-stretch gap-0 p-0">
     <code class="min-w-0 grow self-center truncate px-3 font-mono text-[0.8125rem] text-foreground">
-      {server && <span class="text-muted-foreground">{server}</span>}{path}
+      {server && <span class="text-muted-foreground">{base}</span>}{path}{serverQuery && <span class="text-muted-foreground">{serverQuery}</span>}
     </code>
     {isWebhook && <Badge text="Webhook" variant="outline" class="me-3 self-center" />}
     <button

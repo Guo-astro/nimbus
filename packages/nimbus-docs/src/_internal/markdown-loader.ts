@@ -351,7 +351,10 @@ export function prepareMarkdownLoader<T extends Loader>(
         entries: Iterable<StoreEntry> = context.store.values(),
         publish?: () => () => void,
       ) => {
-        const sourceEntries = [...entries];
+        // Astro drops an empty body (frontmatter-only file); it is still a page.
+        const sourceEntries = [...entries].map((entry) =>
+          typeof entry.body === "string" ? entry : { ...entry, body: "" },
+        );
         const headings = new Map<
           string,
           Array<{ depth: number; text: string; slug: string }>

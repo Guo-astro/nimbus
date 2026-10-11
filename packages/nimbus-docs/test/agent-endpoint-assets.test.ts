@@ -331,6 +331,26 @@ test("bakes expanded source and transformed Markdown endpoint assets determinist
   assert.equal(manifest, `${JSON.stringify(first, null, 2)}\n`);
 });
 
+test("a section takes its index page's sidebar group label, then its title", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    {
+      id: "guide",
+      body: "Overview",
+      data: { title: "Guides overview", sidebar: { group: { label: "Guides" } } },
+    },
+    { id: "guide/a", body: "Guide A", data: { title: "Guide A" } },
+    { id: "ref", body: "Reference", data: { title: "Reference home" } },
+    { id: "ref/a", body: "Ref A", data: { title: "Ref A" } },
+  ]);
+  const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test" };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  const index = await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" });
+  assert.match(index.body, /\[Guides\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/);
+  assert.match(index.body, /\[Reference home\]\(https:\/\/example\.test\/docs\/ref\/llms\.txt\)/);
+});
+
 test("bakes site and section llms.txt endpoint assets from public discoverable prose and API pages", async () => {
   const projectRoot = await root();
   commit(projectRoot, "docs", [
@@ -421,11 +441,11 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
   );
   assert.match(
     index.body,
-    /\[guide\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/,
+    /\[Guide\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/,
   );
   assert.match(
     index.body,
-    /\[api\]\(https:\/\/example\.test\/docs\/api\/llms\.txt\)/,
+    /\[API\]\(https:\/\/example\.test\/docs\/api\/llms\.txt\)/,
   );
   assert.doesNotMatch(index.body, /v1|Hidden/);
 
@@ -434,6 +454,8 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
     surface: "index",
     section: "guide",
   });
+  // Sections are named for their index page, or their folder as the sidebar names it.
+  assert.match(guide.body, /^# Guide\n/);
   assert.match(guide.body, /Guide A/);
   assert.match(guide.body, /Guide B.*Second guide/);
   assert.doesNotMatch(guide.body, /Hidden/);

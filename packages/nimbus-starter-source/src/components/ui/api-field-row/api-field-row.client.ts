@@ -22,6 +22,14 @@ document.addEventListener("click", (event) => {
   if (details) details.open = !details.open;
 });
 
+// Touch screens have no hover to reveal a field's anchor: tapping its name does.
+const touch = matchMedia("(hover: none)");
+document.addEventListener("click", (event) => {
+  if (!touch.matches) return;
+  const item = (event.target as Element).closest?.(".fl-name")?.closest(".fl-item");
+  item?.toggleAttribute("data-anchor-shown");
+});
+
 // Keep aria-expanded true to the details, however it was toggled (button,
 // Expand all, deep link, find-in-page).
 document.addEventListener(

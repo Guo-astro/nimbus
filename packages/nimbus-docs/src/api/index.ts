@@ -122,7 +122,7 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
   const key = `${collectionKey(source.collection)}${options}::${specDigest(raw)}`;
   const cached = handleCache.get(key);
   if (cached) return cached;
-  const promise = parseOpenApi(source).then((r) => wrap(r.model));
+  const promise = parseOpenApi(source, key).then((r) => wrap(r.model));
   handleCache.set(key, promise);
   // Never leave a rejected promise cached — a transient parse failure in dev
   // would otherwise be sticky until the server restarts.

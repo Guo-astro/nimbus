@@ -138,10 +138,10 @@ function renderField(field: ApiFieldView, depth: number, out: string[], base?: s
   flags.push(field.required ? "required" : "optional");
   if (field.nullable) flags.push("nullable");
   if (field.deprecated) flags.push("deprecated");
-  // The field's own coordinate is its identifier — `create.amount`, not the bare
-  // leaf `amount` — so an agent reading the Markdown can cite it unambiguously.
-  // Indentation still conveys nesting; the leaf is the suffix.
-  let head = `${pad}- ${inlineCode(field.coordinate)} (${flags.join(", ")})`;
+  // Named as the page names it, with its coordinate (`create.amount`) beside
+  // it so an agent can still cite the field unambiguously.
+  const id = field.name && field.name !== field.coordinate ? `${inlineCode(field.name)} (${inlineCode(field.coordinate)}; ` : `${inlineCode(field.coordinate)} (`;
+  let head = `${pad}- ${id}${flags.join(", ")})`;
   if (field.description) head += ` — ${inlineText(field.description)}`;
   if (field.link) head += ` (${link("details", field.link.href, base)})`;
   out.push(head);

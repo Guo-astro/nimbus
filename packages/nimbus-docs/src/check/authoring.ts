@@ -13,6 +13,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Features } from "satteri";
+
+import { setMarkdownFeatures } from "../_internal/markdown-features.js";
 import {
   findMdxFiles,
   lintPaths,
@@ -32,6 +35,7 @@ export function checkAuthoring(cwd: string): ScopeReport {
   const notes: Note[] = [];
   const hasLintJson = fs.existsSync(path.join(cwd, ".nimbus", "lint.json"));
   const { config, error } = loadMaterializedConfig(cwd);
+  if (config.markdownFeatures) setMarkdownFeatures(config.markdownFeatures);
 
   if (error) {
     findings.push({
@@ -81,6 +85,7 @@ export interface MaterializedConfig {
   rules: RulesConfig;
   collections: CollectionsConfig;
   site?: string;
+  markdownFeatures?: Features;
 }
 
 export interface LoadMaterializedResult {
@@ -106,7 +111,7 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
     return { config: { rules: {}, collections: {} }, error: null };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown };
+  let parsed: { rules?: unknown; collections?: unknown; site?: unknown; markdownFeatures?: unknown };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -123,12 +128,20 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
       IMPLEMENTED_CODES,
     );
     const site = typeof parsed.site === "string" ? parsed.site : undefined;
+    const markdownFeatures = materializedFeatures(parsed.markdownFeatures);
     return {
-      config: { rules: validated.rules, collections: validated.collections, site },
+      config: { rules: validated.rules, collections: validated.collections, site, markdownFeatures },
       error: null,
     };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { config: { rules: {}, collections: {} }, error: `${rel} is invalid — ${detail}.` };
   }
+}
+
+/** The site's Markdown features from `.nimbus/lint.json`; files from older builds have none. */
+export function materializedFeatures(value: unknown): Features | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Features)
+    : undefined;
 }

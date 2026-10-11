@@ -820,7 +820,7 @@ async function assertProvenance(registryItems, registryUrl, initialNimbus) {
     const conflicts = await Promise.all(
       item.files.map((file) => exists(join(site, "src", file.path))),
     );
-    // This runs after add, so use the initial scaffold inventory captured on each item.
+    // This runs after add, so use the scaffold's conflicts captured on each item before it.
     if (!item.hadConflict) expectedAdded.push(item);
     assert(
       conflicts.every(Boolean),
@@ -1631,10 +1631,15 @@ async function execute() {
   const initialNimbus = JSON.parse(
     await readFile(join(site, "nimbus.json"), "utf8"),
   );
+  // `add` keeps a component, unrecorded, only when a file it would write
+  // already exists with different content; identical files are up to date.
   for (const item of registryItems) {
     item.hadConflict = (
       await Promise.all(
-        item.files.map((file) => exists(join(site, "src", file.path))),
+        item.files.map(async (file) => {
+          const target = join(site, "src", file.path);
+          return (await exists(target)) && (await readFile(target, "utf8")) !== file.content;
+        }),
       )
     ).some(Boolean);
   }

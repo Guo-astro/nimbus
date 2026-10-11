@@ -120,7 +120,22 @@ async function loadParser(): Promise<ScalarParserModule> {
   }
 }
 
-export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
+// A build parses each spec in two module graphs (config setup, then content
+// sync), so the once-only record lives on globalThis.
+const surfaced: Set<string> = ((globalThis as Record<symbol, unknown>)[Symbol.for("nimbus.api.surfaced")] ??= new Set<string>()) as Set<string>;
+
+/**
+ * `onceKey` names an identical parse (same spec, collection and options);
+ * its warnings print only the first time it's parsed in this process.
+ */
+export async function parseOpenApi(source: SpecSource, onceKey?: string): Promise<ParseResult> {
+  const surface = (collection: string, diagnostics: readonly Diagnostic[]) => {
+    if (onceKey !== undefined) {
+      if (surfaced.has(onceKey)) return;
+      surfaced.add(onceKey);
+    }
+    surfaceWarnings(collection, diagnostics);
+  };
   const parser = await loadParser();
   const label = source.label ?? source.collection;
 
@@ -224,13 +239,13 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];
-    surfaceWarnings(source.collection, diagnostics);
+    surface(source.collection, diagnostics);
     return { model, diagnostics };
   } catch (err) {
     // Warnings gathered before the abort explain *why* it aborted — a lowercase
     // `4xx` key, an unresolved `$ref`. Never swallow them just because a later
     // stage threw; surface them alongside the failure.
-    surfaceWarnings(source.collection, [
+    surface(source.collection, [
       ...preDiagnostics,
       ...(walker?.registry.getDiagnostics() ?? []),
     ]);
@@ -317,13 +332,24 @@ function describeType(value: unknown): string {
  * cannot flood the console with thousands of lines.
  */
 function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
-  const warnings = diagnostics.filter((d) => d.level === "warning");
+  // Fallback routes get one summary line below, so they can't push the
+  // warnings that need attention past the cap.
+  const fallbacks = diagnostics.filter((d) => d.level === "warning" && d.code === "route-fallback");
+  const warnings = diagnostics.filter((d) => d.level === "warning" && d.code !== "route-fallback");
   const CAP = 20;
   for (const d of warnings.slice(0, CAP)) {
     console.warn(`[nimbus:api:${collection}] ${d.message}${d.source ? ` (${d.source})` : ""}`);
   }
   if (warnings.length > CAP) {
     console.warn(`[nimbus:api:${collection}] …and ${warnings.length - CAP} more warning(s).`);
+  }
+  if (fallbacks.length > 0) {
+    const shown = fallbacks.slice(0, 5).map((d) => d.coordinate ?? d.source ?? "?");
+    console.warn(
+      `[nimbus:api:${collection}] ${fallbacks.length} operation(s) have no unambiguous route and use their ` +
+        `coordinate as the URL slug (${shown.join(", ")}${fallbacks.length > shown.length ? ", …" : ""}). ` +
+        `Name them in \`routes.operations\` to pin stable URLs.`,
+    );
   }
   // Per-op fallback warnings can be hidden entirely by the CAP on a large spec;
   // emit a guaranteed aggregate last so the author always sees the count and fix.

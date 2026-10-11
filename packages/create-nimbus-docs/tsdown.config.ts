@@ -33,6 +33,9 @@ export default defineConfig({
   platform: "node",
   clean: true,
   dts: false,
+  // Bundle the adapter recipes so `npm create` installs a handful of
+  // packages, not the framework and its build tools.
+  noExternal: ["@cloudflare/nimbus-docs"],
   outputOptions: {
     entryFileNames: "[name].js",
     chunkFileNames: "[name]-[hash].js",

@@ -24,6 +24,8 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
+  /** The plain `check` command, in the site's package manager. */
+  rerun: string;
   /**
    * Fixes `--fix` skipped: prompts for a value need a terminal, installs need
    * `--yes`. `invocation` is then the `check --fix` command to build on.
@@ -196,7 +198,7 @@ function renderHeadline(
   }
 
   if (result.status === "passed") return passedHeadline(result, opts, secs, paint);
-  return partialHeadline(result, secs, paint);
+  return partialHeadline(result, opts, secs, paint);
 }
 
 /**
@@ -207,6 +209,7 @@ function renderHeadline(
  */
 function partialHeadline(
   result: CheckResult,
+  opts: PrettyOptions,
   secs: string,
   paint: (code: string, text: string) => string,
 ): string[] {
@@ -229,7 +232,7 @@ function partialHeadline(
         (s) => s.status === "not_evaluated" || s.notes.some((n) => !n.requiresInput),
       );
       if (buildHelps) {
-        out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
+        out.push(paint(COLORS.dim, `    → run a build, then \`${opts.rerun}\` again`));
       }
     }
     return out;
@@ -244,7 +247,7 @@ function partialHeadline(
   const out =
     passed.length > 0
       ? [paint(COLORS.green, `  ✓ ${passed.join(" + ")} checked in ${secs}s`)]
-      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`nimbus-docs check\` again`)];
+      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`${opts.rerun}\` again`)];
   if (gapLine) out.push(gapLine);
   return out;
 }

@@ -1,5 +1,4 @@
-import { mdxToMdast } from "satteri-source-parser";
-
+import { parseMarkdownSource } from "./markdown-source.js";
 import type { PreparedMarkdownEntry } from "./prepared-markdown-registry.js";
 
 interface MdNode {
@@ -35,22 +34,7 @@ export interface ExpandPreparedPartialsOptions {
   }) => string;
 }
 
-function offsetMap(source: string): number[] {
-  const offsets = [0];
-  let index = 0;
-  while (index < source.length) {
-    const codePoint = source.codePointAt(index);
-    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-    offsets.push(index);
-  }
-  return offsets;
-}
-
-function range(
-  node: MdNode,
-  offsets: number[],
-  sourceId: string,
-): [number, number] {
+function range(node: MdNode, sourceId: string): [number, number] {
   const start = node.position?.start?.offset;
   const end = node.position?.end?.offset;
   if (typeof start !== "number" || typeof end !== "number") {
@@ -58,18 +42,12 @@ function range(
       `nimbus-docs: ${sourceId} has a <Render> node without a source position.`,
     );
   }
-  const utf16Start = offsets[start];
-  const utf16End = offsets[end];
-  if (
-    utf16Start === undefined ||
-    utf16End === undefined ||
-    utf16End < utf16Start
-  ) {
+  if (end < start) {
     throw new Error(
       `nimbus-docs: ${sourceId} has an invalid <Render> source position.`,
     );
   }
-  return [utf16Start, utf16End];
+  return [start, end];
 }
 
 function walk(node: MdNode, callback: (node: MdNode) => void): void {
@@ -82,7 +60,7 @@ function walk(node: MdNode, callback: (node: MdNode) => void): void {
 
 function parseSource(source: string, sourceId: string): MdNode {
   try {
-    return mdxToMdast(source) as unknown as MdNode;
+    return parseMarkdownSource(source) as unknown as MdNode;
   } catch (error) {
     throw new Error(
       `nimbus-docs: failed to parse prepared source for ${sourceId}.`,
@@ -197,7 +175,6 @@ function applyParams(
   sourceId: string,
 ): string {
   const tree = parseSource(source, sourceId);
-  const offsets = offsetMap(source);
   const replacements: Replacement[] = [];
   walk(tree, (node) => {
     if (node.type !== "mdxTextExpression" && node.type !== "mdxFlowExpression")
@@ -208,7 +185,7 @@ function applyParams(
       params,
     ).parseReference();
     if (!value.matched) return;
-    const [start, end] = range(node, offsets, sourceId);
+    const [start, end] = range(node, sourceId);
     replacements.push({ start, end, value: markdownValue(value.value) });
   });
   return replace(source, replacements);
@@ -235,7 +212,6 @@ async function expand(
   if (/\.md$/iu.test(options.sourceId)) return source;
   const prepared = applyParams(source, params, options.sourceId);
   const tree = parseSource(prepared, options.sourceId);
-  const offsets = offsetMap(prepared);
   const renders: MdNode[] = [];
   const collect = (node: MdNode): void => {
     if (
@@ -272,16 +248,27 @@ async function expand(
       );
     }
     validateParams(partial, invocation.params);
-    const [start, end] = range(render, offsets, options.sourceId);
+    const [start, end] = range(render, options.sourceId);
+    // A partial inside a list item or quote continues it: every line after
+    // the first takes the container's prefix (quote markers kept, list
+    // markers turned into the spaces that align with the item's text).
+    const lineStart = prepared.lastIndexOf("\n", start - 1) + 1;
+    const container = /^(?:[ \t]*>[ \t]?|[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+|[ \t]+)*/u
+      .exec(prepared.slice(lineStart, start))![0]
+      .replace(/[-*+]|\d{1,9}[.)]/gu, (marker) => " ".repeat(marker.length));
+    const body = await expand(
+      partial.body,
+      invocation.params,
+      { ...options, sourceId: `partials:${partial.filePath ?? partial.id}` },
+      [...chain, invocation.file],
+    );
     replacements.push({
       start,
       end,
-      value: await expand(
-        partial.body,
-        invocation.params,
-        { ...options, sourceId: `partials:${partial.filePath ?? partial.id}` },
-        [...chain, invocation.file],
-      ),
+      value: body
+        .split("\n")
+        .map((line, i) => (i === 0 ? line : line ? container + line : container.trimEnd()))
+        .join("\n"),
     });
   }
   return replace(prepared, replacements);

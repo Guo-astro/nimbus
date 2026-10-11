@@ -34,7 +34,11 @@ import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { AstroIntegration, ShikiConfig } from "astro";
 import mdx from "@astrojs/mdx";
-import type { HastPluginInput, MdastPluginInput } from "satteri";
+import type {
+  Features as SatteriFeatures,
+  HastPluginInput,
+  MdastPluginInput,
+} from "satteri";
 import sitemap from "@astrojs/sitemap";
 import {
   configureAdmonitions,
@@ -171,6 +175,8 @@ import {
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
 import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
+import { setMarkdownFeatures } from "./_internal/markdown-features.js";
+import { MATH_PLUGIN } from "./markdown/math.js";
 import { buildLastUpdatedIndex } from "./_internal/git-last-updated.js";
 import { virtualLastUpdatedPlugin } from "./_internal/last-updated-virtual.js";
 import {
@@ -329,6 +335,14 @@ export interface NimbusIntegrationOptions {
     hastPlugins?: HastPluginInput[];
     /** Sätteri mdast plugins appended to the default processor's user mdast stage, in array order. Ignored when a custom `processor` is supplied. */
     mdastPlugins?: MdastPluginInput[];
+    /**
+     * Sätteri syntax features, such as `{ headingAttributes: true }` for
+     * `## Install {#install}` or `{ math: true }`. Every Nimbus pass
+     * (rendering, generated Markdown, partials, lint) reads Markdown with
+     * these. Ignored when a custom `processor` is supplied: Nimbus reads that
+     * processor's features instead.
+     */
+    features?: SatteriFeatures;
     /** Build-time transforms for project-specific MDX components in generated Markdown. */
     componentMap?: Record<string, GeneratedMarkdownComponentTransform>;
     /** Build-time mapping from static `<Render>` attributes to partial IDs. */
@@ -1310,6 +1324,39 @@ export function nimbus(
         sitemapBareRootUrl = null;
         sitemapHasResolvedRootPage = false;
 
+        // One reading of Markdown for the whole site: every internal parse
+        // (link rewriting, partials, generated Markdown, lint, the code-language
+        // scan) uses the features the pages render with.
+        const mdxOptions = resolveMdxOptions(options.mdx);
+        const { createDefaultMarkdownProcessor, processorFeatures } =
+          await import("./_internal/default-markdown-processor.js");
+        const baseMarkdownProcessor =
+          options.markdown?.processor ??
+          createDefaultMarkdownProcessor({
+            hastPlugins: options.markdown?.hastPlugins,
+            mdastPlugins: options.markdown?.mdastPlugins,
+            features: options.markdown?.features,
+          });
+        const features = processorFeatures(
+          mdxOptions.processor ?? baseMarkdownProcessor,
+          {
+            gfm: astroConfig.markdown?.gfm !== false,
+            smartPunctuation: astroConfig.markdown?.smartypants !== false,
+          },
+        );
+        setMarkdownFeatures(features);
+        // `math()` renders MathML that needs Temml's stylesheet and the font
+        // stack; a site with math switched off ships neither.
+        if (
+          !options.markdown?.processor &&
+          options.markdown?.features?.math &&
+          (options.markdown?.hastPlugins as unknown[] | undefined)
+            ?.flat(Infinity)
+            .some((plugin) => typeof plugin === "function" && MATH_PLUGIN in plugin)
+        ) {
+          params.injectScript("page-ssr", 'import "@cloudflare/nimbus-docs/styles/math.css";');
+        }
+
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded
         // — a write failure must never break the build.
@@ -1318,6 +1365,7 @@ export function nimbus(
           lintOptions.rules,
           lintOptions.collections,
           config.site,
+          features,
         );
 
         // Pre-build MDX validation. Runs as a content pass against
@@ -1984,7 +2032,6 @@ export function nimbus(
         }
 
         // MDX is always added; sitemap only when `site` is configured.
-        const mdxOptions = resolveMdxOptions(options.mdx);
         const wantSitemap = options.sitemap !== false && Boolean(config.site);
         const sitemapOpts =
           typeof options.sitemap === "object" ? options.sitemap : undefined;
@@ -2055,18 +2102,6 @@ export function nimbus(
           ? await buildLastUpdatedIndex(projectRoot)
           : null;
 
-        const baseMarkdownProcessor =
-          options.markdown?.processor ??
-          (
-            await import("./_internal/default-markdown-processor.js")
-          ).createDefaultMarkdownProcessor({
-            hastPlugins: options.markdown?.hastPlugins,
-            mdastPlugins: options.markdown?.mdastPlugins,
-          });
-        const features = {
-          gfm: astroConfig.markdown?.gfm !== false,
-          smartPunctuation: astroConfig.markdown?.smartypants !== false,
-        };
         const markdownProcessor =
           admonitionOptions && !mdxOptions.processor
             ? configureAdmonitions(
@@ -2465,7 +2500,9 @@ export function nimbus(
             throw new Error(`nimbus-docs: ${message}`);
           }
           if (baseline.fromVersion) {
-            const reviews = selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion);
+            const reviews = selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, {
+              api: (config.api?.length ?? 0) > 0,
+            });
             const requiredReviews = reviews.filter((entry) => entry.mode !== "optional");
             if (requiredReviews.length > 0) {
               const message =
@@ -3155,20 +3192,22 @@ export function nimbus(
  *
  * `site` is materialized alongside the rules so site-aware rules
  * (`no-self-host-url`) get the project's deploy host without making the
- * user duplicate it in their lint config.
+ * user duplicate it in their lint config, and `markdownFeatures` so lint
+ * reads Markdown the way the site renders it.
  */
 function materializeLintConfig(
   projectRoot: string,
   rules: RulesConfig,
   collections: CollectionsConfig,
   site: string,
+  markdownFeatures: SatteriFeatures,
 ): void {
   try {
     const dir = path.join(projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "lint.json"),
-      JSON.stringify({ version: 1, rules, collections, site }, null, 2) + "\n",
+      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures }, null, 2) + "\n",
       "utf8",
     );
   } catch {

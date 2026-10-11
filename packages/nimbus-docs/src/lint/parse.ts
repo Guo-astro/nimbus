@@ -1,8 +1,8 @@
 /**
  * MDX parsing for the lint engine.
  *
- * Uses Sätteri's own `mdxToMdast` — the *same parser that renders the
- * site* — so the linter never disagrees with what actually ships. No
+ * Uses Sätteri with the site's own features — the *same parser that renders
+ * the site* — so the linter never disagrees with what actually ships. No
  * shadow AST, no reintroduced unified pipeline, and the Rust parser keeps
  * the pass fast. Sätteri exposes `mdxToMdast` and unist positions
  * precisely for this kind of read-only inspection; the remark-plugin
@@ -10,8 +10,9 @@
  * `markdown.processor`, not direct parse calls like this one.
  */
 
-import { mdxToMdast } from "satteri";
 import { parse as parseYaml } from "yaml";
+
+import { parseMarkdownSource } from "../_internal/markdown-source.js";
 
 export interface Point {
   line: number;
@@ -142,7 +143,7 @@ export function parseSource(
   let tree: MdRoot;
   let parseError: ParsedFile["parseError"] = null;
   try {
-    tree = mdxToMdast(source) as unknown as MdRoot;
+    tree = parseMarkdownSource(source) as unknown as MdRoot;
   } catch (err) {
     // A file that won't parse won't render either — surface it instead of
     // crashing the whole lint run.

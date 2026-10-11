@@ -41,6 +41,7 @@ import { registerAgentEndpointAssetReader } from "./agent-endpoint-asset-reader.
 import {
   renderEntryAsMarkdown,
 } from "./transform.js";
+import { formatLabel } from "./sidebar.js";
 import { toDocumentHref, toRouteKey, withBase } from "./url.js";
 import type {
   GeneratedMarkdownComponentTransform,
@@ -587,6 +588,8 @@ function markdownAsset(
     `Source: ${absoluteUrl(options.site, options.base, urls.source)}`,
     "",
   ].join("\n");
+  // A frontmatter-only page is its title and source, with no blank body between.
+  if (markdown.trim() === "") return envelopedAsset(`${prefix}\n`, "", suffix.slice(1));
   return envelopedAsset(`${prefix}\n`, markdown, `\n${suffix}`);
 }
 
@@ -634,6 +637,8 @@ interface PreparedLlmsPage {
   url: string;
   markdownUrl: string;
   markdown: string;
+  /** `sidebar.group.label` on a group's index page. */
+  groupLabel?: string;
 }
 
 interface PreparedLlmsGroup {
@@ -667,7 +672,14 @@ function preparedLlmsPage(
     url: toDocumentHref(route),
     markdownUrl: route === "/" ? "/index.md" : `${route}/index.md`,
     markdown,
+    groupLabel: sidebarGroupLabel(entry.data),
   };
+}
+
+function sidebarGroupLabel(data: Record<string, unknown>): string | undefined {
+  const sidebar = data.sidebar as { group?: { label?: unknown } } | undefined;
+  const label = sidebar?.group?.label;
+  return typeof label === "string" && label.length > 0 ? label : undefined;
 }
 
 function groupPreparedLlmsPages(
@@ -695,14 +707,15 @@ function groupPreparedLlmsPages(
     if (members.length === 1 && members[0]!.id === slug) {
       leaves.push(members[0]!);
     } else {
-      groups.push({ slug, label: slug, kind: "primary", members });
+      groups.push({ slug, label: groupLabel(slug, members), kind: "primary", members });
     }
   }
   for (const [slug, members] of secondary) {
+    const version = versionSlugs.has(slug);
     groups.push({
       slug,
-      label: slug,
-      kind: versionSlugs.has(slug) ? "version" : "secondary",
+      label: version ? slug : groupLabel(slug, members),
+      kind: version ? "version" : "secondary",
       members,
     });
   }
@@ -712,6 +725,12 @@ function groupPreparedLlmsPages(
     group.members.sort((a, b) => compare(a.url, b.url));
   }
   return { leaves, groups };
+}
+
+/** A section's name, as the sidebar names it: the index page's group label or title, else the formatted slug. */
+function groupLabel(slug: string, members: readonly PreparedLlmsPage[]): string {
+  const index = members.find((page) => page.markdownUrl === `/${slug}/index.md`);
+  return index?.groupLabel ?? index?.title ?? formatLabel(slug);
 }
 
 function siteIndexAsset(

@@ -6,14 +6,15 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { runningNimbusVersion, selectUpgradeEntries } from "../src/_internal/upgrades.js";
+import { runningNimbusVersion, selectUpgradeEntries, siteScope } from "../src/_internal/upgrades.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = path.join(packageRoot, "test", "fixtures", "partial-resolver-migration");
 
 test("published failure becomes a packed migration and preserves partial-heading behavior", { timeout: 240_000 }, () => {
   const targetVersion = runningNimbusVersion();
-  const expectedReviewIds = selectUpgradeEntries("0.11.0", targetVersion).map(entry => entry.id);
+  // The fixture has no API collection, so API-only reviews are skipped, as in migrate.
+  const expectedReviewIds = selectUpgradeEntries("0.11.0", targetVersion, siteScope(fixture)).map(entry => entry.id);
   assert.ok(expectedReviewIds.includes("partial-resolver-to-markdown"));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-packed-migration-"));
   const previousNpmrc = process.env.NPM_CONFIG_USERCONFIG;

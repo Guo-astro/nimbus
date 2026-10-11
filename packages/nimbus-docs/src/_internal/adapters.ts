@@ -619,8 +619,9 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-function enableCloudflareRequestRendering(
+function enableRequestRendering(
   source: string,
+  policy: string,
 ): { source: string; status: RequestRenderingEdit } {
   const sourceFile = ts.createSourceFile(
     "astro.config.ts",
@@ -813,7 +814,7 @@ function enableCloudflareRequestRendering(
       return {
         source:
           source.slice(0, insertion) +
-          `${eol}${indent}rendering: { default: "request" },` +
+          `${eol}${indent}rendering: ${policy},` +
           source.slice(insertion),
         status: "inserted",
       };
@@ -821,7 +822,7 @@ function enableCloudflareRequestRendering(
     return {
       source:
         source.slice(0, propertyStart) +
-        `rendering: { default: "request" },${eol}${indent}` +
+        `rendering: ${policy},${eol}${indent}` +
         source.slice(propertyStart),
       status: "inserted",
     };
@@ -830,7 +831,7 @@ function enableCloudflareRequestRendering(
   return {
     source:
       source.slice(0, propertyStart) +
-      'rendering: { default: "request" }, ' +
+      `rendering: ${policy}, ` +
       source.slice(propertyStart),
     status: "inserted",
   };
@@ -865,8 +866,20 @@ function chooseImportBinding(preferred: string, masked: string): string {
 export function applyAdapterToConfig(
   source: string,
   adapterId: AdapterId,
+  options: {
+    /**
+     * Render content collections on request: `true` for every collection, or
+     * just the named ones. Defaults to Cloudflare only, for existing sites.
+     */
+    requestRendering?: boolean | { collections: readonly string[] };
+  } = {},
 ): ApplyAdapterResult {
   const recipe = ADAPTER_RECIPES[adapterId];
+  const requestRendering = options.requestRendering ?? adapterId === "cloudflare";
+  const policy =
+    typeof requestRendering === "object"
+      ? `{ collections: { ${requestRendering.collections.map((name) => `${JSON.stringify(name)}: "request"`).join(", ")} } }`
+      : '{ default: "request" }';
   if (isCommonJsConfig(source)) {
     return {
       status: "error",
@@ -977,8 +990,8 @@ export function applyAdapterToConfig(
   }
 
   if (isServer && adapterProperty && existingAdapter?.defaultName) {
-    if (adapterId !== "cloudflare") return { status: "noop", source };
-    const rendering = enableCloudflareRequestRendering(source);
+    if (!requestRendering) return { status: "noop", source };
+    const rendering = enableRequestRendering(source, policy);
     return rendering.source === source
       ? { status: "noop", source, requestRendering: rendering.status }
       : {
@@ -1021,8 +1034,8 @@ export function applyAdapterToConfig(
     next = insertImport(next, `import ${importName} from "${recipe.pkg}";`);
   }
 
-  if (adapterId === "cloudflare") {
-    const rendering = enableCloudflareRequestRendering(next);
+  if (requestRendering) {
+    const rendering = enableRequestRendering(next, policy);
     next = rendering.source;
     return {
       status: "applied",

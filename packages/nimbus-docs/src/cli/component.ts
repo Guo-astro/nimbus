@@ -22,7 +22,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as p from "@clack/prompts";
 
 import { componentsMapBody } from "../_internal/parse-components-registry.js";
-import { stripComments } from "../_internal/parse-object-literal.js";
+import { stripComments, stripStrings } from "../_internal/parse-object-literal.js";
 import { bytesHash } from "./nimbus-json.js";
 import { addCommand, detectPackageManager } from "./pm.js";
 import { progress } from "./progress.js";
@@ -371,7 +371,8 @@ function isRegistered(registry: string, slug: string): boolean {
     ...named.split(",").map((part) => part.trim().split(/\s+as\s+/).pop()!.trim()),
     clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim().split(/\s+/)[0] ?? "",
   ].filter((name) => /^[A-Za-z_$][\w$]*$/.test(name));
-  const map = componentsMapBody(registry);
+  const body = componentsMapBody(registry);
+  const map = body === null ? null : stripStrings(body);
   // An unreadable map can't prove the import is unused; trust the import.
   return map === null ? locals.length > 0 : locals.some((name) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(map));
 }

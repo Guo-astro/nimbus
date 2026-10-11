@@ -6,7 +6,7 @@ import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from
 import { CLI_PACKAGE, declaresCli, detectPackageManager, installCommand, invocation } from "../cli/pm.js";
 import { getCommand } from "../lib/pkgm.js";
 import { resolveMigrationSrcDir } from "./migrations.js";
-import { stripComments } from "./parse-object-literal.js";
+import { stripComments, stripStrings } from "./parse-object-literal.js";
 import rawManifest from "./upgrade-manifest.json";
 
 declare const __APP_VERSION__: string;
@@ -61,10 +61,15 @@ export interface SiteScope {
   api: boolean;
 }
 
+// Packages a content config imports that can't define an API collection
+// unless it calls `apiCollection` itself.
+const NON_API_IMPORT = /^(?:astro(?::|\/|$)|@astrojs\/|zod$|@cloudflare\/nimbus-docs(?:\/|$))/;
+
 /**
  * A site skips API-only reviews only when its content config provably has no
- * API collection: it never names `apiCollection` and imports no local module
- * that could define one. Anything unreadable or unclear shows every review.
+ * API collection: it never calls or imports `apiCollection`, and every import
+ * comes from Astro, Zod or Nimbus, so no other file could define one.
+ * Anything unreadable or unclear shows every review.
  */
 export function siteScope(projectRoot: string, srcDirOverride?: string): SiteScope {
   const { srcDir } = resolveMigrationSrcDir(projectRoot, srcDirOverride);
@@ -74,7 +79,9 @@ export function siteScope(projectRoot: string, srcDirOverride?: string): SiteSco
     if (!fs.existsSync(file)) continue;
     try {
       const source = stripComments(fs.readFileSync(file, "utf8"));
-      return { api: /\bapiCollection\b/.test(source) || /\bfrom\s*["']\.{1,2}\//.test(source) };
+      const specifiers = [...source.matchAll(/\b(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+      const usesApi = /\bapiCollection\b/.test(stripStrings(source));
+      return { api: usesApi || specifiers.some((specifier) => !NON_API_IMPORT.test(specifier)) };
     } catch {
       return { api: true };
     }

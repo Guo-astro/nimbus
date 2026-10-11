@@ -370,6 +370,14 @@ test("API scope reads the content config in Astro's srcDir", () => {
     // Collections defined in a local module could include one.
     assert.equal(config('import { collections } from "./collections";\nexport { collections };\n'), true);
     assert.equal(config("// apiCollection() later\nexport const collections = { docs: docsCollection() };\n"), false);
+    // Through the starter's own path alias, too.
+    assert.equal(config('import { collections } from "@/collections";\nexport { collections };\n'), true);
+    assert.equal(config('const note = "apiCollection() someday";\nexport const collections = { docs: docsCollection() };\n'), false);
+    // The starter's own imports prove nothing is defined elsewhere.
+    assert.equal(
+      config('import { defineCollection } from "astro:content";\nimport { z } from "astro/zod";\nimport { docsCollection } from "@cloudflare/nimbus-docs/content";\nexport const collections = { docs: defineCollection(docsCollection()) };\n'),
+      false,
+    );
     if (process.getuid?.() !== 0) {
       fs.chmodSync(path.join(root, "site", "content.config.ts"), 0o000);
       assert.deepEqual(siteScope(root), { api: true });

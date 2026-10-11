@@ -1461,7 +1461,9 @@ test("policy-rendered routes that export getStaticPaths get one explaining line"
     default: "request",
     collections: { docs: "request", blog: "build" },
   });
-  const withStaticPaths = "---\nexport function getStaticPaths() { return []; }\n---\n";
+  // A glob string that looks like a comment opener mustn't hide the export.
+  const withStaticPaths =
+    '---\nconst pages = import.meta.glob("/src/*.md");\nexport function getStaticPaths() { return []; }\n/* one entry per page */\n---\n';
   const mentionsOnly = "---\n// getStaticPaths isn't needed: this renders on request.\n---\n";
   await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), mentionsOnly, "utf8");
   await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), withStaticPaths, "utf8");

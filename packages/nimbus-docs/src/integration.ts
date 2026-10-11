@@ -40,6 +40,7 @@ import type {
   MdastPluginInput,
 } from "satteri";
 import sitemap from "@astrojs/sitemap";
+import ts from "typescript";
 import {
   configureAdmonitions,
   type AdmonitionOptions,
@@ -242,6 +243,39 @@ const REQUEST_ROUTE_INVENTORY_ENTRYPOINT = new URL(
 const initialDevWatchers = new Map<string, { close(): Promise<void> }>();
 
 type AgentEndpointAssetsModule = typeof import("./_internal/agent-endpoint-assets.js");
+
+/**
+ * Whether a route module exports `getStaticPaths` (an `.astro` route from its
+ * frontmatter). Astro warns only then, not when the name is just mentioned.
+ */
+function exportsGetStaticPaths(file: string, source: string): boolean {
+  const code = file.endsWith(".astro")
+    ? (/^\s*---\r?\n([\s\S]*?)\r?\n---/u.exec(source)?.[1] ?? "")
+    : source;
+  const { statements } = ts.createSourceFile(file, code, ts.ScriptTarget.Latest);
+  return statements.some((statement) => {
+    if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause;
+      return (
+        !statement.isTypeOnly &&
+        clause !== undefined &&
+        ts.isNamedExports(clause) &&
+        clause.elements.some((element) => !element.isTypeOnly && element.name.text === "getStaticPaths")
+      );
+    }
+    const exported =
+      ts.canHaveModifiers(statement) &&
+      ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
+    if (!exported) return false;
+    if (ts.isFunctionDeclaration(statement)) return statement.name?.text === "getStaticPaths";
+    return (
+      ts.isVariableStatement(statement) &&
+      statement.declarationList.declarations.some(
+        (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === "getStaticPaths",
+      )
+    );
+  });
+}
 
 /** Whether an endpoint serves the site's llms-full.txt, by path or by call. */
 function servesLlmsFull(
@@ -2446,12 +2480,7 @@ export function nimbus(
           if (mode !== "request") return;
           try {
             const source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
-            // Astro warns only when the compiled route still has
-            // `getStaticPaths`, so look for an export, not a mention.
-            const code = source.replace(/\/\*[\s\S]*?\*\//gu, "").replace(/(^|[^:])\/\/.*$/gmu, "$1");
-            if (
-              /\bexport\s+(?:async\s+)?(?:function\s*\*?\s*|const\s+|let\s+|var\s+)getStaticPaths\b|\bexport\s*\{[^}]*\bgetStaticPaths\b/u.test(code)
-            ) {
+            if (exportsGetStaticPaths(route.component, source)) {
               policyRoutesWithStaticPaths.add(route.component);
             }
           } catch {

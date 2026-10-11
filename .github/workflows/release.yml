@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # Redeploy the current published release's docs site and registry.
+  workflow_dispatch:
 
 # Serialize releases: never let two runs race on the version-bump PR or npm.
 concurrency: ${{ github.workflow }}-${{ github.ref }}
@@ -13,6 +15,7 @@ permissions: {}
 jobs:
   release:
     name: Release
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release
@@ -140,15 +143,51 @@ jobs:
   build-www:
     name: Build released www
     needs: release
-    if: ${{ !cancelled() && needs.release.outputs.published == 'true' }}
+    if: ${{ !cancelled() && (needs.release.outputs.published == 'true' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0 # package tags locate the published release commit
           persist-credentials: false
+
+      # A release builds its own commit. A manual run builds the newer of the
+      # two packages' npm `latest` tags; the deploy job rechecks both versions.
+      - name: Choose the published release commit
+        id: commit
+        run: |
+          sha=$GITHUB_SHA
+          if [ "$EVENT" = 'workflow_dispatch' ]; then
+            docs="refs/tags/@cloudflare/nimbus-docs@$(npm view @cloudflare/nimbus-docs dist-tags.latest)"
+            cli="refs/tags/@cloudflare/create-nimbus-docs@$(npm view @cloudflare/create-nimbus-docs dist-tags.latest)"
+            for tag in "$docs" "$cli"; do
+              if ! git rev-parse --quiet --verify "$tag^{commit}" > /dev/null; then
+                echo "::error::Release tag ${tag#refs/tags/} is missing."
+                exit 1
+              fi
+            done
+            if git merge-base --is-ancestor "$docs" "$cli"; then
+              sha=$(git rev-parse "$cli^{commit}")
+            elif git merge-base --is-ancestor "$cli" "$docs"; then
+              sha=$(git rev-parse "$docs^{commit}")
+            else
+              echo "::error::Could not order the release tags $docs and $cli."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$sha" origin/main; then
+              echo "::error::Release commit $sha is not on main."
+              exit 1
+            fi
+          fi
+          git checkout --quiet --detach "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -172,8 +211,8 @@ jobs:
 
   deploy-www:
     name: Deploy released www
-    needs: [release, build-www]
-    if: ${{ !cancelled() && needs.release.outputs.published == 'true' && needs.build-www.result == 'success' }}
+    needs: build-www
+    if: ${{ !cancelled() && needs.build-www.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: cloudflare
@@ -182,6 +221,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          ref: ${{ needs.build-www.outputs.sha }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4

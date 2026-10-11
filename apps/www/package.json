@@ -13,7 +13,8 @@
     "test": "node --import tsx --test \"registry/**/*.test.ts\"",
     "preview:cf": "wrangler dev",
     "predeploy": "pnpm --filter nimbus-docs build && astro check && pnpm run build",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "build:workers": "pnpm run predeploy && printf '%s\\n' \"${WORKERS_CI_COMMIT_SHA:?}\" > dist/_nimbus-preview-sha.txt && printf '\\n/*\\n  X-Robots-Tag: noindex\\n' >> dist/_headers"
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "^0.4.0",

@@ -431,7 +431,7 @@ async function publish({ dryRun, haltAfter }) {
 
   if (syncResult) await dispatchSmoke(syncResult.tag);
   log("publish: done.");
-  log("The release workflow deploys www after publication; use pnpm --filter @nimbus/www run deploy as a fallback.");
+  log("The release workflow deploys www after publication; if it fails, run the Release workflow manually from main.");
 }
 
 // ---------------------------------------------------------------------------

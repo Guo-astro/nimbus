@@ -70,15 +70,25 @@ jobs:
           sha=$(git rev-parse HEAD)
           current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
           read -r state head_sha <<< "$current"
-          url="https://pr-$PR.nimbus-docs.com"
-          served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-            "$url/_nimbus-preview-sha.txt") || true
-          registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-            "$url/registry/registry.json" | jq -er '.registryVersion') || true
+          comment=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq '.[] | select(.user.login == "cloudflare-workers-and-pages[bot]" and (.body | contains("/services/view/nimbus-docs/"))) | .id' | sort -n | tail -1)
+          url=''
+          served_sha=''
+          registry_version=''
+          if [ -n "$comment" ]; then
+            url=$(gh api "repos/$REPO/issues/comments/$comment" --jq '.body' | \
+              grep -oE 'Preview URL: https://[A-Za-z0-9.-]+' | head -1 | sed 's/^Preview URL: //') || true
+          fi
+          if [ -n "$url" ]; then
+            served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/_nimbus-preview-sha.txt") || true
+            registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/registry/registry.json" | jq -er '.registryVersion') || true
+          fi
           if [ "$state" != 'open' ] || [ "$head_sha" != "$sha" ] || [ "$served_sha" != "$sha" ] || \
             [ "$registry_version" != "$(jq -r .version packages/nimbus-docs/package.json)" ]; then
             gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'
-            echo '::error::No live www Preview of this PR head. Wait for its Preview workflow, then reapply the label.'
+            echo "::error::No live Workers Builds Preview of this PR head (url: ${url:-none}, serving: ${served_sha:-none}). Wait for its build to finish, then reapply the label."
             exit 1
           fi
           echo "preview_url=$url" >> "$GITHUB_OUTPUT"

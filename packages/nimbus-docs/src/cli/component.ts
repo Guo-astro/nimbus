@@ -367,7 +367,10 @@ function isRegistered(registry: string, slug: string): boolean {
   const body = componentsMapBody(registry);
   const map = body === null ? null : stripStrings(body);
   // An unreadable map can't prove the import is unused; trust the import.
-  return map === null ? locals.length > 0 : locals.some((name) => new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$])(?!\\s*:)`).test(map));
+  if (map === null) return locals.length > 0;
+  // Identifiers used as values: shorthand entries and the right side of `Key: Value`.
+  const values = new Set(map.match(/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])(?!\s*:)/g) ?? []);
+  return locals.some((name) => values.has(name));
 }
 
 export function registerHint(

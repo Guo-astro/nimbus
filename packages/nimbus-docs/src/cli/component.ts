@@ -49,8 +49,10 @@ export interface InstallReport {
   replaced: string[];
   /** Registry slugs already identical to the registry: nothing written. */
   upToDate: string[];
-  /** Registry slugs skipped wholesale by the user. */
+  /** Registry slugs whose differing files were kept. */
   skipped: string[];
+  /** The kept files that differ from the registry. */
+  kept: string[];
   npmDepsInstalled: string[];
 }
 
@@ -63,6 +65,7 @@ export async function installComponents(
     replaced: [],
     upToDate: [],
     skipped: [],
+    kept: [],
     npmDepsInstalled: [],
   };
 
@@ -109,6 +112,8 @@ export async function installComponents(
 
     // `--overwrite` replaces every conflicting file across the tree — the
     // explicit upgrade path. Without it we never clobber an owned file.
+    // Missing files are always written; declining only keeps existing ones.
+    let keep = false;
     const edits =
       conflicts.length > 0 && options.overwrite && !options.yes && process.stdin.isTTY
         ? localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src")
@@ -126,33 +131,20 @@ export async function installComponents(
         p.cancel("Cancelled.");
         process.exit(0);
       }
-      if (!replace) {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (!replace) keep = true;
     } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
       // their copy when present unless an explicit upgrade asks to replace it.
-      if (conflicts.length > 0 && !options.overwrite) {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (conflicts.length > 0 && !options.overwrite) keep = true;
     } else if (conflicts.length > 0 && !options.overwrite) {
-      const total = filePlans.length;
-
       // Non-interactive (or `--yes`): keep the user's files. `--yes` is assent
       // to prompts, not permission to clobber — `--overwrite` does that.
-      if (options.yes || !process.stdin.isTTY) {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (options.yes || !process.stdin.isTTY) keep = true;
 
-      const message =
-        conflicts.length === total
-          ? `${item.name} is already installed (${total} file${total === 1 ? "" : "s"}). Overwrite?`
-          : `${item.name} is partially installed (${conflicts.length} of ${total} file${total === 1 ? "" : "s"} present). Overwrite all?`;
+      const n = conflicts.length;
+      const message = `${item.name}: ${n} file${n === 1 ? " differs" : "s differ"} from the registry. Overwrite ${n === 1 ? "it" : "them"}?`;
 
-      const choice = await p.select({
+      const choice = keep ? "skip" : await p.select({
         message,
         options: [
           { value: "overwrite", label: "Overwrite — replace existing files" },
@@ -166,14 +158,15 @@ export async function installComponents(
         p.cancel("Cancelled.");
         process.exit(0);
       }
-      if (choice === "skip") {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (choice === "skip") keep = true;
     }
 
     // Write what's new or different; identical files stay untouched.
-    for (const plan of [...missing, ...conflicts]) {
+    if (keep) {
+      report.skipped.push(item.name);
+      report.kept.push(...conflicts.map((f) => f.targetRel));
+    }
+    for (const plan of keep ? missing : [...missing, ...conflicts]) {
       mkdirSync(dirname(plan.targetAbs), { recursive: true });
       writeFileSync(plan.targetAbs, plan.content);
       report.written.push(plan.targetRel);

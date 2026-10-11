@@ -122,6 +122,24 @@ test("--overwrite names each replaced file and leaves identical ones alone", asy
   });
 });
 
+test("a kept component still gets its missing files", async () => {
+  await withProject(async (cwd) => {
+    const files = (b: string) => [
+      { path: "components/ui/dialog/Dialog.astro", content: b },
+      { path: "components/ui/dialog/DialogTitle.astro", content: "T1" },
+    ];
+    await installComponents([item("dialog", "registry:ui", [files("D1")[0]!])], opts(cwd));
+    // Dialog.astro differs and is kept; DialogTitle.astro is new and written.
+    const report = await installComponents([item("dialog", "registry:ui", files("D2"))], opts(cwd));
+    assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "D1");
+    assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/DialogTitle.astro"), "utf8"), "T1");
+    assert.deepEqual(report.skipped, ["dialog"]);
+    assert.deepEqual(report.kept, [path.join("src", "components/ui/dialog/Dialog.astro")]);
+    assert.deepEqual(report.written, [path.join("src", "components/ui/dialog/DialogTitle.astro")]);
+    assert.deepEqual(report.replaced, []);
+  });
+});
+
 test("local edits compare the installed files, not the registry's current list", async () => {
   const cwd = await mkdtemp(path.join(tmpdir(), "nimbus-edits-"));
   try {

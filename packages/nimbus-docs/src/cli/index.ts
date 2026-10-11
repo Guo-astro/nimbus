@@ -468,14 +468,17 @@ async function addCommand(
 
   const lines: string[] = [];
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-  const added = report.written.length - report.replaced.length;
+  const added = report.written.filter((file) => !report.replaced.includes(file));
   if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
-  if (added > 0) lines.push(`✓ Added ${plural(added, "file")}`);
+  if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
   if (report.replaced.length > 0) {
     lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  if (report.skipped.length > 0) {
-    lines.push(`↷ Kept existing: ${report.skipped.join(", ")} — pass --overwrite to replace`);
+  if (report.kept.length > 0) {
+    lines.push(
+      `↷ Kept ${plural(report.kept.length, "file")} that ${report.kept.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
+      ...report.kept.map((file) => `    ${file}`),
+    );
   }
   if (report.npmDepsInstalled.length > 0) {
     lines.push(

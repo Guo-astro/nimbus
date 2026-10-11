@@ -81,7 +81,9 @@ export function siteScope(projectRoot: string, srcDirOverride?: string): SiteSco
       const source = stripComments(fs.readFileSync(file, "utf8"));
       const specifiers = [...source.matchAll(/\b(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]!);
       const usesApi = /\bapiCollection\b/.test(stripStrings(source));
-      return { api: usesApi || specifiers.some((specifier) => !NON_API_IMPORT.test(specifier)) };
+      // A dynamic import whose specifier isn't a plain string can load anything.
+      const opaqueImport = /\bimport\s*\(\s*(?!["'][^"'`]+["']\s*\))/.test(source);
+      return { api: usesApi || opaqueImport || specifiers.some((specifier) => !NON_API_IMPORT.test(specifier)) };
     } catch {
       return { api: true };
     }

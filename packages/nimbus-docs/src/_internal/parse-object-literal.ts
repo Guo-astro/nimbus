@@ -26,9 +26,14 @@ export function stripComments(source: string): string {
   );
 }
 
-/** Blank the contents of string literals, so text inside them can't read as code. */
+/**
+ * Blank the contents of string literals, so text inside them can't read as
+ * code. A template with `${…}` is left whole: its interpolations are code.
+ */
 export function stripStrings(source: string): string {
-  return source.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, (m) => m[0] + m.slice(1, -1).replace(/[^\n]/g, " ") + m[0]);
+  return source.replace(/(["'`])(?:\\.|(?!\1)[^\\])*\1/g, (m) =>
+    m[0] === "`" && m.includes("${") ? m : m[0] + m.slice(1, -1).replace(/[^\n]/g, " ") + m[0],
+  );
 }
 
 /**

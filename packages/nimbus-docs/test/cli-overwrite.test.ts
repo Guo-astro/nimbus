@@ -155,4 +155,7 @@ test("the register hint is skipped once components.ts imports the component", ()
   assert.match(registerHint([tabs], "tabs", "src", `import { Tabs } from "./components/ui/tabs";\n${map("Aside")}`) ?? "", hint);
   assert.match(registerHint([tabs], "tabs", "src", `// import { Tabs } from "./components/ui/tabs";\n${map("Tabs")}`) ?? "", hint);
   assert.match(registerHint([tabs], "tabs", "src", `import { Tabs } from "./components/ui/tabs";\n${map('Aside: "Tabs"')}`) ?? "", hint);
+  // Used only as a key, the import isn't registered; as a value it is.
+  assert.match(registerHint([tabs], "tabs", "src", `import { Tabs } from "./components/ui/tabs";\n${map("Tabs: Other")}`) ?? "", hint);
+  assert.equal(registerHint([tabs], "tabs", "src", `import { Tabs } from "./components/ui/tabs";\n${map("Tabs: Tabs")}`), null);
 });

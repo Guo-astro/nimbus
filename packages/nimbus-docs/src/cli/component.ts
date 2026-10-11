@@ -360,7 +360,7 @@ function barrelExports(item: ComponentItem): string[] {
  * "register in components.ts" hint. Its registry dependencies are installed
  * too but aren't meant to be registered, so they get no hint.
  */
-/** components.ts imports the component and puts one of its imports in the `components` map. */
+/** components.ts imports the component and puts one of its imports in the `components` map as a value (not only a key). */
 function isRegistered(registry: string, slug: string): boolean {
   const source = stripComments(registry);
   const path = `(?:\\./|@/)components/ui/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/index(?:\\.ts)?)?`;
@@ -374,7 +374,7 @@ function isRegistered(registry: string, slug: string): boolean {
   const body = componentsMapBody(registry);
   const map = body === null ? null : stripStrings(body);
   // An unreadable map can't prove the import is unused; trust the import.
-  return map === null ? locals.length > 0 : locals.some((name) => new RegExp(`(?<![\\w$])${name.replace(/\$/g, "\\$")}(?![\\w$])`).test(map));
+  return map === null ? locals.length > 0 : locals.some((name) => new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}(?![\\w$])(?!\\s*:)`).test(map));
 }
 
 export function registerHint(

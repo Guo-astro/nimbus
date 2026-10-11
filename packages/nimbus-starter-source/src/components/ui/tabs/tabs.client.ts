@@ -35,6 +35,7 @@ function initTabContainer(container: HTMLElement): () => void {
       btn.className = TRIGGER_CLASS;
       btn.textContent = label;
       btn.setAttribute("data-nb-tabs-trigger", "");
+      btn.dataset.slot = "tabs-trigger";
 
       const panelId = `${id}-panel-${i}`;
       const tabId = `${id}-tab-${i}`;

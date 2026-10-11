@@ -71,6 +71,16 @@ if (!effectiveSearchable || versionStatus?.isHidden) {
   }
 }
 
+// The filter earns its place only once the sidebar is long enough to search.
+const countLinks = (items: typeof sidebar): number =>
+  Array.isArray(items)
+    ? items.reduce((n, item) => n + (item.type === "group" ? countLinks(item.children) + (item.indexHref ? 1 : 0) : 1), 0)
+    : 0;
+const showFilter = countLinks(sidebar) >= 12;
+
+// Below xl the On this page bar's own borders separate the header from the
+// content, so the header rule only draws where that bar is hidden.
+const hasMobileToc = headings !== false && headings.length > 0;
 const hasHeader = Astro.slots.has("header");
 const hasSidebar = Astro.slots.has("sidebar");
 const hasToc = Astro.slots.has("toc");
@@ -100,7 +110,7 @@ const hasPagination = Astro.slots.has("pagination");
                   <slot name="sidebar" />
                 ) : (
                   <nav class="px-4 pb-12 pt-5">
-                    <SidebarFilter />
+                    {showFilter && <SidebarFilter />}
                     <Sidebar items={sidebar} persist />
                   </nav>
                 )}
@@ -203,11 +213,11 @@ const hasPagination = Astro.slots.has("pagination");
                 ) : (
                   <Fragment>
                     <div class="flex items-center gap-3 flex-wrap mt-6">
-                      <h1 class="text-foreground mb-0 leading-tight [text-wrap:balance]" style={`font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)`}>{title}</h1>
+                      <h1 class="text-foreground mb-0 [text-wrap:balance]" style={`font-size:var(--nb-h1-size);line-height:var(--nb-h1-leading);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)`}>{title}</h1>
                       {draft && <Badge text="Draft" variant="warning" size="medium" />}
                     </div>
                     {description && (
-                      <p class="text-[0.9375rem] sm:text-[1.0625rem] text-muted-foreground leading-relaxed mt-2 mb-2 [text-wrap:pretty]">{description}</p>
+                      <p class="text-base leading-7 sm:text-lg sm:leading-7 text-muted-foreground mt-2 mb-2 [text-wrap:pretty]">{description}</p>
                     )}
                     {capabilities.mcpUrl ? (
                       <div class:list={["not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", description ? undefined : "mt-3"]}>
@@ -218,8 +228,8 @@ const hasPagination = Astro.slots.has("pagination");
                     ) : (
                       <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class={description ? undefined : "mt-3"} />
                     )}
-                    {headings !== false && headings.length > 0 && (
-                      <div class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky top-14 z-20 -mx-4 mt-3 border-y px-4 py-2 backdrop-blur md:-mx-6 md:px-6 xl:hidden">
+                    {hasMobileToc && (
+                      <div class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky top-14 z-20 -mx-4 mt-3 mb-6 border-y px-4 py-2 backdrop-blur md:-mx-6 md:px-6 xl:hidden">
                         <MobileTOC headings={headings} />
                       </div>
                     )}
@@ -231,7 +241,7 @@ const hasPagination = Astro.slots.has("pagination");
                           <div class="h-px flex-1 bg-border"></div>
                         </div>
                       ) : (
-                        <div class="mt-3 mb-6 h-px w-full bg-border" role="none" />
+                        <div class={`mt-3 mb-6 h-px w-full bg-border ${hasMobileToc ? "hidden xl:block" : ""}`} role="none" />
                       )
                     )}
                     {!description && !markdownUrl && audience !== "human" && <div class="mb-4" />}
@@ -275,7 +285,7 @@ const hasPagination = Astro.slots.has("pagination");
     <dialog
       data-mobile-sidebar
       data-state="closed"
-      class="group fixed inset-0 m-0 h-full w-full max-h-full max-w-full border-0 bg-transparent p-0 [&::backdrop]:bg-transparent"
+      class="group fixed inset-0 m-0 h-full w-full max-h-full max-w-full border-0 bg-transparent p-0 transition-[background-color] duration-250 ease-out data-[state=open]:bg-black/40 motion-reduce:transition-none [&::backdrop]:bg-transparent"
       aria-label="Site navigation"
     >
       <div data-mobile-sidebar-panel class="flex h-full w-(--nb-sidebar-width) max-w-[85vw] -translate-x-full flex-col border-r border-border bg-card transition-transform duration-250 ease-out group-data-[state=open]:translate-x-0 motion-reduce:transition-none">

@@ -21,6 +21,7 @@ const { syncKey, class: className, ...attrs } = Astro.props;
 
 <div
   data-nb-tabs
+  data-slot="tabs"
   data-nb-sync-key={syncKey}
   class={cn(className)}
   {...attrs}

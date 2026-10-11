@@ -7,7 +7,7 @@
  * classes for a button-shaped element; `buttonIconSize` sizes a leading/
  * trailing icon for a given size.
  */
-import { cn } from "@/lib/cn";
+import { variants } from "@/lib/variants";
 
 export type ButtonVariant =
   | "primary"
@@ -66,17 +66,26 @@ export interface ButtonVariantsOptions {
   shape?: ButtonShape;
 }
 
+const button = variants({
+  base: buttonBase,
+  variants: {
+    variant: buttonVariantClasses,
+    size: buttonSizeText,
+    // Square and circle are icon-only: equal sides, no padding. Their size
+    // comes from `compound` below.
+    shape: { base: "", square: "p-0", circle: "p-0 rounded-full" },
+  },
+  defaults: { variant: "secondary", size: "base", shape: "base" },
+  compound: (["square", "circle"] as const).flatMap((shape) =>
+    (Object.keys(buttonSizeCompact) as ButtonSize[]).map((size) => ({
+      shape,
+      size,
+      class: buttonSizeCompact[size],
+    })),
+  ),
+});
+
 /** Compose the base + variant + size/shape classes for a button-shaped element. */
-export function buttonVariants({
-  variant = "secondary",
-  size = "base",
-  shape = "base",
-}: ButtonVariantsOptions = {}): string {
-  // base + square inherit `rounded-lg` from buttonBase; circle overrides it
-  // to a full pill.
-  const dims =
-    shape === "base"
-      ? buttonSizeText[size]
-      : cn(buttonSizeCompact[size], "p-0", shape === "circle" && "rounded-full");
-  return cn(buttonBase, buttonVariantClasses[variant], dims);
+export function buttonVariants(options: ButtonVariantsOptions = {}): string {
+  return button(options);
 }

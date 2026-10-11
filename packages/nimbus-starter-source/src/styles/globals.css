@@ -40,11 +40,17 @@
 	--nb-primary-foreground: oklch(0.97 0 0);
 	--nb-primary-hover: oklch(0.371 0 0);
 
+	/* Brand — Nimbus steel, the accent of the Chrome palette: a grey with a
+	   trace of blue, so it reads apart from the pure-neutral ink. Used only
+	   for wayfinding: where you are (current page, section, tab) and what you
+	   can act on (focus, link hover). */
+	--nb-brand: oklch(0.373 0.034 260.2);
+
 	/* Borders / focus */
 	--nb-border: oklch(0.935 0 0);
 	--nb-border-strong: oklch(0.87 0 0);
 	--nb-selected: oklch(0.89 0 0);
-	--nb-ring: oklch(0.145 0 0 / 0.35);
+	--nb-ring: oklch(0.373 0.034 260.2 / 0.4);
 
 	/* Status colors — paired (saturated for text/border + muted for bg) */
 	--nb-info: oklch(0.424 0.199 265.638);
@@ -97,16 +103,30 @@
 	--nb-font-mono:
 		"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, "Cascadia Code",
 		"Source Code Pro", Menlo, Consolas, monospace;
-	--nb-h1-size: 2.1875rem;
-	--nb-h1-weight: 600;
+	/* Type scale: one ratio, √1.5, stepping up from the 16px body. Two steps
+	   make 1.5, so body → h2 → h1 is the same interval twice and lands on
+	   whole pixels: 16 → 24 → 36, with h3 at the half step (19.6 → 20).
+	   Line heights sit on the 4px grid. Weight falls as size rises, since a
+	   larger glyph needs less stroke to carry the same visual weight. */
+	--nb-h1-size: 2.25rem;
+	--nb-h1-leading: 2.75rem;
+	--nb-h1-weight: 500;
 	--nb-h1-tracking: -0.025em;
-	--nb-h2-size: 1.3rem;
-	--nb-h2-weight: 650;
-	--nb-h2-tracking: -0.015em;
-	--nb-h3-size: 1.1rem;
+	--nb-h2-size: 1.5rem;
+	--nb-h2-leading: 2rem;
+	--nb-h2-weight: 550;
+	--nb-h2-tracking: -0.018em;
+	--nb-h3-size: 1.25rem;
+	--nb-h3-leading: 1.75rem;
 	--nb-h3-weight: 600;
-	--nb-h3-tracking: -0.01em;
+	--nb-h3-tracking: -0.012em;
 	--nb-h4-weight: 600;
+
+	/* Corners: surfaces (cards, callouts, code blocks, buttons, sidebar rows)
+	   share one radius; small marks inside them (inline code, badges in a
+	   title bar) use the smaller one. Change these two to re-round the site. */
+	--nb-radius: 0.5rem;
+	--nb-radius-sm: 0.25rem;
 
 	/* Shadows */
 	--nb-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04);
@@ -141,10 +161,12 @@
 	--nb-primary-foreground: oklch(0.085 0 0);
 	--nb-primary-hover: oklch(0.7 0 0);
 
+	--nb-brand: oklch(0.837 0.018 261.3);
+
 	--nb-border: oklch(0.269 0 0);
 	--nb-border-strong: oklch(0.371 0 0);
 	--nb-selected: oklch(0.371 0 0);
-	--nb-ring: oklch(0.9 0 0 / 0.35);
+	--nb-ring: oklch(0.837 0.018 261.3 / 0.45);
 
 	--nb-info: oklch(0.707 0.165 254.624);
 	--nb-info-foreground: oklch(0.707 0.165 254.624);
@@ -189,6 +211,8 @@
 	--color-accent: var(--nb-accent);
 	--color-accent-foreground: var(--nb-accent-foreground);
 
+	--color-brand: var(--nb-brand);
+
 	--color-primary: var(--nb-primary);
 	--color-primary-foreground: var(--nb-primary-foreground);
 	--color-primary-hover: var(--nb-primary-hover);
@@ -216,6 +240,9 @@
 
 	--font-sans: var(--nb-font-sans);
 	--font-mono: var(--nb-font-mono);
+
+	--radius-lg: var(--nb-radius);
+	--radius-sm: var(--nb-radius-sm);
 
 	--shadow-sm: var(--nb-shadow-sm);
 	--shadow-default: var(--nb-shadow);
@@ -300,13 +327,14 @@ pre.astro-code {
 	position: relative;
 	margin: 1rem 0;
 	padding: 0.75rem 1rem;
-	border-radius: 0.5rem;
+	border-radius: var(--nb-radius);
 	border: 1px solid var(--nb-border);
 	background-color: var(--nb-card);
 	overflow-x: auto;
 	font-family: var(--nb-font-mono);
 	font-size: 0.875rem;
-	line-height: 1.625;
+	/* 14/24: a whole-pixel line, so a block of n lines is always 24n + 24px. */
+	line-height: 1.5rem;
 }
 pre.astro-code > code {
 	background: transparent;
@@ -359,6 +387,28 @@ pre.astro-code span {
 .nb-code-copy[data-state="copied"] {
 	color: var(--nb-success);
 }
+/* In a titled block the copy button lives in the title bar, centred in its
+   36px, and is always there. */
+.nb-code-figure-titled .nb-code-copy {
+	top: 0.25rem;
+	right: 0.375rem;
+	border-color: transparent;
+	background: transparent;
+	opacity: 1;
+}
+.nb-code-figure-titled .nb-code-copy:hover {
+	background: var(--nb-accent);
+}
+/* No hover on touch screens: show the button, and let the language badge
+   give way to it. */
+@media (hover: none) {
+	.nb-code-copy {
+		opacity: 1;
+	}
+	.nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled)::before {
+		display: none;
+	}
+}
 
 /* ---- Premium code chrome ---- */
 
@@ -370,7 +420,7 @@ pre.astro-code span {
 	position: relative;
 	margin: 1rem 0;
 	border: 1px solid var(--nb-border);
-	border-radius: 0.5rem;
+	border-radius: var(--nb-radius);
 	background-color: var(--nb-card);
 	overflow: hidden;
 }
@@ -380,19 +430,23 @@ pre.astro-code span {
 	border-radius: 0;
 	background-color: transparent;
 }
+/* Title bar: the filename, and the copy button at the right end (positioned
+   below). The filename's extension already names the language, so the
+   language chip stays hidden here. 8 + 20 + 8 + 1px rule = 37px. */
 .nb-code-title {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
-	gap: 0.75rem;
-	padding: 0.5rem 0.875rem;
+	gap: 0.5rem;
+	padding: 0.5rem 2.75rem 0.5rem 0.75rem;
 	border-bottom: 1px solid var(--nb-border);
 	background: color-mix(in oklch, var(--nb-muted) 50%, transparent);
 	font-family: var(--nb-font-mono);
 	font-size: 0.75rem;
-	line-height: 1.4;
+	line-height: 1.25rem;
 }
 .nb-code-title-name {
+	flex: 1;
+	min-width: 0;
 	color: var(--nb-foreground);
 	font-weight: 500;
 	overflow: hidden;
@@ -400,12 +454,14 @@ pre.astro-code span {
 	white-space: nowrap;
 }
 .nb-code-title-lang {
+	display: none;
 	flex-shrink: 0;
 	padding: 0.0625rem 0.375rem;
-	border-radius: 0.25rem;
+	border-radius: var(--nb-radius-sm);
 	background: var(--nb-muted);
 	color: var(--nb-muted-foreground);
 	font-size: 0.6875rem;
+	line-height: 1rem;
 	letter-spacing: 0.02em;
 	text-transform: uppercase;
 }
@@ -419,7 +475,7 @@ pre.astro-code span {
 	top: 0.5rem;
 	right: 0.625rem;
 	padding: 0.0625rem 0.375rem;
-	border-radius: 0.25rem;
+	border-radius: var(--nb-radius-sm);
 	background: var(--nb-muted);
 	color: var(--nb-muted-foreground);
 	font-family: var(--nb-font-mono);
@@ -433,6 +489,19 @@ pre.astro-code span {
 }
 .nb-code-figure:hover::before {
 	opacity: 0;
+}
+/* Keep a short line clear of the badge. On a phone a long line scrolls under
+   it whatever the padding, so the badge steps aside there. */
+.nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled) > pre.astro-code {
+	padding-right: 3.5rem;
+}
+@media (max-width: 639px) {
+	.nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled)::before {
+		display: none;
+	}
+	.nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled) > pre.astro-code {
+		padding-right: 1rem;
+	}
 }
 /* Hide plaintext/text "language" — it's noise. */
 .nb-code-figure[data-nb-lang="text"]::before,
@@ -515,7 +584,7 @@ pre.astro-code .line.highlighted.warning {
 pre.astro-code .highlighted-word {
 	padding: 0.0625rem 0.25rem;
 	margin: -0.0625rem -0.125rem;
-	border-radius: 0.25rem;
+	border-radius: var(--nb-radius-sm);
 	background: color-mix(in oklch, var(--nb-info) 18%, transparent);
 	box-shadow: 0 0 0 1px color-mix(in oklch, var(--nb-info) 30%, transparent);
 }
@@ -531,7 +600,7 @@ pre.astro-code .highlighted-word {
 		min-height: 2rem;
 		align-items: center;
 		gap: 0.5rem;
-		border-radius: 0.5rem;
+		border-radius: var(--nb-radius);
 		padding: 0.25rem 0.75rem;
 		font-size: 0.8125rem;
 		font-weight: 500;
@@ -550,10 +619,14 @@ pre.astro-code .highlighted-word {
 		display: none;
 	}
 	.nb-sidebar-link:hover,
-	.nb-sidebar-link[aria-current="page"],
 	.nb-sidebar-row:hover {
 		background-color: var(--nb-accent);
 		color: var(--nb-foreground);
+	}
+	/* You are here: the one place the sidebar uses the brand. */
+	.nb-sidebar-link[aria-current="page"] {
+		background-color: color-mix(in oklch, var(--nb-brand) 10%, transparent);
+		color: var(--nb-brand);
 	}
 	.nb-sidebar-link:focus-visible,
 	.nb-sidebar-row:focus-visible {
@@ -595,6 +668,42 @@ pre.astro-code .highlighted-word {
 	/* Safari still lays out closed <details> content in large trees. */
 	details[data-nb-sidebar-group]:not([open]) > .nb-sidebar-list {
 		display: none;
+	}
+	/* Docs sidebar: 14px rows to sit with the 16px body. */
+	[data-nb-sidebar] :is(.nb-sidebar-link, .nb-sidebar-row) {
+		font-size: 0.875rem;
+		line-height: 1.25rem;
+		font-weight: 450;
+	}
+	[data-nb-sidebar] .nb-sidebar-link[aria-current="page"] {
+		font-weight: 500;
+	}
+	/* A top-level group reads as a section heading, set apart from the loose
+	   pages above it. */
+	[data-nb-sidebar] .top-level > li:has(> details) {
+		margin-top: 0.75rem;
+	}
+	[data-nb-sidebar] .top-level > li > details > .nb-sidebar-row {
+		color: var(--nb-foreground);
+		font-weight: 600;
+	}
+	/* Inside a group, the current page marks the group's guide line instead of
+	   filling its row, so nesting stays legible. */
+	[data-nb-sidebar] .nb-sidebar-list .nb-sidebar-link[aria-current="page"] {
+		position: relative;
+		background-color: transparent;
+	}
+	[data-nb-sidebar] .nb-sidebar-list .nb-sidebar-link[aria-current="page"]:hover {
+		background-color: var(--nb-accent);
+	}
+	[data-nb-sidebar] .nb-sidebar-list .nb-sidebar-link[aria-current="page"]::before {
+		content: "";
+		position: absolute;
+		inset-block: 0.375rem;
+		inset-inline-start: calc(-0.5rem - 1.5px);
+		width: 2px;
+		border-radius: 1px;
+		background-color: var(--nb-brand);
 	}
 }
 

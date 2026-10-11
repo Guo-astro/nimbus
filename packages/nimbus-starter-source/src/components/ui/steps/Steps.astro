@@ -15,6 +15,7 @@ const { start, class: className, ...attrs } = Astro.props;
 
 <div
   data-steps
+  data-slot="steps"
   class={cn("steps", className)}
   style={start !== undefined ? `--steps-start: ${start};` : undefined}
   {...attrs}
@@ -81,7 +82,7 @@ const { start, class: className, ...attrs } = Astro.props;
     grid-column: 1;
     width: 1.75rem;
     height: 1.75rem;
-    border-radius: 0.5rem;
+    border-radius: var(--nb-radius);
     background: var(--nb-accent);
     color: var(--nb-foreground);
     border: 1px solid var(--nb-border-strong);

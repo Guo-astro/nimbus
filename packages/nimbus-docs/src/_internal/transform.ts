@@ -134,14 +134,27 @@ function containsComponent(node: MdNode, ctx: Context): boolean {
 
 const LITERAL = /^\s*(["'`])([^"'`$]*)\1\s*$/;
 // `{/* note */}` and `{}`: nothing for a reader.
-const EMPTY = /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*)*$/;
+function isEmpty(expression: string): boolean {
+  let rest = expression.trim();
+  while (rest) {
+    if (rest.startsWith("/*")) {
+      const end = rest.indexOf("*/", 2);
+      if (end < 0) return false;
+      rest = rest.slice(end + 2).trimStart();
+    } else if (rest.startsWith("//")) {
+      const end = rest.indexOf("\n");
+      rest = end < 0 ? "" : rest.slice(end + 1).trimStart();
+    } else return false;
+  }
+  return true;
+}
 
 const isExpression = (node: MdNode): boolean =>
   node.type === "mdxTextExpression" || node.type === "mdxFlowExpression";
 
 /** Whether `node` holds an expression written as text: a string (JSX's `{" "}`) or nothing at all. */
 function containsLiteralExpression(node: MdNode): boolean {
-  if (isExpression(node) && (LITERAL.test(String(node.value)) || EMPTY.test(String(node.value)))) return true;
+  if (isExpression(node) && (LITERAL.test(String(node.value)) || isEmpty(String(node.value)))) return true;
   return node.children?.some(containsLiteralExpression) ?? false;
 }
 
@@ -303,7 +316,7 @@ function transformNode(node: MdNode, ctx: Context): MdNode[] {
   if (isExpression(node)) {
     const literal = LITERAL.exec(String(node.value));
     if (literal) return [text(literal[2]!)];
-    if (EMPTY.test(String(node.value))) return [];
+    if (isEmpty(String(node.value))) return [];
   }
   if (!node.children) return [node];
   // A paragraph made only of block components (`<Aside>…</Aside><Aside>…</Aside>`

@@ -1,0 +1,39 @@
+---
+title: Image zoom
+tagline: "Content images open at full size in one native <dialog>, with keyboard and screen-reader support."
+---
+
+New sites render `<ImageZoom />` once in `src/layouts/DocsLayout.astro`. Every image in the page content that would show at least 1.2× bigger becomes a button that opens it at up to 95% of the viewport. Images that are already about as big as they can get, such as a screenshot on a phone, stay plain images, and resizing the window adds or removes the button.
+
+- **Keyboard:** Tab reaches the image, Enter or Space opens it, and Esc closes it. Focus returns to the image.
+- **Screen readers:** the button is named "Enlarge image: *alt text*", and the enlarged image keeps the alt text.
+- **Motion:** the image fades in, and doesn't animate when the reader prefers reduced motion.
+- **Linked images** and images inside buttons are left alone.
+
+## Opt an image out
+
+Add `data-nb-zoom="off"` to the image, or to any element around it:
+
+```mdx
+<div data-nb-zoom="off">
+  ![Architecture diagram](./diagram.png)
+</div>
+```
+
+## Remove it
+
+Delete `<ImageZoom />` and its import from `src/layouts/DocsLayout.astro`. Images go back to plain images, and the script leaves the page.
+
+## Add it to an existing site
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add image-zoom" />
+
+Then render it once in `src/layouts/DocsLayout.astro`, next to the other dialogs:
+
+```astro
+---
+import { ImageZoom } from "@/components/ui/image-zoom";
+---
+
+<ImageZoom />
+```

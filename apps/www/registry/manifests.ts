@@ -278,6 +278,14 @@ export const MANIFESTS = {
     registryDependencies: ["cn"],
   },
 
+  "image-zoom": {
+    type: "registry:ui",
+    title: "ImageZoom",
+    description: "Opens content images at full size in one native dialog. Render it once in the docs layout.",
+    registryDependencies: [],
+    docs: "Render <ImageZoom /> once in src/layouts/DocsLayout.astro, next to the other dialogs.",
+  },
+
   toc: {
     type: "registry:ui",
     title: "TOC",

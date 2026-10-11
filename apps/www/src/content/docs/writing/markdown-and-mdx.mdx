@@ -152,19 +152,42 @@ files, raw imports and files outside `admonitions.contentDirs` are unchanged. Us
 
 ## Heading ids and math
 
-Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids on:
+Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids and math on:
 
 ```ts title="astro.config.ts"
+import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
+
 nimbus(config, {
-  markdown: { features: { headingAttributes: true, math: true } },
+  markdown: {
+    hastPlugins: [tableScroll(), math()],
+    features: { headingAttributes: true, math: true },
+  },
 });
 ```
 
 With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` keep working when the heading text changes. A heading that ends in other `{…}` text, such as `## GET /accounts/{account_id}` in a `.md` file, is read as attributes too; leave the feature off if your headings end that way. A `.md` page's generated Markdown keeps the heading as you wrote it.
 
-With `math`, `$x^2$` inline and `$$` blocks are read as math instead of text. Pages get them as `<code class="language-math">` elements for a math renderer of your choice to typeset, and generated Markdown keeps the `$…$` source. It's off unless you turn it on, because a `$` in prose ("costs $5 and $10") would start a formula.
-
 Pages, generated Markdown, reusable snippets and `nimbus-docs lint` all read Markdown with the same features.
+
+### Math
+
+With `features.math` and the `math()` plugin, write math in TeX:
+
+```md
+The energy is $E = mc^2$.
+
+$$
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+```
+
+A ` ```math ` fence works like `$$`. Formulas are typeset during the build into MathML, which every current browser renders natively, so pages load no math JavaScript. Each formula carries its TeX source in the page for tools, and the page's Markdown version keeps the `$…$` source for agents.
+
+- **Prices and shell variables.** A single `$` starts inline math, so "costs $5 and $10" or `$HOME` in prose can turn into a formula. If your docs have them, use `math: { singleDollarTextMath: false }` and write inline math as `$$x^2$$`.
+- **Macros.** Give every formula the same shortcuts with `math({ macros: { "\\R": "\\mathbb{R}" } })`.
+- **Equation numbers.** `\begin{equation}` numbers an equation, and `\label{eq:name}` with `\eqref{eq:name}` refers to it.
+- **Mistakes.** A formula that can't be typeset is shown as its source, marked, and the build warns with its file and line.
+- **Your own renderer.** Remove `math()`. Math then reaches the page as `<code class="language-math">` elements, with `math-inline` or `math-display`. If you call `math()` from your own plugin or processor instead, add `import "@cloudflare/nimbus-docs/styles/math.css"` to your layout so formulas get their font and spacing.
 
 ## Extending Markdown
 

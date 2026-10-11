@@ -176,6 +176,7 @@ import {
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
 import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
 import { setMarkdownFeatures } from "./_internal/markdown-features.js";
+import { MATH_PLUGIN } from "./markdown/math.js";
 import { buildLastUpdatedIndex } from "./_internal/git-last-updated.js";
 import { virtualLastUpdatedPlugin } from "./_internal/last-updated-virtual.js";
 import {
@@ -1344,6 +1345,15 @@ export function nimbus(
           },
         );
         setMarkdownFeatures(features);
+        // `math()` renders MathML that needs Temml's stylesheet and the font stack.
+        if (
+          !options.markdown?.processor &&
+          (options.markdown?.hastPlugins as unknown[] | undefined)
+            ?.flat(Infinity)
+            .some((plugin) => typeof plugin === "function" && MATH_PLUGIN in plugin)
+        ) {
+          params.injectScript("page-ssr", 'import "@cloudflare/nimbus-docs/styles/math.css";');
+        }
 
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded

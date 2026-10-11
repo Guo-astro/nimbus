@@ -3,6 +3,25 @@
   "oldestSupportedVersion": "0.11.0",
   "entries": [
     {
+      "id": "math-rendering",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "math-rendering",
+      "summary": "Optionally typeset math with the new math() Markdown plugin.",
+      "affected": "Sites that want $…$ or $$…$$ math, or that render math with their own markdown.processor only to typeset it.",
+      "instructions": [
+        "No action is needed: sites that don't add math() are unchanged.",
+        "To typeset math, import math from @cloudflare/nimbus-docs/markdown, add math() to markdown.hastPlugins, and add math: true to markdown.features in the Nimbus integration, as new sites have.",
+        "A heading that contains math gets a new anchor once math() is on (the slug comes from the typeset text). Update links to those headings, or give them a fixed id with {#id}.",
+        "If prose uses $ for prices or shell variables ($5, $HOME), set features.math to { singleDollarTextMath: false } and write inline math as $$x^2$$.",
+        "If the site already renders math another way (KaTeX, MathJax, a custom processor), keep that and don't add math()."
+      ],
+      "verify": [
+        "Build and open a page with inline and display math: formulas render as MathML.",
+        "Check the build output for 'Math error in' warnings and fix any formula they name."
+      ]
+    },
+    {
       "id": "markdown-features",
       "introducedIn": "0.18.0",
       "mode": "optional",

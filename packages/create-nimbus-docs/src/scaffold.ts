@@ -312,7 +312,9 @@ export async function scaffold(
     if (err instanceof ScaffoldError) throw err;
     throw new ScaffoldError(
       `Could not scaffold "${dir}": ${(err as Error).message}. ` +
-        "The partial directory was removed, so you can fix the cause and re-run.",
+        (existing === null
+          ? "The partial directory was removed, so you can fix the cause and re-run."
+          : "The files it added were removed, so you can fix the cause and re-run."),
     );
   }
 
@@ -612,9 +614,12 @@ function basename(dir: string): string {
 function shouldCopyTemplatePath(source: string, templateDir: string): boolean {
   const pathFromTemplate = relative(templateDir, source);
   if (!pathFromTemplate) return true;
+  // A template that is itself a checkout must never write into the site's
+  // repository. (`.git` isn't in EXCLUDED_TEMPLATE_ENTRIES: those are also
+  // swept from the site afterwards, and the site's own `.git` must stay.)
   return !pathFromTemplate
     .split(sep)
-    .some((segment) => EXCLUDED_TEMPLATE_ENTRIES.has(segment));
+    .some((segment) => segment === ".git" || EXCLUDED_TEMPLATE_ENTRIES.has(segment));
 }
 
 function normalizePackageManagerFiles(

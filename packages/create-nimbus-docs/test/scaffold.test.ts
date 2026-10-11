@@ -397,6 +397,28 @@ test("scaffolds into a cloned repository, and a failure keeps its .git", async (
   }
 });
 
+test("a template's own .git never reaches the site's repository", async () => {
+  const cwd = makeCwd();
+  const bad = makeTemplate(`{ not valid json`);
+  try {
+    fs.mkdirSync(path.join(bad, ".git"));
+    fs.writeFileSync(path.join(bad, ".git", "HEAD"), "ref: refs/heads/template\n");
+    const target = path.join(cwd, "my-docs");
+    fs.mkdirSync(path.join(target, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    await assert.rejects(
+      scaffold({ ...BASE_OPTIONS, dir: "my-docs", templateDir: bad }, { cwd }),
+      (err) => err instanceof ScaffoldError && /files it added were removed/.test(err.message),
+    );
+    assert.deepEqual(fs.readdirSync(target), [".git"]);
+    assert.deepEqual(fs.readdirSync(path.join(target, ".git")), ["HEAD"]);
+    assert.equal(fs.readFileSync(path.join(target, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+  } finally {
+    cleanup(cwd, bad);
+  }
+});
+
 test("a fresh repository gets a first commit; an existing one gets neither init nor commit", async () => {
   const identity = {
     GIT_AUTHOR_NAME: "Test",

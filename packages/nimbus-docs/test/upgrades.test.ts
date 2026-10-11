@@ -45,6 +45,7 @@ test("only universally skippable entries are optional", () => {
       "api-version-picker",
       "browser-documentation-search",
       "homepage-renders-on-request",
+      "image-zoom",
       "lighter-sidebar-markup",
       "markdown-features",
       "math-rendering",

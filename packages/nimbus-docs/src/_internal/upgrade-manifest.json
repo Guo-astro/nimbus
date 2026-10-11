@@ -93,6 +93,21 @@
       ]
     },
     {
+      "id": "image-zoom",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "image-zoom",
+      "summary": "Optionally let readers open content images at full size.",
+      "affected": "Sites scaffolded before 0.18.0.",
+      "instructions": [
+        "No action is needed: images keep working as they do.",
+        "To add it, run nimbus-docs add image-zoom, then import { ImageZoom } from \"@/components/ui/image-zoom\" in src/layouts/DocsLayout.astro and render <ImageZoom /> once, next to the other dialogs."
+      ],
+      "verify": [
+        "On a page with a large screenshot, click it and confirm it opens at full size and Esc closes it."
+      ]
+    },
+    {
       "id": "compact-coordinate-manifest",
       "introducedIn": "0.14.0",
       "mode": "review-required",

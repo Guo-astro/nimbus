@@ -203,6 +203,12 @@ export const BUNDLED_INDEX: BundledIndex = {
       "title": "ThemeToggle",
       "description": "Light / dark theme switcher button."
     },
+    "image-zoom": {
+      "name": "image-zoom",
+      "type": "registry:ui",
+      "title": "ImageZoom",
+      "description": "Opens content images at full size in one native dialog. Render it once in the docs layout."
+    },
     "toc": {
       "name": "toc",
       "type": "registry:ui",

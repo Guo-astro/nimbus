@@ -335,6 +335,12 @@ function headerPatternMatches(pattern: string, pathname: string): boolean {
     const pathStart = pattern.indexOf("/", "https://".length);
     pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
   }
+  try {
+    // Static hosts URL-normalize raw Unicode and spaces in owner paths.
+    pattern = new URL(`//${pattern}`, "relative://").pathname;
+  } catch {
+    return false;
+  }
   let source = "";
   let offset = 0;
   for (const token of pattern.matchAll(/\*|:[A-Za-z]\w*/g)) {

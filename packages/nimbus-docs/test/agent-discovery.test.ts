@@ -401,3 +401,24 @@ test("text header patterns serialize Unicode and spaces in the base once", () =>
     );
   }
 });
+
+test("raw and encoded owner paths do not duplicate generated text Content-Type", () => {
+  for (const [pathname, ownerPath] of [
+    ["/café/index.md", "/docs/café/index.md"],
+    ["/café/index.md", "/docs/caf%C3%A9/index.md"],
+    ["/my guide/index.md", "/docs/my guide/index.md"],
+    ["/my guide/index.md", "/docs/my%20guide/index.md"],
+  ]) {
+    const ownerHeaders = `${ownerPath}\n  Content-Type: application/octet-stream`;
+    const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+      paths: [pathname!],
+      ownerHeaders,
+    });
+    assert.doesNotMatch(generated, /^\/docs\/\*\/index.md$/m, ownerPath);
+    assert.ok(
+      appendAgentDiscoveryHeaders(ownerHeaders, generated).startsWith(
+        ownerHeaders,
+      ),
+    );
+  }
+});

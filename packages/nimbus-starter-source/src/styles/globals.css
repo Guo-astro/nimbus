@@ -680,7 +680,7 @@ pre.astro-code .highlighted-word {
 	}
 	/* A top-level group reads as a section heading, set apart from the loose
 	   pages above it. */
-	[data-nb-sidebar] .top-level > li:has(> details) {
+	[data-nb-sidebar] .top-level > li + li:has(> details) {
 		margin-top: 0.75rem;
 	}
 	[data-nb-sidebar] .top-level > li > details > .nb-sidebar-row {

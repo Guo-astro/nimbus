@@ -123,18 +123,21 @@ jobs:
         id: preview
         working-directory: apps/www
         run: |
+          set -o pipefail
           name='main'
           if [ "$EVENT" = 'pull_request' ]; then name="pr-$PR"; fi
           output_file="$RUNNER_TEMP/www-preview-output.jsonl"
           WRANGLER_OUTPUT_FILE_PATH="$output_file" pnpm exec wrangler preview --name "$name" --json
           url=$(jq -er --arg expected "https://$name.nimbus-docs.com" 'select(.type == "preview") | .preview_urls[] | select(. == $expected)' "$output_file")
+          for attempt in {1..12}; do
+            if served_sha=$(curl --fail --show-error --silent --max-time 10 "$url/_nimbus-preview-sha.txt") && [ "$served_sha" = "$EVENT_SHA" ]; then break; fi
+            if [ "$attempt" -eq 12 ]; then echo "::error::Preview did not serve commit $EVENT_SHA"; exit 1; fi
+            sleep 5
+          done
           curl --fail --show-error --silent --retry 5 --retry-delay 3 \
             "$url/registry/registry.json" | jq -e \
             --arg version "$(jq -r .version ../../packages/nimbus-docs/package.json)" \
             '.registryVersion == $version'
-          served_sha=$(curl --fail --show-error --silent --retry 5 --retry-delay 3 \
-            "$url/_nimbus-preview-sha.txt")
-          test "$served_sha" = "$EVENT_SHA"
           echo "url=$url" >> "$GITHUB_OUTPUT"
         env:
           EVENT: ${{ github.event_name }}

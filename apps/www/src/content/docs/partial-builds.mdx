@@ -47,13 +47,13 @@ Any other slice writes its site-wide files under its prefix, where its own deplo
 | `llms-full.txt`, one per collection in the slice | `/.well-known/` | `_redirects`, when the site emits one; both files for hosts that read them |
 | `_nimbus/shiki.css`, `_astro/` (bundled CSS and JS) | another collection's `openapi.json` and nav lists | |
 
-A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, so the slice takes that prefix too (below).
+A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, and `/og/docs-es.png` for the collection's index page, so the slice takes those too (below).
 
 The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. An absent collection is named by its formatted name (`Docs Es` for `docs-es`; an API collection by its configured label), not by its index page's title, which that build doesn't read. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
 
 ## Deploy each slice
 
-Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. A slice needs three prefixes: the prefix itself (`/docs-es`, so the slashless form doesn't reach the root slice), everything under it (`/docs-es/*`) and its OG images (`/og/docs-es/*`). Everything else goes to the root slice. The most specific prefix wins; nothing merges at build time, and slices deploy in any order.
+Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. A slice needs four paths: the prefix itself (`/docs-es`, so the slashless form doesn't reach the root slice), everything under it (`/docs-es/*`), its pages' OG images (`/og/docs-es/*`) and its index page's OG image (`/og/docs-es.png`). Everything else goes to the root slice. The most specific prefix wins; nothing merges at build time, and slices deploy in any order.
 
 A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and come from the root slice, so a change there deploys the root slice.
 
@@ -69,7 +69,8 @@ Give every collection to exactly one slice: two deployments that both hold `api`
   "routes": [
     { "pattern": "docs.example.com/docs-es", "zone_name": "example.com" },
     { "pattern": "docs.example.com/docs-es/*", "zone_name": "example.com" },
-    { "pattern": "docs.example.com/og/docs-es/*", "zone_name": "example.com" }
+    { "pattern": "docs.example.com/og/docs-es/*", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/og/docs-es.png", "zone_name": "example.com" }
   ]
 }
 ```
@@ -82,10 +83,11 @@ The root slice's `wrangler.jsonc` keeps `"pattern": "docs.example.com/*"`. Then 
 location = /docs-es      { proxy_pass https://docs-es.internal; }
 location /docs-es/       { proxy_pass https://docs-es.internal; }
 location /og/docs-es/    { proxy_pass https://docs-es.internal; }
+location = /og/docs-es.png { proxy_pass https://docs-es.internal; }
 location /                { proxy_pass https://docs-root.internal; }
 ```
 
-**A static host with rewrites**, such as Netlify or Vercel: deploy each slice as its own site and add rewrites on the root site to the slice's deployment, for example `/docs-es/* https://docs-es.example.app/docs-es/:splat 200` in `_redirects`, or the equivalent `rewrites` entries in `vercel.json`, for the three prefixes.
+**A static host with rewrites**, such as Netlify or Vercel: deploy each slice as its own site and add rewrites on the root site to the slice's deployment, for example `/docs-es/* https://docs-es.example.app/docs-es/:splat 200` in `_redirects`, or the equivalent `rewrites` entries in `vercel.json`, for the four paths.
 
 Each slice's `_headers` and `_redirects` cover that slice's files; hosts that don't read those files need the same rules in their own configuration, as for a whole-site build ([Docs for agents](/ai/docs-for-agents#agent-discovery)).
 
@@ -116,7 +118,8 @@ const root = 8790;
 createServer((req, res) => {
   const path = new URL(req.url, "http://x").pathname;
   const slice = slices.find(
-    ({ prefix }) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`/og${prefix}/`),
+    ({ prefix }) =>
+      path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`/og${prefix}/`) || path === `/og${prefix}.png`,
   );
   const upstream = request({ port: slice?.port ?? root, path: req.url, method: req.method, headers: req.headers }, (up) => {
     res.writeHead(up.statusCode ?? 502, up.headers);

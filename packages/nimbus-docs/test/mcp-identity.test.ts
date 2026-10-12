@@ -89,6 +89,19 @@ test("the card validates as $defs.ServerCard, names the live endpoint and carrie
   assert.equal(MCP_CARD_MEDIA_TYPE, "application/mcp-server-card+json");
 });
 
+test("the card names the endpoint the site publishes, slashed form included", () => {
+  const identity = mcpServerIdentity({
+    site: "https://docs.example.com",
+    base: "/",
+    title: "Example",
+    version: "0.19.0",
+    endpointUrl: mcpUrl("https://docs.example.com", "/", "always"),
+  });
+  assert.equal(identity.endpointUrl, "https://docs.example.com/mcp/");
+  assert.deepEqual(mcpServerCard(identity).remotes, [{ type: "streamable-http", url: "https://docs.example.com/mcp/" }]);
+  assert.equal(mcpCardUrl(identity.endpointUrl), "https://docs.example.com/mcp/server-card");
+});
+
 test("a long site title keeps the card's description and title within the schema limits", () => {
   const title = "T".repeat(150);
   const card = mcpServerCard(

@@ -82,8 +82,10 @@ export function mcpServerIdentity(input: {
   base: string;
   title: string;
   version: string;
+  /** The published endpoint (`capabilities.mcpUrl`), which carries the trailing-slash form. */
+  endpointUrl?: string;
 }): McpServerIdentity {
-  const endpointUrl = mcpUrl(input.site, input.base);
+  const endpointUrl = input.endpointUrl ?? mcpUrl(input.site, input.base);
   const description = truncate(
     `Read the ${input.title} documentation: get_page and list_pages, no search.`,
     100,

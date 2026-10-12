@@ -29,8 +29,8 @@ const actionBtn =
 ---
 
 {url && (
-  <div data-nb-connect-mcp class={cn("not-prose inline-flex text-[0.8125rem]", className)} {...attrs}>
-    <button type="button" data-nb-connect-mcp-open class={actionBtn}>
+  <div data-nb-connect-mcp data-pagefind-ignore class={cn("not-prose inline-flex text-[0.8125rem]", className)} {...attrs}>
+    <button type="button" data-nb-connect-mcp-open aria-haspopup="dialog" class={actionBtn}>
       <Icon name="ph:plugs-connected" class="w-3.5 h-3.5" />
       Connect MCP
     </button>

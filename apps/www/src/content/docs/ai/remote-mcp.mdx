@@ -47,7 +47,7 @@ Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. Wi
 
 ## The tools
 
-**`list_pages`** returns pages with their `title`, `url`, `markdownUrl`, `description`, `section` and `version`, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`), or by one `version` from the site's `versions` manifest.
+**`list_pages`** returns pages with their `title`, `url`, `markdownUrl`, `description`, `section` and `version`, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; the root page is `index`), or by one `version` from the site's `versions` manifest. A `version` filter returns that version's docs pages only, the same set as its `/<version>/llms.txt`; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
 
 ```json
 { "section": "guide" }

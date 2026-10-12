@@ -88,7 +88,51 @@ test("OPTIONS is answered with CORS; GET and DELETE are 405 with Allow; a bad Or
   }
   assert.equal(originIsWellFormed("https://app.example.com:8443"), true);
   assert.equal(originIsWellFormed("chrome-extension://abcdefghijklmnop"), true);
+  assert.equal(originIsWellFormed("https://Example.com"), true, "non-canonical case is still an origin");
+  assert.equal(originIsWellFormed("http://example.com:80"), true, "a default port is still an origin");
+  assert.equal(originIsWellFormed("https://example.com/app"), false, "a path is not an origin");
+  assert.equal(originIsWellFormed("https://example.com/?q"), false, "a query is not an origin");
   assert.equal(originIsWellFormed(null), true);
+});
+
+test("every tool call reads the index and the page with the request being served", async () => {
+  const seen: string[] = [];
+  const handler = createDocsMcpHandler({
+    identity: mcpServerIdentity({ site: SITE, base: "/", title: "Example", version: "0.19.0" }),
+    base: "/",
+    source: {
+      readIndex: async (request) => {
+        seen.push(new URL(request.url).hostname);
+        return INDEX;
+      },
+      readPage: async (page, request) => {
+        seen.push(`page@${new URL(request.url).hostname}`);
+        return `# ${page.title}`;
+      },
+    },
+  });
+  for (const host of ["first.test", "second.test"]) {
+    const request = rpcRequest(`https://${host}/mcp`, "tools/call", { name: "get_page", arguments: { url: "/guide/" } });
+    await readRpcResponse(await handler.fetch(request));
+  }
+  assert.deepEqual(seen, ["first.test", "page@first.test", "second.test", "page@second.test"]);
+});
+
+test("a page store that cannot be read is a structured not_found, not a raw error", async () => {
+  const handler = createDocsMcpHandler({
+    identity: mcpServerIdentity({ site: SITE, base: "/", title: "Example", version: "0.19.0" }),
+    base: "/",
+    source: {
+      readIndex: async () => INDEX,
+      readPage: async () => {
+        throw new Error("nimbus-docs: build output file x returned 404. Check the site's client files (dist/client) were deployed with the server.");
+      },
+    },
+  });
+  const { value, isError } = await call(handler, "get_page", { url: "/guide/" });
+  assert.equal(isError, true);
+  assert.equal((value.error as { code: string }).code, "not_found");
+  assert.doesNotMatch((value.error as { message: string }).message, /dist\/client|returned 404/);
 });
 
 test("initialize reports the derived name, the package version, instructions and the tools capability", async () => {

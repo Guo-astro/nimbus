@@ -24,6 +24,7 @@ function docsMcpHandler(): DocsMcpHandler {
       base: options.base,
       title: options.title,
       version: options.nimbusVersion ?? "0.0.0",
+      endpointUrl: capabilities.mcpUrl,
     }),
     base: options.base,
     source: {

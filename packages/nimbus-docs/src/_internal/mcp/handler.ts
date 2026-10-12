@@ -105,7 +105,7 @@ export const LIST_PAGES_TOOL = {
     properties: {
       section: { type: "string", minLength: 1, maxLength: 200 },
       version: { type: "string", minLength: 1, maxLength: 100 },
-      cursor: { type: "string", minLength: 1, maxLength: 200 },
+      cursor: { type: "string", minLength: 1, maxLength: 512 },
     },
   },
 } as const;
@@ -217,15 +217,12 @@ export function listPages(
 }
 
 export function pageResult(record: McpPageRecord, content: string): GetPageResult {
+  const result = { title: record.title, url: record.url, markdownUrl: record.markdownUrl };
+  // UTF-16 length bounds the code-point count, so short pages skip the spread.
+  if (content.length <= MCP_PAGE_CONTENT_LIMIT) return { ...result, content };
   const points = [...content];
-  const truncated = points.length > MCP_PAGE_CONTENT_LIMIT;
-  return {
-    title: record.title,
-    url: record.url,
-    markdownUrl: record.markdownUrl,
-    content: truncated ? points.slice(0, MCP_PAGE_CONTENT_LIMIT).join("") : content,
-    ...(truncated ? { truncated: true as const } : {}),
-  };
+  if (points.length <= MCP_PAGE_CONTENT_LIMIT) return { ...result, content };
+  return { ...result, content: points.slice(0, MCP_PAGE_CONTENT_LIMIT).join(""), truncated: true };
 }
 
 /**
@@ -242,8 +239,10 @@ export function originIsWellFormed(origin: string | null): boolean {
   } catch {
     return false;
   }
-  if (parsed.origin !== "null") return parsed.origin === origin;
-  return parsed.host !== "" && `${parsed.protocol}//${parsed.host}` === origin;
+  // Non-special schemes (extensions) parse with an empty path.
+  if (parsed.host === "" || !["/", ""].includes(parsed.pathname) || parsed.search || parsed.hash) return false;
+  if (parsed.origin !== "null") return true;
+  return `${parsed.protocol}//${parsed.host}`.toLowerCase() === origin.toLowerCase();
 }
 
 /**
@@ -296,10 +295,26 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
   const validator = new CfWorkerJsonSchemaValidator();
   const checkGetPage = invalidArguments(validator, GET_PAGE_TOOL.inputSchema);
   const checkListPages = invalidArguments(validator, LIST_PAGES_TOOL.inputSchema);
+  const getPageSchema = describedSchema<{ url: string }>(GET_PAGE_TOOL.inputSchema, validator);
+  const listPagesSchema = describedSchema<{ section?: string; version?: string; cursor?: string }>(
+    LIST_PAGES_TOOL.inputSchema,
+    validator,
+  );
+  // The SDK hands the served request to the factory; the fallback is the
+  // request `fetch` is serving, for a runtime that leaves it out.
+  let serving: Request | undefined;
+  const unavailable = (error: unknown) => {
+    console.error(error);
+    return toolResult(
+      toolError("not_found", "The page data could not be read; the site's published files may not be deployed. Try again later."),
+      true,
+    );
+  };
   let sdk: McpHttpHandler | undefined;
-  const handler = (request: Request): McpHttpHandler => {
+  const handler = (): McpHttpHandler => {
     sdk ??= createMcpHandler(
-      () => {
+      ({ requestInfo }) => {
+        const request = requestInfo ?? serving ?? new Request("https://nimbus.invalid/mcp");
         const server = new McpServer(
           {
             name: identity.name,
@@ -315,13 +330,18 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
           {
             title: GET_PAGE_TOOL.title,
             description: GET_PAGE_TOOL.description,
-            inputSchema: describedSchema<{ url: string }>(GET_PAGE_TOOL.inputSchema, validator),
+            inputSchema: getPageSchema,
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
           },
           async (args) => {
             const invalid = checkGetPage(args);
             if (invalid) return toolResult(invalid, true);
-            const index = await source.readIndex(request);
+            let index: McpPageIndex;
+            try {
+              index = await source.readIndex(request);
+            } catch (error) {
+              return unavailable(error);
+            }
             const record = resolvePageRecord(args.url, index, base);
             if (!record) {
               return toolResult(
@@ -329,7 +349,12 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
                 true,
               );
             }
-            const content = await source.readPage(record, request);
+            let content: string | null;
+            try {
+              content = await source.readPage(record, request);
+            } catch (error) {
+              return unavailable(error);
+            }
             if (content === null) {
               return toolResult(
                 toolError("not_found", `No Markdown for ${record.url}; read ${record.markdownUrl} directly.`),
@@ -344,16 +369,18 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
           {
             title: LIST_PAGES_TOOL.title,
             description: LIST_PAGES_TOOL.description,
-            inputSchema: describedSchema<{ section?: string; version?: string; cursor?: string }>(
-              LIST_PAGES_TOOL.inputSchema,
-              validator,
-            ),
+            inputSchema: listPagesSchema,
             annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
           },
           async (args) => {
             const invalid = checkListPages(args);
             if (invalid) return toolResult(invalid, true);
-            const index = await source.readIndex(request);
+            let index: McpPageIndex;
+            try {
+              index = await source.readIndex(request);
+            } catch (error) {
+              return unavailable(error);
+            }
             const result = listPages(args, index);
             return toolResult(result, "error" in result);
           },
@@ -379,7 +406,8 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
       if (!originIsWellFormed(request.headers.get("origin"))) {
         return json({ error: { code: "invalid_origin", message: "The Origin header is not a valid origin." } }, 403);
       }
-      const response = await handler(request).fetch(request);
+      serving = request;
+      const response = await handler().fetch(request);
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

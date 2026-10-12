@@ -11,6 +11,7 @@ export function GET() {
       base: options.base,
       title: options.title,
       version: options.nimbusVersion ?? "0.0.0",
+      endpointUrl: capabilities.mcpUrl,
     }),
   );
   return new Response(JSON.stringify(card, null, 2) + "\n", {

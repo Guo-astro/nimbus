@@ -236,12 +236,30 @@ function suite(name: string, options: { host: string; base?: string }) {
       assert.equal(pages[3]!.section, "guide");
       assert.equal(pages[1]!.section, "blog");
       const root = await readFile(dist("/llms.txt"), "utf8");
-      const current = pages.filter((page) => page.version === undefined || page.version === "v2").filter((page) => page.url !== `${origin}${prefix}/findable/`);
-      const rootLinks = new Set(linksOf(root));
-      for (const page of current) {
-        const section = page.section === "index" ? undefined : `${origin}${prefix}/${page.section}/llms.txt`;
-        assert.ok(rootLinks.has(page.markdownUrl) || (section !== undefined && rootLinks.has(section)), `${page.url} is on llms.txt or its section is`);
+      // The root llms.txt lists leaves and section files; the union of the
+      // section files' pages and the root's own page links is the current
+      // version's discoverable set, which is the default list minus the
+      // searchable-but-noindex page and minus other versions.
+      const rootPages: string[] = [];
+      for (const link of linksOf(root)) {
+        if (!link.endsWith("/llms.txt")) {
+          rootPages.push(link);
+          continue;
+        }
+        // A section whose pages render on request (the API here) serves its
+        // llms.txt on request too; the others are files.
+        const sectionPath = dist(new URL(link).pathname.slice(prefix.length));
+        const section = existsSync(sectionPath)
+          ? await readFile(sectionPath, "utf8")
+          : await (await site.app.render(new Request(link))).text();
+        rootPages.push(...linksOf(section).filter((item) => !item.endsWith("/llms.txt")));
       }
+      const current = pages
+        .filter((page) => page.version === undefined || page.version === "v2")
+        .filter((page) => page.url !== `${origin}${prefix}/findable/`)
+        .map((page) => page.markdownUrl)
+        .sort();
+      assert.deepEqual([...new Set(rootPages)].sort(), current);
       assert.ok(!root.includes("/v1/") && !root.includes("/v0/") && !root.includes("/internal/"), "root llms.txt has no other versions and no noindex");
       assert.match(root, new RegExp(`^MCP server \\(Streamable HTTP; tools list_pages and get_page over these pages\\): ${endpoint.replace(/[.]/g, "\\.")}$`, "m"));
       const v1 = await call("list_pages", { version: "v1" });

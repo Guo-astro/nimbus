@@ -744,7 +744,7 @@ test("rebakes when invalidated during API input loading", async () => {
     (
       await readdir(path.join(projectRoot, ".astro/nimbus/agent-endpoint-assets/assets"))
     ).sort(),
-    [...manifest.markdownAssets, ...manifest.llmsAssets]
+    [...manifest.markdownAssets, ...manifest.llmsAssets, manifest.pageIndex]
       .map((asset) => path.basename(asset.path))
       .sort(),
   );
@@ -1110,7 +1110,7 @@ test("removes assets made obsolete by edits and deletions", async () => {
   );
   assert.deepEqual(
     files.sort(),
-    [...manifest.markdownAssets, ...manifest.llmsAssets]
+    [...manifest.markdownAssets, ...manifest.llmsAssets, manifest.pageIndex]
       .map((asset) => path.basename(asset.path))
       .sort(),
   );
@@ -1168,7 +1168,7 @@ test("bakes every Markdown asset at its public URL, API pages included, hidden A
   configure(projectRoot, options);
   const manifest = await bakeAgentEndpointAssets(options);
 
-  assert.equal(manifest.version, 5);
+  assert.equal(manifest.version, 6);
   assert.deepEqual(
     manifest.markdownAssets.map((asset) => `${asset.surface} ${asset.url}`).sort(),
     [

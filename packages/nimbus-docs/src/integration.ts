@@ -124,7 +124,7 @@ import {
 import { scanCodeBlocks } from "./_internal/scan-code-langs.js";
 import { walkFilesSync } from "./_internal/fs-walk.js";
 import { discoverMigrations } from "./_internal/migrations.js";
-import { resolveUpgradeBaseline, selectUpgradeEntries } from "./_internal/upgrades.js";
+import { resolveUpgradeBaseline, runningNimbusVersion, selectUpgradeEntries } from "./_internal/upgrades.js";
 import { registerAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import {
   NIMBUS_CONFIG_FILE,
@@ -205,6 +205,7 @@ import {
 } from "./_internal/agent-endpoint-coverage.js";
 import { pagefindDocument } from "./_internal/pagefind-document.js";
 import { invocation } from "./cli/pm.js";
+import { MCP_CARD_PATH, MCP_PATH, mcpUrl as mcpEndpointUrl } from "./_internal/mcp/identity.js";
 import {
   beginPreparedMarkdownSession,
   getPreparedMarkdownSnapshot,
@@ -766,6 +767,7 @@ export function nimbus(
         base: astroBaseForBuild,
         output: outputModeForBuild,
         homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
+        ...(config.agents?.mcp ? { nimbusVersion: runningNimbusVersion() } : {}),
       },
       capabilities: createAgentCapabilities({
         search: config.search,
@@ -787,6 +789,9 @@ export function nimbus(
         apis,
         ...(skills?.index
           ? { skillsIndexUrl: new URL(AGENT_SKILLS_INDEX_PATH, config.site).href }
+          : {}),
+        ...(config.agents?.mcp
+          ? { mcpUrl: mcpEndpointUrl(config.site, astroBaseForBuild, sitemapTrailingSlash) }
           : {}),
       }),
     };
@@ -1113,6 +1118,9 @@ export function nimbus(
               description: config.description,
               socialImage: config.socialImage,
               versions: config.versions,
+              ...(config.agents?.mcp
+                ? { mcpUrl: mcpEndpointUrl(config.site, astroConfig.base || "/", astroConfig.trailingSlash) }
+                : {}),
               citationIndex,
               componentMap: options.markdown?.componentMap,
               partialResolver,
@@ -2074,6 +2082,41 @@ export function nimbus(
             rendering: "build",
           });
         }
+        if (config.agents?.mcp) {
+          // The server at /mcp and its card: both infrastructure, one on
+          // request, one at build. A project file at either path is a
+          // collision, never a silent override.
+          for (const [pattern, name, prerender] of [
+            [MCP_PATH, "mcp/route", false],
+            [MCP_CARD_PATH, "mcp/card-route", true],
+          ] as const) {
+            const ownedPaths = [
+              path.join(publicDir, pattern),
+              ...["ts", "js", "astro"].map((ext) =>
+                path.join(srcDir, "pages", `${pattern}.${ext}`),
+              ),
+              ...["ts", "js", "astro"].map((ext) =>
+                path.join(srcDir, "pages", pattern, `index.${ext}`),
+              ),
+            ];
+            const collision = ownedPaths.find((file) => fs.existsSync(file));
+            if (collision)
+              throw authorError(
+                `Nimbus serves ${pattern} when agents.mcp is on. Move ${path.relative(projectRoot, collision)}, or set agents.mcp to false.`,
+              );
+            const entrypoint = new URL(
+              `./_internal/${name}.${extension}`,
+              import.meta.url,
+            );
+            injectRoute({ pattern, entrypoint, prerender });
+            managedRoutesForBuild.push({
+              pattern,
+              entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
+              owner: "infrastructure",
+              rendering: prerender ? "build" : "request",
+            });
+          }
+        }
         for (const api of resolveAllApiCollections(config.api)) {
           const owned = path.join(publicDir, api.mountPath, "openapi.json");
           if (api.publishSpec && fs.existsSync(owned))
@@ -2748,6 +2791,23 @@ export function nimbus(
           buildOutput ??
           (astroConfig.output === "server" ? "server" : "static");
         adapterNameForBuild = astroConfig.adapter?.name ?? null;
+        if (config.agents?.mcp) {
+          const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
+          if (building && (outputModeForBuild !== "server" || !adapterNameForBuild)) {
+            throw new Error(
+              "nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. " +
+                `Run \`${invocation("add adapter-cloudflare", root)}\` (or add adapter-node, adapter-vercel or adapter-netlify), or set agents.mcp to false. ` +
+                `Received output=${outputModeForBuild}, adapter=${adapterNameForBuild ?? "none"}.`,
+            );
+          }
+          try {
+            createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server/package.json");
+          } catch {
+            throw new Error(
+              "nimbus-docs: agents.mcp needs the MCP server SDK in this project. Install it:\n\n  npm install @modelcontextprotocol/server\n",
+            );
+          }
+        }
         if (
           building &&
           requestRenderingConfigured &&

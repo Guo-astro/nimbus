@@ -350,7 +350,7 @@ test("two shared files serve every collection under a base, and a changelog over
   );
   assert.doesNotMatch(site.logs, /not prerendered|did not generate/);
   const baked = await manifest(site.root);
-  assert.equal(baked.version, 5);
+  assert.equal(baked.version, 6);
 
   const outputs = await markdownOutputs(site.root);
   const api = outputs.filter((file) => file.startsWith("api/"));

@@ -589,6 +589,15 @@ const apiReferencesSchema = z
     });
   });
 
+const agentsSchema = withStrictKeys(
+  z.object({
+    mcp: z
+      .boolean({ error: '"agents.mcp" must be true or false' })
+      .optional(),
+  }),
+  { removedKeys: {}, contextLabel: "agents sub-key" },
+).optional();
+
 const nimbusConfigSchema = withStrictKeys(
   z.object({
     site: z
@@ -628,6 +637,7 @@ const nimbusConfigSchema = withStrictKeys(
     api: apiSchema,
     apiReferences: apiReferencesSchema,
     rendering: renderingSchema,
+    agents: agentsSchema,
   }),
   {
     removedKeys: REMOVED_CONFIG_KEYS,

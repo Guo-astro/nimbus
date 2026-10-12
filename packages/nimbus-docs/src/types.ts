@@ -23,6 +23,8 @@ export interface AgentCapabilities {
   llmsUrl?: string;
   /** The Agent Skills discovery index, when the site publishes skills. */
   skillsIndexUrl?: string;
+  /** The remote MCP endpoint, when `agents.mcp` is on. Its card is at `<mcpUrl>/server-card`. */
+  mcpUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +169,20 @@ export interface NimbusConfig {
    * default. Overrides are collection names, not URL patterns or API versions.
    */
   rendering?: RenderingConfig;
+  /**
+   * Agent-facing services the site runs itself. Absent means none.
+   *
+   *   - `mcp` — serve a remote MCP server at `/mcp` from the site's own
+   *     server, with `get_page` and `list_pages` over the published
+   *     Markdown. Needs a server adapter and the
+   *     `@modelcontextprotocol/server` package in the project.
+   */
+  agents?: AgentsConfig;
+}
+
+export interface AgentsConfig {
+  /** Serve a remote MCP server at `/mcp`. Default `false`. */
+  mcp?: boolean;
 }
 
 export type RenderingMode = "build" | "request";

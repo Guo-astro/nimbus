@@ -1,5 +1,6 @@
 import type { AgentCapabilities } from "../types.js";
 import { safeDecode, withBase } from "./url.js";
+import { MCP_CARD_MEDIA_TYPE, mcpCardUrl } from "./mcp/identity.js";
 import {
   API_CATALOG_MEDIA_TYPE,
   API_CATALOG_PATH,
@@ -13,6 +14,8 @@ export interface AgentDiscoveryOptions {
   base: string;
   output: "static" | "server";
   homepageMarkdownFallback?: boolean;
+  /** The installed `@cloudflare/nimbus-docs` version: the remote MCP server reports it. */
+  nimbusVersion?: string;
 }
 export interface ArdEntry {
   identifier: string;
@@ -111,6 +114,17 @@ export function agentDiscoveryManifest(
       [
         `Find agent skills published by ${options.title}`,
         `Install a skill for working with ${options.title}`,
+      ],
+    );
+  if (capabilities.mcpUrl)
+    add(
+      "mcp",
+      `${options.title} MCP server`,
+      MCP_CARD_MEDIA_TYPE,
+      mcpCardUrl(capabilities.mcpUrl),
+      [
+        `Read the ${options.title} documentation over MCP`,
+        `List the pages of the ${options.title} documentation`,
       ],
     );
   return {
@@ -286,6 +300,18 @@ export function agentDiscoveryHeaderRules(
         rules.push({ pattern, headers: [[name, value]], evaluated: true });
       }
     }
+  }
+  if (capabilities.mcpUrl) {
+    // The card has no extension, so the host can't infer its media type.
+    rules.push({
+      pattern: new URL(mcpCardUrl(capabilities.mcpUrl)).pathname,
+      headers: [
+        ["Content-Type", MCP_CARD_MEDIA_TYPE],
+        ["Access-Control-Allow-Origin", "*"],
+        ["Access-Control-Allow-Methods", "GET"],
+        ["Access-Control-Expose-Headers", "ETag"],
+      ],
+    });
   }
   const kept = rules.flatMap((rule) => {
     const headers = rule.evaluated

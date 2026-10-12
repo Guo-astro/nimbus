@@ -674,3 +674,32 @@ test("an owner line that normalizes to a generated path is the same rule, and ex
   });
   assert.match(replaced, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json/m, "the surviving rule sets no Content-Type, so the generated one stays");
 });
+
+test("a remote MCP server is one catalog entry pointing at its card, plus a typed, CORS-enabled header rule", () => {
+  const capabilities = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    homepageMarkdownUrl: minimal.homepageMarkdownUrl,
+    mcpUrl: `${options.site}/docs/mcp`,
+  });
+  const document = agentDiscoveryManifest(capabilities, options);
+  for (const validate of [validateArd, validateCatalog])
+    assert.equal(validate(document), true, JSON.stringify(validate.errors));
+  const entry = document.entries.find((item) => item.type === "application/mcp-server-card+json");
+  assert.deepEqual(entry, {
+    identifier: "urn:air:docs.example.com:docs-docs:mcp",
+    displayName: "Example MCP server",
+    type: "application/mcp-server-card+json",
+    url: "https://docs.example.com/docs/mcp/server-card",
+    representativeQueries: [
+      "Read the Example documentation over MCP",
+      "List the pages of the Example documentation",
+    ],
+  });
+  const generated = agentDiscoveryHeaderRules(capabilities, options);
+  assert.match(
+    generated,
+    /^\/docs\/mcp\/server-card\n  Content-Type: application\/mcp-server-card\+json\n  Access-Control-Allow-Origin: \*\n  Access-Control-Allow-Methods: GET\n  Access-Control-Expose-Headers: ETag$/m,
+  );
+  assert.doesNotMatch(agentDiscoveryHeaderRules(minimal, options), /server-card/);
+  assert.doesNotMatch(JSON.stringify(agentDiscoveryManifest(minimal, options)), /mcp/);
+});

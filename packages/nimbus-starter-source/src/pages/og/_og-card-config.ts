@@ -9,9 +9,6 @@
  * inside `src/pages/` to be next to its consumers, but it's not a route.
  */
 
-import { fileURLToPath } from "node:url";
-
-import { publicDir, root } from "astro:config/server";
 import type { OGImageOptions } from "astro-og-canvas";
 
 export const ogCardConfig = {
@@ -21,10 +18,9 @@ export const ogCardConfig = {
   ],
   border: { color: [39, 39, 42], width: 2, side: "inline-start" },
   padding: 96,
-  // Resolved from the project, so a build started elsewhere (`astro build
-  // --root <site>`) finds the font and keeps its cache under the site.
-  fonts: [fileURLToPath(new URL("fonts/Inter-Bold.ttf", publicDir))],
-  cacheDir: fileURLToPath(new URL("node_modules/.astro-og-canvas", root)),
+  // `fonts` and `cacheDir` are set by the two routes from the project's own
+  // paths, so a build started elsewhere (`astro build --root <site>`) finds
+  // the font and keeps its cache under the site.
   font: {
     title: {
       color: [250, 250, 250],

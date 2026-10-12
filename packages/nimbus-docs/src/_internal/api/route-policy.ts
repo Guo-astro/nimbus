@@ -7,15 +7,22 @@
  * implementation and can never drift.
  *
  * The rules become permanent the moment the first page ships; a future behavior
- * change gets a new policy name (`resource-action-v2`), never an edit here. See
- * `route-convention.mdx` for the normative contract this transcribes.
+ * change gets a new policy name, never an edit here. See `route-convention.mdx`
+ * for the normative contract this transcribes.
+ *
+ * `resource-action-v2` is v1 plus tag routes: operation derivation is shared
+ * byte for byte, and tag pages take the same lowercase kebab-case projection
+ * (`policyTagRouteSegment` in `coordinates.ts`) instead of the legacy
+ * case-preserving one.
  */
 
 import type { RouteProvenance } from "./model.js";
 
 /** The serializable route policy carried by one concrete parsed spec. */
+export type RouteConvention = "resource-action-v1" | "resource-action-v2";
+
 export interface RoutePolicy {
-  convention: "resource-action-v1";
+  convention: RouteConvention;
   /** Base path prefixes stripped before classification, e.g. `["/v1"]`. */
   stripPathPrefixes?: string[];
   /** `operationId` → complete collection-relative slug. Bypasses derivation. */

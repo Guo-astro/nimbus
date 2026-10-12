@@ -2801,7 +2801,7 @@ export function nimbus(
             );
           }
           try {
-            createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server/package.json");
+            createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server");
           } catch {
             throw new Error(
               "nimbus-docs: agents.mcp needs the MCP server SDK in this project. Install it:\n\n  npm install @modelcontextprotocol/server\n",

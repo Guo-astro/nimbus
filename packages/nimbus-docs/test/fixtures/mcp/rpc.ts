@@ -52,5 +52,9 @@ export function toolText(message: JsonRpcResponse): unknown {
   const content = (message.result as { content?: Array<{ type: string; text: string }> } | undefined)?.content;
   const text = content?.find((block) => block.type === "text")?.text;
   if (text === undefined) throw new Error(`No text content in ${JSON.stringify(message)}`);
-  return JSON.parse(text);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Tool text is not JSON: ${text}`);
+  }
 }

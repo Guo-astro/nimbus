@@ -40,6 +40,10 @@ export interface InstallOptions {
   /** Non-interactive assent. Without `--overwrite` it keeps the user's files
    * (never clobber); with `--overwrite` it replaces edited files too. */
   yes: boolean;
+  /** Test seams: the prompt functions and whether a terminal is attached.
+   *  Production uses clack and the real TTY check. */
+  prompts?: Prompts;
+  interactive?: boolean;
   /** Src dir to write against, relative to `cwd` (default `"src"`; monorepo root from nimbus.json). */
   srcRoot?: string;
   /** Each installed slug's record in nimbus.json, to tell local edits from upstream changes. */
@@ -78,6 +82,11 @@ export interface KeptComponent {
   /** `edited`: differs from the version the site installed or came with;
    *  `unknown`: no install record and the starter release couldn't be read. */
   reason: "edited" | "unknown";
+}
+
+export interface Prompts {
+  confirm: typeof p.confirm;
+  select: typeof p.select;
 }
 
 /** Prompts render on stdout and read stdin; both must be terminals. */
@@ -153,19 +162,16 @@ export async function installComponents(
     // nobody to ask, so we keep them, list them with the commands that replace
     // them, and exit 1. A prompt we can't show fails closed, never open.
     let keep = false;
-    const tty = interactive();
+    const tty = options.interactive ?? interactive();
+    const prompts = options.prompts ?? p;
     if (conflicts.length > 0 && options.overwrite) {
-      // With `--yes` the record hash is free to check; without a record we
-      // don't fetch the starter release just to count, so those files are
-      // reported as "could not be compared".
-      const hasRecord = Boolean(options.recorded?.get(item.name)?.hash);
-      const edits =
-        options.yes && !hasRecord
-          ? "unknown"
-          : await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
-              files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
-              baseline: options.starter ?? null,
-            });
+      // The edit check runs under `--yes` as well, so the report can say what
+      // the replace discarded; a starter release that can't be fetched just
+      // counts as "could not be compared".
+      const edits = await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
+        files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
+        baseline: options.starter ?? null,
+      });
       const files = conflicts.map((f) => f.targetRel);
       if (edits === "none") {
         // Upstream changed, the user didn't: replace freely.
@@ -175,7 +181,7 @@ export async function installComponents(
       } else if (tty) {
         // `--overwrite` replaces upstream changes freely, but asks before
         // discarding edits made since the item was installed.
-        const replace = await p.confirm({
+        const replace = await prompts.confirm({
           message:
             `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
             `Replace these files?\n${files.map((f) => `  ${f}`).join("\n")}`,
@@ -206,7 +212,7 @@ export async function installComponents(
       const n = conflicts.length;
       const message = `${item.name}: ${n} file${n === 1 ? " differs" : "s differ"} from the registry. Overwrite ${n === 1 ? "it" : "them"}?`;
 
-      const choice = keep ? "skip" : await p.select({
+      const choice = keep ? "skip" : await prompts.select({
         message,
         options: [
           { value: "overwrite", label: "Overwrite — replace existing files" },

@@ -9,8 +9,8 @@
  *   nimbus-docs list                   → list
  *   nimbus-docs list --type ui|lib|feature
  *   nimbus-docs add                    → list
- *   nimbus-docs add <slug>             → install (component path or feature path)
- *   nimbus-docs add <slug> --yes       → component: skip overwrite prompts
+ *   nimbus-docs add <slug...>          → install (component path or feature path)
+ *   nimbus-docs add <slug...> --yes    → component: skip overwrite prompts
  *   nimbus-docs add <feature> --print  → print an agent-handoff recipe
  *
  * Feature behavior: print markdown to stdout iff `--print` OR an agent is
@@ -110,7 +110,7 @@ const HELP = `
   Commands:
     list [--type ui|lib|feature]   List available registry items
     add                            Same as \`list\`
-    add <slug>                     Install a component or hand off a feature
+    add <slug...>                  Install components or hand off a feature
     add server-output --adapter <vercel|node|netlify|cloudflare>
                                    Opt into server output: flip \`output\` to "server" + wire the adapter
     add adapter-<vercel|node|netlify|cloudflare>
@@ -325,6 +325,10 @@ async function main(): Promise<void> {
         `Unknown registry item${unknown.length === 1 ? "" : "s"}: ${unknown.map((s) => `\`${s}\``).join(", ")}. ` +
           `Nothing was installed. Try \`${invocation("list")}\` to see what's available.`,
       );
+      process.exit(1);
+    }
+    if (args.print && slugs.length > 1) {
+      p.log.error("`--print` takes one slug. Nothing was installed.");
       process.exit(1);
     }
     for (const current of slugs) {

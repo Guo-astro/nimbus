@@ -9,7 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { installComponents, localEdits, registerHint, starterBaseline, type InstallOptions } from "../src/cli/component.js";
+import { installComponents, localEdits, registerHint, starterBaseline, type InstallOptions, type Prompts } from "../src/cli/component.js";
 import { bytesHash } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
 
@@ -297,18 +297,63 @@ test("--overwrite --yes replaces edited files too and says how many carried edit
   });
 });
 
-test("--overwrite --yes without an install record replaces without fetching and counts the files as not compared", async () => {
+test("--overwrite --yes without an install record consults the starter release; when it can't, the files count as not compared", async () => {
   await withProject(async (cwd) => {
     await installComponents([dialog("V1")], opts(cwd));
     let fetches = 0;
     const starter = starterBaseline({ templatesTag: "templates-v1.0.0" }, "src", undefined, async () => {
       fetches++;
-      throw new Error("unexpected fetch");
+      throw new Error("offline");
     });
     const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, starter }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
-    assert.equal(fetches, 0);
+    assert.equal(fetches, 1, "the starter release is consulted so the report can say what was discarded");
     assert.equal(report.replacedUncompared, 1);
+    assert.equal(report.replacedEdited, 0);
+  });
+});
+
+test("--overwrite --yes on an edited starter component counts it as a local edit", async () => {
+  await withProject(async (root) => {
+    const tree = path.join(root, "tree");
+    const cwd = path.join(root, "site");
+    writeFiles(tree, { "package.json": "{}", "src/components/ui/dialog/Dialog.astro": "V1" });
+    writeFiles(cwd, { "src/components/ui/dialog/Dialog.astro": "V1 redesigned" });
+    const starter = starterBaseline({ templatesTag: "templates-v1.0.0" }, "src", tree);
+    const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, starter }));
+    assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
+    assert.equal(report.replacedEdited, 1);
+  });
+});
+
+test("--overwrite in a terminal asks per edited component; no keeps it in the same report block", async () => {
+  await withProject(async (cwd) => {
+    await installComponents([dialog("V1"), cn("C1")], opts(cwd));
+    writeFiles(cwd, { "src/components/ui/dialog/Dialog.astro": "V1 redesigned", "src/lib/cn.ts": "C1 edited" });
+    const recorded = new Map([...recordFor("dialog", dialog("V1").files), ...recordFor("cn", cn("C1").files)]);
+    const asked: string[] = [];
+    const answers: Record<string, boolean> = { dialog: false, cn: true };
+    const prompts: Prompts = {
+      confirm: (async ({ message }: { message: string }) => {
+        const slug = message.split(" ")[0]!;
+        asked.push(slug);
+        return answers[slug]!;
+      }) as Prompts["confirm"],
+      select: (async () => "skip") as Prompts["select"],
+    };
+    const report = await withExitCode(async () => {
+      const r = await installComponents([dialog("V2"), cn("C2")], opts(cwd, { overwrite: true, recorded, interactive: true, prompts }));
+      assert.notEqual(process.exitCode, 1, "answering is not a failure");
+      return r;
+    });
+    assert.deepEqual(asked, ["dialog", "cn"]);
+    assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V1 redesigned");
+    assert.equal(readFileSync(path.join(cwd, "src/lib/cn.ts"), "utf8"), "C2");
+    assert.deepEqual(report.keptDeclined, [
+      { slug: "dialog", files: [path.join("src", "components/ui/dialog/Dialog.astro")], reason: "edited" },
+    ]);
+    assert.deepEqual(report.keptUnasked, []);
+    assert.deepEqual(report.skipped, ["dialog"]);
   });
 });
 

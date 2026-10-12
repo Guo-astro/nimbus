@@ -177,6 +177,7 @@ addFormats(ajv);
 const cardSchema = JSON.parse(await readFile(new URL("./fixtures/mcp/server-card.schema.json", import.meta.url), "utf8"));
 const validateCard = ajv.compile({ ...cardSchema, $ref: "#/$defs/ServerCard" });
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 const linksOf = (llms: string) => [...llms.matchAll(/^- \[[^\]]*\]\(([^)]+)\)/gm)].map((m) => m[1]!);
 
 function suite(name: string, options: { host: string; base?: string }) {
@@ -261,7 +262,7 @@ function suite(name: string, options: { host: string; base?: string }) {
         .sort();
       assert.deepEqual([...new Set(rootPages)].sort(), current);
       assert.ok(!root.includes("/v1/") && !root.includes("/v0/") && !root.includes("/internal/"), "root llms.txt has no other versions and no noindex");
-      assert.match(root, new RegExp(`^MCP server \\(Streamable HTTP; tools list_pages and get_page over these pages\\): ${endpoint.replace(/[.]/g, "\\.")}$`, "m"));
+      assert.match(root, new RegExp(`^MCP server \\(Streamable HTTP; tools list_pages and get_page over these pages\\): ${escapeRegExp(endpoint)}$`, "m"));
       const v1 = await call("list_pages", { version: "v1" });
       const v1Pages = (v1.value.pages as Array<{ markdownUrl: string }>).map((page) => page.markdownUrl);
       assert.deepEqual(v1Pages, [`${origin}${prefix}/v1/guide/index.md`]);
@@ -311,7 +312,7 @@ function suite(name: string, options: { host: string; base?: string }) {
       // Under a base the Cloudflare adapter keeps control files at the asset
       // root above the base directory, and so does Nimbus.
       const headers = await readFile(prefix ? path.join(site.root, "_headers") : dist("/_headers"), "utf8");
-      assert.match(headers, new RegExp(`^${prefix.replace(/\//g, "\\/")}\\/mcp\\/server-card\\n  Content-Type: application\\/mcp-server-card\\+json\\n  Access-Control-Allow-Origin: \\*\\n  Access-Control-Allow-Methods: GET\\n  Access-Control-Expose-Headers: ETag$`, "m"));
+      assert.match(headers, new RegExp(`^${escapeRegExp(prefix)}\\/mcp\\/server-card\\n  Content-Type: application\\/mcp-server-card\\+json\\n  Access-Control-Allow-Origin: \\*\\n  Access-Control-Allow-Methods: GET\\n  Access-Control-Expose-Headers: ETag$`, "m"));
     });
   });
 }

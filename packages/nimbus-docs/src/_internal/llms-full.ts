@@ -34,6 +34,8 @@ export interface LlmsFullHeader {
   site?: string | undefined;
   /** Astro base path applied before URLs are made absolute. */
   base?: string | undefined;
+  /** The `llms.txt` the header links to. Default `/llms.txt`. */
+  index?: string | undefined;
 }
 
 /**
@@ -52,32 +54,62 @@ export function buildLlmsFullMarkdown(
   blocks: LlmsFullBlock[],
   header: LlmsFullHeader,
 ): string {
-  const abs = (p: string): string => {
-    const base = header.base ?? "/";
-    let end = base.length;
-    while (end > 0 && base[end - 1] === "/") end--;
-    const prefix = base.slice(0, end);
-    const based =
-      isAbsoluteUrl(p) || p.startsWith("#") || p.startsWith("?") || !prefix
-        ? p
-        : `${prefix}${p.startsWith("/") ? p : `/${p}`}`;
-    return header.site ? new URL(based, header.site).href : based;
-  };
-
-  const lines: string[] = [`# ${header.title}`, ""];
-  if (header.description) lines.push(`> ${header.description}`, "");
-  lines.push(`Index: ${abs("/llms.txt")}`, "");
-
   const sorted = [...blocks].sort((a, b) =>
     a.url < b.url ? -1 : a.url > b.url ? 1 : 0,
   );
-  for (const block of sorted) {
-    lines.push(`# ${block.title}`, "");
-    if (block.description) lines.push(`> ${block.description}`, "");
-    lines.push(`Source: ${abs(block.url)} · Markdown: ${abs(block.markdownUrl)}`, "");
-    // A page with no body adds no blank run.
-    if (block.markdown.trim()) lines.push(block.markdown, "");
-  }
+  // Each part ends in a blank line; the document ends with one newline.
+  return (
+    llmsFullHeaderText(header) +
+    sorted.map((block) => llmsFullBlockText(block, header)).join("")
+  ).slice(0, -1);
+}
 
-  return lines.join("\n");
+/**
+ * Bytes `block` adds to a document with this header. A document's size is
+ * its header's bytes plus its blocks', minus one (the final blank line).
+ */
+export function llmsFullBlockBytes(block: LlmsFullBlock, header: LlmsFullHeader): number {
+  return utf8Bytes(llmsFullBlockText(block, header));
+}
+
+/** Bytes of the document's header (see {@link llmsFullBlockBytes}). */
+export function llmsFullHeaderBytes(header: LlmsFullHeader): number {
+  return utf8Bytes(llmsFullHeaderText(header));
+}
+
+const encoder = new TextEncoder();
+function utf8Bytes(text: string): number {
+  return encoder.encode(text).length;
+}
+
+/** `path` as a URL in the document: under the base, absolute with a site. */
+export function llmsFullUrl(header: LlmsFullHeader, p: string): string {
+  const base = header.base ?? "/";
+  let end = base.length;
+  while (end > 0 && base[end - 1] === "/") end--;
+  const prefix = base.slice(0, end);
+  const based =
+    isAbsoluteUrl(p) || p.startsWith("#") || p.startsWith("?") || !prefix
+      ? p
+      : `${prefix}${p.startsWith("/") ? p : `/${p}`}`;
+  return header.site ? new URL(based, header.site).href : based;
+}
+
+function llmsFullHeaderText(header: LlmsFullHeader): string {
+  const lines: string[] = [`# ${header.title}`, ""];
+  if (header.description) lines.push(`> ${header.description}`, "");
+  lines.push(`Index: ${llmsFullUrl(header, header.index ?? "/llms.txt")}`, "");
+  return `${lines.join("\n")}\n`;
+}
+
+function llmsFullBlockText(block: LlmsFullBlock, header: LlmsFullHeader): string {
+  const lines: string[] = [`# ${block.title}`, ""];
+  if (block.description) lines.push(`> ${block.description}`, "");
+  lines.push(
+    `Source: ${llmsFullUrl(header, block.url)} · Markdown: ${llmsFullUrl(header, block.markdownUrl)}`,
+    "",
+  );
+  // A page with no body adds no blank run.
+  if (block.markdown.trim()) lines.push(block.markdown, "");
+  return `${lines.join("\n")}\n`;
 }

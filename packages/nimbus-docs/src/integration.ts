@@ -195,6 +195,8 @@ import {
   findUngeneratedAgentPages,
   formatUngeneratedAgentPages,
   llmsAssetUrl,
+  findShadowedLlmsFullFiles,
+  formatShadowedLlmsFullFiles,
   type EndpointRouteRecord,
 } from "./_internal/agent-endpoint-coverage.js";
 import { pagefindDocument } from "./_internal/pagefind-document.js";
@@ -556,6 +558,9 @@ export function nimbus(
   let endpointRoutesForBuild: EndpointRouteRecord[] = [];
   // Whether a route serves llms-full.txt; unknown until routes resolve.
   let servesFullDocument: boolean | undefined;
+  // Whether the project's section llms route takes nested paths
+  // (`[...section]/llms.txt`); decided from the resolved routes.
+  let nestedLlmsSections: boolean | undefined;
   // Resolved `redirects` (user ∪ version-alternate) for the platform emitter.
   let redirectsForBuild: Record<string, RedirectConfigLike> = {};
   let renderingRoutes = new Map<string, RenderingMode>();
@@ -1108,11 +1113,24 @@ export function nimbus(
               componentMap: options.markdown?.componentMap,
               partialResolver,
               fullDocument: servesFullDocument ?? true,
-              // The size limit it reports is Cloudflare's.
+              nestedSections: nestedLlmsSections ?? false,
+              // The size limit it reports is Cloudflare's: warn when the site
+              // deploys there, through the adapter or a wrangler file (the
+              // default starter deploys static output with no adapter).
               warn: (message) => {
-                if (adapterNameForBuild === "@astrojs/cloudflare")
+                if (
+                  adapterNameForBuild === "@astrojs/cloudflare" ||
+                  ["wrangler.json", "wrangler.jsonc", "wrangler.toml"].some((file) =>
+                    fs.existsSync(path.join(projectRoot, file)),
+                  )
+                )
                   logger.warn(message);
               },
+              info: (message) => logger.info(message),
+              // Tests only: a smaller llms-full.txt limit.
+              llmsFullLimitBytes: process.env.NIMBUS_TEST_LLMS_FULL_LIMIT_BYTES
+                ? Number(process.env.NIMBUS_TEST_LLMS_FULL_LIMIT_BYTES)
+                : undefined,
               loadApiEntries: async () => {
                 const apiEntries: Array<{
                   collection: string;
@@ -1470,6 +1488,7 @@ export function nimbus(
         resolvedRoutesForBuild = [];
         endpointRoutesForBuild = [];
         servesFullDocument = undefined;
+        nestedLlmsSections = undefined;
 
         // Scan every code-fence language used in `src/content/**/*.{mdx,md}`
         // so Shiki eager-loads grammars at startup. This makes cold-build
@@ -1607,6 +1626,42 @@ export function nimbus(
         // routes, so only a route at the mount can serve the mount's agent
         // files in a different mode. A project route file at the pattern
         // owns it and is policy-managed through `astro:route:setup` instead.
+        // A root `llms-full.txt` route gets a sibling for the per-section files
+        // of a document split for size, at the root and at request-rendered
+        // mounts, unless the project serves them itself.
+        const routeExtensions = ["ts", "js", "mjs", "cjs", "mts", "cts"];
+        const pagesRoot = path.join(srcDir, "pages");
+        const rootLlmsFullFile = routeExtensions
+          .map((ext) => path.join(pagesRoot, `llms-full.txt.${ext}`))
+          .find((file) => fs.existsSync(file));
+        const hasRootLlmsFull = rootLlmsFullFile !== undefined;
+        const spreadDirHolds = (dir: string, base: string) =>
+          fs.existsSync(dir) &&
+          fs
+            .readdirSync(dir, { withFileTypes: true })
+            .some(
+              (entry) =>
+                entry.isDirectory() &&
+                /^\[\.\.\..+\]$/u.test(entry.name) &&
+                routeExtensions.some((ext) => fs.existsSync(path.join(dir, entry.name, `${base}.${ext}`))),
+            );
+        // Astro keeps one `prerender` per entrypoint, so a Nimbus route
+        // module injected in both modes (at the root and at mounts) goes
+        // through one re-exporting file per mode.
+        const routeModuleFor = (name: string, mode: RenderingMode): URL => {
+          const module = new URL(
+            `./_internal/${name}.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`,
+            import.meta.url,
+          );
+          const dir = path.join(projectRoot, ".astro", "nimbus", "agent-route-shims");
+          const file = path.join(dir, `${name}-${mode}.mjs`);
+          const body = `export * from ${JSON.stringify(module.href)};\n`;
+          fs.mkdirSync(dir, { recursive: true });
+          if (!fs.existsSync(file) || fs.readFileSync(file, "utf8") !== body) {
+            fs.writeFileSync(file, body, "utf8");
+          }
+          return pathToFileURL(file);
+        };
         agentRenderingForBuild = null;
         if (config.rendering) {
           const mountModes = new Map<string, RenderingMode>();
@@ -1625,7 +1680,6 @@ export function nimbus(
           const hiddenVersionMounts = new Set(
             (config.versions?.hidden ?? []).map((version) => `/${version}`),
           );
-          const agentExtension = import.meta.url.endsWith(".ts") ? "ts" : "js";
           const routeFileExists = (pattern: string) =>
             ["ts", "js", "mjs", "cjs", "mts", "cts"].some((ext) =>
               fs.existsSync(path.join(srcDir, "pages", `${pattern}.${ext}`)),
@@ -1688,7 +1742,7 @@ export function nimbus(
           const rootAgentFiles = {
             markdown: findRootAgentFile(spreadDirs, "index.md", "markdown"),
             source: findRootAgentFile(spreadDirs, "index.mdx", "source"),
-            llms: findRootAgentFile(paramDirs, "llms.txt", "llms"),
+            llms: findRootAgentFile([...paramDirs, ...spreadDirs], "llms.txt", "llms"),
           };
           const rootMode =
             agentRenderingForBuild.rootMode;
@@ -1751,13 +1805,28 @@ export function nimbus(
           // or any llms.txt route file, suppresses injection there.
           const mountOwns = (
             mount: string,
-            kind: "index.md" | "index.mdx" | "llms.txt",
+            kind: "index.md" | "index.mdx" | "llms.txt" | "llms-full.txt",
           ): boolean => {
             const mountDir = path.join(pagesDir, mount.slice(1));
+            if (kind === "llms-full.txt") {
+              return (
+                routeFileExists(`${mount.slice(1)}/llms-full.txt`) ||
+                spreadDirHolds(mountDir, "llms-full.txt")
+              );
+            }
             if (kind === "llms.txt") {
               return (
                 routeFileExists(`${mount.slice(1)}/llms.txt`) ||
-                routeFileExists(`${mount.slice(1)}/[llms].txt`)
+                routeFileExists(`${mount.slice(1)}/[llms].txt`) ||
+                (fs.existsSync(mountDir) &&
+                  fs
+                    .readdirSync(mountDir, { withFileTypes: true })
+                    .some(
+                      (entry) =>
+                        entry.isDirectory() &&
+                        /^\[\.\.\..+\]$/u.test(entry.name) &&
+                        dirHasRouteFile(path.join(mount.slice(1), entry.name), "llms.txt"),
+                    ))
               );
             }
             if (!fs.existsSync(mountDir)) return false;
@@ -1771,6 +1840,25 @@ export function nimbus(
               );
           };
           for (const [mount, mode] of mountModes) {
+            // Astro ranks the mount's page route above the root routes, so
+            // the mount serves its own split llms-full.txt files unless both
+            // render at build time (the root llms-full.txt follows the default).
+            if (
+              !(mode === "build" && policy.default === "build") &&
+              hasRootLlmsFull &&
+              !hiddenVersionMounts.has(mount) &&
+              !mountOwns(mount, "llms-full.txt")
+            ) {
+              const pattern = `${mount}/[...section]/llms-full.txt`;
+              const entrypoint = routeModuleFor("section-llms-full-route", mode);
+              injectRoute({ pattern, entrypoint, prerender: mode === "build" });
+              managedRoutesForBuild.push({
+                pattern,
+                entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
+                owner: "infrastructure",
+                rendering: mode,
+              });
+            }
             if (mode === "build" && rootMode === "build") continue;
             // When a mount shares the root's mode, the injected Markdown
             // routes reuse the project's own root route module, so a wrapped
@@ -1866,14 +1954,16 @@ export function nimbus(
                 : []),
               // A hidden version is absent from discovery, so it has no
               // llms index to serve; its Markdown URLs 404 as today. The
-              // dynamic pattern lets a prebuilt mount with no discoverable
-              // pages emit nothing instead of a bogus file. The section
-              // factory's static paths are keyed by [section], so this one
-              // never reuses the project module.
+              // rest pattern lets a prebuilt mount with no discoverable pages
+              // emit nothing instead of a bogus file, and serves the mount's
+              // nested sections when the bake has them (a dynamic
+              // `[llms].txt` would also match, and outrank, the mount's
+              // `llms-full.txt`). The section factory's static paths are keyed
+              // by [section], so this one never reuses the project module.
               ...(rootAgentFiles.llms?.shared && !hiddenVersionMounts.has(mount)
                 ? [
                     {
-                      pattern: `${mount}/[llms].txt`,
+                      pattern: `${mount}/[...section]/llms.txt`,
                       name: "mounted-llms-route",
                       kind: "llms.txt" as const,
                     },
@@ -1896,10 +1986,7 @@ export function nimbus(
                       `${mount.slice(1).replaceAll(/[^A-Za-z0-9_-]/gu, "_")}-${createHash("sha256").update(mount).digest("hex").slice(0, 8)}-${kind.replaceAll(".", "-")}.mjs`,
                     ),
                   )
-                : new URL(
-                    `./_internal/${name}.${agentExtension}`,
-                    import.meta.url,
-                  );
+                : routeModuleFor(name, mode);
               injectRoute({
                 pattern,
                 entrypoint,
@@ -1915,6 +2002,28 @@ export function nimbus(
                 rendering: mode,
               });
             }
+          }
+        }
+        if (hasRootLlmsFull && !spreadDirHolds(pagesRoot, "llms-full.txt")) {
+          const pattern = "/[...section]/llms-full.txt";
+          // Without a policy, the section files render like the root file.
+          const declared = /export\s+const\s+prerender\s*=\s*(true|false)\b/u.exec(
+            fs.readFileSync(rootLlmsFullFile, "utf8"),
+          )?.[1];
+          const mode: RenderingMode = config.rendering
+            ? policy.default
+            : (declared ?? String(astroConfig.output !== "server")) === "true"
+              ? "build"
+              : "request";
+          const entrypoint = routeModuleFor("section-llms-full-route", mode);
+          injectRoute({ pattern, entrypoint, prerender: mode === "build" });
+          if (config.rendering) {
+            managedRoutesForBuild.push({
+              pattern,
+              entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
+              owner: "infrastructure",
+              rendering: mode,
+            });
           }
         }
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
@@ -2974,12 +3083,30 @@ export function nimbus(
               : () => undefined,
           ),
         );
+        const sectionRoutes = routes.filter(
+          (route) =>
+            route.origin === "project" &&
+            route.type === "endpoint" &&
+            /^\/\[[^\]/]+\]\/llms\.txt$/u.test(route.pattern),
+        );
+        const nested = sectionRoutes.some((route) => route.pattern.startsWith("/[..."));
+        if (nested && sectionRoutes.some((route) => !route.pattern.startsWith("/[..."))) {
+          throw authorError(
+            `Two routes serve section llms.txt files: ${sectionRoutes
+              .map((route) => normalizeRouteEntrypoint(projectRootForBuild, route.entrypoint) ?? route.entrypoint)
+              .join(" and ")}. Delete the one in a [section] folder; [...section] serves nested sections too.`,
+          );
+        }
         // Dev re-resolves routes when a page file is added or removed.
-        if (servesFullDocument !== undefined && serves !== servesFullDocument)
+        if (
+          (servesFullDocument !== undefined && serves !== servesFullDocument) ||
+          (nestedLlmsSections !== undefined && nested !== nestedLlmsSections)
+        )
           void loadAgentEndpointAssets().then((assets) =>
             assets.invalidateAgentEndpointAssets(projectRootForBuild),
           );
         servesFullDocument = serves;
+        nestedLlmsSections = nested;
         resolvedRoutesForBuild = routes.map((r) => ({
           pattern: r.pattern,
           type: r.type,
@@ -3119,7 +3246,18 @@ export function nimbus(
             }
             logger.warn(message);
           }
-          const reported = new Set(unclaimed.map(({ url }) => url));
+          // A split file another route answers first is reported once, by
+          // the shadowing check.
+          const shadowed = findShadowedLlmsFullFiles(
+            endpointRoutesForBuild,
+            manifest.llmsAssets
+              .filter((asset) => asset.scope === "section" && asset.surface === "full")
+              .map(llmsAssetUrl),
+          );
+          if (shadowed.length > 0) {
+            logger.warn(formatShadowedLlmsFullFiles(shadowed));
+          }
+          const reported = new Set([...unclaimed, ...shadowed].map(({ url }) => url));
           const ungenerated = findUngeneratedAgentPages(
             endpointRoutesForBuild,
             [

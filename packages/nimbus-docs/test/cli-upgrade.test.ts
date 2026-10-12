@@ -465,3 +465,40 @@ test("diff on a file that doesn't exist fails, with or without --apply", async (
     fixture.cleanup();
   }
 });
+
+test("the nested-llms-scopes steps move an unmodified section route with two diff --apply runs", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-nested-llms-upgrade-"));
+  try {
+    const route = fs.readFileSync(
+      path.resolve(import.meta.dirname, "../../nimbus-starter-source/src/pages/[...section]/llms.txt.ts"),
+      "utf8",
+    );
+    const common = { "package.json": '{ "name": "starter" }\n', "src/pages/index.astro": "<h1>home</h1>\n" };
+    const trees: Record<string, Record<string, string>> = {
+      "templates-v0.1.0": { ...common, "src/pages/[section]/llms.txt.ts": route },
+      "templates-v0.2.0": { ...common, "src/pages/[...section]/llms.txt.ts": route },
+    };
+    const write = (dir: string, files: Record<string, string>) => {
+      for (const [file, content] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+        fs.writeFileSync(path.join(dir, file), content);
+      }
+    };
+    for (const [tag, files] of Object.entries(trees)) write(path.join(root, tag), files);
+    const project = path.join(root, "site");
+    write(project, {
+      ...trees["templates-v0.1.0"],
+      "nimbus.json": JSON.stringify({ templatesTag: "templates-v0.1.0", variant: "starter", components: [] }),
+    });
+    const source: TemplateSource = {
+      resolve: async (tag) => ({ dir: path.join(root, tag), cleanup: () => {} }),
+      latestTag: async () => "templates-v0.2.0",
+    };
+    assert.equal((await runDiff("src/pages/[...section]/llms.txt.ts", { apply: true }, { cwd: project, source })).exitCode, 0);
+    assert.equal((await runDiff("src/pages/[section]/llms.txt.ts", { apply: true }, { cwd: project, source })).exitCode, 0);
+    assert.equal(fs.readFileSync(path.join(project, "src/pages/[...section]/llms.txt.ts"), "utf8"), route);
+    assert.ok(!fs.existsSync(path.join(project, "src/pages/[section]/llms.txt.ts")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

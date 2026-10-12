@@ -552,7 +552,8 @@ async function assertStaticSurfaces(origin) {
     ["/api/Health/ping/index.md", "Ping"],
     ["/llms.txt", "Workers request prose"],
     ["/llms-full.txt", "Request prose body."],
-    ["/api/llms.txt", "Ping"],
+    ["/api/llms.txt", "/api/Health/llms.txt"],
+    ["/api/Health/llms.txt", "Ping"],
     ["/robots.txt", "Sitemap:"],
   ]) {
     const result = await request(origin, route);

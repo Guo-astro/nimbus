@@ -23,6 +23,7 @@ export interface AgentSiteOptions {
   logLevel?: "silent" | "warn";
   versions?: { current: string; others: string[] };
   api?: unknown[];
+  rendering?: unknown;
 }
 
 /** Import specifier for a package source module, usable from fixture files. */
@@ -115,6 +116,7 @@ export function agentSites() {
               search: false,
               ...(options.versions ? { versions: options.versions } : {}),
               ...(options.api ? { api: options.api } : {}),
+              ...(options.rendering ? { rendering: options.rendering } : {}),
             } as Parameters<typeof nimbus>[0],
             { admonitions: false, sitemap: false, validateMdx: false },
           ),

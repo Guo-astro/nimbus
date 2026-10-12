@@ -1006,7 +1006,24 @@ async function assertArtifactsAndSmoke(dist) {
     occurrences(rootIndex, apiLlmsUrl) === 1,
     "root llms.txt must link /api/llms.txt exactly once",
   );
-  const apiIndex = await readFile(join(dist, "api", "llms.txt"), "utf8");
+  // The API's section index nests: /api/llms.txt links each sub-folder's
+  // own llms.txt. Every page appears once across them, every nested index is
+  // linked once from its parent.
+  const apiIndexFiles = (await readdir(join(dist, "api"), { recursive: true }))
+    .filter((file) => file === "llms.txt" || file.endsWith(`${sep}llms.txt`))
+    .sort();
+  const apiIndexTexts = await Promise.all(
+    apiIndexFiles.map((file) => readFile(join(dist, "api", file), "utf8")),
+  );
+  const apiIndex = apiIndexTexts.join("\n");
+  assert(apiIndexFiles.includes("llms.txt"), "api/llms.txt is missing");
+  for (const file of apiIndexFiles.filter((file) => file !== "llms.txt")) {
+    const nestedUrl = absoluteUrl(`/api/${file.split(sep).join("/")}`);
+    assert(
+      occurrences(apiIndex, nestedUrl) === 1,
+      `the API's section indexes must link ${nestedUrl} exactly once`,
+    );
+  }
   const llmsFull = await readFile(join(dist, "llms-full.txt"), "utf8");
   const expectedMarkdownUrls = expectedRoutes
     .map((route) => absoluteUrl(`${route}/index.md`))
@@ -1015,7 +1032,7 @@ async function assertArtifactsAndSmoke(dist) {
     const markdownUrl = absoluteUrl(`${route}/index.md`);
     assert(
       occurrences(apiIndex, markdownUrl) === 1,
-      `api/llms.txt must contain ${markdownUrl} exactly once`,
+      `the API's section indexes must contain ${markdownUrl} exactly once`,
     );
     assert(
       occurrences(llmsFull, markdownUrl) === 1,
@@ -1025,7 +1042,7 @@ async function assertArtifactsAndSmoke(dist) {
   assert(
     JSON.stringify(extractApiMarkdownUrls(apiIndex)) ===
       JSON.stringify(expectedMarkdownUrls),
-    "api/llms.txt API Markdown URL set differs from expected.json",
+    "the API's section indexes' Markdown URL set differs from expected.json",
   );
   assert(
     JSON.stringify(extractApiMarkdownUrls(llmsFull)) ===
@@ -1436,6 +1453,10 @@ async function assertBasePathMetadata() {
     ],
     "API agent index": [
       await readFile(join(site, "dist-base", "api", "llms.txt"), "utf8"),
+      [absoluteUrl("/docs/api/charges/llms.txt")],
+    ],
+    "nested API agent index": [
+      await readFile(join(site, "dist-base", "api", "charges", "llms.txt"), "utf8"),
       [absoluteUrl("/docs/api/charges/create/index.md")],
     ],
     "full documentation": [

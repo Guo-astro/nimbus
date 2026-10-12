@@ -422,3 +422,19 @@ test("raw and encoded owner paths do not duplicate generated text Content-Type",
     );
   }
 });
+
+test("nested section indexes get the UTF-8 llms.txt header", () => {
+  const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+    paths: ["/reference/functions/dates/llms.txt"],
+  });
+  assert.match(generated, /^\/docs\/\*\/llms\.txt\n  Content-Type: text\/plain; charset=utf-8$/m);
+});
+
+test("split llms-full.txt sections get the UTF-8 header, only when there are any", () => {
+  const split = agentDiscoveryHeaderRules(minimal, options, [], {
+    paths: ["/llms-full.txt", "/reference/llms-full.txt"],
+  });
+  assert.match(split, /^\/docs\/\*\/llms-full\.txt\n  Content-Type: text\/plain; charset=utf-8$/m);
+  const whole = agentDiscoveryHeaderRules(minimal, options, [], { paths: ["/llms-full.txt"] });
+  assert.doesNotMatch(whole, /\*\/llms-full\.txt/);
+});

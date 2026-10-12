@@ -41,7 +41,7 @@ Before prompting the user or writing anything, inspect the project:
   into another file.
 - `src/pages/[...slug].astro`, `src/pages/[...slug]/index.md.ts`,
   `src/pages/llms.txt.ts`, `src/pages/llms-full.txt.ts`, and
-  `src/pages/[section]/llms.txt.ts` — the primary docs page, Markdown version,
+  `src/pages/[...section]/llms.txt.ts` — the primary docs page, Markdown version,
   and index routes. The API page route is a sibling of the primary docs page,
   so match its style.
   If any are missing, stop and install `nimbus-docs add ai-native` first.

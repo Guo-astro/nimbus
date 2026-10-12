@@ -17,7 +17,7 @@ export function virtualLastUpdatedPlugin(
         dates &&
         (normalizedId.endsWith("/_internal/git-last-updated.js") ||
           /(?:^|\/)git-last-updated-[\w-]+\.js$/.test(normalizedId)) &&
-        normalizedImporter?.endsWith("/runtime.js")
+        /\/runtime\.[jt]s$/.test(normalizedImporter ?? "")
       ) {
         return RESOLVED_ID;
       }

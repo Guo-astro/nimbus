@@ -774,6 +774,22 @@
       "verify": [
         "Build, open /<section>/llms.txt for a section with sub-folders, and confirm it ends with a Sections list whose links return each sub-folder's llms.txt."
       ]
+    },
+    {
+      "id": "page-not-found-head",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "head-seo-fixes",
+      "summary": "Optionally give the 404 page a plain title and keep it out of search engines.",
+      "affected": "Sites created from the starter that still have src/pages/404.astro.",
+      "instructions": [
+        "No action is needed: the 404 page keeps working, with the site name repeated in its title and no noindex.",
+        "If src/pages/404.astro is unmodified, run nimbus-docs diff src/pages/404.astro --apply.",
+        "If you've edited it, pass title=\"Page not found\" and noindex to BaseLayout, and drop the config import if nothing else uses it."
+      ],
+      "verify": [
+        "Open a URL that doesn't exist and confirm the tab reads \"Page not found | <site>\" and the page source has <meta name=\"robots\" content=\"noindex\">."
+      ]
     }
   ]
 }

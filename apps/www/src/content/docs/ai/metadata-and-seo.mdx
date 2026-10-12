@@ -41,11 +41,31 @@ socialImage: /og/pricing.png
 
 Nimbus also ships an OG image route, so pages without an explicit image get a generated card.
 
+The image a page uses is, in order: the page's `socialImage`, then `config.socialImage`, then `public/opengraph.png` or `public/logo.png` if one exists, then the generated `/og.png` card. A documentation page passes its own generated card, `/og/<page>.png`, as the page's image unless its frontmatter sets `socialImage`, so `config.socialImage` and the `public/` fallbacks apply to pages that set none, such as the 404 page and hand-written routes.
+
 Image paths are logical paths without Astro's deployment base. For a site deployed at `/docs`, keep `socialImage: "/og.png"`; Nimbus produces `/docs/og.png`. Absolute and protocol-relative image URLs are preserved.
+
+### Image sizes
+
+`og:image:width` and `og:image:height` are written only when the size is known, so a link preview is never cropped to the wrong shape:
+
+- Generated cards (`/og.png` and `/og/<page>.png`) are 1200 × 630.
+- `config.socialImage`, the auto-detected `public/opengraph.png` or `public/logo.png`, and every image under `public/og/` are measured at build time.
+- Any other image, such as a remote URL or a per-page file elsewhere in `public/`, gets no size tags. Pass the size where you know it, as `socialImageSize` on `NimbusHead` or on the starter's `BaseLayout`:
+
+```astro
+<NimbusHead title={title} socialImage="/diagrams/cover.png" socialImageSize={{ width: 1600, height: 900 }} />
+```
 
 ## Sitemap and robots
 
 When `site` is set, the sitemap integration and `/robots.txt` are wired automatically. Disable the sitemap with `sitemap: false` in the integration options.
+
+The sitemap is written as `sitemap-index.xml` plus `sitemap-0.xml`, and `/sitemap.xml` is a copy of the index for tools that only try that name. A site that serves its own `/sitemap.xml`, as a file in `public/`, a `sitemap.xml` route, or a dynamic `[name].xml` route at the root, keeps it.
+
+Each documentation page's `<lastmod>` is its frontmatter `lastUpdated` when set, otherwise the author date of the last commit that touched its source file, the same date as the page's "Last updated" line. Pages without a source file in a content collection, such as the home page, hand-written routes and API reference pages, have none. A `serialize` option in `sitemap` runs after Nimbus sets `lastmod`, so it can change or drop the value.
+
+Git dates need the repository's history. On a shallow clone, which most CI systems make by default, the build says so once and leaves out every git date: the sitemap's `lastmod` and the "Last updated" line on pages. Fetch the full history to restore them, with `fetch-depth: 0` in GitHub Actions or `git fetch --unshallow`.
 
 ## Per-page and site-wide head
 

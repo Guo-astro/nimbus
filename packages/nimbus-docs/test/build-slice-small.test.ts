@@ -546,7 +546,7 @@ test("a slice writes its site-wide files under its prefix, and the root slice kn
       "https://docs.example.test/sitemap-0.xml",
     ]);
     const rootUrls = await sitemapUrls("dist/sitemap-0.xml");
-    assert.ok(rootUrls.includes("https://docs.example.test/"));
+    assert.ok(new Set(rootUrls).has("https://docs.example.test/"));
     assert.ok(!rootUrls.some((url) => url.startsWith("https://docs.example.test/docs-es/")));
     assert.match(await site.read("dist/_headers"), /^\/$/m);
     const enPage = `dist/${site.corpus.en[0]!.slug}/index.html`;

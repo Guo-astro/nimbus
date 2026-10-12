@@ -176,21 +176,29 @@ export function agentDiscoveryHeaderRules(
 ): string {
   const home = withBase("/", options.base).replace(/\/$/, "");
   const homePaths = new Set([home || "/", `${home}/`]);
+  const owner = ownerHeaderPolicies(text.ownerHeaders ?? "");
+  const rules: HeaderRule[] = [];
   // Cloudflare limits each _headers line to 2,000 characters and comma-joins
   // repeated fields. Keep API collections/versions on separate Link lines.
-  const links = agentHomepageLinks(capabilities, options)
-    .map((value) => `  Link: ${value}`)
-    .join("\n");
-  const rules = [...homePaths].map((path) => `${path}\n${links}`);
+  const links = agentHomepageLinks(capabilities, options).map(
+    (value) => ["Link", value] as const,
+  );
+  for (const path of homePaths) rules.push({ pattern: path, headers: [...links] });
   for (const path of [
     "/.well-known/ard.json",
     "/.well-known/ai-catalog.json",
   ]) {
-    rules.push(
-      `${path}\n  Content-Type: application/json\n  Access-Control-Allow-Origin: *`,
-    );
+    rules.push({
+      pattern: path,
+      headers: [
+        ["Content-Type", "application/json"],
+        ["Access-Control-Allow-Origin", "*"],
+      ],
+    });
   }
-  const ownerTypes = ownerContentTypePatterns(text.ownerHeaders ?? "");
+  const ownerTypes = owner
+    .filter((policy) => policy.headers.has("content-type"))
+    .map((policy) => policy.pattern);
   const addTextRule = (pattern: string, type: string, members: string[]) => {
     if (!members.length) return;
     const covered = members.filter((pathname) =>
@@ -205,7 +213,7 @@ export function agentDiscoveryHeaderRules(
         );
       return;
     }
-    rules.push(`${pattern}\n  Content-Type: ${type}; charset=utf-8`);
+    rules.push({ pattern, headers: [["Content-Type", `${type}; charset=utf-8`]] });
   };
   if (capabilities.homepageMarkdownUrl) {
     const pathname = new URL(capabilities.homepageMarkdownUrl).pathname;
@@ -242,24 +250,101 @@ export function agentDiscoveryHeaderRules(
   }
   if (capabilities.apis.length) {
     // Extensionless, so no host can infer its type; HEAD carries the Link too.
-    rules.push(
-      `${API_CATALOG_PATH}\n  Content-Type: ${API_CATALOG_MEDIA_TYPE}\n  Access-Control-Allow-Origin: *\n  Link: ${apiCatalogLink(options.site)}`,
-    );
+    rules.push({
+      pattern: API_CATALOG_PATH,
+      headers: [
+        ["Content-Type", API_CATALOG_MEDIA_TYPE],
+        ["Access-Control-Allow-Origin", "*"],
+        ["Link", apiCatalogLink(options.site)],
+      ],
+    });
   }
   for (const file of files)
-    rules.push(
-      `${file.pathname}\n  Content-Type: ${file.type}\n  Access-Control-Allow-Origin: *`,
-    );
+    rules.push({
+      pattern: file.pathname,
+      headers: [
+        ["Content-Type", file.type],
+        ["Access-Control-Allow-Origin", "*"],
+      ],
+    });
   if (capabilities.skillsIndexUrl) {
     // Static hosts infer SKILL.md and .tar.gz types from the extension; the
     // RFC wants CORS on everything and application/json on the index.
     rules.push(
-      "/.well-known/agent-skills/*\n  Access-Control-Allow-Origin: *",
-      "/.well-known/agent-skills/index.json\n  Content-Type: application/json",
-      "/.well-known/agent-skills/*.tar.gz\n  Content-Type: application/gzip",
+      { pattern: "/.well-known/agent-skills/*", headers: [["Access-Control-Allow-Origin", "*"]] },
+      { pattern: "/.well-known/agent-skills/index.json", headers: [["Content-Type", "application/json"]] },
+      { pattern: "/.well-known/agent-skills/*.tar.gz", headers: [["Content-Type", "application/gzip"]] },
     );
   }
-  return `# Nimbus agent discovery (generated)\n${rules.join("\n\n")}\n# End Nimbus agent discovery\n`;
+  const kept = rules.flatMap((rule) => {
+    const headers = rule.headers.filter(([name]) =>
+      !ownerSetsHeader(owner, rule.pattern, name, text.warn),
+    );
+    return headers.length ? [{ pattern: rule.pattern, headers }] : [];
+  });
+  return `# Nimbus agent discovery (generated)\n${kept
+    .map(
+      (rule) =>
+        `${rule.pattern}\n${rule.headers.map(([name, value]) => `  ${name}: ${value}`).join("\n")}`,
+    )
+    .join("\n\n")}\n# End Nimbus agent discovery\n`;
+}
+
+interface HeaderRule {
+  pattern: string;
+  headers: Array<readonly [name: string, value: string]>;
+}
+
+/** One owner rule: its path pattern and the header names it sets or removes. */
+interface OwnerHeaderPolicy {
+  pattern: string;
+  headers: Set<string>;
+}
+
+/**
+ * Headers that may legitimately repeat: static hosts join matching values
+ * with a comma, which is valid for these and wrong for every other header.
+ */
+const MULTI_VALUED_HEADERS = new Set(["link"]);
+
+/**
+ * Whether an owner rule already sets (or removes with `!`) a header on a
+ * path the generated rule covers. Hosts apply every matching rule and
+ * comma-join a repeated header, so a generated value would corrupt the
+ * owner's, as `Access-Control-Allow-Origin: *, *` does. An owner rule
+ * narrower than the generated pattern wins too, with a warning, since a
+ * generated wildcard can't exclude one path.
+ */
+function ownerSetsHeader(
+  owner: readonly OwnerHeaderPolicy[],
+  pattern: string,
+  name: string,
+  warn?: (message: string) => void,
+): boolean {
+  const header = name.toLowerCase();
+  if (MULTI_VALUED_HEADERS.has(header)) return false;
+  let covered = false;
+  for (const policy of owner) {
+    if (!policy.headers.has(header)) continue;
+    if (headerPatternMatches(policy.pattern, representativePath(pattern))) {
+      covered = true;
+    } else if (headerPatternMatches(pattern, representativePath(policy.pattern))) {
+      covered = true;
+      warn?.(
+        `Owner ${name} rule ${policy.pattern} overlaps ${pattern}; set ${name} for every path under ${pattern} in public/_headers.`,
+      );
+    }
+  }
+  return covered;
+}
+
+/** A concrete path a pattern matches, for testing one pattern against another. */
+function representativePath(pattern: string): string {
+  if (pattern.startsWith("https://")) {
+    const pathStart = pattern.indexOf("/", "https://".length);
+    pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
+  }
+  return pattern.replace(/\*|:[A-Za-z]\w*/g, "x");
 }
 
 export function appendAgentDiscoveryHeaders(
@@ -318,15 +403,22 @@ function withoutGeneratedHeaders(headers: string): string {
     );
 }
 
-function ownerContentTypePatterns(headers: string): string[] {
-  const patterns = new Set<string>();
-  let pattern = "";
+function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
+  const policies: OwnerHeaderPolicy[] = [];
+  let current: OwnerHeaderPolicy | undefined;
   for (const line of withoutGeneratedHeaders(headers).split(/\r?\n/)) {
-    if (!line || line.startsWith("#")) continue;
-    if (!/^\s/.test(line)) pattern = line.trimEnd();
-    else if (/^\s+Content-Type:/i.test(line)) patterns.add(pattern);
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      current = { pattern: line.trimEnd(), headers: new Set() };
+      policies.push(current);
+      continue;
+    }
+    // `  Name: value` sets a header; `  ! Name` removes one. Both are the
+    // owner's policy for that header on the rule's paths.
+    const header = /^\s*!\s*([^:\s]+)\s*$/.exec(line)?.[1] ?? /^\s*([^:\s]+)\s*:/.exec(line)?.[1];
+    if (header && current) current.headers.add(header.toLowerCase());
   }
-  return [...patterns];
+  return policies;
 }
 
 function headerPatternMatches(pattern: string, pathname: string): boolean {

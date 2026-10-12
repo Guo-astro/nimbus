@@ -438,3 +438,82 @@ test("split llms-full.txt sections get the UTF-8 header, only when there are any
   const whole = agentDiscoveryHeaderRules(minimal, options, [], { paths: ["/llms-full.txt"] });
   assert.doesNotMatch(whole, /\*\/llms-full\.txt/);
 });
+
+test("a site-wide owner rule that sets a header keeps generated rules from repeating it", () => {
+  const skills = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    homepageMarkdownUrl: minimal.homepageMarkdownUrl,
+    skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json`,
+    apis: [
+      {
+        collection: "pets",
+        docsUrl: `${options.site}/docs/pets/`,
+        markdownUrl: `${options.site}/docs/pets/index.md`,
+        spec: { url: `${options.site}/docs/pets/openapi.json`, type: "application/vnd.oai.openapi+json" },
+      },
+    ],
+  });
+  // The report: a site-wide CORS policy and an exact Content-Type for the skills index.
+  const owner = [
+    "/*",
+    "  Access-Control-Allow-Origin: *",
+    "  X-Frame-Options: DENY",
+    "",
+    "/.well-known/agent-skills/index.json",
+    "  Content-Type: application/json; charset=utf-8",
+    "",
+  ].join("\n");
+  const warnings: string[] = [];
+  const generated = agentDiscoveryHeaderRules(skills, options, undefined, {
+    paths: ["/llms.txt", "/index.md"],
+    ownerHeaders: owner,
+    warn: (message) => warnings.push(message),
+  });
+  assert.doesNotMatch(generated, /Access-Control-Allow-Origin/, "the owner's /* rule already sets it everywhere");
+  assert.doesNotMatch(generated, /agent-skills\/index\.json/, "the owner's exact rule already types the index");
+  assert.match(generated, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json$/m, "its own header survives");
+  assert.match(generated, /^\/\.well-known\/api-catalog\n  Content-Type: [^\n]+\n  Link: /m);
+  assert.match(generated, /^\/docs\/pets\/openapi\.json\n  Content-Type: application\/vnd\.oai\.openapi\+json$/m);
+  assert.match(generated, /^\/\.well-known\/agent-skills\/\*\.tar\.gz\n  Content-Type: application\/gzip$/m);
+  assert.doesNotMatch(generated, /^\/\.well-known\/agent-skills\/\*\n/m, "a rule left with no headers is omitted");
+  assert.deepEqual(warnings, []);
+  const merged = appendAgentDiscoveryHeaders(owner, generated);
+  const names = (header: string) => (merged.match(new RegExp(`^\\s+${header}:`, "gmi")) ?? []).length;
+  assert.equal(names("Access-Control-Allow-Origin"), 1);
+  assert.equal((merged.match(/^\/\.well-known\/agent-skills\/index\.json$/gm) ?? []).length, 1);
+  assert.equal((merged.match(/^  Content-Type: application\/json$/gm) ?? []).length, 2, "ard.json and ai-catalog.json only");
+  assert.ok(merged.startsWith(owner));
+  assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged, "regenerating is stable");
+});
+
+test("an owner rule narrower than a generated wildcard wins, with a warning, and ! removals count as policy", () => {
+  const skills = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json`,
+  });
+  const warnings: string[] = [];
+  const narrower = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/.well-known/agent-skills/index.json\n  Access-Control-Allow-Origin: https://app.example.com\n",
+    warn: (message) => warnings.push(message),
+  });
+  assert.doesNotMatch(narrower, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin/m);
+  assert.match(narrower, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json\n  Access-Control-Allow-Origin: \*$/m, "other paths keep theirs");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /Access-Control-Allow-Origin rule \/\.well-known\/agent-skills\/index\.json overlaps \/\.well-known\/agent-skills\/\*/);
+  for (const removal of ["/.well-known/*\n  ! Access-Control-Allow-Origin\n", "/.well-known/*\n  !Access-Control-Allow-Origin\n"]) {
+    const generated = agentDiscoveryHeaderRules(skills, options, [], { ownerHeaders: removal });
+    assert.doesNotMatch(generated, /Access-Control-Allow-Origin/, removal);
+    assert.match(generated, /Content-Type: application\/json/);
+  }
+  // Link may repeat: hosts join it with a comma, which is valid for Link.
+  const linked = agentDiscoveryHeaderRules(minimal, options, [], {
+    ownerHeaders: "/*\n  Link: <https://example.net/>; rel=help\n",
+  });
+  assert.match(linked, /^\/docs\/\n  Link: /m);
+  // Header names match case-insensitively; a commented-out line is not a policy.
+  const cased = agentDiscoveryHeaderRules(minimal, options, [], {
+    ownerHeaders: "/*\n  access-control-allow-origin: *\n# /.well-known/ard.json\n#  Content-Type: text/plain\n",
+  });
+  assert.doesNotMatch(cased, /Access-Control-Allow-Origin/);
+  assert.match(cased, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json$/m);
+});

@@ -34,7 +34,7 @@ A way to build documentation sites on top of Astro.
 
 ## Agent discovery
 
-Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt` and the homepage Markdown at `/index.md`. Request-rendered homepages advertise these files and each visible API reference through HTTP `Link` headers. Static builds emit `_headers` rules for hosts that support that format, including Cloudflare; generated fields share existing exact-path rules so owner headers survive. On other static hosts, configure equivalent HTTP headers in the host's native configuration.
+Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt` and the homepage Markdown at `/index.md`. Request-rendered homepages advertise these files and each visible API reference through HTTP `Link` headers. Static builds emit `_headers` rules for hosts that support that format, including Cloudflare. Your own `_headers` wins: a header a site rule already sets for a path, with an exact path or a wildcard such as `/*`, is left out of the generated rule for it, since hosts join repeated values and `Access-Control-Allow-Origin: *, *` is refused by browsers. A `Link` header is the exception, as joined `Link` values are valid. On other static hosts, configure equivalent HTTP headers in the host's native configuration.
 
 `/index.md` is the root content entry when there is one, otherwise the `llms.txt` content. A root entry with `noindex: true` is served but left out of discovery.
 

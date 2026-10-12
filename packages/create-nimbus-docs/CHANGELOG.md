@@ -1,5 +1,67 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.7.12
+
+### Patch Changes
+
+- [#229](https://github.com/cloudflare/nimbus/pull/229) [`a04304c`](https://github.com/cloudflare/nimbus/commit/a04304cac1eb7ebf0eed1e23a943da46ab16f7eb) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - A page or reusable snippet with only frontmatter builds, and its Markdown version is just its title and source.
+  - A snippet included inside a list item or quote keeps that structure in the page's Markdown version.
+  - `llms.txt` names each section for its index page's title, such as "Guides" instead of `guides`.
+  - Documentation search results link to the page itself instead of a URL ending in `#`, and excerpts no longer include the page actions.
+  - The Markdown version of an API page names each field as the page does, with its full coordinate beside it for citing.
+
+- [#232](https://github.com/cloudflare/nimbus/pull/232) [`d655e86`](https://github.com/cloudflare/nimbus/commit/d655e863e247e1510102f7f0e01372f5b6fd9333) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - API pages link to the previous and next page in sidebar order, even when a group is collapsed.
+  - Error responses start collapsed; a link to one, or to a field inside it, opens it.
+  - A sidebar link to an API or docs-version mount, such as `/api`, no longer warns.
+  - Operations that fall back to a coordinate route print one summary line, so other warnings stay visible.
+  - Samples and the endpoint card keep a server URL's query after the path.
+  - Response toggles meet 4.5:1 contrast in light mode, field anchors work on touch screens, and "Authorisation" reads "Authorization".
+
+- [#211](https://github.com/cloudflare/nimbus/pull/211) [`4a841cb`](https://github.com/cloudflare/nimbus/commit/4a841cb503d246e83b9dd921df5f6b85d492350a) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Add `bundle: false` to an `api` entry to serve a very large or many-version API from static assets instead of the server bundle. Unchanged pages are shared across versions, and unchanged versions aren't prepared again on rebuild. Needs `src/live.config.ts` registering `apiPagesLoader` from `@cloudflare/nimbus-docs/live`; the build shows the snippet. The build suggests the option when an API's bundled page data passes 16 MiB.
+  - Add `getVersionSwitchUrl` and `getApiVersionHead` for version pickers and heads in every rendering mode; the starter's picker and API layout use them.
+
+- [#212](https://github.com/cloudflare/nimbus/pull/212) [`94ebe52`](https://github.com/cloudflare/nimbus/commit/94ebe52791ddacaba0980f4cd932026dd9c0e98d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - API pages show the sidebar filter. With `sidebar: "on-demand"` it also finds pages the sidebar hasn't loaded.
+
+- [#214](https://github.com/cloudflare/nimbus/pull/214) [`825ffcf`](https://github.com/cloudflare/nimbus/commit/825ffcf7a4f6de2102e0af44f16bb788c5644ca4) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - API reference pages show the version picker for versioned APIs, in the sidebar and the mobile navigation.
+
+- [#240](https://github.com/cloudflare/nimbus/pull/240) [`381b37a`](https://github.com/cloudflare/nimbus/commit/381b37aa9ba313e05103308172401f7af2c7f1b8) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `og:image:width` and `og:image:height` describe the image: generated cards stay 1200 × 630, a `socialImage` file in `public/` is measured at build time, and any other image gets no size tags. `NimbusHead` takes `socialImageSize` to set them for an image Nimbus can't measure.
+  - The sitemap has `<lastmod>` on every documentation page, from frontmatter `lastUpdated` or the page's last commit, and `/sitemap.xml` is a copy of `sitemap-index.xml` unless the site serves its own.
+  - The starter's `BaseLayout` passes `socialImageSize` through to `NimbusHead`, and the 404 page recipe writes the new title and `noindex`.
+  - On a shallow clone, pages get no git dates instead of the wrong one, and the build says how to fetch the history.
+  - The 404 page's title is `Page not found | <site>` and the page is `noindex`.
+
+- [#233](https://github.com/cloudflare/nimbus/pull/233) [`1f2ce43`](https://github.com/cloudflare/nimbus/commit/1f2ce439031622f882ae39093a7bd0dc4c0621f6) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - New sites open content images at full size on click. On an existing site, run `nimbus-docs add image-zoom` and render `<ImageZoom />` in `src/layouts/DocsLayout.astro`.
+
+- [#224](https://github.com/cloudflare/nimbus/pull/224) [`79b05ef`](https://github.com/cloudflare/nimbus/commit/79b05efb52ef79876113bfeef67aaeae794193bd) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - New `markdown.features` option turns on Sätteri syntax, such as `{ headingAttributes: true }` for `## Install {#install}` or `{ math: true }`. Pages, generated Markdown, reusable snippets and lint all follow it. New sites start with heading ids on.
+  - Generated Markdown drops `{/* comments */}`.
+  - Invalid MDX reports the file, line and fix instead of an internal error.
+
+- [#236](https://github.com/cloudflare/nimbus/pull/236) [`fb759c5`](https://github.com/cloudflare/nimbus/commit/fb759c5f3ceae20612025473de1a86e617b5d41e) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - With the section route at `src/pages/[...section]/llms.txt.ts`, each sub-folder gets its own `llms.txt`, and its parent's index links to it under "Sections". New sites have this route; a `[section]` route keeps today's one index per top-level section.
+  - An `llms-full.txt` over 25 MiB becomes an index of one `llms-full.txt` per section, split further where a section is still too big, so the site deploys to Cloudflare.
+  - `LlmsEndpointReference` (from `@cloudflare/nimbus-docs/agent-endpoints`) adds `surface: "full"` on section references, for the per-section `llms-full.txt` files.
+
+- [#216](https://github.com/cloudflare/nimbus/pull/216) [`647471a`](https://github.com/cloudflare/nimbus/commit/647471aecc1cc399ee0bb4b6568dc8e1bc93a806) Thanks [@sansynx](https://github.com/sansynx)! - Keep version-switcher entries exposed as navigation links, with the current page identified by `aria-current`, instead of listbox options
+
+- [#230](https://github.com/cloudflare/nimbus/pull/230) [`25d21cf`](https://github.com/cloudflare/nimbus/commit/25d21cfa369f81bb6fe563f5f774dda1a6b41072) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Server scaffolds for Node, Vercel, and Netlify render docs pages on request, so Markdown negotiation works on them.
+  - Scaffold into `.` or an empty folder, including a freshly cloned repository.
+  - New repositories get a first commit; scaffolding inside an existing repository no longer creates a nested one.
+  - `npm create` installs a handful of packages instead of the whole framework.
+  - A missing package manager fails before anything is written, and a mistyped flag suggests the right one.
+  - Yarn sites ignore `.yarn/` the way Yarn recommends, and pin Yarn inside a folder that pins another package manager.
+  - The starter's `AGENT.md` explains sidebar groups, order, and links.
+  - `nimbus-docs check` and `--help` show commands for your package manager.
+
+- [#224](https://github.com/cloudflare/nimbus/pull/224) [`79b05ef`](https://github.com/cloudflare/nimbus/commit/79b05efb52ef79876113bfeef67aaeae794193bd) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Starter fixes:
+
+  - The theme toggle no longer submits a surrounding form, reports its state to screen readers, and still switches when storage is blocked.
+  - Closing a dialog no longer releases another overlay's scroll lock.
+  - "Copy page" works in Safari, and a failed command copy shows it failed.
+  - In search, Enter on the close button closes the dialog, and status messages are announced.
+  - `<Render>` params can't replace registered components; small fixes to breadcrumbs and the mobile table of contents.
+  - Banner content is rendered as written, like the rest of the site's content.
+
+- [#223](https://github.com/cloudflare/nimbus/pull/223) [`c39fdfc`](https://github.com/cloudflare/nimbus/commit/c39fdfcb2c0a31c6cd34d10e5a83e1f563c697ce) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - The docs version picker no longer appears on pages outside the docs versions, such as API reference and blog pages.
+
 ## 0.7.11
 
 ### Patch Changes

@@ -6,15 +6,9 @@ import { test } from "node:test";
 import { parseNimbusConfig } from "../../src/_internal/parse-nimbus-config.js";
 import { checkStructure } from "../../src/check/structure.js";
 
-async function check(nimbus: string, astro = "", setup = "", sdkInstalled = false) {
+async function check(nimbus: string, astro = "", setup = "") {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-adapter-check-"));
   try {
-    if (sdkInstalled) {
-      const sdk = path.join(cwd, "node_modules", "@modelcontextprotocol", "server");
-      fs.mkdirSync(sdk, { recursive: true });
-      fs.writeFileSync(path.join(sdk, "package.json"), JSON.stringify({ exports: "./index.js" }));
-      fs.writeFileSync(path.join(sdk, "index.js"), "export {};\n");
-    }
     fs.writeFileSync(path.join(cwd, "package.json"), JSON.stringify({ packageManager: "pnpm@9.0.0" }));
     fs.writeFileSync(
       path.join(cwd, "astro.config.ts"),
@@ -38,13 +32,6 @@ const missing = (report: Awaited<ReturnType<typeof check>>) =>
   report.findings.filter((f) => f.code === "nimbus/server-adapter-missing");
 const unconfirmed = (report: Awaited<ReturnType<typeof check>>) =>
   report.notes.some((n) => n.code === "nimbus/server-adapter-unconfirmed");
-
-test("MCP preflight requires the SDK to resolve from the project", async () => {
-  const config = "agents: { mcp: true }";
-  const astro = "adapter: cloudflare()";
-  assert.ok((await check(config, astro)).findings.some((f) => f.code === "nimbus/mcp-sdk-missing"));
-  assert.ok(!(await check(config, astro, "", true)).findings.some((f) => f.code === "nimbus/mcp-sdk-missing"));
-});
 
 test("server features fail preflight without a configured adapter", async () => {
   for (const config of [

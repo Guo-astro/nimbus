@@ -14,10 +14,9 @@
 
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 
 import { cloudflareTrailingSlashWarning } from "../_internal/cloudflare-trailing-slash.js";
-import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage, type ServerFeature } from "../_internal/server-adapter.js";
+import { serverAdapterFeature, serverAdapterMessage, type ServerFeature } from "../_internal/server-adapter.js";
 import { parseAstroConfigFields, type ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
@@ -60,26 +59,12 @@ export async function checkStructure(
   await checkApiCollections(cwd, findings, notes, parsed, config);
   const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config);
   if (parsed.ok && config && !parsed.unresolved.includes("...spread")) {
-    const mcp = !parsed.unresolved.includes("agents") && !!config.agents?.mcp;
     const feature = serverAdapterFeature({
       unbundledApi: !parsed.unresolved.includes("api") && !!config.api?.some((entry) => entry.bundle === false),
       requestRendering,
-      mcp,
+      mcp: !parsed.unresolved.includes("agents") && !!config.agents?.mcp,
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
-    if (mcp) {
-      try {
-        createRequire(path.join(cwd, "package.json")).resolve("@modelcontextprotocol/server");
-      } catch {
-        findings.push({
-          scope: "structure",
-          code: "nimbus/mcp-sdk-missing",
-          severity: "error",
-          message: mcpSdkMessage(cwd),
-          fixable: false,
-        });
-      }
-    }
   }
   await checkDuplicateRoutes(cwd, findings, parsed);
   await checkMdxComponents(cwd, findings, notes, parsed);

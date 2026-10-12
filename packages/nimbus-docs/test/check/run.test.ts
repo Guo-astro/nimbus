@@ -62,6 +62,26 @@ test("real site with search disabled passes env with exit 0", async () => {
   }
 });
 
+test("agents.mcp without the MCP server SDK is an error until it is installed", async () => {
+  const dir = project(`{ site: "https://docs.example.com", title: "X", search: false, agents: { mcp: true } }`);
+  try {
+    const r = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+    const sdk = r.findings.find((f) => f.code === "nimbus/mcp-sdk-missing");
+    assert.ok(sdk);
+    assert.equal(sdk.severity, "error");
+    assert.match(sdk.message, /@modelcontextprotocol\/server@2/);
+    assert.equal(exitCodeFor(r.summary), 1);
+
+    const pkg = path.join(dir, "node_modules", "@modelcontextprotocol", "server");
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, "package.json"), `{ "name": "@modelcontextprotocol/server" }`);
+    const installed = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+    assert.equal(installed.summary.errors, 0);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("wrangler config without wrangler installed is a warning, not an error", async () => {
   const dir = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
   fs.writeFileSync(path.join(dir, "wrangler.jsonc"), `{ "name": "x" }`);

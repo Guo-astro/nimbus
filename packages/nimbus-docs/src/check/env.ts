@@ -1,9 +1,9 @@
 /**
  * The **env** category: is the machine + project set up to build a correct site
  * at all? Node floor · config locatable · `site` not a placeholder · pagefind
- * when search is on · wrangler on a Cloudflare scaffold · installed Astro
- * adapters inside the range Nimbus supports. Build-free: filesystem
- * + `process.versions` + the statically-parsed config only. env's core always
+ * when search is on · the MCP server SDK when agents.mcp is on · wrangler on a
+ * Cloudflare scaffold · installed Astro adapters inside the range Nimbus
+ * supports. Build-free: filesystem + `process.versions` + the statically-parsed config only. env's core always
  * runs, so it's always `evaluated`; a config we can't read statically becomes a
  * `config-not-evaluated` note (not a silent skip), which drives `readiness:
  * unknown`.
@@ -18,6 +18,7 @@ import { ADAPTER_IDS, ADAPTER_RECIPES } from "../_internal/adapters.js";
 import { readBuildEnv } from "../_internal/dotenv.js";
 import { deriveFootprint, type FeatureRecipe } from "../_internal/footprint.js";
 import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
+import { mcpSdkMessage } from "../_internal/server-adapter.js";
 import { dependenciesMissing } from "../_internal/upgrades.js";
 import { addCommand, detectPackageManager, installCommand, quoteForDisplay } from "../cli/pm.js";
 import type { CheckFinding, Note, ScopeReport } from "./finding.js";
@@ -59,6 +60,7 @@ export function checkEnv(cwd: string, parsed: ConfigParseResult): ScopeReport {
     });
   } else if (hasPackageJson(cwd)) {
     checkPagefind(cwd, findings, parsed);
+    checkMcpSdk(cwd, findings, parsed);
     checkWrangler(cwd, findings);
     checkAdapterVersions(cwd, findings);
     const features = deriveFootprint(readDependencyNames(cwd));
@@ -219,6 +221,24 @@ function usesCustomSearchProvider(search: unknown): boolean {
     "provider" in search &&
     (search as { provider?: unknown }).provider === "custom"
   );
+}
+
+function checkMcpSdk(
+  cwd: string,
+  findings: CheckFinding[],
+  parsed: ConfigParseResult,
+): void {
+  if (!parsed.ok) return;
+  const agents = parsed.config.agents as { mcp?: unknown } | undefined;
+  if (agents?.mcp !== true) return;
+  if (depInstalled(cwd, "@modelcontextprotocol/server")) return;
+  findings.push({
+    scope: "env",
+    code: "nimbus/mcp-sdk-missing",
+    severity: "error",
+    message: mcpSdkMessage(cwd),
+    fixable: false,
+  });
 }
 
 const WRANGLER_CONFIGS = ["wrangler.jsonc", "wrangler.json", "wrangler.toml"];

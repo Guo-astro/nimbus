@@ -1,8 +1,8 @@
 import { addCommand, detectPackageManager, invocation, quoteForDisplay } from "../cli/pm.js";
 
 export function mcpSdkMessage(root: string): string {
-  const { bin, args } = addCommand(detectPackageManager(root), ["@modelcontextprotocol/server"]);
-  return `nimbus-docs: agents.mcp needs the MCP server SDK in this project. Run \`${bin} ${args.map(quoteForDisplay).join(" ")}\`.`;
+  const { bin, args } = addCommand(detectPackageManager(root), ["@modelcontextprotocol/server@2"]);
+  return `nimbus-docs: agents.mcp needs the MCP server SDK in this project. Run \`${bin} ${args.map(quoteForDisplay).join(" ")}\`, or set agents.mcp to false.`;
 }
 
 export type ServerFeature = "MCP" | "request rendering" | "api bundle: false";

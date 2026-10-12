@@ -46,6 +46,8 @@
 	   for wayfinding: where you are (current page, section, tab) and what you
 	   can act on (focus, link hover). */
 	--nb-brand: oklch(0.373 0.034 260.2);
+	/* The current page's fill: a light wash of the brand. */
+	--nb-brand-wash: color-mix(in oklch, var(--nb-brand) 7%, transparent);
 
 	/* Borders / focus */
 	--nb-border: oklch(0.935 0 0);
@@ -164,6 +166,7 @@
 	--nb-primary-hover: oklch(0.7 0 0);
 
 	--nb-brand: oklch(0.837 0.018 261.3);
+	--nb-brand-wash: color-mix(in oklch, var(--nb-brand) 10%, transparent);
 
 	--nb-border: oklch(0.269 0 0);
 	--nb-border-strong: oklch(0.371 0 0);
@@ -629,7 +632,7 @@ pre.astro-code .highlighted-word {
 	}
 	/* You are here: the one place the sidebar uses the brand. */
 	.nb-sidebar-link[aria-current="page"] {
-		background-color: color-mix(in oklch, var(--nb-brand) 10%, transparent);
+		background-color: var(--nb-brand-wash);
 		color: var(--nb-brand);
 	}
 	.nb-sidebar-link:focus-visible,

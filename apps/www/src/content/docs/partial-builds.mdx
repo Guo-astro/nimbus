@@ -1,13 +1,13 @@
 ---
 title: Build one locale or one part
-description: Build one collection, or a set, and deploy each slice as its own Worker, composed by zone routes.
+description: Build one collection, or a set, and deploy each slice on its own under one hostname.
 aiGenerated: true
 sidebar:
   order: 9.5
   label: Partial builds
 ---
 
-A site with several locales or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice deploys as its own Worker, and zone routes compose them under one hostname.
+A site with several locales or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice is a static site of its own; your host routes each slice's path prefix to it, so visitors see one hostname.
 
 The unit is a collection. A translation is a collection with its own route prefix, the API reference is a collection, and so is any part you keep separate, so "build one locale" and "build one part" are the same operation.
 
@@ -38,45 +38,34 @@ A build fails when:
 
 The slice that holds `docs` is the **root slice**: it writes where a whole-site build does, and serves the homepage, `robots.txt`, `llms.txt`, `.well-known` and the rest of the origin root.
 
-Any other slice writes its site-wide files under its prefix, where its own Worker serves them, and drops the root files the root slice serves:
+Any other slice writes its site-wide files under its prefix, where its own deployment serves them, and drops the root files the root slice serves:
 
 | Under the slice's prefix (`/docs-es/…`) | Dropped from the output | At the asset root |
 |---|---|---|
 | `sitemap-index.xml`, `sitemap-0.xml`, `sitemap.xml` | `/`, `/robots.txt`, `/og.png`, `/nimbus-api/coordinates.json` | `_headers`, with rules for the slice's files only |
-| `pagefind/` | `/llms.txt`, `/llms-full.txt`, `/index.md` | `404.html`, served by the Worker's not-found handling |
-| `llms-full.txt`, one per collection in the slice | `/.well-known/` | `_redirects`, when the site emits one |
+| `pagefind/` | `/llms.txt`, `/llms-full.txt`, `/index.md` | `404.html` |
+| `llms-full.txt`, one per collection in the slice | `/.well-known/` | `_redirects`, when the site emits one; both files for hosts that read them |
 | `_nimbus/shiki.css`, `_astro/` (bundled CSS and JS) | another collection's `openapi.json` and nav lists | |
 
-A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, so the slice's Worker takes that route too (below).
+A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, so the slice takes that prefix too (below).
 
 The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. An absent collection is named by its formatted name (`Docs Es` for `docs-es`; an API collection by its configured label), not by its index page's title, which that build doesn't read. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
 
-## Deploy each slice as a Worker
+## Deploy each slice
 
-Each slice is a Worker with static assets and zone routes. Routes need a zone: `workers.dev` hostnames take no routes. The most specific route wins, so the slice on `/docs-es/*` composes with the root slice on `/*` without a router.
+Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. A slice needs three prefixes: the prefix itself (`/docs-es`, so the slashless form doesn't reach the root slice), everything under it (`/docs-es/*`) and its OG images (`/og/docs-es/*`). Everything else goes to the root slice. The most specific prefix wins; nothing merges at build time, and slices deploy in any order.
 
-```jsonc title="wrangler.jsonc (root slice)"
-{
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "docs-site",
-  "compatibility_date": "2026-10-01",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "404-page"
-  },
-  "routes": [{ "pattern": "docs.example.com/*", "zone_name": "example.com" }]
-}
-```
+A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and come from the root slice, so a change there deploys the root slice.
+
+Any host that routes by prefix works. Three ways:
+
+**Cloudflare**, one Worker per slice with zone routes (`workers.dev` hostnames take no routes):
 
 ```jsonc title="wrangler.docs-es.jsonc (the docs-es slice)"
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "docs-site-es",
   "compatibility_date": "2026-10-01",
-  "assets": {
-    "directory": "./dist",
-    "not_found_handling": "404-page"
-  },
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" },
   "routes": [
     { "pattern": "docs.example.com/docs-es", "zone_name": "example.com" },
     { "pattern": "docs.example.com/docs-es/*", "zone_name": "example.com" },
@@ -85,14 +74,18 @@ Each slice is a Worker with static assets and zone routes. Routes need a zone: `
 }
 ```
 
-Three routes per slice: the prefix itself (`/docs-es` without a trailing slash would otherwise reach the root Worker), everything under it, and its OG images. Build and deploy each slice on its own, in any order:
+The root slice's `wrangler.jsonc` keeps `"pattern": "docs.example.com/*"`. Then `NIMBUS_BUILD_ONLY=docs-es pnpm build && npx wrangler deploy --config wrangler.docs-es.jsonc`.
 
-```sh
-NIMBUS_BUILD_ONLY=docs,api pnpm build && npx wrangler deploy
-NIMBUS_BUILD_ONLY=docs-es pnpm build && npx wrangler deploy --config wrangler.docs-es.jsonc
+**A reverse proxy** in front of one static origin per slice:
+
+```nginx
+location = /docs-es      { proxy_pass https://docs-es.internal; }
+location /docs-es/       { proxy_pass https://docs-es.internal; }
+location /og/docs-es/    { proxy_pass https://docs-es.internal; }
+location /                { proxy_pass https://docs-root.internal; }
 ```
 
-A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and are served by the root slice through the zone, so a change there deploys the root slice.
+**A static host with rewrites**, such as Netlify or Vercel: deploy each slice as its own site and add rewrites on the root site to the slice's deployment, for example `/docs-es/* https://docs-es.example.app/docs-es/:splat 200` in `_redirects`, or the equivalent `rewrites` entries in `vercel.json`, for the three prefixes.
 
 ### Announce every sitemap
 
@@ -105,7 +98,7 @@ A slice's pages load their CSS, JS, stylesheet and search bundle from under thei
 
 ### Check a slice before it's live
 
-`wrangler dev` serves one Worker and can't express zone routes, so it can't compose slices. Check a slice's own pages on a [preview URL](https://developers.cloudflare.com/workers/configuration/previews/) (`wrangler versions upload`), and the composition, links from one slice into another, on a hostname with the same routes, such as a staging zone.
+A slice's own deployment serves its own pages, so check them on that deployment's preview URL. The composition, links from one slice into another, needs the routing in front, so check it on a staging hostname with the same prefixes. One local server can't compose slices.
 
 ## Search across slices
 
@@ -140,9 +133,20 @@ A script maps changed paths to slices, and a workflow builds each one. Keep the 
 // picks every slice.
 import { readFileSync } from "node:fs";
 
+// `preview` and `deploy` are your host's commands; these are Cloudflare's.
 const SLICES = [
-  { name: "docs-site", config: "wrangler.jsonc", only: "docs,api" },
-  { name: "docs-site-es", config: "wrangler.docs-es.jsonc", only: "docs-es" },
+  {
+    name: "docs-site",
+    only: "docs,api",
+    preview: "npx wrangler versions upload",
+    deploy: "npx wrangler deploy",
+  },
+  {
+    name: "docs-site-es",
+    only: "docs-es",
+    preview: "npx wrangler versions upload --config wrangler.docs-es.jsonc",
+    deploy: "npx wrangler deploy --config wrangler.docs-es.jsonc",
+  },
 ];
 
 const paths = process.argv.includes("--all")
@@ -217,11 +221,11 @@ jobs:
       - run: npx nimbus-docs lint
 
       - if: github.event_name == 'pull_request'
-        run: npx wrangler versions upload --config ${{ matrix.slice.config }}
+        run: ${{ matrix.slice.preview }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - if: github.event_name == 'push'
-        run: npx wrangler deploy --config ${{ matrix.slice.config }}
+        run: ${{ matrix.slice.deploy }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -248,7 +252,7 @@ A pull request that touches only `src/content/docs-es/` builds and previews the 
 
 ## Limits
 
-- Request rendering holds only the slice: a slice's Worker renders its own collections' pages on request and nothing else. Nimbus has no cache layer to invalidate.
+- Request rendering holds only the slice: a slice's server renders its own collections' pages on request and nothing else. Nimbus has no cache layer to invalidate.
 - The site's WebMCP search uses the root slice's bundle.
 - Cross-slice version pickers aren't supported: the docs version collections build together.
 - A slice can't span part of a collection.

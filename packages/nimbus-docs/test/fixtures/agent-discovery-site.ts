@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import nimbus from "../../src/index.js";
 import { runningNimbusVersion } from "../../src/_internal/upgrades.js";
+import { TEST_TMP } from "./temp-root.js";
 
 export async function discoveryFixture(
   rootContent?: string,
@@ -20,7 +20,7 @@ export async function discoveryFixture(
       : withApi
         ? withApi.api
         : [];
-  const root = await mkdtemp(path.join(tmpdir(), "nimbus-discovery-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-discovery-"));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body);
@@ -73,6 +73,8 @@ export async function discoveryFixture(
   const config = {
     root: pathToFileURL(root + path.sep),
     configFile: false as const,
+    cacheDir: path.join(root, ".astro"),
+    vite: { cacheDir: path.join(root, ".vite") },
     logLevel: "silent" as const,
     base: "/docs",
     integrations: [

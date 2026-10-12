@@ -70,6 +70,7 @@ pnpm templates:check     # generate + scaffold + build one variant end to end
 pnpm local               # scaffold a throwaway site against your local packages
 pnpm typecheck           # typecheck the whole workspace
 pnpm -r test             # every package's tests, incl. the registry tier-invariant guard
+RUN_PACKED_MIGRATION=true pnpm --filter @cloudflare/nimbus-docs test   # also the packed-migration test (installs from npm; CI runs it on main and the release PR)
 ```
 
 Working on the docs site (`apps/www`):

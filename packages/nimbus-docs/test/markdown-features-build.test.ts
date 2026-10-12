@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -8,6 +7,7 @@ import { build } from "astro";
 
 import nimbus from "../src/index.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const module = (file: string) =>
   JSON.stringify(pathToFileURL(path.resolve(import.meta.dirname, "../src", file)).href);
@@ -21,7 +21,7 @@ title: Setup
 `;
 
 async function site(page: string, markdown?: Record<string, unknown>) {
-  const root = await mkdtemp(path.join(tmpdir(), "nimbus-markdown-features-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-markdown-features-"));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body);
@@ -63,6 +63,8 @@ export const { GET, getStaticPaths } = markdownRoute();
       build({
         root: pathToFileURL(root + path.sep),
         configFile: false,
+        cacheDir: path.join(root, ".astro"),
+        vite: { cacheDir: path.join(root, ".vite") },
         logLevel: "silent",
         base: "/docs",
         integrations: [

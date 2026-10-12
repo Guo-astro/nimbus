@@ -8,7 +8,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test, before, after } from "node:test";
@@ -17,6 +16,7 @@ import { build, type AstroIntegration } from "astro";
 
 import nimbus from "../src/index.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const SRC_DIR = path.resolve(import.meta.dirname, "../src");
 
@@ -167,7 +167,7 @@ let root: string;
 let app: { render(request: Request): Promise<Response> };
 
 before(async () => {
-  root = await mkdtemp(path.join(os.tmpdir(), "nimbus-query-versions-"));
+  root = await mkdtemp(path.join(TEST_TMP, "nimbus-query-versions-"));
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
     await writeFile(path.join(root, relative), contents, "utf8");

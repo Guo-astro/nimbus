@@ -78,7 +78,12 @@ jobs:
 
       - run: pnpm test:upgrades
 
+      # The packed-migration test installs a published release from npm and
+      # packs this one. A packed tarball can only regress at a release, so it
+      # runs on main and the release PR, not on every feature PR.
       - run: pnpm -r test
+        env:
+          RUN_PACKED_MIGRATION: ${{ github.ref == 'refs/heads/main' || startsWith(github.head_ref, 'changeset-release/') }}
 
   # The docs site is otherwise built only when it's deployed, after a
   # release; build it on every PR so a broken page or a framework change that

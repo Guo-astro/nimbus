@@ -58,9 +58,10 @@ import {
   isRelativeUrl,
   isUnderOpaqueNamespace,
   resolveLink,
+  sliceDisposition,
   type LinkEnv,
 } from "../link-resolver.js";
-import type { Rule } from "../rule.js";
+import type { Rule, RuleReport } from "../rule.js";
 
 export const internalLink: Rule = {
   code: "nimbus/internal-link",
@@ -110,9 +111,16 @@ export const internalLink: Rule = {
       const resolution = resolveLink(env, url, ignore);
       if (resolution.kind === "valid") continue;
 
+      // A partial build's truth: a link into another slice is advisory when
+      // the previous build covered that slice, and unknowable otherwise.
+      const disposition = sliceDisposition(env, key);
+      if (disposition === "skip") continue;
+      const report = (finding: RuleReport) =>
+        ctx.report(disposition === "warn" ? { ...finding, severity: "warn" } : finding);
+
       if (resolution.throughRedirect) {
         // The redirect points nowhere, so a did-you-mean for the link would mislead.
-        ctx.report({
+        report({
           message: `broken link "${url}" — ${resolution.reason}`,
           line: occ.line,
           column: occ.column,
@@ -122,7 +130,7 @@ export const internalLink: Rule = {
 
       if (resolution.slashHint !== undefined) {
         const hint = resolution.slashHint;
-        ctx.report({
+        report({
           message: `broken link "${url}" — no page resolves to this path, but a redirect is defined for "${hint}".`,
           line: occ.line,
           column: occ.column,
@@ -131,7 +139,7 @@ export const internalLink: Rule = {
         continue;
       }
 
-      ctx.report({ ...missingRouteReport(url, key, env), line: occ.line, column: occ.column });
+      report({ ...missingRouteReport(url, key, env), line: occ.line, column: occ.column });
     }
   },
 };

@@ -613,3 +613,37 @@ test("an owner rule for a page that isn't emitted doesn't drop a text family tha
   assert.match(generated, /^\/docs\/\*\/index\.md\n  Content-Type: text\/markdown; charset=utf-8$/m);
   assert.deepEqual(warnings, []);
 });
+
+test("owner rules the host rejects are no policy, a blank value is ignored, and ! Link is honoured", () => {
+  const skills = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json`,
+  });
+  const corsEverywhere = /^\/\.well-known\/ard\.json\n  Content-Type: application\/json\n  Access-Control-Allow-Origin: \*$/m;
+  for (const rejected of [
+    "http://docs.example.com/*",
+    "https://docs.example.com:8443/*",
+    "wss://docs.example.com/*",
+    "/*/*.json",
+    "/*/:splat",
+  ]) {
+    const generated = agentDiscoveryHeaderRules(skills, options, [], {
+      ownerHeaders: `${rejected}\n  Access-Control-Allow-Origin: *\n`,
+    });
+    assert.match(generated, corsEverywhere, rejected);
+    assert.match(generated, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin: \*$/m, rejected);
+  }
+  const accepted = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "https://docs.example.com/*\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(accepted, /Access-Control-Allow-Origin/);
+  const blank = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/*\n  Access-Control-Allow-Origin:\n  Access-Control-Allow-Origin:   \n",
+  });
+  assert.match(blank, corsEverywhere);
+  const unsetLink = agentDiscoveryHeaderRules(minimal, options, [], {
+    ownerHeaders: "/*\n  ! Link\n",
+  });
+  assert.doesNotMatch(unsetLink, /Link:/);
+  assert.match(unsetLink, /^\/\.well-known\/ard\.json\n  Content-Type/m, "other headers stay");
+});

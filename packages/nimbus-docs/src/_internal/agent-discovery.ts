@@ -199,7 +199,7 @@ export function agentDiscoveryHeaderRules(
     });
   }
   const ownerTypes = owner
-    .filter((policy) => policy.headers.has("content-type"))
+    .filter((policy) => policyCovers(policy, "content-type"))
     .map((policy) => policy.pattern);
   const addTextRule = (pattern: string, type: string, members: string[]) => {
     if (!members.length) return;
@@ -308,10 +308,20 @@ interface HeaderRule {
   evaluated?: boolean;
 }
 
-/** One owner rule: its path pattern and the header names it sets or removes. */
+/** One owner rule: its path pattern and the header names it sets and removes. */
 interface OwnerHeaderPolicy {
   pattern: string;
-  headers: Set<string>;
+  sets: Set<string>;
+  unsets: Set<string>;
+}
+
+/**
+ * Whether an owner rule has a policy for a header. A removal counts for
+ * every header; a value counts unless the header may repeat, since hosts
+ * join repeated values and that is valid for those headers.
+ */
+function policyCovers(policy: OwnerHeaderPolicy, header: string): boolean {
+  return policy.unsets.has(header) || (!MULTI_VALUED_HEADERS.has(header) && policy.sets.has(header));
 }
 
 /**
@@ -335,10 +345,9 @@ function ownerSetsHeader(
   warn?: (message: string) => void,
 ): boolean {
   const header = name.toLowerCase();
-  if (MULTI_VALUED_HEADERS.has(header)) return false;
   let covered = false;
   for (const policy of owner) {
-    if (!policy.headers.has(header)) continue;
+    if (!policyCovers(policy, header)) continue;
     if (headerPatternMatches(policy.pattern, representativePath(pattern))) {
       covered = true;
     } else if (headerPatternMatches(pattern, representativePath(policy.pattern))) {
@@ -365,10 +374,10 @@ function ownerSetsHeaderOnMembers(
   warn?: (message: string) => void,
 ): boolean {
   const header = name.toLowerCase();
-  if (MULTI_VALUED_HEADERS.has(header) || members.length === 0) return false;
+  if (members.length === 0) return false;
   const covering = owner.filter(
     (policy) =>
-      policy.headers.has(header) &&
+      policyCovers(policy, header) &&
       members.some((pathname) => headerPatternMatches(policy.pattern, pathname)),
   );
   if (covering.length === 0) return false;
@@ -457,17 +466,32 @@ function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     if (HEADER_PATH_LINE.test(line)) {
-      current = { pattern: line, headers: new Set() };
-      policies.push(current);
+      // A rule the host rejects (several wildcards, a scheme other than
+      // https, a port) never applies, so its headers are no policy.
+      current = validOwnerPattern(line) ? { pattern: line, sets: new Set(), unsets: new Set() } : undefined;
+      if (current) policies.push(current);
       continue;
     }
-    // `Name: value` sets a header; `! Name` (the host's unset operator, with
-    // the space) removes one. Both are the owner's policy for that header on
-    // the rule's paths.
-    const header = /^! ([^:\s]+)$/.exec(line)?.[1] ?? /^([^:\s]+)\s*:/.exec(line)?.[1];
-    if (header && current) current.headers.add(header.toLowerCase());
+    if (!current) continue;
+    // `! Name` (the host's unset operator, with the space) removes a header;
+    // `Name: value` sets one, and a blank value is ignored, as the host does.
+    const unset = /^! ([^:\s]+)$/.exec(line)?.[1];
+    if (unset) current.unsets.add(unset.toLowerCase());
+    const set = /^([^:\s]+)\s*:\s*\S/.exec(line)?.[1];
+    if (set && !unset) current.sets.add(set.toLowerCase());
   }
   return policies;
+}
+
+/** The path rules Cloudflare accepts: one wildcard, and only an https host without a port. */
+function validOwnerPattern(pattern: string): boolean {
+  if (/:\/\//.test(pattern)) {
+    if (!pattern.startsWith("https://")) return false;
+    const host = pattern.slice("https://".length).split("/")[0] ?? "";
+    if (/:\d+$/.test(host)) return false;
+  }
+  const wildcards = (pattern.match(/\*/g) ?? []).length + (/:splat(?!\w)/.test(pattern) ? 1 : 0);
+  return wildcards <= 1;
 }
 
 /**
@@ -478,7 +502,8 @@ function normalizeHeaderPattern(pattern: string): string | undefined {
   // Path-only generated rules apply on preview hosts too. Conservatively
   // honor an absolute owner policy even when its hostname differs from site.
   if (/^[^\s]+:\/\//.test(pattern)) {
-    const pathStart = pattern.indexOf("/", pattern.indexOf("://") + 3);
+    if (!validOwnerPattern(pattern)) return undefined;
+    const pathStart = pattern.indexOf("/", "https://".length);
     pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
   }
   try {

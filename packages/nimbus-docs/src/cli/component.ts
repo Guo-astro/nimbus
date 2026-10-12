@@ -25,7 +25,7 @@ import { componentsMapBody } from "../_internal/parse-components-registry.js";
 import { stripComments, stripStrings } from "../_internal/parse-object-literal.js";
 import { readTreeFile, resolveTemplateTree, type FetchedTree } from "./_templates.js";
 import { bytesHash, type NimbusJson } from "./nimbus-json.js";
-import { addCommand, detectPackageManager } from "./pm.js";
+import { addCommand, detectPackageManager, invocation } from "./pm.js";
 import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
 import { starterProjectPath } from "./upgrade.js";
@@ -80,8 +80,60 @@ export interface KeptComponent {
   /** Project-relative paths of the kept files. */
   files: string[];
   /** `edited`: differs from the version the site installed or came with;
-   *  `unknown`: no install record and the starter release couldn't be read. */
+   *  `unknown`: no install record, and no starter release shipped the files
+   *  or it couldn't be fetched. */
   reason: "edited" | "unknown";
+}
+
+/**
+ * The report block for components `--overwrite` kept, the same whether nobody
+ * could be asked or the user answered no. It leads with what is safe, then the
+ * narrowest replace, then the widest; agents act on these lines too.
+ */
+export function keptLines(
+  report: Pick<InstallReport, "keptUnasked" | "keptDeclined">,
+  slug: string,
+  starter: Pick<StarterBaseline, "error"> | null,
+): string[] {
+  // A run either has a terminal or not, so only one of the two is ever set.
+  const unasked = report.keptUnasked.length > 0;
+  const group = unasked ? report.keptUnasked : report.keptDeclined;
+  if (group.length === 0) return [];
+  const why = unasked ? "no terminal to ask" : "you answered no";
+  const lines: string[] = [];
+  const count = (list: readonly KeptComponent[]) => {
+    const n = list.reduce((sum, k) => sum + k.files.length, 0);
+    return `${n} file${n === 1 ? "" : "s"}`;
+  };
+  const width = Math.max(...group.flatMap((k) => k.files.map((f) => f.length)));
+  const rows = (list: readonly KeptComponent[]) =>
+    list.flatMap((k) => k.files.map((f) => `    ${f.padEnd(width)}   ${k.slug}`));
+  const edited = group.filter((k) => k.reason === "edited");
+  const unknown = group.filter((k) => k.reason === "unknown");
+  if (edited.length > 0) lines.push(`↷ Kept ${count(edited)} with local edits (${why}):`, ...rows(edited));
+  if (unknown.length > 0) {
+    lines.push(`↷ Kept ${count(unknown)} that may have local edits (${why}):`, ...rows(unknown));
+    if (!starter) lines.push("  Could not compare: no recorded content hash or starter release.");
+    else if (starter.error) {
+      const cause = starter.error.message.split("\n")[0]!;
+      lines.push(`  Could not compare: ${cause}`);
+      if (!cause.includes("--template-dir")) lines.push("  Set GIGET_AUTH to a GitHub token, or pass --template-dir <path>, and rerun.");
+    } else lines.push("  Could not compare: no recorded content hash, and the starter didn't ship these files.");
+  }
+  const all = invocation(`add ${slug} --overwrite --yes`);
+  const others = group.filter((k) => k.slug !== slug).map((k) => invocation(`add ${k.slug} --overwrite --yes`));
+  if (others.length === 0) {
+    lines.push("  Your edits are untouched. To discard them and take upstream:", `    ${all}`);
+    lines.push("  To compare first: commit, run it, and review with `git diff`.");
+  } else {
+    lines.push(
+      "  Your edits are untouched. To discard one component's edits and take upstream, with its dependencies:",
+      ...others.map((command) => `    ${command}`),
+      `  Or everything above: ${all}`,
+      "  To compare first: commit, run one, and review with `git diff`.",
+    );
+  }
+  return lines;
 }
 
 export interface Prompts {
@@ -159,8 +211,8 @@ export async function installComponents(
     // Under `--overwrite`, files the user edited since install are the only
     // thing worth a question. In a terminal we ask; with `--yes` we replace and
     // say how many carried edits; with neither (an agent, CI, a pipe) there is
-    // nobody to ask, so we keep them, list them with the commands that replace
-    // them, and exit 1. A prompt we can't show fails closed, never open.
+    // nobody to ask, so we keep them and list them with the commands that
+    // replace them. A prompt we can't show fails closed, never open.
     let keep = false;
     const tty = options.interactive ?? interactive();
     const prompts = options.prompts ?? p;
@@ -198,7 +250,6 @@ export async function installComponents(
       } else {
         keep = true;
         report.keptUnasked.push({ slug: item.name, files, reason: edits });
-        process.exitCode = 1;
       }
     } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
@@ -381,6 +432,8 @@ export interface StarterBaseline {
   /** A project file as the site's starter release shipped it, or null when it
    * shipped no such file. Rejects when the release can't be fetched. */
   read: (file: string) => Promise<string | null>;
+  /** Why the release couldn't be fetched, once a read has failed. */
+  readonly error: Error | null;
   cleanup: () => void;
 }
 
@@ -400,18 +453,28 @@ export function starterBaseline(
   if (!nimbus || !recorded) return null;
   const trees = new Map<string, Promise<FetchedTree>>();
   const fetched: FetchedTree[] = [];
+  let error: Error | null = null;
   const tree = (tag: string) => {
     let pending = trees.get(tag);
     if (!pending) {
-      pending = resolveTree(tag).then((t) => {
-        fetched.push(t);
-        return t;
-      });
+      pending = resolveTree(tag).then(
+        (t) => {
+          fetched.push(t);
+          return t;
+        },
+        (cause: unknown) => {
+          error ??= cause instanceof Error ? cause : new Error(String(cause));
+          throw cause;
+        },
+      );
       trees.set(tag, pending);
     }
     return pending;
   };
   return {
+    get error() {
+      return error;
+    },
     async read(file) {
       const treeFile = posix.join("src", posix.relative(srcRoot, file));
       if (treeFile.startsWith("src/..") || starterProjectPath(srcRoot, treeFile) !== file) return null;

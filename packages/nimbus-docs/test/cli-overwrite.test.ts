@@ -9,7 +9,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { installComponents, localEdits, registerHint, starterBaseline, type InstallOptions, type Prompts } from "../src/cli/component.js";
+import { installComponents, keptLines, localEdits, registerHint, starterBaseline, type InstallOptions, type KeptComponent, type Prompts } from "../src/cli/component.js";
 import { bytesHash } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
 
@@ -192,6 +192,11 @@ test("a component without an install record is judged against the starter releas
     assert.equal(await edits([tabs], { templatesTag: null }), "unknown");
     const offline = starterBaseline(nimbus, "src", undefined, () => Promise.reject(new Error("offline")));
     assert.equal(await localEdits(undefined, cwd, "src", { files: [tabs], baseline: offline }), "unknown");
+    assert.equal(offline?.error?.message, "offline", "a failed fetch is remembered so the report can name it");
+
+    const local = starterBaseline(nimbus, "src", tree);
+    await localEdits(undefined, cwd, "src", { files: [tabs], baseline: local });
+    assert.equal(local?.error, null);
 
     writeFiles(cwd, { [tabs]: "<tabs edited />\n" });
     assert.equal(await edits([tabs]), "edited");
@@ -237,17 +242,9 @@ test("a nested install root maps to the starter's src", async () => {
 
 // `--overwrite` without a terminal (these tests run with stdin and stdout piped)
 // and without `--yes`: files the user edited are kept and listed, files they
-// didn't are replaced, and the exit code says the verb didn't complete.
+// didn't are replaced. `keptUnasked` is what makes the command exit 1.
 
-
-function withExitCode<T>(run: () => Promise<T>): Promise<T> {
-  const before = process.exitCode;
-  return run().finally(() => {
-    process.exitCode = before;
-  });
-}
-
-test("--overwrite without a terminal keeps edited components and their edited dependencies, replaces the rest, exits 1", async () => {
+test("--overwrite without a terminal keeps edited components and their edited dependencies, replaces the rest", async () => {
   await withProject(async (cwd) => {
     const badge = (c: string) => item("badge", "registry:ui", [{ path: "components/ui/badge/Badge.astro", content: c }]);
     const crumbs = (c: string) => item("breadcrumbs", "registry:ui", [{ path: "components/ui/breadcrumbs/Breadcrumbs.astro", content: c }]);
@@ -262,11 +259,7 @@ test("--overwrite without a terminal keeps edited components and their edited de
       ...recordFor("badge", badge("B1").files),
       ...recordFor("breadcrumbs", crumbs("C1").files),
     ]);
-    const report = await withExitCode(async () => {
-      const r = await installComponents([dialog("V2"), badge("B2"), crumbs("C2")], opts(cwd, { overwrite: true, recorded }));
-      assert.equal(process.exitCode, 1, "the verb did not complete");
-      return r;
-    });
+    const report = await installComponents([dialog("V2"), badge("B2"), crumbs("C2")], opts(cwd, { overwrite: true, recorded }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/badge/Badge.astro"), "utf8"), "B1 redesigned");
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/breadcrumbs/Breadcrumbs.astro"), "utf8"), "C1 redesigned");
@@ -286,11 +279,7 @@ test("--overwrite --yes replaces edited files too and says how many carried edit
     await installComponents([dialog("V1")], opts(cwd));
     writeFiles(cwd, { "src/components/ui/dialog/Dialog.astro": "V1 redesigned" });
     const recorded = recordFor("dialog", dialog("V1").files);
-    const report = await withExitCode(async () => {
-      const r = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, recorded }));
-      assert.notEqual(process.exitCode, 1);
-      return r;
-    });
+    const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, recorded }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
     assert.equal(report.replacedEdited, 1);
     assert.deepEqual(report.keptUnasked, []);
@@ -341,11 +330,7 @@ test("--overwrite in a terminal asks per edited component; no keeps it in the sa
       }) as Prompts["confirm"],
       select: (async () => "skip") as Prompts["select"],
     };
-    const report = await withExitCode(async () => {
-      const r = await installComponents([dialog("V2"), cn("C2")], opts(cwd, { overwrite: true, recorded, interactive: true, prompts }));
-      assert.notEqual(process.exitCode, 1, "answering is not a failure");
-      return r;
-    });
+    const report = await installComponents([dialog("V2"), cn("C2")], opts(cwd, { overwrite: true, recorded, interactive: true, prompts }));
     assert.deepEqual(asked, ["dialog", "cn"]);
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V1 redesigned");
     assert.equal(readFileSync(path.join(cwd, "src/lib/cn.ts"), "utf8"), "C2");
@@ -361,11 +346,7 @@ test("--overwrite without a terminal and without a record consults the starter r
   await withProject(async (cwd) => {
     await installComponents([dialog("V1")], opts(cwd));
     const offline = starterBaseline({ templatesTag: "templates-v1.0.0" }, "src", undefined, () => Promise.reject(new Error("offline")));
-    const report = await withExitCode(async () => {
-      const r = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, starter: offline }));
-      assert.equal(process.exitCode, 1);
-      return r;
-    });
+    const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, starter: offline }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V1");
     assert.deepEqual(report.keptUnasked, [
       { slug: "dialog", files: [path.join("src", "components/ui/dialog/Dialog.astro")], reason: "unknown" },
@@ -395,10 +376,50 @@ test("a lib item under --overwrite follows the same rule as a component", async 
     await installComponents([cn("C1")], opts(cwd));
     writeFiles(cwd, { "src/lib/cn.ts": "C1 edited" });
     const recorded = recordFor("cn", cn("C1").files);
-    const report = await withExitCode(() => installComponents([cn("C2")], opts(cwd, { overwrite: true, recorded })));
+    const report = await installComponents([cn("C2")], opts(cwd, { overwrite: true, recorded }));
     assert.equal(readFileSync(path.join(cwd, "src/lib/cn.ts"), "utf8"), "C1 edited");
     assert.deepEqual(report.keptUnasked.map((k) => k.slug), ["cn"]);
   });
+});
+
+const kept = (slug: string, reason: KeptComponent["reason"] = "edited"): KeptComponent => ({
+  slug,
+  files: [`src/components/ui/${slug}/${slug}.astro`],
+  reason,
+});
+const none = { keptUnasked: [], keptDeclined: [] };
+
+test("the kept block names each component's replace command and the whole tree's", () => {
+  const lines = keptLines({ ...none, keptUnasked: [kept("badge"), kept("breadcrumbs")] }, "api-layout", null).join("\n");
+  assert.match(lines, /Kept 2 files with local edits \(no terminal to ask\)/);
+  assert.match(lines, /nimbus-docs add badge --overwrite --yes/);
+  assert.match(lines, /nimbus-docs add breadcrumbs --overwrite --yes/);
+  assert.match(lines, /Or everything above: .*nimbus-docs add api-layout --overwrite --yes/);
+  assert.match(lines, /commit, run one, and review with `git diff`/);
+  assert.doesNotMatch(lines, /nimbus-docs diff/, "diff compares starter files, not registry components");
+});
+
+test("the kept block names each command once", () => {
+  const single = keptLines({ ...none, keptDeclined: [kept("badge")] }, "badge", null).join("\n");
+  assert.equal(single.match(/add badge --overwrite --yes/g)?.length, 1);
+  assert.doesNotMatch(single, /Or everything above/);
+  assert.match(single, /you answered no/);
+  // The requested component kept with a dependency: its command is the whole tree's.
+  const both = keptLines({ ...none, keptUnasked: [kept("badge"), kept("api-layout")] }, "api-layout", null).join("\n");
+  assert.equal(both.match(/add api-layout --overwrite --yes/g)?.length, 1);
+  assert.equal(both.match(/add badge --overwrite --yes/g)?.length, 1);
+});
+
+test("the kept block says why files couldn't be compared", () => {
+  const unknown = { ...none, keptUnasked: [kept("badge", "unknown")] };
+  const text = (starter: { error: Error | null } | null) => keptLines(unknown, "badge", starter).join("\n");
+  assert.match(text(null), /Could not compare: no recorded content hash or starter release/);
+  const rateLimited = new Error("GitHub rate-limited the download (403).\nRepo: x · tag: y\n  • --to <tag>");
+  assert.match(text({ error: rateLimited }), /Could not compare: GitHub rate-limited the download \(403\)\.\n.*GIGET_AUTH.*--template-dir/);
+  assert.doesNotMatch(text({ error: rateLimited }), /--to/, "add takes no --to");
+  assert.match(text({ error: null }), /the starter didn't ship these files/);
+  assert.doesNotMatch(text(null), /\binit\b/);
+  assert.deepEqual(keptLines(none, "badge", null), []);
 });
 
 test("the register hint is skipped once components.ts imports the component", () => {

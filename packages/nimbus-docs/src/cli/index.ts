@@ -10,7 +10,7 @@
  *   nimbus-docs list --type ui|lib|feature
  *   nimbus-docs add                    → list
  *   nimbus-docs add <slug...>          → install (component path or feature path)
- *   nimbus-docs add <slug...> --yes    → component: skip overwrite prompts
+ *   nimbus-docs add <slug...> --yes    → component: no prompts, keeps differing files
  *   nimbus-docs add <feature> --print  → print an agent-handoff recipe
  *
  * Feature behavior: print markdown to stdout iff `--print` OR an agent is
@@ -35,7 +35,7 @@ import {
 } from "./adapter.js";
 import { BUNDLED_INDEX } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents, registerHint, starterBaseline } from "./component.js";
+import { installComponents, keptLines, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
 import { installFeature, shouldUseAgentHandoff } from "./feature.js";
 import { initCommand } from "./init.js";
@@ -124,7 +124,7 @@ const HELP = `
 
   Flags:
     --yes, -y                      Assume yes for prompts; with --overwrite, replaces edited files too
-    --overwrite                    \`add\`: replace files you haven't edited; for edited ones, asks in a terminal and stops otherwise
+    --overwrite                    \`add\`: replace files you haven't edited; asks about edited ones in a terminal, else keeps them and exits 1
     --apply                        \`diff <file>\`: write the upstream change (clean files only)
     --dry-run                      \`migrate\`: plan without prompting or writing
     --diff                         \`migrate\`: print proposed edits without prompting or writing
@@ -149,11 +149,11 @@ const HELP = `
     --version, -v
 
   Environment:
-    GIGET_AUTH=<token>             \`outdated\`/\`diff\`: GitHub token for the template lookup (anonymous: 60 requests/hour)
+    GIGET_AUTH=<token>             \`outdated\`/\`diff\`/\`add --overwrite\`: GitHub token for the template lookup (anonymous: 60 requests/hour)
 
   Examples (run with your package manager — see Usage above):
     nimbus-docs add dialog                              # component: resolve + install
-    nimbus-docs add card --overwrite                    # re-install over your copy (review with git)
+    nimbus-docs add card --overwrite                    # update card; keeps your edits unless you say so
     nimbus-docs check                                   # build-free preflight (env + structure + authoring + types + migrations)
     nimbus-docs check --json                            # agent-readable findings + fixes
     nimbus-docs check --fix                             # apply safe fixes, prompt for the rest
@@ -332,17 +332,13 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     for (const current of slugs) {
-      await addCommand(
-        current,
-        {
-          yes: args.yes,
-          print: args.print,
-          overwrite: args.overwrite,
-          adapter: args.adapter,
-          templateDir: args["template-dir"],
-        },
-        slugs,
-      );
+      await addCommand(current, {
+        yes: args.yes,
+        print: args.print,
+        overwrite: args.overwrite,
+        adapter: args.adapter,
+        templateDir: args["template-dir"],
+      });
     }
     return;
   }
@@ -430,7 +426,6 @@ const ADAPTER_SLUGS: Record<string, AdapterId> = Object.fromEntries(
 async function addCommand(
   slug: string,
   flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
-  requested: readonly string[] = [slug],
 ): Promise<void> {
   if (slug === "server-output") {
     const adapterId = parseAdapterFlag(flags.adapter);
@@ -512,7 +507,8 @@ async function addCommand(
   if (skew) p.log.warn(skew);
 
   const starter = starterBaseline(nimbus, srcRoot, flags.templateDir);
-  process.once("exit", () => starter?.cleanup());
+  const cleanup = () => starter?.cleanup();
+  process.once("exit", cleanup);
   const report = await installComponents(items, {
     cwd,
     yes: flags.yes,
@@ -521,7 +517,8 @@ async function addCommand(
     recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
     starter,
   });
-  starter?.cleanup();
+  cleanup();
+  process.off("exit", cleanup);
 
   const lines: string[] = [];
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -535,43 +532,15 @@ async function addCommand(
     const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
     lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  // Kept under `--overwrite`: the same block whether nobody could be asked or
-  // the user answered no. It leads with what is safe, then the narrowest way
-  // to replace, then the widest; agents read these lines too.
-  for (const [group, why] of [
-    [report.keptUnasked, "no terminal to ask"],
-    [report.keptDeclined, "you answered no"],
-  ] as const) {
-    if (group.length === 0) continue;
-    const edited = group.filter((k) => k.reason === "edited");
-    const unknown = group.filter((k) => k.reason === "unknown");
-    const width = Math.max(...group.flatMap((k) => k.files.map((f) => f.length)));
-    const rows = (list: typeof group) =>
-      list.flatMap((k) => k.files.map((f) => `    ${f.padEnd(width)}   ${k.slug}`));
-    if (edited.length > 0) {
-      const n = edited.reduce((sum, k) => sum + k.files.length, 0);
-      lines.push(`↷ Kept ${plural(n, "file")} with local edits (${why}):`, ...rows(edited));
-    }
-    if (unknown.length > 0) {
-      const n = unknown.reduce((sum, k) => sum + k.files.length, 0);
-      lines.push(
-        `↷ Kept ${plural(n, "file")} that may have local edits (could not compare: no install record, or the starter release couldn't be fetched; run ${invocation("init")}, or pass --template-dir <path>):`,
-        ...rows(unknown),
-      );
-    }
-    lines.push(
-      `  Your edits are untouched. To review upstream: ${invocation("diff <file>")}`,
-      `  To replace one component and its dependencies, discarding its edits:`,
-      ...group.map((k) => `    ${invocation(`add ${k.slug} --overwrite --yes`)}`),
-      `  To replace everything above, including dependencies: ${invocation(`add ${requested.join(" ")} --overwrite --yes`)}`,
-    );
-  }
+  lines.push(...keptLines(report, slug, starter));
+  // `--overwrite` didn't finish: tell a script, without stopping the other slugs.
+  if (report.keptUnasked.length > 0) process.exitCode = 1;
   const keptPlain = report.kept.filter(
     (file) => ![...report.keptUnasked, ...report.keptDeclined].some((k) => k.files.includes(file)),
   );
   if (keptPlain.length > 0) {
     lines.push(
-      `↷ Kept ${plural(keptPlain.length, "file")} that ${keptPlain.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
+      `↷ Kept ${plural(keptPlain.length, "file")} that ${keptPlain.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace; it checks for your edits first):`,
       ...keptPlain.map((file) => `    ${file}`),
     );
   }

@@ -815,8 +815,8 @@
       "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts and src/pages/og.png.ts.",
       "instructions": [
         "No action is needed when you build from the site's folder.",
-        "Run nimbus-docs outdated, then nimbus-docs diff <file> --apply for src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts when they are unmodified.",
-        "If you've edited them, add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to both routes' image options, importing publicDir and root from astro:config/server, and drop fonts from the config."
+        "Run nimbus-docs outdated. When src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts are all unmodified, apply all three with nimbus-docs diff <file> --apply; applying the config alone drops the font.",
+        "If you've edited any of them, add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to both routes' image options, importing publicDir and root from astro:config/server, then drop fonts from the config."
       ],
       "verify": [
         "From the parent folder, run astro build --root <site>; the build writes the OG cards."

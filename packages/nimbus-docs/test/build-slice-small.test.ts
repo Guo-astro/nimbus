@@ -443,20 +443,30 @@ test("a slice writes its site-wide files under its prefix, and the root slice kn
   const sitemapUrls = async (file: string) =>
     [...(await site.read(file)).matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!);
   try {
+    await site.write("public/.well-known/security.txt", "Contact: mailto:security@example.test\n");
     // A slice without the root collection: nothing at the output root but
-    // the scoped `_headers` and the 404 page, which Workers reads there.
+    // the scoped `_headers`, the 404 page, which Workers reads there, and
+    // the site's own public files.
     const es = await withPagefind(() =>
       captureOutput(() => withBuildOnly("docs-es", () => build(site.config))),
     );
-    if (!es) return t.skip("pagefind is not installed in the workspace");
+    if (!es) {
+      // The starter's devDependency; a CI checkout without it is broken.
+      assert.ok(!process.env.CI, "pagefind is not installed in the workspace");
+      return t.skip("pagefind is not installed in the workspace");
+    }
+    // The site's own `public/.well-known/` file stays; Nimbus's discovery
+    // files go by name.
     assert.deepEqual((await readdir(path.join(site.root, "dist"))).sort(), [
+      ".well-known",
       "404.html",
       "_headers",
       "docs-es",
     ]);
+    assert.deepEqual(await readdir(path.join(site.root, "dist/.well-known")), ["security.txt"]);
     assert.match(
       es.output,
-      /partial build without the root collection: dropped \/, \/robots\.txt, \/og\.png, \/nimbus-api\/coordinates\.json, \/llms\.txt, \/llms-full\.txt, \/\.well-known from the output; the root slice serves them\./,
+      /partial build without the root collection: dropped \/, \/robots\.txt, \/og\.png, \/nimbus-api\/coordinates\.json, \/llms\.txt, \/llms-full\.txt, \/\.well-known\/ard\.json, \/\.well-known\/ai-catalog\.json, \/\.well-known\/api-catalog from the output; the root slice serves them\./,
     );
     const esFiles = await filePaths(site);
     for (const file of [

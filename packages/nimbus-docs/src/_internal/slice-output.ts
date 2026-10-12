@@ -11,11 +11,18 @@ import path from "node:path";
 
 import { STARTER_ROOT_ROUTES } from "./build-slice.js";
 
-/** Root files Nimbus writes for the whole site; a non-root slice has no use for them. */
-export const NIMBUS_ROOT_FILES: readonly string[] = ["/llms.txt", "/llms-full.txt", "/index.md"];
-
-/** Root directories of the same kind. */
-export const NIMBUS_ROOT_DIRS: readonly string[] = ["/.well-known"];
+/**
+ * Root files Nimbus writes for the whole site; a non-root slice has no use
+ * for them. Named one by one: a site's own `public/.well-known/` files stay.
+ */
+export const NIMBUS_ROOT_FILES: readonly string[] = [
+  "/llms.txt",
+  "/llms-full.txt",
+  "/index.md",
+  "/.well-known/ard.json",
+  "/.well-known/ai-catalog.json",
+  "/.well-known/api-catalog",
+];
 
 /** Every route key a non-root slice leaves out of its output and sitemap. */
 export function droppedRootRoutes(): string[] {
@@ -44,12 +51,6 @@ export function removeRootArtifacts(distDir: string): string[] {
       fs.rmdirSync(dir);
       dir = path.dirname(dir);
     }
-  }
-  for (const route of NIMBUS_ROOT_DIRS) {
-    const dir = path.join(distDir, ...route.split("/").filter(Boolean));
-    if (!fs.existsSync(dir)) continue;
-    fs.rmSync(dir, { recursive: true, force: true });
-    removed.push(route);
   }
   // The request-route inventory leaves its directory behind once read.
   const nimbusDir = path.join(distDir, "_nimbus");

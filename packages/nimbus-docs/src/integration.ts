@@ -2970,8 +2970,6 @@ export function nimbus(
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
             "  export const emptyCollections: readonly string[];",
-            "  /** The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice without the root collection keeps its site-wide files under `prefix`. */",
-            "  export const buildSlice: { collections: readonly string[]; prefix: string; search: { bundle: string; merge: readonly string[] } } | null;",
             "  /** The Pagefind bundle to load, site-root-relative, and the other slices' bundles to merge into it (none in a whole-site build). */",
             "  export const searchIndex: { bundle: string; merge: readonly string[] };",
             "  /** Collections whose canonical routes render on request. Build-only. */",

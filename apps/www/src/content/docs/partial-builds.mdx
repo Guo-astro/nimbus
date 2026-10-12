@@ -49,7 +49,7 @@ Any other slice writes its site-wide files under its prefix, where its own Worke
 
 A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, so the slice's Worker takes that route too (below).
 
-The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
+The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. An absent collection is named by its formatted name (`Docs Es` for `docs-es`; an API collection by its configured label), not by its index page's title, which that build doesn't read. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
 
 ## Deploy each slice as a Worker
 
@@ -92,7 +92,7 @@ NIMBUS_BUILD_ONLY=docs,api pnpm build && npx wrangler deploy
 NIMBUS_BUILD_ONLY=docs-es pnpm build && npx wrangler deploy --config wrangler.docs-es.jsonc
 ```
 
-A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current.
+A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and are served by the root slice through the zone, so a change there deploys the root slice.
 
 ### Announce every sitemap
 
@@ -133,10 +133,11 @@ In CI, cache `.nimbus/routes.json` from the whole-site build of the base branch 
 A script maps changed paths to slices, and a workflow builds each one. Keep the map of slices in one place:
 
 ```js title="scripts/pick-slice.mjs"
-// Reads changed paths on stdin (git diff --name-only) and prints the slices
-// to build as JSON. A path outside a collection's content folder (a
-// component, the config, a partial, an API spec) touches every slice;
-// `--all` picks every slice.
+// Reads changed paths on stdin (git diff --name-only --no-renames, so a
+// page moved between collections names both) and prints the slices to
+// build as JSON. A path outside a collection's content folder (a component,
+// the config, a partial, an API spec, public/) touches every slice; `--all`
+// picks every slice.
 import { readFileSync } from "node:fs";
 
 const SLICES = [
@@ -180,7 +181,7 @@ jobs:
       - id: pick
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --name-only "origin/${{ github.base_ref }}...HEAD" | node scripts/pick-slice.mjs
+            git diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD" | node scripts/pick-slice.mjs
           else
             node scripts/pick-slice.mjs --all
           fi | sed 's/^/slices=/' >> "$GITHUB_OUTPUT"

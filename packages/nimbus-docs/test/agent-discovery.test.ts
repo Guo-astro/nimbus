@@ -675,7 +675,7 @@ test("an owner line that normalizes to a generated path is the same rule, and ex
   assert.match(replaced, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json/m, "the surviving rule sets no Content-Type, so the generated one stays");
 });
 
-test("a remote MCP server is one catalog entry pointing at its card, plus a typed, CORS-enabled header rule", () => {
+test("a remote MCP server is one catalog entry pointing at its card, which serves its own headers", () => {
   const capabilities = createAgentCapabilities({
     llmsUrl: minimal.llmsUrl,
     homepageMarkdownUrl: minimal.homepageMarkdownUrl,
@@ -695,11 +695,6 @@ test("a remote MCP server is one catalog entry pointing at its card, plus a type
       "List the pages of the Example documentation",
     ],
   });
-  const generated = agentDiscoveryHeaderRules(capabilities, options);
-  assert.match(
-    generated,
-    /^\/docs\/mcp\/server-card\n  Content-Type: application\/mcp-server-card\+json\n  Access-Control-Allow-Origin: \*\n  Access-Control-Allow-Methods: GET\n  Access-Control-Expose-Headers: ETag$/m,
-  );
-  assert.doesNotMatch(agentDiscoveryHeaderRules(minimal, options), /server-card/);
+  assert.doesNotMatch(agentDiscoveryHeaderRules(capabilities, options), /server-card/);
   assert.doesNotMatch(JSON.stringify(agentDiscoveryManifest(minimal, options)), /mcp/);
 });

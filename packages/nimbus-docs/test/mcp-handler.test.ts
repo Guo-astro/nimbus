@@ -9,13 +9,14 @@ import {
   MCP_MAX_DRAIN_BYTES,
   MCP_MAX_REQUEST_BODY_BYTES,
   MCP_PAGE_CONTENT_LIMIT,
+  cachedPerOrigin,
   createDocsMcpHandler,
   originIsWellFormed,
   resolvePageRecord,
 } from "../src/_internal/mcp/handler.js";
-import { mcpServerIdentity } from "../src/_internal/mcp/identity.js";
+import { mcpServerIdentity, mcpUrl } from "../src/_internal/mcp/identity.js";
 import type { McpPageIndex, McpPageRecord } from "../src/_internal/mcp/page-index.js";
-import { INITIALIZE_PARAMS, readRpcResponse, rpcRequest, toolText } from "./fixtures/mcp/rpc.js";
+import { INITIALIZE_PARAMS, MODERN_META, readRpcResponse, rpcRequest, toolText } from "./fixtures/mcp/rpc.js";
 
 const SITE = "https://docs.example.com";
 
@@ -31,11 +32,8 @@ function record(
     title,
     url: `${SITE}${prefix}${path}`,
     markdownUrl: `${SITE}${prefix}${markdownPath}`,
-    path,
     markdownPath,
-    collection: "docs",
     section: path.split("/").filter(Boolean)[0] ?? "index",
-    discoverable: true,
     searchable: true,
     ...rest,
   };
@@ -43,27 +41,30 @@ function record(
 
 const INDEX: McpPageIndex = {
   version: 1,
-  currentVersion: "v2",
   versions: ["v2", "v1"],
   pages: [
     record("/", { version: "v2" }),
     record("/guide/", { version: "v2", description: "Start here" }),
     record("/guide/install/", { version: "v2" }),
-    record("/internal/", { version: "v2", discoverable: false, searchable: false }),
-    record("/findable/", { version: "v2", discoverable: false, searchable: true }),
-    record("/v1/guide/", { version: "v1", deprecated: true, collection: "docs-v1", section: "v1" }),
-    record("/blog/hello/", { collection: "blog", section: "blog" }),
-    record("/api/pets/", { collection: "api", section: "api" }),
+    record("/internal/", { version: "v2", searchable: false }),
+    record("/findable/", { version: "v2", searchable: true }),
+    record("/v1/guide/", { version: "v1", deprecated: true, section: "v1" }),
+    record("/blog/hello/", { section: "blog" }),
+    record("/api/pets/", { section: "api" }),
   ],
 };
 
+function identity(base = "/") {
+  return mcpServerIdentity({ site: SITE, base, title: "Example", version: "0.19.0", endpointUrl: mcpUrl(SITE, base) });
+}
+
 function handlerFor(index: McpPageIndex, base = "/", pages: Record<string, string> = {}) {
   return createDocsMcpHandler({
-    identity: mcpServerIdentity({ site: SITE, base, title: "Example", version: "0.19.0" }),
+    identity: identity(base),
     base,
     source: {
       readIndex: async () => index,
-      readPage: async (page) => pages[page.path] ?? `# ${page.title}\n\nBody of ${page.path}.\n`,
+      readPage: async (page) => pages[page.markdownPath] ?? `# ${page.title}\n\nBody of ${page.markdownPath}.\n`,
     },
   });
 }
@@ -120,12 +121,20 @@ test("a body past the drain cap is cancelled: at once when declared, at the cap 
   assert.ok(streamed.state.read <= MCP_MAX_DRAIN_BYTES / (64 * 1024) + 2, `read ${streamed.state.read} chunks`);
 });
 
-test("OPTIONS is answered with CORS; GET and DELETE are 405 with Allow; a bad Origin is 403", async () => {
+test("OPTIONS allows the requested headers; GET and DELETE are 405 with Allow; a bad Origin is 403", async () => {
   const handler = handlerFor(INDEX);
-  const preflight = await handler.fetch(new Request(URL_, { method: "OPTIONS" }));
+  const requested = "content-type, mcp-method, mcp-name, mcp-protocol-version";
+  const preflight = await handler.fetch(
+    new Request(URL_, {
+      method: "OPTIONS",
+      headers: { Origin: "https://app.example.com", "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": requested },
+    }),
+  );
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get("access-control-allow-origin"), "*");
-  assert.match(preflight.headers.get("access-control-allow-headers") ?? "", /Mcp-Protocol-Version/);
+  assert.equal(preflight.headers.get("access-control-allow-headers"), requested);
+  assert.equal(preflight.headers.get("access-control-allow-methods"), "POST, OPTIONS");
+  assert.equal(preflight.headers.get("vary"), "Access-Control-Request-Headers");
   for (const method of ["GET", "DELETE", "PUT"]) {
     const response = await handler.fetch(new Request(URL_, { method }));
     assert.equal(response.status, 405, method);
@@ -149,7 +158,7 @@ test("OPTIONS is answered with CORS; GET and DELETE are 405 with Allow; a bad Or
 test("every tool call reads the index and the page with the request being served", async () => {
   const seen: string[] = [];
   const handler = createDocsMcpHandler({
-    identity: mcpServerIdentity({ site: SITE, base: "/", title: "Example", version: "0.19.0" }),
+    identity: identity(),
     base: "/",
     source: {
       readIndex: async (request) => {
@@ -169,9 +178,31 @@ test("every tool call reads the index and the page with the request being served
   assert.deepEqual(seen, ["first.test", "page@first.test", "second.test", "page@second.test"]);
 });
 
-test("a page store that cannot be read is a structured not_found, not a raw error", async () => {
+test("the index cache is per origin, so one request's Host never decides another's read, and a failed read is retried", async () => {
+  const reads: string[] = [];
+  let fail = true;
+  const read = cachedPerOrigin(async (request) => {
+    const host = new URL(request.url).host;
+    reads.push(host);
+    if (host === "flaky.test" && fail) {
+      fail = false;
+      throw new Error("unavailable");
+    }
+    return host;
+  });
+  const at = (host: string) => read(new Request(`https://${host}/mcp`));
+  assert.equal(await at("docs.example.com"), "docs.example.com");
+  assert.equal(await at("docs.example.com"), "docs.example.com");
+  assert.equal(await at("169.254.169.254"), "169.254.169.254");
+  assert.equal(await at("docs.example.com"), "docs.example.com");
+  await assert.rejects(at("flaky.test"));
+  assert.equal(await at("flaky.test"), "flaky.test");
+  assert.deepEqual(reads, ["docs.example.com", "169.254.169.254", "docs.example.com", "flaky.test", "flaky.test"]);
+});
+
+test("a page store that cannot be read is a structured unavailable error, not a raw one", async () => {
   const handler = createDocsMcpHandler({
-    identity: mcpServerIdentity({ site: SITE, base: "/", title: "Example", version: "0.19.0" }),
+    identity: identity(),
     base: "/",
     source: {
       readIndex: async () => INDEX,
@@ -182,7 +213,7 @@ test("a page store that cannot be read is a structured not_found, not a raw erro
   });
   const { value, isError } = await call(handler, "get_page", { url: "/guide/" });
   assert.equal(isError, true);
-  assert.equal((value.error as { code: string }).code, "not_found");
+  assert.equal((value.error as { code: string }).code, "unavailable");
   assert.doesNotMatch((value.error as { message: string }).message, /dist\/client|returned 404/);
 });
 
@@ -193,7 +224,6 @@ test("initialize reports the derived name, the package version, instructions and
   );
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), "*");
-  assert.match(response.headers.get("access-control-expose-headers") ?? "", /Mcp-Protocol-Version/);
   const message = await readRpcResponse(response);
   const result = message.result as {
     serverInfo: { name: string; version: string };
@@ -208,8 +238,24 @@ test("initialize reports the derived name, the package version, instructions and
     websiteUrl: "https://docs.example.com/",
     description: "Read the Example documentation: get_page and list_pages, no search.",
   });
-  assert.ok("tools" in result.capabilities);
+  assert.deepEqual(result.capabilities.tools, { listChanged: false });
   assert.match(result.instructions, /two tools and no search/);
+});
+
+test("the 2026-07-28 protocol discovers the server and calls a tool with its headers", async () => {
+  const handler = handlerFor(INDEX);
+  const modern = (method: string, params: Record<string, unknown>, name?: string) =>
+    rpcRequest(URL_, method, { ...params, _meta: MODERN_META }, 1, {
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": method,
+      ...(name ? { "Mcp-Name": name } : {}),
+    });
+  const discover = await readRpcResponse(await handler.fetch(modern("server/discover", {})));
+  assert.deepEqual((discover.result as { capabilities: { tools: unknown } }).capabilities.tools, { listChanged: false });
+  const page = await readRpcResponse(
+    await handler.fetch(modern("tools/call", { name: "get_page", arguments: { url: "/guide/" } }, "get_page")),
+  );
+  assert.equal((toolText(page) as { url: string }).url, `${SITE}/guide/`);
 });
 
 test("tools/list returns get_page and list_pages with strict input schemas and read-only annotations", async () => {
@@ -233,6 +279,12 @@ async function call(handler: ReturnType<typeof handlerFor>, name: string, args: 
   const message = await readRpcResponse(await handler.fetch(rpcRequest(URL_, "tools/call", { name, arguments: args })));
   if (message.error) return { rpcError: message.error };
   return { isError: (message.result as { isError?: boolean }).isError === true, value: toolText(message) as Record<string, unknown> };
+}
+
+async function callText(handler: ReturnType<typeof handlerFor>, name: string, args: Record<string, unknown>) {
+  const message = await readRpcResponse(await handler.fetch(rpcRequest(URL_, "tools/call", { name, arguments: args })));
+  const result = message.result as { isError?: boolean; content: Array<{ text: string }> };
+  return { rpcError: message.error, isError: result?.isError === true, text: result?.content[0]?.text ?? "" };
 }
 
 test("list_pages by default matches search: noindex out unless searchable, deprecated out, other collections in", async () => {
@@ -292,8 +344,11 @@ test("list_pages pages 200 at a time through an opaque cursor and rejects a curs
   const mismatched = await call(handler, "list_pages", { cursor, section: "p" });
   assert.equal(mismatched.isError, true);
   assert.equal((mismatched.value.error as { code: string }).code, "invalid_input");
-  const garbage = await call(handler, "list_pages", { cursor: "not-a-cursor" });
-  assert.equal(garbage.isError, true);
+  const key = cursor.split(".")[1];
+  for (const bad of ["not-a-cursor", `0x10.${key}`, `-1.${key}`, `1e2.${key}`]) {
+    const garbage = await call(handler, "list_pages", { cursor: bad });
+    assert.equal(garbage.isError, true, bad);
+  }
 });
 
 test("get_page accepts an absolute URL, a site path, a .md path, a query and a fragment, and reports not_found", async () => {
@@ -308,6 +363,9 @@ test("get_page accepts an absolute URL, a site path, a .md path, a query and a f
     `${SITE}/guide/#install`,
     `${SITE}/guide/?version=v1`,
     "https://preview.example.workers.dev/guide/",
+    "./guide/",
+    "guide/../guide/",
+    "guide?tab=1",
   ]) {
     const { value, isError } = await call(handler, "get_page", { url });
     assert.equal(isError, false, url);
@@ -316,7 +374,7 @@ test("get_page accepts an absolute URL, a site path, a .md path, a query and a f
       { title: "guide", url: `${SITE}/guide/`, markdownUrl: `${SITE}/guide/index.md` },
       url,
     );
-    assert.equal(value.content, "# guide\n\nBody of /guide/.\n");
+    assert.equal(value.content, "# guide\n\nBody of /guide/index.md.\n");
     assert.equal("truncated" in value, false);
   }
   const home = await call(handler, "get_page", { url: "/" });
@@ -334,19 +392,19 @@ test("get_page strips a configured base from URLs and paths", () => {
   const base = "/docs/";
   const index: McpPageIndex = { version: 1, versions: [], pages: [record("/guide/", { base })] };
   for (const url of [`${SITE}/docs/guide/`, "/docs/guide/", "/guide/", "/docs/guide/index.md"]) {
-    assert.equal(resolvePageRecord(url, index, base)?.path, "/guide/", url);
+    assert.equal(resolvePageRecord(url, index, base)?.markdownPath, "/guide/index.md", url);
   }
 });
 
 test("get_page cuts long pages near the limit and says so", async () => {
   const long = "é".repeat(MCP_PAGE_CONTENT_LIMIT + 10);
-  const handler = handlerFor(INDEX, "/", { "/guide/": long });
+  const handler = handlerFor(INDEX, "/", { "/guide/index.md": long });
   const { value } = await call(handler, "get_page", { url: "/guide/" });
   assert.equal(value.truncated, true);
   assert.equal([...(value.content as string)].length, MCP_PAGE_CONTENT_LIMIT);
 });
 
-test("schema-invalid arguments are the structured invalid_input error, and a body over 64 KB is 413", async () => {
+test("schema-invalid arguments are the SDK's tool error, and a body over 64 KB is 413", async () => {
   const handler = handlerFor(INDEX);
   for (const [name, args, detail] of [
     ["get_page", { url: "/guide/", extra: true }, /extra/],
@@ -355,11 +413,11 @@ test("schema-invalid arguments are the structured invalid_input error, and a bod
     ["list_pages", { version: "" }, /version/],
     ["list_pages", { limit: 5 }, /limit/],
   ] as const) {
-    const { value, isError, rpcError } = await call(handler, name, args);
+    const { text, isError, rpcError } = await callText(handler, name, args);
     assert.equal(rpcError, undefined);
     assert.equal(isError, true, JSON.stringify(args));
-    assert.equal((value.error as { code: string }).code, "invalid_input");
-    assert.match((value.error as { message: string }).message, detail);
+    assert.match(text, /^Input validation error: Invalid arguments for tool /);
+    assert.match(text, detail);
   }
   const big = new Request(URL_, {
     method: "POST",

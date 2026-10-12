@@ -1,9 +1,8 @@
 import type { APIRoute } from "astro";
-import { capabilities, options } from "virtual:nimbus/agent-capabilities";
+import { options } from "virtual:nimbus/agent-capabilities";
 import { markdownAssets, pageIndex } from "virtual:nimbus/agent-endpoint-assets";
 import { readStagedAsset } from "../staged-asset-reader.js";
-import { createDocsMcpHandler, type DocsMcpHandler } from "./handler.js";
-import { mcpServerIdentity } from "./identity.js";
+import { cachedPerOrigin, createDocsMcpHandler, type DocsMcpHandler } from "./handler.js";
 import type { McpPageIndex } from "./page-index.js";
 
 export const prerender = false;
@@ -14,29 +13,16 @@ const markdownByPath = new Map(
     .filter((asset) => asset.surface === "markdown")
     .map((asset) => [asset.url, asset] as const),
 );
-let index: Promise<McpPageIndex> | undefined;
 let handler: DocsMcpHandler | undefined;
 
-function docsMcpHandler(): DocsMcpHandler {
+export const ALL: APIRoute = ({ request }) => {
   handler ??= createDocsMcpHandler({
-    identity: mcpServerIdentity({
-      site: options.site,
-      base: options.base,
-      title: options.title,
-      version: options.nimbusVersion ?? "0.0.0",
-      endpointUrl: capabilities.mcpUrl,
-    }),
+    identity: options.mcp!,
     base: options.base,
     source: {
-      readIndex(request) {
-        index ??= readStagedAsset(`${ASSET_PREFIX}${pageIndex.path}`, { request })
-          .then((body) => JSON.parse(body) as McpPageIndex)
-          .catch((error: unknown) => {
-            index = undefined;
-            throw error;
-          });
-        return index;
-      },
+      readIndex: cachedPerOrigin(async (request) =>
+        JSON.parse(await readStagedAsset(`${ASSET_PREFIX}${pageIndex!.path}`, { request })) as McpPageIndex,
+      ),
       async readPage(record, request) {
         const asset = markdownByPath.get(record.markdownPath);
         if (!asset) return null;
@@ -45,10 +31,5 @@ function docsMcpHandler(): DocsMcpHandler {
       },
     },
   });
-  return handler;
-}
-
-export const ALL: APIRoute = ({ request }) => {
-  if (!capabilities.mcpUrl) return new Response("Not found", { status: 404 });
-  return docsMcpHandler().fetch(request);
+  return handler.fetch(request);
 };

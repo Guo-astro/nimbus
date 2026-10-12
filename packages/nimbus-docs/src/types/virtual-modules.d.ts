@@ -64,7 +64,8 @@ declare module "virtual:nimbus/agent-endpoint-assets" {
   export const base: string;
   export const markdownAssets: import("../_internal/agent-endpoint-assets.js").MarkdownEndpointAsset[];
   export const llmsAssets: import("../_internal/agent-endpoint-assets.js").LlmsEndpointAsset[];
-  export const pageIndex: import("../_internal/agent-endpoint-assets.js").PageIndexAsset;
+  /** `null` unless `agents.mcp` is on. */
+  export const pageIndex: import("../_internal/agent-endpoint-assets.js").PageIndexAsset | null;
 }
 
 declare module "virtual:nimbus/markdown-routes" {

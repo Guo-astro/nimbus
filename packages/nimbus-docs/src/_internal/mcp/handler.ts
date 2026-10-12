@@ -3,14 +3,7 @@
  * handler with two read tools over the page index and the Markdown twins.
  * One module wraps the SDK so a swap stays away from the route and tests.
  */
-import {
-  McpServer,
-  createMcpHandler,
-  fromJsonSchema,
-  type McpHttpHandler,
-  type StandardSchemaWithJSON,
-  type jsonSchemaValidator,
-} from "@modelcontextprotocol/server";
+import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotocol/server";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import type { McpServerIdentity } from "./identity.js";
 import type { McpPageIndex, McpPageRecord } from "./page-index.js";
@@ -25,7 +18,7 @@ export const MCP_LIST_PAGE_SIZE = 200;
 /** `get_page` content is cut near this many code points, with `truncated: true`. */
 export const MCP_PAGE_CONTENT_LIMIT = 100_000;
 
-export type McpToolErrorCode = "invalid_input" | "not_found";
+export type McpToolErrorCode = "invalid_input" | "not_found" | "unavailable";
 export interface McpToolError {
   error: { code: McpToolErrorCode; message: string };
 }
@@ -68,21 +61,14 @@ export interface DocsMcpHandler {
   fetch(request: Request): Promise<Response>;
 }
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "Content-Type, Accept, Authorization, Mcp-Protocol-Version, Mcp-Session-Id",
-  "Access-Control-Expose-Headers": "Mcp-Protocol-Version, Mcp-Session-Id",
-  "Access-Control-Max-Age": "86400",
-} as const;
+const CORS_HEADERS = { "Access-Control-Allow-Origin": "*" } as const;
 
 export const GET_PAGE_TOOL = {
   name: "get_page",
   title: "Get a documentation page",
   description:
     "Return one documentation page as Markdown. Pass the page's URL as list_pages returns it (an absolute URL), " +
-    "or a site-relative path such as /guide/. Long pages are cut near 100,000 characters with truncated: true; " +
+    `or a site-relative path such as /guide/. Long pages are cut near ${MCP_PAGE_CONTENT_LIMIT.toLocaleString("en-US")} characters with truncated: true; ` +
     "the markdownUrl serves the whole page.",
   inputSchema: {
     type: "object",
@@ -100,7 +86,7 @@ export const LIST_PAGES_TOOL = {
   description:
     "List published documentation pages: title, URL, Markdown URL, description, section and version. " +
     "By default the list matches site search: pages marked noindex and deprecated versions are left out. " +
-    "Filter by section (a top-level path segment) or by one version; pass nextCursor back as cursor for the next 200.",
+    `Filter by section (a top-level path segment) or by one version; pass nextCursor back as cursor for the next ${MCP_LIST_PAGE_SIZE}.`,
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -111,6 +97,31 @@ export const LIST_PAGES_TOOL = {
     },
   },
 } as const;
+
+interface ListPagesInput {
+  section?: string;
+  version?: string;
+  cursor?: string;
+}
+
+/**
+ * Caches the read for the most recent origin only. Where the asset reader
+ * falls back to fetching the site's own URL, a request's Host must not
+ * decide what requests from another origin read.
+ */
+export function cachedPerOrigin<T>(read: (request: Request) => Promise<T>): (request: Request) => Promise<T> {
+  let cached: { origin: string; value: Promise<T> } | undefined;
+  return (request) => {
+    const origin = new URL(request.url).origin;
+    if (cached?.origin === origin) return cached.value;
+    const value = read(request).catch((error: unknown) => {
+      if (cached?.value === value) cached = undefined;
+      throw error;
+    });
+    cached = { origin, value };
+    return value;
+  };
+}
 
 export function toolError(code: McpToolErrorCode, message: string): McpToolError {
   return { error: { code, message } };
@@ -128,29 +139,17 @@ export function resolvePageRecord(
 ): McpPageRecord | undefined {
   let pathname: string;
   try {
-    pathname = /^https?:\/\//i.test(url)
-      ? new URL(url).pathname
-      : new URL(url, "https://nimbus.invalid/").pathname;
+    const rooted = /^https?:\/\//i.test(url) || url.startsWith("/");
+    pathname = new URL(rooted ? url : `/${url}`, "https://nimbus.invalid/").pathname;
   } catch {
     return undefined;
   }
-  if (!url.startsWith("/") && !/^https?:\/\//i.test(url)) {
-    pathname = `/${url.split(/[?#]/)[0]}`;
-  }
-  const sitePath = stripBase(pathname, base);
-  const markdownPath = /\.md$/i.test(sitePath)
-    ? toRouteKey(sitePath)
-    : (() => {
-        const route = toRouteKey(sitePath);
-        return route === "/" ? "/index.md" : `${route}/index.md`;
-      })();
+  const route = toRouteKey(stripBase(pathname, base));
+  const markdownPath = /\.md$/i.test(route) ? route : route === "/" ? "/index.md" : `${route}/index.md`;
   return index.pages.find((page) => page.markdownPath === markdownPath);
 }
 
-function listFilter(
-  index: McpPageIndex,
-  input: { section?: string; version?: string },
-): McpPageRecord[] {
+function listFilter(index: McpPageIndex, input: ListPagesInput): McpPageRecord[] {
   return index.pages.filter(
     (page) =>
       page.searchable &&
@@ -159,32 +158,21 @@ function listFilter(
   );
 }
 
-function encodeCursor(offset: number, key: string): string {
-  const bytes = new TextEncoder().encode(`${offset}:${key}`);
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function decodeCursor(cursor: string, key: string): number | undefined {
-  let decoded: string;
-  try {
-    const binary = atob(cursor.replace(/-/g, "+").replace(/_/g, "/"));
-    decoded = new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)));
-  } catch {
-    return undefined;
+/** An FNV-1a hash of the filters, so a cursor is only accepted with the filters it came from. */
+function filterKey(input: ListPagesInput): string {
+  let hash = 0x811c9dc5;
+  for (const char of `${input.section ?? ""}\u0000${input.version ?? ""}`) {
+    hash = Math.imul(hash ^ char.codePointAt(0)!, 0x01000193) >>> 0;
   }
-  const separator = decoded.indexOf(":");
-  if (separator === -1 || decoded.slice(separator + 1) !== key) return undefined;
-  const offset = Number(decoded.slice(0, separator));
-  return Number.isInteger(offset) && offset >= 0 ? offset : undefined;
+  return hash.toString(36);
 }
 
-export function listPages(
-  input: { section?: string; version?: string; cursor?: string },
-  index: McpPageIndex,
-): ListPagesResult | McpToolError {
+function decodeCursor(cursor: string, input: ListPagesInput): number | undefined {
+  const match = /^(\d+)\.([0-9a-z]+)$/.exec(cursor);
+  return match && match[2] === filterKey(input) ? Number(match[1]) : undefined;
+}
+
+export function listPages(input: ListPagesInput, index: McpPageIndex): ListPagesResult | McpToolError {
   if (input.version !== undefined && !index.versions.includes(input.version)) {
     return toolError(
       "invalid_input",
@@ -193,18 +181,17 @@ export function listPages(
         : "This site has no versions; call list_pages without a version.",
     );
   }
-  const matches = listFilter(index, input);
-  const key = `${input.section ?? ""}\u0000${input.version ?? ""}`;
-  const offset = input.cursor === undefined ? 0 : decodeCursor(input.cursor, key);
+  const offset = input.cursor === undefined ? 0 : decodeCursor(input.cursor, input);
   if (offset === undefined) {
     return toolError(
       "invalid_input",
       "The cursor is not one list_pages returned for these filters. Start again without a cursor.",
     );
   }
-  const slice = matches.slice(offset, offset + MCP_LIST_PAGE_SIZE);
+  const matches = listFilter(index, input);
+  const next = offset + MCP_LIST_PAGE_SIZE;
   return {
-    pages: slice.map((page) => ({
+    pages: matches.slice(offset, next).map((page) => ({
       title: page.title,
       url: page.url,
       markdownUrl: page.markdownUrl,
@@ -212,9 +199,7 @@ export function listPages(
       section: page.section,
       ...(page.version ? { version: page.version } : {}),
     })),
-    ...(offset + MCP_LIST_PAGE_SIZE < matches.length
-      ? { nextCursor: encodeCursor(offset + MCP_LIST_PAGE_SIZE, key) }
-      : {}),
+    ...(next < matches.length ? { nextCursor: `${next}.${filterKey(input)}` } : {}),
   };
 }
 
@@ -247,35 +232,19 @@ export function originIsWellFormed(origin: string | null): boolean {
   return `${parsed.protocol}//${parsed.host}`.toLowerCase() === origin.toLowerCase();
 }
 
-/**
- * The tool's input schema for `tools/list`, with the SDK's own check
- * disabled: the tool validates in its callback, so a mismatch comes back
- * as the structured `invalid_input` error every other failure uses.
- */
-function describedSchema<T>(
-  schema: Record<string, unknown>,
-  validator: jsonSchemaValidator,
-): StandardSchemaWithJSON<T, T> {
-  const described = fromJsonSchema<T>(schema, validator);
-  return {
-    "~standard": {
-      ...described["~standard"],
-      validate: (value: unknown) => ({ value: value as T }),
+/** The preflight allows the headers the client asks for, as the SDK's own metadata routes do. */
+function preflight(request: Request): Response {
+  const requested = request.headers.get("access-control-request-headers");
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...CORS_HEADERS,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      ...(requested ? { "Access-Control-Allow-Headers": requested } : {}),
+      "Access-Control-Max-Age": "86400",
+      Vary: "Access-Control-Request-Headers",
     },
-  };
-}
-
-function invalidArguments(
-  validator: jsonSchemaValidator,
-  schema: Record<string, unknown>,
-): (args: unknown) => McpToolError | undefined {
-  const check = validator.getValidator(schema);
-  return (args) => {
-    const result = check(args);
-    return result.valid
-      ? undefined
-      : toolError("invalid_input", result.errorMessage.replace(/^#:?\s*/u, ""));
-  };
+  });
 }
 
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {
@@ -318,112 +287,83 @@ async function readBody(request: Request): Promise<Blob | null> {
   return size > MCP_MAX_REQUEST_BODY_BYTES ? null : new Blob(chunks);
 }
 
+function unavailable(error: unknown) {
+  console.error(error);
+  return toolResult(
+    toolError("unavailable", "The page data could not be read; the site's published files may not be deployed. Try again later."),
+    true,
+  );
+}
+
 export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHandler {
   const { identity, base, source } = options;
   const validator = new CfWorkerJsonSchemaValidator();
-  const checkGetPage = invalidArguments(validator, GET_PAGE_TOOL.inputSchema);
-  const checkListPages = invalidArguments(validator, LIST_PAGES_TOOL.inputSchema);
-  const getPageSchema = describedSchema<{ url: string }>(GET_PAGE_TOOL.inputSchema, validator);
-  const listPagesSchema = describedSchema<{ section?: string; version?: string; cursor?: string }>(
-    LIST_PAGES_TOOL.inputSchema,
-    validator,
-  );
-  // The SDK hands the served request to the factory; the fallback is the
-  // request `fetch` is serving, for a runtime that leaves it out.
-  let serving: Request | undefined;
-  const unavailable = (error: unknown) => {
-    console.error(error);
-    return toolResult(
-      toolError("not_found", "The page data could not be read; the site's published files may not be deployed. Try again later."),
-      true,
-    );
-  };
-  let sdk: McpHttpHandler | undefined;
-  const handler = (): McpHttpHandler => {
-    sdk ??= createMcpHandler(
-      ({ requestInfo }) => {
-        const request = requestInfo ?? serving ?? new Request("https://nimbus.invalid/mcp");
-        const server = new McpServer(
-          {
-            name: identity.name,
-            version: identity.version,
-            title: identity.title,
-            websiteUrl: identity.websiteUrl,
-            description: identity.description,
-          },
-          { instructions: identity.instructions, jsonSchemaValidator: validator },
-        );
-        server.registerTool(
-          GET_PAGE_TOOL.name,
-          {
-            title: GET_PAGE_TOOL.title,
-            description: GET_PAGE_TOOL.description,
-            inputSchema: getPageSchema,
-            annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-          },
-          async (args) => {
-            const invalid = checkGetPage(args);
-            if (invalid) return toolResult(invalid, true);
-            let index: McpPageIndex;
-            try {
-              index = await source.readIndex(request);
-            } catch (error) {
-              return unavailable(error);
-            }
-            const record = resolvePageRecord(args.url, index, base);
-            if (!record) {
-              return toolResult(
-                toolError("not_found", `No published page at ${args.url}. list_pages names every page.`),
-                true,
-              );
-            }
-            let content: string | null;
-            try {
-              content = await source.readPage(record, request);
-            } catch (error) {
-              return unavailable(error);
-            }
-            if (content === null) {
-              return toolResult(
-                toolError("not_found", `No Markdown for ${record.url}; read ${record.markdownUrl} directly.`),
-                true,
-              );
-            }
-            return toolResult(pageResult(record, content));
-          },
-        );
-        server.registerTool(
-          LIST_PAGES_TOOL.name,
-          {
-            title: LIST_PAGES_TOOL.title,
-            description: LIST_PAGES_TOOL.description,
-            inputSchema: listPagesSchema,
-            annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-          },
-          async (args) => {
-            const invalid = checkListPages(args);
-            if (invalid) return toolResult(invalid, true);
-            let index: McpPageIndex;
-            try {
-              index = await source.readIndex(request);
-            } catch (error) {
-              return unavailable(error);
-            }
-            const result = listPages(args, index);
-            return toolResult(result, "error" in result);
-          },
-        );
-        return server;
+  const getPageSchema = fromJsonSchema<{ url: string }>(GET_PAGE_TOOL.inputSchema, validator);
+  const listPagesSchema = fromJsonSchema<ListPagesInput>(LIST_PAGES_TOOL.inputSchema, validator);
+  const annotations = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+
+  const serverFor = (request: Request): McpServer => {
+    const server = new McpServer(
+      {
+        name: identity.name,
+        version: identity.version,
+        title: identity.title,
+        websiteUrl: identity.websiteUrl,
+        description: identity.description,
       },
-      { legacy: "stateless", maxRequestBodySize: MCP_MAX_REQUEST_BODY_BYTES },
+      {
+        capabilities: { tools: { listChanged: false } },
+        instructions: identity.instructions,
+        jsonSchemaValidator: validator,
+      },
     );
-    return sdk;
+    const readIndex = () => source.readIndex(request);
+    server.registerTool(
+      GET_PAGE_TOOL.name,
+      { title: GET_PAGE_TOOL.title, description: GET_PAGE_TOOL.description, inputSchema: getPageSchema, annotations },
+      async ({ url }) => {
+        let record: McpPageRecord | undefined;
+        let content: string | null;
+        try {
+          record = resolvePageRecord(url, await readIndex(), base);
+          if (!record) {
+            return toolResult(toolError("not_found", `No published page at ${url}. list_pages names every page.`), true);
+          }
+          content = await source.readPage(record, request);
+        } catch (error) {
+          return unavailable(error);
+        }
+        if (content === null) {
+          return toolResult(toolError("not_found", `No Markdown for ${record.url}; read ${record.markdownUrl} directly.`), true);
+        }
+        return toolResult(pageResult(record, content));
+      },
+    );
+    server.registerTool(
+      LIST_PAGES_TOOL.name,
+      { title: LIST_PAGES_TOOL.title, description: LIST_PAGES_TOOL.description, inputSchema: listPagesSchema, annotations },
+      async (args) => {
+        let index: McpPageIndex;
+        try {
+          index = await readIndex();
+        } catch (error) {
+          return unavailable(error);
+        }
+        const result = listPages(args, index);
+        return toolResult(result, "error" in result);
+      },
+    );
+    return server;
   };
+
+  const sdk = createMcpHandler(({ requestInfo }) => serverFor(requestInfo!), {
+    legacy: "stateless",
+    maxRequestBodySize: MCP_MAX_REQUEST_BODY_BYTES,
+  });
+
   return {
     async fetch(request) {
-      if (request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: CORS_HEADERS });
-      }
+      if (request.method === "OPTIONS") return preflight(request);
       if (request.method !== "POST") {
         return json(
           { error: { code: "method_not_allowed", message: "POST a JSON-RPC message; this server is stateless." } },
@@ -434,7 +374,6 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
       if (!originIsWellFormed(request.headers.get("origin"))) {
         return json({ error: { code: "invalid_origin", message: "The Origin header is not a valid origin." } }, 403);
       }
-      serving = request;
       const body = await readBody(request);
       if (!body) {
         return json(
@@ -442,7 +381,7 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
           413,
         );
       }
-      const response = await handler().fetch(new Request(request, { body }));
+      const response = await sdk.fetch(new Request(request, { body }));
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

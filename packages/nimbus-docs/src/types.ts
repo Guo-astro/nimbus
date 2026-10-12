@@ -23,7 +23,7 @@ export interface AgentCapabilities {
   llmsUrl?: string;
   /** The Agent Skills discovery index, when the site publishes skills. */
   skillsIndexUrl?: string;
-  /** The remote MCP endpoint, when `agents.mcp` is on. Its card is at `<mcpUrl>/server-card`. */
+  /** The remote MCP endpoint, when `agents.mcp` is on. Its Server Card is at `server-card` under it. */
   mcpUrl?: string;
 }
 

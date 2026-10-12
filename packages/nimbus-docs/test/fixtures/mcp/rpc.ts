@@ -47,6 +47,13 @@ export const INITIALIZE_PARAMS = {
   clientInfo: { name: "nimbus-test", version: "0.0.0" },
 };
 
+/** The per-request `_meta` envelope of the 2026-07-28 protocol revision. */
+export const MODERN_META = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientCapabilities": {},
+  "io.modelcontextprotocol/clientInfo": { name: "nimbus-test", version: "0.0.0" },
+};
+
 /** The parsed `text` content of a tools/call result. */
 export function toolText(message: JsonRpcResponse): unknown {
   const content = (message.result as { content?: Array<{ type: string; text: string }> } | undefined)?.content;

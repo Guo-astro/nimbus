@@ -184,6 +184,7 @@ import {
   collectionMountPrefix,
   PRIMARY_COLLECTION,
 } from "./_internal/collection-mount.js";
+import { entryRouteUrl } from "./_internal/astro-slug.js";
 import {
   isRequiredCanonicalRouteComponent,
   normalizeRouteEntrypoint,
@@ -191,7 +192,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, toDocumentHref, toRouteKey, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
 import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
@@ -220,7 +221,13 @@ import {
 } from "./_internal/agent-endpoint-coverage.js";
 import { pagefindDocument } from "./_internal/pagefind-document.js";
 import { invocation } from "./cli/pm.js";
-import { MCP_CARD_PATH, MCP_PATH, mcpUrl as mcpEndpointUrl } from "./_internal/mcp/identity.js";
+import {
+  MCP_CARD_PATH,
+  MCP_PATH,
+  mcpServerIdentity,
+  mcpUrl as mcpEndpointUrl,
+  type McpServerIdentity,
+} from "./_internal/mcp/identity.js";
 import {
   beginPreparedMarkdownSession,
   getPreparedMarkdownSnapshot,
@@ -592,6 +599,7 @@ export function nimbus(
   let sitemapCustomPages: string[] = [];
   let sitemapExcludedPaths = new Set<string>();
   let sitemapTrailingSlash: "always" | "never" | "ignore" = "ignore";
+  let mcpServerForBuild: McpServerIdentity | undefined;
   let sitemapBareRootUrl: string | null = null;
   let sitemapHasResolvedRootPage = false;
   let building = false;
@@ -838,7 +846,7 @@ export function nimbus(
         base: astroBaseForBuild,
         output: outputModeForBuild,
         homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
-        ...(config.agents?.mcp ? { nimbusVersion: runningNimbusVersion() } : {}),
+        ...(mcpServerForBuild ? { mcp: mcpServerForBuild } : {}),
       },
       capabilities: createAgentCapabilities({
         search: config.search,
@@ -861,9 +869,7 @@ export function nimbus(
         ...(skills?.index
           ? { skillsIndexUrl: new URL(AGENT_SKILLS_INDEX_PATH, config.site).href }
           : {}),
-        ...(config.agents?.mcp
-          ? { mcpUrl: mcpEndpointUrl(config.site, astroBaseForBuild, sitemapTrailingSlash) }
-          : {}),
+        ...(mcpServerForBuild ? { mcpUrl: mcpServerForBuild.endpointUrl } : {}),
       }),
     };
   };
@@ -871,15 +877,17 @@ export function nimbus(
   /**
    * Checks that need the page-collection list, which exists only after
    * content sync: `versions.others` coverage, the rendering policy's two
-   * post-sync cases, and the `nimbus/duplicate-slug` validator. Runs in
-   * `astro:build:start` and, in dev, `astro:server:start`. Skipped when the
-   * record is empty (nothing has synced — a site with no collections).
+   * post-sync cases, the `nimbus/duplicate-slug` validator, and the paths
+   * `agents.mcp` reserves. Runs in `astro:build:start` and, in dev,
+   * `astro:server:start`. Skipped when the record is empty (nothing has
+   * synced — a site with no collections).
    */
   const runPostSyncPageChecks = async (logger: {
     warn: (message: string) => void;
     info: (message: string) => void;
   }): Promise<void> => {
-    if (!getPreparedMarkdownSnapshot(projectRootForBuild)) return;
+    const snapshot = getPreparedMarkdownSnapshot(projectRootForBuild);
+    if (!snapshot) return;
     const pageCollections = await getPageCollectionsForBuild();
     const pageSet = new Set(pageCollections);
     const versionInfo = config.versions
@@ -998,6 +1006,22 @@ export function nimbus(
       path.join(srcDirForBuild, "pages"),
       projectRootForBuild,
     ).map((route) => ({ ...route, kind: "page" as const }));
+    if (config.agents?.mcp) {
+      // Every synced entry, `.md` included, at the URL its collection mounts it.
+      const entryOwners = pageCollections.flatMap((collection) =>
+        [...(snapshot.collections.get(collection)?.entries.values() ?? [])].map((entry) => ({
+          url: entryRouteUrl(collectionMountPrefix(collection, versionInfo), entry.id),
+          source: entry.filePath ?? `${collection}:${entry.id}`,
+        })),
+      );
+      const owner = [...entryOwners, ...pageOwners].find((candidate) =>
+        [MCP_PATH, MCP_CARD_PATH].includes(toRouteKey(candidate.url)),
+      );
+      if (owner)
+        throw authorError(
+          `Nimbus serves ${toRouteKey(owner.url)} when agents.mcp is on. Move ${owner.source}, or set agents.mcp to false.`,
+        );
+    }
     const duplicateRoutes = findDuplicateRoutes([
       ...contentOwners,
       ...pageOwners,
@@ -1228,9 +1252,7 @@ export function nimbus(
               description: config.description,
               socialImage: config.socialImage,
               versions: config.versions,
-              ...(config.agents?.mcp
-                ? { mcpUrl: mcpEndpointUrl(config.site, astroConfig.base || "/", astroConfig.trailingSlash) }
-                : {}),
+              ...(mcpServerForBuild ? { mcpUrl: mcpServerForBuild.endpointUrl } : {}),
               citationIndex,
               componentMap: options.markdown?.componentMap,
               partialResolver,
@@ -1610,6 +1632,15 @@ export function nimbus(
         projectRootForBuild = projectRoot;
         srcDirForBuild = srcDir;
         astroBaseForBuild = astroConfig.base ?? "";
+        mcpServerForBuild = config.agents?.mcp
+          ? mcpServerIdentity({
+              site: config.site,
+              base: astroBaseForBuild,
+              title: config.title,
+              version: runningNimbusVersion(),
+              endpointUrl: mcpEndpointUrl(config.site, astroBaseForBuild, astroConfig.trailingSlash),
+            })
+          : undefined;
         astroRootForBuild = astroConfig.root;
         prerenderConflictBehaviorForBuild =
           astroConfig.prerenderConflictBehavior ?? "warn";
@@ -2194,37 +2225,28 @@ export function nimbus(
           });
         }
         if (config.agents?.mcp) {
-          // The server at /mcp and its card: both infrastructure, one on
-          // request, one at build. A project file at either path is a
-          // collision, never a silent override.
-          for (const [pattern, name, prerender] of [
-            [MCP_PATH, "mcp/route", false],
-            [MCP_CARD_PATH, "mcp/card-route", true],
+          // The server at /mcp and its card, both on request. A public file
+          // at either path is a collision here; pages and content entries are
+          // checked after content sync (`runPostSyncPageChecks`).
+          for (const [pattern, name] of [
+            [MCP_PATH, "mcp/route"],
+            [MCP_CARD_PATH, "mcp/card-route"],
           ] as const) {
-            const ownedPaths = [
-              path.join(publicDir, pattern),
-              ...["ts", "js", "astro"].map((ext) =>
-                path.join(srcDir, "pages", `${pattern}.${ext}`),
-              ),
-              ...["ts", "js", "astro"].map((ext) =>
-                path.join(srcDir, "pages", pattern, `index.${ext}`),
-              ),
-            ];
-            const collision = ownedPaths.find((file) => fs.existsSync(file));
-            if (collision)
+            const owned = path.join(publicDir, pattern);
+            if (fs.existsSync(owned))
               throw authorError(
-                `Nimbus serves ${pattern} when agents.mcp is on. Move ${path.relative(projectRoot, collision)}, or set agents.mcp to false.`,
+                `Nimbus serves ${pattern} when agents.mcp is on. Move ${path.relative(projectRoot, owned)}, or set agents.mcp to false.`,
               );
             const entrypoint = new URL(
               `./_internal/${name}.${extension}`,
               import.meta.url,
             );
-            injectRoute({ pattern, entrypoint, prerender });
+            injectRoute({ pattern, entrypoint, prerender: false });
             managedRoutesForBuild.push({
               pattern,
               entrypoint: normalizeRouteEntrypoint(projectRoot, entrypoint.href)!,
               owner: "infrastructure",
-              rendering: prerender ? "build" : "request",
+              rendering: "request",
             });
           }
         }
@@ -2940,20 +2962,19 @@ export function nimbus(
           buildOutput ??
           (astroConfig.output === "server" ? "server" : "static");
         adapterNameForBuild = astroConfig.adapter?.name ?? null;
-        const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
         const serverFeature = serverAdapterFeature({
           unbundledApi: pageAssetCollections.length > 0,
           requestRendering: requestRenderingConfigured,
           mcp: !!config.agents?.mcp,
         });
         if (building && serverFeature && !adapterNameForBuild) {
-          throw new Error(serverAdapterMessage(serverFeature, root));
+          throw new Error(serverAdapterMessage(serverFeature, migrationRoot));
         }
         if (config.agents?.mcp) {
           try {
-            createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server");
+            createRequire(path.join(migrationRoot, "package.json")).resolve("@modelcontextprotocol/server");
           } catch {
-            throw new Error(mcpSdkMessage(root));
+            throw new Error(mcpSdkMessage(migrationRoot));
           }
         }
         if (

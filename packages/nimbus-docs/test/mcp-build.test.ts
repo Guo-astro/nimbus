@@ -3,11 +3,11 @@
 // directory) with current, deprecated and hidden docs versions, a noindex
 // page, a noindex-but-searchable page, a blog and a query-versioned API.
 // Then the handshake, both tools, parity with llms.txt and search's rule,
-// the card, discovery, headers, and the static-build author error.
+// the card, discovery, a site without the server, and the author errors.
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { register } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -62,7 +62,15 @@ interface Site {
   app: { render(request: Request): Promise<Response> };
 }
 
-async function buildSite(options: { host: string; base?: string; adapter?: boolean }): Promise<Site> {
+interface SiteOptions {
+  host: string;
+  base?: string;
+  adapter?: boolean;
+  mcp?: boolean;
+  files?: Record<string, string>;
+}
+
+async function buildSite(options: SiteOptions): Promise<Site> {
   const root = await mkdtemp(path.join(TEST_TMP, "nimbus-mcp-"));
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
@@ -102,6 +110,7 @@ export const collections = {
   await write("src/pages/llms.txt.ts", `import { llmsRoute } from ${srcModule("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET } = llmsRoute();\n`);
   await write("src/pages/[...section]/llms.txt.ts", `import { llmsSectionRoute } from ${srcModule("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = llmsSectionRoute();\n`);
   await write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+  for (const [relative, contents] of Object.entries(options.files ?? {})) await write(relative, contents);
 
   const adapter: AstroIntegration = {
     name: "@astrojs/cloudflare",
@@ -127,7 +136,7 @@ export const collections = {
   return { root, host: options.host, base: options.base ?? "/", app };
 }
 
-async function buildIn(root: string, options: { host: string; base?: string; adapter?: boolean }, adapter: AstroIntegration) {
+async function buildIn(root: string, options: SiteOptions, adapter: AstroIntegration) {
   await build({
     root: pathToFileURL(`${root}${path.sep}`),
     cacheDir: path.join(root, ".astro"),
@@ -164,7 +173,7 @@ async function buildIn(root: string, options: { host: string; base?: string; ada
               ],
             },
           ],
-          agents: { mcp: true },
+          agents: { mcp: options.mcp ?? true },
         } as Parameters<typeof nimbus>[0],
         { admonitions: false, sitemap: true, validateMdx: false },
       ),
@@ -236,6 +245,7 @@ function suite(name: string, options: { host: string; base?: string }) {
       assert.equal(pages[3]!.version, "v2");
       assert.equal(pages[3]!.section, "guide");
       assert.equal(pages[1]!.section, "blog");
+      assert.equal(pages[5]!.version, undefined, "an API page has its API's version, not a docs version");
       const root = await readFile(dist("/llms.txt"), "utf8");
       // The root llms.txt lists leaves and section files; the union of the
       // section files' pages and the root's own page links is the current
@@ -299,9 +309,12 @@ function suite(name: string, options: { host: string; base?: string }) {
       }
     });
 
-    test("the card is written under base, validates, and is listed in discovery with a typed header rule", async () => {
-      const cardPath = dist("/mcp/server-card");
-      const card = JSON.parse(await readFile(cardPath, "utf8"));
+    test("the card is served on request under base with its own headers, validates, and is listed in discovery", async () => {
+      const response = await site.app.render(new Request(`${endpoint}/server-card`));
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "application/mcp-server-card+json");
+      assert.equal(response.headers.get("access-control-allow-origin"), "*");
+      const card = await response.json();
       assert.equal(validateCard(card), true, JSON.stringify(validateCard.errors));
       assert.deepEqual(card.remotes, [{ type: "streamable-http", url: endpoint }]);
       assert.equal(card.version, runningNimbusVersion());
@@ -309,10 +322,7 @@ function suite(name: string, options: { host: string; base?: string }) {
       const catalog = JSON.parse(await readFile(dist(".well-known/ai-catalog.json"), "utf8")) as { entries: Array<{ type: string; url: string }> };
       const entry = catalog.entries.find((item) => item.type === "application/mcp-server-card+json");
       assert.equal(entry?.url, `${endpoint}/server-card`);
-      // Under a base the Cloudflare adapter keeps control files at the asset
-      // root above the base directory, and so does Nimbus.
-      const headers = await readFile(prefix ? path.join(site.root, "_headers") : dist("/_headers"), "utf8");
-      assert.match(headers, new RegExp(`^${escapeRegExp(prefix)}\\/mcp\\/server-card\\n  Content-Type: application\\/mcp-server-card\\+json\\n  Access-Control-Allow-Origin: \\*\\n  Access-Control-Allow-Methods: GET\\n  Access-Control-Expose-Headers: ETag$`, "m"));
+      assert.equal(existsSync(dist("/mcp/server-card")), false, "no prerendered card file");
     });
   });
 }
@@ -320,9 +330,43 @@ function suite(name: string, options: { host: string; base?: string }) {
 suite("at the site root", { host: "root.test" });
 suite("under base /docs", { host: "based.test", base: "/docs" });
 
-test("a static build with agents.mcp is an author error that names the adapter flip", async () => {
+test("a site without agents.mcp has no server, no card, no llms.txt line and no page index", async () => {
+  const site = await buildSite({ host: "plain.test", mcp: false });
+  try {
+    assert.equal((await site.app.render(rpcRequest("https://plain.test/mcp", "initialize", INITIALIZE_PARAMS))).status, 404);
+    assert.equal((await site.app.render(new Request("https://plain.test/mcp/server-card"))).status, 404);
+    assert.doesNotMatch(await readFile(path.join(site.root, "dist/llms.txt"), "utf8"), /MCP server/);
+    assert.doesNotMatch(await readFile(path.join(site.root, "dist/.well-known/ai-catalog.json"), "utf8"), /mcp-server-card/);
+    const staged = path.join(site.root, "dist/_nimbus/agent-endpoint-assets/assets");
+    assert.ok(existsSync(staged), "the request-rendered API still stages its Markdown");
+    assert.equal((await readdir(staged)).some((name) => name.endsWith(".json")), false);
+  } finally {
+    await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test("a static build with agents.mcp is an author error that names the adapter", async () => {
   await assert.rejects(
     () => buildSite({ host: "static.test", adapter: false }),
     /rendering mode "request" needs a server adapter[\s\S]*add adapter-cloudflare/,
   );
+});
+
+test("a page or content entry at /mcp or its card is an author error, not a silently shadowed page", async () => {
+  for (const [file, route] of [
+    ["src/content/docs/mcp.mdx", "/mcp"],
+    ["src/content/docs/mcp.md", "/mcp"],
+    ["src/content/docs/mcp/server-card.md", "/mcp/server-card"],
+    ["src/pages/mcp.astro", "/mcp"],
+  ] as const) {
+    await assert.rejects(
+      () =>
+        buildSite({
+          host: "clash.test",
+          files: { [file]: file.endsWith(".astro") ? "<p>Our MCP server</p>\n" : "---\ntitle: Our MCP server\n---\nAbout it.\n" },
+        }),
+      new RegExp(`Nimbus serves ${escapeRegExp(route)} when agents\\.mcp is on\\. Move \\S*${escapeRegExp(file)}`),
+      file,
+    );
+  }
 });

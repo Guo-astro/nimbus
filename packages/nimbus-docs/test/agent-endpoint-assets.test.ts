@@ -744,7 +744,7 @@ test("rebakes when invalidated during API input loading", async () => {
     (
       await readdir(path.join(projectRoot, ".astro/nimbus/agent-endpoint-assets/assets"))
     ).sort(),
-    [...manifest.markdownAssets, ...manifest.llmsAssets, manifest.pageIndex]
+    [...manifest.markdownAssets, ...manifest.llmsAssets]
       .map((asset) => path.basename(asset.path))
       .sort(),
   );
@@ -1110,7 +1110,7 @@ test("removes assets made obsolete by edits and deletions", async () => {
   );
   assert.deepEqual(
     files.sort(),
-    [...manifest.markdownAssets, ...manifest.llmsAssets, manifest.pageIndex]
+    [...manifest.markdownAssets, ...manifest.llmsAssets]
       .map((asset) => path.basename(asset.path))
       .sort(),
   );
@@ -1207,6 +1207,55 @@ test("bakes every Markdown asset at its public URL, API pages included, hidden A
     ].join("\n"),
   );
   assert.doesNotMatch(api.content, /^# /);
+});
+
+test("bakes the MCP page index only for a site that serves /mcp; API pages carry no docs version", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "guide", body: "Guide", data: { title: "Guide" } },
+    { id: "hidden", body: "Hidden", data: { title: "Hidden", noindex: true } },
+  ]);
+  commit(projectRoot, "docs-v1", [{ id: "old", body: "Old", data: { title: "Old" } }]);
+  const base = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    versions: { current: "v2", others: ["v1"], deprecated: ["v1"] },
+    apiEntries: [
+      {
+        ...apiPage("Pets API"),
+        hidden: false,
+        data: { ...apiPage("Pets API").data, version: "v1" },
+      },
+    ],
+  };
+  configure(projectRoot, base);
+  assert.equal((await bakeAgentEndpointAssets(base)).pageIndex, undefined);
+
+  const options = { ...base, mcpUrl: "https://example.test/docs/mcp" };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  assert.ok(manifest.pageIndex);
+  const index = JSON.parse(
+    await readFile(path.join(projectRoot, ".astro/nimbus/agent-endpoint-assets", manifest.pageIndex.path), "utf8"),
+  );
+  assert.deepEqual(index.versions, ["v2", "v1"]);
+  assert.deepEqual(
+    index.pages.map((page: { url: string; section: string; version?: string; deprecated?: true; searchable: boolean }) => [
+      page.url,
+      page.section,
+      page.version ?? null,
+      page.deprecated ?? false,
+      page.searchable,
+    ]),
+    [
+      ["https://example.test/docs/api/", "api", null, false, true],
+      ["https://example.test/docs/guide/", "guide", "v2", false, true],
+      ["https://example.test/docs/hidden/", "hidden", "v2", false, false],
+      ["https://example.test/docs/v1/old/", "v1", "v1", true, true],
+    ],
+  );
 });
 
 test("fails when a docs page and an API page share a public Markdown path", async () => {

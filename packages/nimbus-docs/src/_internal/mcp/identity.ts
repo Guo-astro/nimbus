@@ -1,7 +1,7 @@
 /**
  * The remote MCP server's identity: its paths, its name and the Server
- * Card. Shared by the live `/mcp` handler, the card route, discovery and
- * the `_headers` rules, so every surface reports the same server.
+ * Card. Computed once at build for the live `/mcp` handler, the card route
+ * and discovery, so every surface reports the same server.
  */
 import { withBase } from "../url.js";
 
@@ -32,9 +32,9 @@ export function mcpUrl(
   return new URL(withBase(pathname, base), site).href;
 }
 
-/** The card's absolute URL for an endpoint URL. */
+/** The card's absolute URL for an endpoint URL, in the endpoint's trailing-slash form. */
 export function mcpCardUrl(endpointUrl: string): string {
-  return `${endpointUrl.replace(/\/+$/, "")}/server-card`;
+  return endpointUrl.endsWith("/") ? `${endpointUrl}server-card/` : `${endpointUrl}/server-card`;
 }
 
 /**
@@ -83,9 +83,8 @@ export function mcpServerIdentity(input: {
   title: string;
   version: string;
   /** The published endpoint (`capabilities.mcpUrl`), which carries the trailing-slash form. */
-  endpointUrl?: string;
+  endpointUrl: string;
 }): McpServerIdentity {
-  const endpointUrl = input.endpointUrl ?? mcpUrl(input.site, input.base);
   const description = truncate(
     `Read the ${input.title} documentation: get_page and list_pages, no search.`,
     100,
@@ -99,8 +98,8 @@ export function mcpServerIdentity(input: {
       `This server reads the ${input.title} documentation. It has two tools and no search: ` +
       "list_pages lists published pages (title, URL, Markdown URL, description) a page at a time, " +
       "filtered by section or version; get_page returns one page as Markdown by its URL or path. " +
-      "Pages are the same ones llms.txt lists; fetch llms.txt or the .md URLs directly when a client has no tool support.",
-    endpointUrl,
+      "By default list_pages lists what site search finds; fetch llms.txt or the .md URLs directly when a client has no tool support.",
+    endpointUrl: input.endpointUrl,
     websiteUrl: new URL(withBase("/", input.base), input.site).href,
   };
 }

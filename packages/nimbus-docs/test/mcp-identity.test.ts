@@ -61,7 +61,7 @@ test("the endpoint and card URLs sit under site and base", () => {
   assert.equal(mcpUrl("https://docs.example.com", "/docs"), "https://docs.example.com/docs/mcp");
   assert.equal(mcpUrl("https://docs.example.com", "/", "always"), "https://docs.example.com/mcp/");
   assert.equal(mcpUrl("https://docs.example.com", "/docs/", "never"), "https://docs.example.com/docs/mcp");
-  assert.equal(mcpCardUrl("https://docs.example.com/mcp/"), "https://docs.example.com/mcp/server-card");
+  assert.equal(mcpCardUrl("https://docs.example.com/mcp/"), "https://docs.example.com/mcp/server-card/");
   assert.equal(mcpCardUrl("https://docs.example.com/docs/mcp"), "https://docs.example.com/docs/mcp/server-card");
 });
 
@@ -71,6 +71,7 @@ test("the card validates as $defs.ServerCard, names the live endpoint and carrie
     base: "/docs/",
     title: "Example",
     version: "0.19.0",
+    endpointUrl: mcpUrl("https://docs.example.com", "/docs/"),
   });
   const card = mcpServerCard(identity);
   assert.equal(validateCard(card), true, JSON.stringify(validateCard.errors));
@@ -99,13 +100,19 @@ test("the card names the endpoint the site publishes, slashed form included", ()
   });
   assert.equal(identity.endpointUrl, "https://docs.example.com/mcp/");
   assert.deepEqual(mcpServerCard(identity).remotes, [{ type: "streamable-http", url: "https://docs.example.com/mcp/" }]);
-  assert.equal(mcpCardUrl(identity.endpointUrl), "https://docs.example.com/mcp/server-card");
+  assert.equal(mcpCardUrl(identity.endpointUrl), "https://docs.example.com/mcp/server-card/");
 });
 
 test("a long site title keeps the card's description and title within the schema limits", () => {
   const title = "T".repeat(150);
   const card = mcpServerCard(
-    mcpServerIdentity({ site: "https://docs.example.com", base: "/", title, version: "1.0.0" }),
+    mcpServerIdentity({
+      site: "https://docs.example.com",
+      base: "/",
+      title,
+      version: "1.0.0",
+      endpointUrl: "https://docs.example.com/mcp",
+    }),
   );
   assert.equal(validateCard(card), true, JSON.stringify(validateCard.errors));
   assert.ok([...card.description].length <= 100);

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -9,6 +8,7 @@ import { build } from "astro";
 import nimbus from "../src/index.js";
 import { math } from "../src/markdown/index.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const src = path.resolve(import.meta.dirname, "../src");
 const module = (file: string) => JSON.stringify(pathToFileURL(path.join(src, file)).href);
@@ -35,7 +35,7 @@ Broken: $\\frac{1}{$ and $\\nosuchcommand$.
 
 async function site(hastPlugins: unknown[], features: Record<string, unknown> = { math: true }, page = PAGE) {
   // The real path: Astro only adds injected page styles to files under its root as written.
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), "nimbus-math-")));
+  const root = await realpath(await mkdtemp(path.join(TEST_TMP, "nimbus-math-")));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body);
@@ -78,8 +78,10 @@ export const { GET, getStaticPaths } = markdownRoute();
     await build({
       root: pathToFileURL(root + path.sep),
       configFile: false,
+      cacheDir: path.join(root, ".astro"),
       logLevel: "silent",
       vite: {
+        cacheDir: path.join(root, ".vite"),
         resolve: {
           alias: [
             { find: /^@cloudflare\/nimbus-docs\//, replacement: src + "/" },

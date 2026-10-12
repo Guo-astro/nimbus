@@ -6,7 +6,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -15,6 +14,7 @@ import { dev } from "astro";
 
 import { getPreparedMarkdownSnapshot } from "../src/_internal/prepared-markdown-registry.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -108,7 +108,7 @@ async function until<T>(
 }
 
 test("dev restart after an api entry edit keeps prose prepared and spec watching alive", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-api-dev-restart-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-api-dev-restart-"));
   roots.push(root);
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });

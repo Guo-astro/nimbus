@@ -113,7 +113,7 @@
 		"build": "tsdown",
 		"dev": "tsdown --watch",
 		"typecheck": "tsc --noEmit",
-		"test": "node --import tsx --test --test-concurrency=1 \"test/**/*.test.ts\"",
+		"test": "node --import tsx --test --test-concurrency=4 \"test/**/*.test.ts\"",
 		"pull:api-fixtures": "node scripts/pull-api-fixtures.mjs",
 		"prepack": "tsdown"
 	},

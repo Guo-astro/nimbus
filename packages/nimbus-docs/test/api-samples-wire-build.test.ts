@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -10,6 +9,7 @@ import nimbus from "../src/index.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
 import { buildApiModel, getApiPageProps, type ApiOperationPage } from "../src/api/index.js";
 import { sampleClientUnavailable, startSampleCapture } from "./_api-sample-wire.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const moduleUrl = (relative: string) => JSON.stringify(pathToFileURL(path.resolve(import.meta.dirname, relative)).href);
 const runtime = moduleUrl("../src/runtime.ts");
@@ -18,7 +18,7 @@ const api = moduleUrl("../src/api/index.ts");
 test("rendered HTML and Markdown samples send null, absence, and schema synthesis correctly", async (t) => {
   const capture = await startSampleCapture();
   t.after(() => capture.close());
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-api-null-wire-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-api-null-wire-"));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10 }));
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });

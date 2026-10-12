@@ -3,7 +3,6 @@
 // agent-endpoint assets.
 
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,6 +10,7 @@ import { build, type AstroIntegration } from "astro";
 
 import nimbus from "../../src/index.ts";
 import { runningNimbusVersion } from "../../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./temp-root.js";
 
 export interface AgentSite {
   root: string;
@@ -59,7 +59,7 @@ export function agentSites() {
     files: Record<string, string>,
     options: AgentSiteOptions = {},
   ): Promise<AgentSite> {
-    const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-agent-site-"));
+    const root = await mkdtemp(path.join(TEST_TMP, "nimbus-agent-site-"));
     roots.push(root);
     const write = async (relative: string, contents: string) => {
       await mkdir(path.dirname(path.join(root, relative)), { recursive: true });

@@ -13,7 +13,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -22,6 +21,7 @@ import { build, type AstroIntegration } from "astro";
 
 import nimbus from "../src/index.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const roots: string[] = [];
 
@@ -92,7 +92,7 @@ async function buildFixture(
 ): Promise<Built> {
   // Deliberately not realpath'd: macOS tmpdir is a symlink, so this also
   // proves citation scoping survives a symlinked project root.
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-citation-base-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-citation-base-"));
   roots.push(root);
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });

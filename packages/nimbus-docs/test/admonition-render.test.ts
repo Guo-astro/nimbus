@@ -8,7 +8,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -20,6 +19,7 @@ import { JSDOM } from "jsdom";
 import nimbus from "../src/index.js";
 import { satteriAdmonitions } from "../src/_internal/admonition-processor.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const source = [
   "[Reference target][target-ref]",
@@ -66,7 +66,7 @@ const source = [
 for (const processor of ["satteri", "nimbus"] as const) {
   test(`Astro ${processor} renders the unchanged Aside with plain titles and protected code`, async () => {
     const root = await realpath(
-      await mkdtemp(path.join(os.tmpdir(), "nimbus-aside-render-")),
+      await mkdtemp(path.join(TEST_TMP, "nimbus-aside-render-")),
     );
     try {
       await symlink(
@@ -212,7 +212,7 @@ for (const processor of ["satteri", "nimbus"] as const) {
 for (const optionPath of ["markdown.processor", "mdx.processor"] as const) {
   test(`Nimbus rejects an incompatible ${optionPath}`, async () => {
     const root = await realpath(
-      await mkdtemp(path.join(os.tmpdir(), "nimbus-aside-processor-")),
+      await mkdtemp(path.join(TEST_TMP, "nimbus-aside-processor-")),
     );
     try {
       await symlink(
@@ -258,7 +258,7 @@ for (const optionPath of ["markdown.processor", "mdx.processor"] as const) {
 
 test("Nimbus permits custom processors when admonitions are disabled", async () => {
   const root = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "nimbus-aside-disabled-")),
+    await mkdtemp(path.join(TEST_TMP, "nimbus-aside-disabled-")),
   );
   try {
     await symlink(

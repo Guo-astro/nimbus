@@ -190,40 +190,35 @@ function loadManifest(file = MANIFEST) {
   return validateUpgradeManifest(JSON.parse(fs.readFileSync(file, "utf8")));
 }
 
-export function loadPreviousManifest(base) {
+/**
+ * The manifest the PR started from: at the merge base of the base branch and
+ * HEAD, so a PR behind `main` isn't blamed for entries `main` gained since.
+ * A base with no shared history reads the base tip; an unknown base fails.
+ */
+export function loadPreviousManifest(base, cwd = ROOT) {
   const relative = path.relative(ROOT, MANIFEST).split(path.sep).join("/");
+  const git = (args, stderr = "ignore") =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", stderr] }).trim();
   const refs = [`origin/${base}`, base];
   let commit = null;
   for (const ref of refs) {
     try {
-      commit = execFileSync(
-        "git",
-        ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
-        {
-          cwd: ROOT,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        },
-      ).trim();
+      commit = git(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
       break;
     } catch {
     }
   }
   if (!commit) throw new Error(`Could not resolve base ref ${base}.`);
   try {
-    execFileSync("git", ["cat-file", "-e", `${commit}:${relative}`], {
-      cwd: ROOT,
-      stdio: "ignore",
-    });
+    commit = git(["merge-base", commit, "HEAD"]);
+  } catch {
+  }
+  try {
+    git(["cat-file", "-e", `${commit}:${relative}`]);
   } catch {
     return null;
   }
-  const raw = execFileSync("git", ["show", `${commit}:${relative}`], {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  return validateUpgradeManifest(JSON.parse(raw));
+  return validateUpgradeManifest(JSON.parse(git(["show", `${commit}:${relative}`], "inherit")));
 }
 
 function pendingChangesets() {

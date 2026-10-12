@@ -18,7 +18,7 @@
     "templates:check": "node scripts/templates-check.mjs",
     "templates:sync": "node scripts/sync-templates-repo.mjs",
     "upgrades:check": "node scripts/upgrade-manifest.mjs",
-    "test:upgrades": "node --test scripts/upgrade-manifest.test.mjs scripts/sync-reviewed-baselines.test.mjs",
+    "test:upgrades": "node --test scripts/upgrade-manifest.test.mjs scripts/sync-reviewed-baselines.test.mjs scripts/freshness-guard.test.mjs",
     "local": "node scripts/local.mjs",
     "local:auto": "node scripts/local.mjs --auto",
     "local:reset": "node scripts/local.mjs --auto --reset",

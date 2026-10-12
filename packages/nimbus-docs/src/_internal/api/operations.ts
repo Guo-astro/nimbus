@@ -144,7 +144,7 @@ function addOperation(
 }
 
 /**
- * Record the operation's page slug. Under a `resource-action-v1` policy the slug is
+ * Record the operation's page slug. Under a route policy the slug is
  * resolved by `override → derivation → normalized coordinate fallback`, then
  * route-safety and reserved-route checks run on that final slug (the
  * `operationId` faced neither). Legacy (no policy) keeps the exact
@@ -170,6 +170,7 @@ function resolveSlug(
   }
 
   const label = `${method.toUpperCase()} ${path}`;
+  const convention = ctx.routePolicy.convention;
   const outcome = resolveOperationRoute(ctx.routePolicy, {
     method,
     path,
@@ -182,7 +183,7 @@ function resolveSlug(
     // skip page registration (the build fails on this error, so the partial
     // model is discarded before any consumer reads it).
     ctx.registry.addError(
-      `Operation ${label} (coordinate "${opCoord}") has no unambiguous resource-action-v1 route and its ` +
+      `Operation ${label} (coordinate "${opCoord}") has no unambiguous ${convention} route and its ` +
         `coordinate normalizes to an empty slug. Add an explicit route in \`routes.operations\` ` +
         `keyed by its operationId.`,
       opCoord,
@@ -197,7 +198,7 @@ function resolveSlug(
     ctx.noteOverrideConsumed(operationId!);
   } else if (outcome.kind === "fallback") {
     ctx.registry.addWarning(
-      `Operation ${label} (coordinate "${opCoord}") has no unambiguous resource-action-v1 route; falling back ` +
+      `Operation ${label} (coordinate "${opCoord}") has no unambiguous ${convention} route; falling back ` +
         `to the normalized coordinate slug "${slug}". Add an explicit route in \`routes.operations\` ` +
         `to pin a stable URL.`,
       opCoord,

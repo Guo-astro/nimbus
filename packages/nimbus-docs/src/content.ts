@@ -650,7 +650,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
               ? `Rename the version, or adjust the \`routes.operations\` override target for the colliding page, `
               : kinds.has("derived")
                 ? `Rename the version, or pin a \`routes.operations\` override for the colliding operation ` +
-                  `(a resource-action-v1 slug is derived from method and path, so renaming the operationId will not change it), `
+                  `(a derived slug comes from method and path, so renaming the operationId will not change it), `
                 : `Rename the version, or the colliding operation/tag, `;
             const message =
               `nimbus-docs api: version "${versionId}" of collection "${collection}" collides with a ` +
@@ -659,10 +659,10 @@ export function apiCollection(options?: ApiCollectionOptions): {
             throw new Error(message);
           }
         }
-        // Cross-version drift (non-gating): one coordinate whose resource-action-v1-derived
-        // slug differs across two or more versions. Divergent wire paths across
-        // versions are legitimate, so this warns and recommends pinning an
-        // override; it never fails the build.
+        // Cross-version drift (non-gating): one coordinate whose derived slug
+        // differs across two or more versions, which may use different
+        // conventions. Divergent wire paths across versions are legitimate, so
+        // this warns and recommends pinning an override; it never fails the build.
         for (const [coordinate, byVersion] of derivedByCoordinate) {
           if (byVersion.size < 2) continue;
           const distinct = new Set(byVersion.values());
@@ -671,7 +671,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
             .map(([version, slug]) => `${version}→"${slug}"`)
             .join(", ");
           logger.warn(
-            `nimbus-docs api: coordinate "${coordinate}" derives different resource-action-v1 slugs across ` +
+            `nimbus-docs api: coordinate "${coordinate}" derives different route slugs across ` +
               `versions of "${collection}" (${detail}). Pin an explicit \`routes.operations\` ` +
               `override in each version to keep the URL stable across versions.`,
           );

@@ -18,6 +18,7 @@ import {
   CoordinateRegistry,
   apiCoordinate,
   sectionCoordinate,
+  policyTagRouteSegment,
   tagRouteSegment,
   type Diagnostic,
 } from "./coordinates.js";
@@ -713,7 +714,15 @@ class Walker implements ParseContext {
     });
     // A nav-only category (page === false) is a grouping node with a model node
     // for ancestry but no page — so it is never routed and carries no href.
-    if (page) this.page(coord, `tags/${tagRouteSegment(tag)}`);
+    // `resource-action-v2` routes tag pages through the policy's lowercase
+    // projection; v1 and legacy keep the case-preserving segment, byte for byte.
+    if (page) {
+      const segment =
+        this.routePolicy?.convention === "resource-action-v2"
+          ? policyTagRouteSegment(tag)
+          : tagRouteSegment(tag);
+      this.page(coord, `tags/${segment}`);
+    }
     this.navByTag.set(tag, { coordinate: coord, label: label ?? tag, kind: "section", children: [] });
   }
 

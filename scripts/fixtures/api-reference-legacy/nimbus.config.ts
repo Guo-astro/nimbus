@@ -8,6 +8,11 @@ export default defineConfig({
   github: null,
   socialImageAlt: "SmallCo documentation preview",
   api: [
-    { collection: "api", spec: "./src/api/smallco.yaml", label: "SmallCo API" },
+    {
+      collection: "api",
+      spec: "./src/api/smallco.yaml",
+      label: "SmallCo API",
+      routes: { convention: "resource-action-v2" },
+    },
   ],
 });

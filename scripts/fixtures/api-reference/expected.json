@@ -4,16 +4,16 @@
     { "coordinate": "api", "route": "/api" },
     { "coordinate": "create", "route": "/api/charges/create" },
     { "coordinate": "list", "route": "/api/charges/list" },
-    { "coordinate": "openDispute", "route": "/api/disputes/openDispute" },
+    { "coordinate": "openDispute", "route": "/api/disputes/create" },
     {
       "coordinate": "payment.succeeded",
       "route": "/api/webhooks/payment.succeeded"
     },
-    { "coordinate": "search", "route": "/api/search/search" },
+    { "coordinate": "search", "route": "/api/search/create" },
     { "coordinate": "tags.charges", "route": "/api/tags/charges" },
     { "coordinate": "tags.disputes", "route": "/api/tags/disputes" },
     { "coordinate": "tags.search", "route": "/api/tags/search" },
-    { "coordinate": "upload", "route": "/api/charges/upload" }
+    { "coordinate": "upload", "route": "/api/uploads/create" }
   ],
   "fields": [
     {

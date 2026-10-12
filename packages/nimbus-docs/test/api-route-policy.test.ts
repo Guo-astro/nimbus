@@ -699,7 +699,7 @@ describe("cross-version drift", () => {
   test("one coordinate deriving different slugs across versions warns (non-gating)", async () => {
     const logs = await runFamily("rp-drift", [v1, v0]);
     assert.ok(
-      logs.some((l) => /coordinate "chargeList" derives different resource-action-v1 slugs/.test(l)),
+      logs.some((l) => /coordinate "chargeList" derives different route slugs/.test(l)),
       "drift warning is emitted",
     );
   });
@@ -711,7 +711,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-pinned", [v1, pinned]);
     assert.ok(
-      !logs.some((l) => /derives different resource-action-v1 slugs/.test(l)),
+      !logs.some((l) => /derives different route slugs/.test(l)),
       "an overridden version is not compared, so no drift is reported",
     );
   });
@@ -733,7 +733,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-fallback", [derived, fell]);
     assert.ok(
-      !logs.some((l) => /derives different resource-action-v1 slugs/.test(l)),
+      !logs.some((l) => /derives different route slugs/.test(l)),
       "a fallback version is not compared, so differing slugs do not warn",
     );
   });
@@ -755,7 +755,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-hidden", [shown, hidden]);
     assert.ok(
-      logs.some((l) => /coordinate "chargeList" derives different resource-action-v1 slugs/.test(l)),
+      logs.some((l) => /coordinate "chargeList" derives different route slugs/.test(l)),
       "a hidden version's derived slug drift is still reported",
     );
   });
@@ -807,8 +807,8 @@ describe("routes config validation — rejected", () => {
   const cases: Array<[string, unknown, RegExp]> = [
     [
       "an unknown convention",
-      [{ collection: "s", spec: "./s.json", routes: { convention: "resource-action-v2" } }],
-      /resource-action-v1/,
+      [{ collection: "s", spec: "./s.json", routes: { convention: "resource-action-v3" } }],
+      /"resource-action-v1" or "resource-action-v2"/,
     ],
     [
       "a prefix with a {parameter} segment",

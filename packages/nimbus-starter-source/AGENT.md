@@ -95,6 +95,8 @@ sidebar: {
 },
 ```
 
+The header's section tabs come from the same list: each top-level item that autogenerates from another collection (`{ label: "API", autogenerate: { collection: "api", prefix: "/reference" } }`) becomes a tab, and the tabs show once there are two. Folders of `src/content/docs/` and external links stay in the sidebar. For any other header link, edit `src/components/Header.astro`.
+
 Everything else: <https://nimbus-docs.com/navigation/sidebar/>.
 
 ## Agent interfaces

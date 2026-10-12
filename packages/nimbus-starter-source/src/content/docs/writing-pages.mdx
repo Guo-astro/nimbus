@@ -45,11 +45,11 @@ Standard Markdown works everywhere: **bold**, *italic*, [links](/), `inline code
 
 Code blocks are highlighted at build time. Add a `title` to show a filename, and line numbers in braces to draw attention to specific lines.
 
-```ts title="astro.config.ts" {4}
-import nimbus from "@cloudflare/nimbus-docs";
-
-export default defineConfig({
-  integrations: [nimbus({ title: "My docs" })],
+```ts title="astro.config.ts" {3}
+const nimbusConfig = defineNimbusConfig({
+  site: "https://docs.example.com",
+  title: "My docs",
+  description: "Guides and reference for My product.",
 });
 ```
 

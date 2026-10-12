@@ -168,7 +168,9 @@ test("a project route at [...x]/llms-full.txt owns the section files", async () 
 export function getStaticPaths() { return [{ params: { part: "custom" } }]; }
 export const GET = () => new Response("mine");
 `,
-  });
+  }, { logLevel: "warn" });
+  // The project's own llms-full.txt route isn't another route shadowing it.
+  assert.doesNotMatch(site.logs, /another route answers/);
   assert.equal(await readFile(path.join(site.root, "dist/custom/llms-full.txt"), "utf8"), "mine");
   assert.ok(!existsSync(path.join(site.root, "dist/reference/llms-full.txt")));
 });

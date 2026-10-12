@@ -73,3 +73,31 @@ export function formatUngeneratedAgentPages(
     "rendering mode to \"request\" so the route serves them on request."
   );
 }
+
+/**
+ * Split `llms-full.txt` files that a route meant for something else answers
+ * first, such as a project `/<mount>/[llms].txt`, whose parameter also
+ * matches `llms-full`: the file is linked but never served.
+ */
+export function findShadowedLlmsFullFiles(
+  routes: readonly EndpointRouteRecord[],
+  urls: Iterable<string>,
+): UngeneratedAgentPage[] {
+  const shadowed: UngeneratedAgentPage[] = [];
+  for (const url of urls) {
+    const owner = routes.find((route) => route.regex.test(url));
+    if (owner && !owner.pattern.endsWith("/llms-full.txt")) shadowed.push({ url, owner });
+  }
+  return shadowed.sort((a, b) => a.url.localeCompare(b.url));
+}
+
+export function formatShadowedLlmsFullFiles(shadowed: readonly UngeneratedAgentPage[]): string {
+  const lines = shadowed.map(
+    ({ url, owner }) => `  - ${owner.entrypoint} (${owner.pattern}) answers ${url}`,
+  );
+  return (
+    "nimbus-docs: llms-full.txt is split by section, but another route answers some of its files, so they aren't served:\n" +
+    `${lines.join("\n")}\n` +
+    "Rename those routes so they don't match `llms-full.txt`: a route that serves one llms.txt is `llms.txt.ts`, not a dynamic `[name].txt.ts`."
+  );
+}

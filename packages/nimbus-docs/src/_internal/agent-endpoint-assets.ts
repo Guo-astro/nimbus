@@ -963,7 +963,8 @@ function llmsFullBodies(
   // A size is only given for a file served whole; an index says it's split.
   const sectionLine = (group: PreparedLlmsGroup) => {
     const bytes = sizeOf(group);
-    return `- [${group.label}](${llmsFullUrl(header, `/${group.slug}/llms-full.txt`)}) (${bytes > limit ? "split further" : mebibytes(bytes)})`;
+    const kind = bytes <= limit ? mebibytes(bytes) : group.children.length > 0 ? "split further" : "links to its pages";
+    return `- [${group.label}](${llmsFullUrl(header, `/${group.slug}/llms-full.txt`)}) (${kind})`;
   };
   const indexBody = (
     title: string,
@@ -1014,7 +1015,9 @@ function llmsFullBodies(
     const header = sectionHeader(group);
     const body = indexBody(
       header.title,
-      `This section is over ${mebibytes(limit)}, so it's split further. Fetch the parts you need.`,
+      group.children.length > 0
+        ? `This section is over ${mebibytes(limit)}, so it's split further. Fetch the parts you need.`
+        : `This section is over ${mebibytes(limit)} and has no sub-folders, so it links to each page's Markdown. Fetch the pages you need.`,
       header.index!,
       group.children,
       group.members,

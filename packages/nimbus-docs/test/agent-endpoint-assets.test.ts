@@ -1427,8 +1427,8 @@ test("llms-full.txt over the limit splits by section, recursing where a section 
   for (const [section, body] of bodies) {
     assert.ok(Buffer.byteLength(body) <= 4000, section);
   }
-  assert.match(bodies.get("huge")!, /split further[\s\S]*## Pages\n\n- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/only\/index\.md\)/);
-  assert.match(rootIndex, /- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/llms-full\.txt\) \(split further\)/);
+  assert.match(bodies.get("huge")!, /has no sub-folders, so it links to each page's Markdown[\s\S]*## Pages\n\n- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/only\/index\.md\)/);
+  assert.match(rootIndex, /- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/llms-full\.txt\) \(links to its pages\)/);
   assert.match(infos[0]!, /split by section:[\s\S]*\/reference\/functions\/llms-full\.txt \d+ KiB/);
   assert.match(infos[0]!, /\/llms-full\.txt \d+ KiB \(index\)/);
   assert.match(infos[0]!, /\/huge\/llms-full\.txt \d+ KiB \(index; its pages total \d+ KiB with no sub-folders to split by\)/);

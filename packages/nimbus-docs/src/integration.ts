@@ -193,6 +193,8 @@ import {
   findUngeneratedAgentPages,
   formatUngeneratedAgentPages,
   llmsAssetUrl,
+  findShadowedLlmsFullFiles,
+  formatShadowedLlmsFullFiles,
   type EndpointRouteRecord,
 } from "./_internal/agent-endpoint-coverage.js";
 import { pagefindDocument } from "./_internal/pagefind-document.js";
@@ -3167,7 +3169,18 @@ export function nimbus(
             }
             logger.warn(message);
           }
-          const reported = new Set(unclaimed.map(({ url }) => url));
+          // A split file another route answers first is reported once, by
+          // the shadowing check.
+          const shadowed = findShadowedLlmsFullFiles(
+            endpointRoutesForBuild,
+            manifest.llmsAssets
+              .filter((asset) => asset.scope === "section" && asset.surface === "full")
+              .map(llmsAssetUrl),
+          );
+          if (shadowed.length > 0) {
+            logger.warn(formatShadowedLlmsFullFiles(shadowed));
+          }
+          const reported = new Set([...unclaimed, ...shadowed].map(({ url }) => url));
           const ungenerated = findUngeneratedAgentPages(
             endpointRoutesForBuild,
             [

@@ -122,10 +122,36 @@ test("a project <mount>/[llms].txt still owns the mount's index", async () => {
       ...agentRoutes("[section]"),
       "src/pages/changelog/[llms].txt.ts": `export const prerender = false;\nexport const GET = () => new Response("mine");\n`,
     },
-    { server: true, rendering: { default: "build", collections: { changelog: "request", blog: "build" } } },
+    {
+      server: true,
+      rendering: { default: "build", collections: { changelog: "request", blog: "build" } },
+      logLevel: "warn",
+    },
   );
   const app = await siteApp(site);
   assert.equal(await (await app.render(new Request("https://example.test/docs/changelog/llms.txt"))).text(), "mine");
+  // Its [llms] parameter also matches llms-full, so the split file there is
+  // never served: the build says so, once.
+  assert.match(
+    site.logs,
+    /another route answers some of its files[\s\S]*src\/pages\/changelog\/\[llms\]\.txt\.ts \(\/changelog\/\[llms\]\.txt\) answers \/changelog\/llms-full\.txt/,
+  );
+  assert.doesNotMatch(site.logs, /not prerendered/);
+});
+
+test("on a static build, a project <mount>/[llms].txt hiding a split file is named, not silently 404", async () => {
+  const site = await sites.buildSite(
+    {
+      ...CONTENT,
+      ...agentRoutes("[...section]"),
+      "src/pages/changelog/[llms].txt.ts": `export const prerender = true;\nexport const getStaticPaths = () => [{ params: { llms: "llms" } }];\nexport const GET = () => new Response("mine");\n`,
+    },
+    { logLevel: "warn" },
+  );
+  assert.ok(!existsSync(path.join(site.root, "dist/changelog/llms-full.txt")));
+  assert.match(site.logs, /src\/pages\/changelog\/\[llms\]\.txt\.ts \(\/changelog\/\[llms\]\.txt\) answers \/changelog\/llms-full\.txt/);
+  assert.match(site.logs, /a route that serves one llms\.txt is `llms\.txt\.ts`/);
+  assert.doesNotMatch(site.logs, /not prerendered/);
 });
 
 test("a static Cloudflare site with no adapter warns about a page over the limit", async () => {

@@ -15,6 +15,8 @@ import { Banner } from "@/components/ui/banner";
 import { Pagination } from "@/components/ui/pagination";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import ApiBody from "./ApiBody.astro";
+import Logo from "@/components/Logo.astro";
+import { config } from "virtual:nimbus/config";
 import { cn } from "@/lib/cn";
 import { getApiVersionHead, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiNav, ApiPageProps } from "@cloudflare/nimbus-docs/api";
@@ -84,7 +86,11 @@ if (versionStatus?.isHidden) {
     class="flex h-full w-(--nb-sidebar-width) max-w-[85vw] -translate-x-full flex-col border-r border-border bg-card transition-transform duration-250 ease-out group-data-[state=open]:translate-x-0 motion-reduce:transition-none"
   >
     <div class="z-[1] flex items-center justify-between border-b border-border bg-card px-4 py-3">
-      <span class="text-sm font-semibold text-foreground">Navigation</span>
+      {/* The logo, as in the header; the site title stays as its accessible name. */}
+      <a href={homeHref} class="flex items-center text-foreground transition-opacity hover:opacity-70">
+        <Logo class="h-5 w-8 shrink-0" />
+        <span class="sr-only">{config.title}</span>
+      </a>
       <button
         data-close-sidebar
         class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

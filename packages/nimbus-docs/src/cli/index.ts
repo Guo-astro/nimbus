@@ -123,8 +123,8 @@ const HELP = `
     lint                           Lint .mdx content for authoring-quality issues
 
   Flags:
-    --yes, -y                      Assume yes for prompts (command-specific writes still apply)
-    --overwrite                    \`add\`: replace existing files with registry versions (upgrade)
+    --yes, -y                      Assume yes for prompts; with --overwrite, replaces edited files too
+    --overwrite                    \`add\`: replace files you haven't edited; for edited ones, asks in a terminal and stops otherwise
     --apply                        \`diff <file>\`: write the upstream change (clean files only)
     --dry-run                      \`migrate\`: plan without prompting or writing
     --diff                         \`migrate\`: print proposed edits without prompting or writing
@@ -233,7 +233,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const [command, slug] = args._;
+  const [command, slug, ...moreSlugs] = args._;
 
   const flagError = unknownFlagError(command, process.argv.slice(2));
   if (flagError) {
@@ -314,13 +314,32 @@ async function main(): Promise<void> {
   }
 
   if (command === "add") {
-    await addCommand(slug!, {
-      yes: args.yes,
-      print: args.print,
-      overwrite: args.overwrite,
-      adapter: args.adapter,
-      templateDir: args["template-dir"],
-    });
+    const slugs = [slug!, ...moreSlugs];
+    // Every slug is checked before anything is installed, so `add a typo`
+    // installs nothing rather than `a` and then stopping.
+    const unknown = slugs.filter(
+      (s) => s !== "server-output" && !ADAPTER_SLUGS[s] && !getIndexEntry(s),
+    );
+    if (unknown.length > 0) {
+      p.log.error(
+        `Unknown registry item${unknown.length === 1 ? "" : "s"}: ${unknown.map((s) => `\`${s}\``).join(", ")}. ` +
+          `Nothing was installed. Try \`${invocation("list")}\` to see what's available.`,
+      );
+      process.exit(1);
+    }
+    for (const current of slugs) {
+      await addCommand(
+        current,
+        {
+          yes: args.yes,
+          print: args.print,
+          overwrite: args.overwrite,
+          adapter: args.adapter,
+          templateDir: args["template-dir"],
+        },
+        slugs,
+      );
+    }
     return;
   }
 
@@ -407,6 +426,7 @@ const ADAPTER_SLUGS: Record<string, AdapterId> = Object.fromEntries(
 async function addCommand(
   slug: string,
   flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
+  requested: readonly string[] = [slug],
 ): Promise<void> {
   if (slug === "server-output") {
     const adapterId = parseAdapterFlag(flags.adapter);
@@ -505,12 +525,50 @@ async function addCommand(
   if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
   if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
   if (report.replaced.length > 0) {
-    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}:`, ...report.replaced.map((file) => `    ${file}`));
+    const notes: string[] = [];
+    if (report.replacedEdited > 0) notes.push(`${report.replacedEdited} had local edits`);
+    if (report.replacedUncompared > 0) notes.push(`${report.replacedUncompared} could not be compared`);
+    const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
+    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  if (report.kept.length > 0) {
+  // Kept under `--overwrite`: the same block whether nobody could be asked or
+  // the user answered no. It leads with what is safe, then the narrowest way
+  // to replace, then the widest; agents read these lines too.
+  for (const [group, why] of [
+    [report.keptUnasked, "no terminal to ask"],
+    [report.keptDeclined, "you answered no"],
+  ] as const) {
+    if (group.length === 0) continue;
+    const edited = group.filter((k) => k.reason === "edited");
+    const unknown = group.filter((k) => k.reason === "unknown");
+    const width = Math.max(...group.flatMap((k) => k.files.map((f) => f.length)));
+    const rows = (list: typeof group) =>
+      list.flatMap((k) => k.files.map((f) => `    ${f.padEnd(width)}   ${k.slug}`));
+    if (edited.length > 0) {
+      const n = edited.reduce((sum, k) => sum + k.files.length, 0);
+      lines.push(`↷ Kept ${plural(n, "file")} with local edits (${why}):`, ...rows(edited));
+    }
+    if (unknown.length > 0) {
+      const n = unknown.reduce((sum, k) => sum + k.files.length, 0);
+      lines.push(
+        `↷ Kept ${plural(n, "file")} that may have local edits (could not compare: no install record, or the starter release couldn't be fetched; run ${invocation("init")}, or pass --template-dir <path>):`,
+        ...rows(unknown),
+      );
+    }
     lines.push(
-      `↷ Kept ${plural(report.kept.length, "file")} that ${report.kept.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
-      ...report.kept.map((file) => `    ${file}`),
+      `  Your edits are untouched. To review upstream: ${invocation("diff <file>")}`,
+      `  To replace one component and its dependencies, discarding its edits:`,
+      ...group.map((k) => `    ${invocation(`add ${k.slug} --overwrite --yes`)}`),
+      `  To replace everything above, including dependencies: ${invocation(`add ${requested.join(" ")} --overwrite --yes`)}`,
+    );
+  }
+  const keptPlain = report.kept.filter(
+    (file) => ![...report.keptUnasked, ...report.keptDeclined].some((k) => k.files.includes(file)),
+  );
+  if (keptPlain.length > 0) {
+    lines.push(
+      `↷ Kept ${plural(keptPlain.length, "file")} that ${keptPlain.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
+      ...keptPlain.map((file) => `    ${file}`),
     );
   }
   if (report.npmDepsInstalled.length > 0) {

@@ -33,10 +33,12 @@ import { starterProjectPath } from "./upgrade.js";
 export interface InstallOptions {
   /** User's project root. */
   cwd: string;
-  /** The upgrade verb: replace every conflicting file in the tree, no prompt. */
+  /** The upgrade verb: replace every differing file in the tree. Files the
+   * user edited are asked about in a terminal, kept (and listed) when there is
+   * no terminal to ask, and replaced only with `--yes`. */
   overwrite: boolean;
-  /** Non-interactive assent (dep install etc.); conflict default is to KEEP the
-   * user's file (never clobber). `--overwrite` is the way to replace. */
+  /** Non-interactive assent. Without `--overwrite` it keeps the user's files
+   * (never clobber); with `--overwrite` it replaces edited files too. */
   yes: boolean;
   /** Src dir to write against, relative to `cwd` (default `"src"`; monorepo root from nimbus.json). */
   srcRoot?: string;
@@ -57,7 +59,30 @@ export interface InstallReport {
   skipped: string[];
   /** The kept files that differ from the registry. */
   kept: string[];
+  /** Components kept under `--overwrite` because they carry local edits (or
+   *  couldn't be compared) and nobody could be asked: no terminal, no `--yes`. */
+  keptUnasked: KeptComponent[];
+  /** Components kept under `--overwrite` because the user answered no. */
+  keptDeclined: KeptComponent[];
+  /** Under `--overwrite --yes`: replaced files that carried local edits, and
+   *  replaced files whose edits couldn't be checked. */
+  replacedEdited: number;
+  replacedUncompared: number;
   npmDepsInstalled: string[];
+}
+
+export interface KeptComponent {
+  slug: string;
+  /** Project-relative paths of the kept files. */
+  files: string[];
+  /** `edited`: differs from the version the site installed or came with;
+   *  `unknown`: no install record and the starter release couldn't be read. */
+  reason: "edited" | "unknown";
+}
+
+/** Prompts render on stdout and read stdin; both must be terminals. */
+function interactive(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
 export async function installComponents(
@@ -70,6 +95,10 @@ export async function installComponents(
     upToDate: [],
     skipped: [],
     kept: [],
+    keptUnasked: [],
+    keptDeclined: [],
+    replacedEdited: 0,
+    replacedUncompared: 0,
     npmDepsInstalled: [],
   };
 
@@ -114,39 +143,65 @@ export async function installComponents(
       continue;
     }
 
-    // `--overwrite` replaces every conflicting file across the tree — the
+    // `--overwrite` replaces every differing file across the tree — the
     // explicit upgrade path. Without it we never clobber an owned file.
     // Missing files are always written; declining only keeps existing ones.
+    //
+    // Under `--overwrite`, files the user edited since install are the only
+    // thing worth a question. In a terminal we ask; with `--yes` we replace and
+    // say how many carried edits; with neither (an agent, CI, a pipe) there is
+    // nobody to ask, so we keep them, list them with the commands that replace
+    // them, and exit 1. A prompt we can't show fails closed, never open.
     let keep = false;
-    const edits =
-      conflicts.length > 0 && options.overwrite && !options.yes && process.stdin.isTTY
-        ? await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
-            files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
-            baseline: options.starter ?? null,
-          })
-        : "none";
-    if (edits !== "none") {
-      // `--overwrite` replaces upstream changes freely, but asks before
-      // discarding edits made since the item was installed.
-      const replace = await p.confirm({
-        message:
-          `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
-          `Replace these files?\n${conflicts.map((f) => `  ${f.targetRel}`).join("\n")}`,
-        initialValue: false,
-      });
-      if (p.isCancel(replace)) {
-        p.cancel("Cancelled.");
-        process.exit(0);
+    const tty = interactive();
+    if (conflicts.length > 0 && options.overwrite) {
+      // With `--yes` the record hash is free to check; without a record we
+      // don't fetch the starter release just to count, so those files are
+      // reported as "could not be compared".
+      const hasRecord = Boolean(options.recorded?.get(item.name)?.hash);
+      const edits =
+        options.yes && !hasRecord
+          ? "unknown"
+          : await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
+              files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
+              baseline: options.starter ?? null,
+            });
+      const files = conflicts.map((f) => f.targetRel);
+      if (edits === "none") {
+        // Upstream changed, the user didn't: replace freely.
+      } else if (options.yes) {
+        if (edits === "edited") report.replacedEdited += conflicts.length;
+        else report.replacedUncompared += conflicts.length;
+      } else if (tty) {
+        // `--overwrite` replaces upstream changes freely, but asks before
+        // discarding edits made since the item was installed.
+        const replace = await p.confirm({
+          message:
+            `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
+            `Replace these files?\n${files.map((f) => `  ${f}`).join("\n")}`,
+          initialValue: false,
+        });
+        if (p.isCancel(replace)) {
+          p.cancel("Cancelled.");
+          process.exit(0);
+        }
+        if (!replace) {
+          keep = true;
+          report.keptDeclined.push({ slug: item.name, files, reason: edits });
+        }
+      } else {
+        keep = true;
+        report.keptUnasked.push({ slug: item.name, files, reason: edits });
+        process.exitCode = 1;
       }
-      if (!replace) keep = true;
     } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
       // their copy when present unless an explicit upgrade asks to replace it.
-      if (conflicts.length > 0 && !options.overwrite) keep = true;
-    } else if (conflicts.length > 0 && !options.overwrite) {
+      if (conflicts.length > 0) keep = true;
+    } else if (conflicts.length > 0) {
       // Non-interactive (or `--yes`): keep the user's files. `--yes` is assent
       // to prompts, not permission to clobber — `--overwrite` does that.
-      if (options.yes || !process.stdin.isTTY) keep = true;
+      if (options.yes || !tty) keep = true;
 
       const n = conflicts.length;
       const message = `${item.name}: ${n} file${n === 1 ? " differs" : "s differ"} from the registry. Overwrite ${n === 1 ? "it" : "them"}?`;

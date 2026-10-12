@@ -20,6 +20,7 @@ import {
   resolveAudience,
   type ProjectionContext,
 } from "./projection.js";
+import { loadEmptyCollections } from "./runtime-config.js";
 
 /** Primary collection name. Hard-coded — see also `getDocsStaticPaths`. */
 const PRIMARY_COLLECTION = "docs";
@@ -107,6 +108,13 @@ async function loadVisibleEntries<C extends CollectionKey>(
   const cacheKey = `${name}::${audienceCacheKey(resolveAudience(ctx))}`;
   const cached = visibleEntriesByName.get(cacheKey) as CollectionEntry<C>[] | undefined;
   if (cached) return cached;
+  // A partial build's empty collections are known to be empty; asking Astro
+  // would log "does not exist or is empty" on every static-path and
+  // request-time read.
+  if ((await loadEmptyCollections()).includes(name)) {
+    visibleEntriesByName.set(cacheKey, []);
+    return [];
+  }
   const { getCollection } = await import("astro:content");
   const all = await getCollection(name).catch(
     () => [] as CollectionEntry<C>[],

@@ -12,6 +12,7 @@
 
 import {
   loadApiCollections,
+  loadEmptyCollections,
   loadIndexedCollections,
   loadNimbusConfig,
   loadVersionAlternates,
@@ -344,6 +345,9 @@ export async function getIndexedEntries(
   // configured API collections. Read from the build's registry record via
   // `virtual:nimbus/config` — a site with none indexes nothing.
   const names = await loadIndexedCollections();
+  // A partial build's empty collections: skipped here rather than asked of
+  // Astro, which would warn "does not exist or is empty" per call.
+  const empty = new Set(await loadEmptyCollections());
   const versions = await getVersions();
   // Query-mode API families: discovery is default-only. Non-default entries
   // have no URLs of their own (their store ids are not routes), so they stay
@@ -363,7 +367,9 @@ export async function getIndexedEntries(
       await import("./_internal/api/page-assets-runtime.js");
     const { entries, warning } = (await hasApiPageAssets(name))
       ? { entries: await getApiAssetEntries(name), warning: undefined }
-      : await loadCollectionOrWarn<
+      : empty.has(name)
+        ? { entries: [], warning: undefined }
+        : await loadCollectionOrWarn<
       import("astro:content").CollectionEntry<string>
     >(name, (n) => getCollection(n as any));
     if (warning) runtimeWarn(warning);

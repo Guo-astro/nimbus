@@ -51,6 +51,13 @@ export interface VirtualConfigExtras {
    * content sync, so it waits for loads still in progress.
    */
   getIndexedCollections: () => Promise<readonly string[]>;
+  /**
+   * Page collections a partial build (`NIMBUS_BUILD_ONLY`) left empty on
+   * purpose. The indexed-entry path skips them instead of asking Astro,
+   * which would warn once per collection on every request-rendered
+   * request. Empty in a full build and in dev.
+   */
+  getEmptyCollections?: () => Promise<readonly string[]>;
   requestRenderingCollections: string[];
   /**
    * Build-time alternates table for cross-version SEO links. Empty `{}`
@@ -115,11 +122,13 @@ export function virtualConfigPlugin(
     async load(id: string) {
       if (id === RESOLVED_ID) {
         const indexedCollections = await extras.getIndexedCollections();
+        const emptyCollections = (await extras.getEmptyCollections?.()) ?? [];
         return (
           `export const config = ${JSON.stringify(runtimeConfig)};\n` +
           `export const pageAssets = ${JSON.stringify(extras.getPageAssets?.() ?? {})};\n` +
           `export const navLists = ${JSON.stringify(extras.getNavLists?.() ?? {})};\n` +
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
+          `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +
           `export const versionAlternates = ${JSON.stringify(extras.versionAlternates)};\n` +
           `export const apiCollections = ${JSON.stringify(extras.apiCollections)};\n` +

@@ -76,6 +76,14 @@ import {
   type RouteTruth,
 } from "./lint/site-model.js";
 import { emittedFileRoutes } from "./_internal/emitted-routes.js";
+import {
+  BUILD_ONLY_ENV,
+  buildSliceProblem,
+  parseBuildOnly,
+  routeOwner,
+  setBuildSlice,
+} from "./_internal/build-slice.js";
+import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
 import { parseCollectionBases } from "./_internal/parse-content-collections.js";
 import {
@@ -579,6 +587,14 @@ export function nimbus(
   let sitemapBareRootUrl: string | null = null;
   let sitemapHasResolvedRootPage = false;
   let building = false;
+  // A partial build (`NIMBUS_BUILD_ONLY`): the collections it holds, or null
+  // for a full build. Read once at `astro:config:setup`; only `astro build`
+  // honours the variable.
+  let buildSliceForBuild: string[] | null = null;
+  let buildOnlyNoticePrinted = false;
+  // The previous build's route truth, read before `config:setup` invalidates
+  // it, so a slice build can check links into the other slices.
+  let priorRouteTruthForBuild: RouteTruth | null = null;
   // What `astro:build:setup` hashes into the sidebar's build id.
   let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
@@ -1023,6 +1039,23 @@ export function nimbus(
         // content/assets stay root-relative via their collection bases.
         const srcDir = fileURLToPath(astroConfig.srcDir);
         const projectRoot = fileURLToPath(astroConfig.root);
+        // `NIMBUS_BUILD_ONLY`: build one collection or a set. Only a build
+        // honours it; dev, sync and check serve the full site, with one
+        // notice so a job-level variable doesn't silently change what they do.
+        const buildOnly = parseBuildOnly(process.env[BUILD_ONLY_ENV]);
+        buildSliceForBuild = building ? buildOnly : null;
+        if (buildOnly && !building && !buildOnlyNoticePrinted) {
+          buildOnlyNoticePrinted = true;
+          logger.warn(
+            `${BUILD_ONLY_ENV} is set (${buildOnly.join(", ")}), but only \`astro build\` builds a slice; \`astro ${command}\` uses the whole site and ignores it.`,
+          );
+        }
+        setBuildSlice(astroConfig.root, buildSliceForBuild);
+        // A slice build checks links into the other slices against the
+        // previous build's routes, so read that file before it goes.
+        priorRouteTruthForBuild = buildSliceForBuild
+          ? (readRouteTruth(projectRoot).truth ?? null)
+          : null;
         // A build that fails must not leave the previous build's route truth
         // for `nimbus-docs lint` to check against, so invalidate it before
         // any setup work that can throw (and long before content sync).
@@ -2562,6 +2595,17 @@ export function nimbus(
                   pageAssetsBuild.getApiPageAssetManifest(projectRoot),
                 getNavLists: () => getApiNavListManifest(projectRoot),
                 getIndexedCollections: getPageCollectionsForBuild,
+                getEmptyCollections: async () => {
+                  // Only a slice build leaves page collections empty on
+                  // purpose. In dev the record changes under a running
+                  // server, so the list stays empty there.
+                  if (!buildSliceForBuild) return [];
+                  const snapshot = getPreparedMarkdownSnapshot(projectRoot);
+                  return (await getPageCollectionsForBuild()).filter((name) => {
+                    const record = snapshot?.collections.get(name);
+                    return record !== undefined && record.entries.size === 0;
+                  });
+                },
                 requestRenderingCollections: [...requestRenderingCollections],
                 versionAlternates,
                 apiCollections,
@@ -2820,6 +2864,8 @@ export function nimbus(
             "  export const config: NimbusConfig;",
             "  /** The page-collection list: collections made with Nimbus's helpers, plus API collections. See `getIndexedEntries()`. */",
             "  export const indexedCollections: readonly string[];",
+            "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
+            "  export const emptyCollections: readonly string[];",
             "  /** Collections whose canonical routes render on request. Build-only. */",
             "  export const requestRenderingCollections: readonly string[];",
             "  /** Build-time cross-version alternates table. See `getVersionAlternates()`. */",
@@ -3005,6 +3051,31 @@ export function nimbus(
         await runPostSyncPageChecks(logger);
       },
       "astro:build:start": async ({ logger }) => {
+        // A slice names page collections, which are a post-sync record, so
+        // this is the first hook that can check it. A mistyped name costs
+        // one content sync.
+        if (buildSliceForBuild) {
+          const pageCollections = await getPageCollectionsForBuild();
+          const problem = buildSliceProblem(buildSliceForBuild, {
+            pageCollections,
+            versionCollections: config.versions
+              ? [
+                  PRIMARY_COLLECTION,
+                  ...(config.versions.others ?? []).map((slug) => `docs-${slug}`),
+                ].filter((name) => pageCollections.includes(name))
+              : [],
+          });
+          if (problem) throw authorError(problem.message, problem.hint);
+          const outside = pageCollections.filter(
+            (name) => !buildSliceForBuild!.includes(name),
+          );
+          logger.info(
+            `building only ${buildSliceForBuild.join(", ")} (${BUILD_ONLY_ENV})` +
+              (outside.length > 0
+                ? `; ${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} empty in this build.`
+                : "."),
+          );
+        }
         // Content sync has run: every `api` entry must have been indexed by an
         // `apiCollection()` registered under the same key.
         if (apiCollectionsForBuild.length > 0) {
@@ -3443,6 +3514,21 @@ export function nimbus(
             ...requestRoutes,
             ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
           ],
+          slice: buildSliceForBuild
+            ? {
+                collections: buildSliceForBuild,
+                mounts: Object.fromEntries(
+                  (await getPageCollectionsForBuild()).map((name) => [
+                    name,
+                    collectionMountPrefix(
+                      name,
+                      config.versions ? { others: config.versions.others ?? [] } : null,
+                    ),
+                  ]),
+                ),
+                prior: priorRouteTruthForBuild,
+              }
+            : null,
           logger,
         });
         const { apiNavListFiles } = await import("./_internal/api/nav-list.js");
@@ -3520,7 +3606,18 @@ function materializeRouteTruth(input: {
     rules: RouteTruth["redirectRules"];
   };
   onDemandRoutes: readonly string[];
-  logger: { warn: (msg: string) => void };
+  /**
+   * A partial build: what it held, every page collection's mount, and the
+   * previous build's truth (null when there was none). The file then records
+   * the slice, and holds the previous build's routes for the collections
+   * outside it, so lint can still check links into the other slices.
+   */
+  slice: {
+    collections: readonly string[];
+    mounts: Record<string, string>;
+    prior: RouteTruth | null;
+  } | null;
+  logger: { warn: (msg: string) => void; info: (msg: string) => void };
 }): void {
   try {
     // A Set, because the sources overlap: a prerendered page is in both
@@ -3531,22 +3628,75 @@ function materializeRouteTruth(input: {
     for (const route of emittedFileRoutes(input.distDir, input.assetsDir)) {
       routes.add(route);
     }
+    const redirects = siteRedirects({
+      distDir: input.distDir,
+      file: input.redirects.file,
+      defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
+      logger: input.logger,
+    });
+    const redirectPages = normalizeRedirects(input.redirects.astro, input.base).redirects;
+
+    let sliceRecord: RouteTruth["slice"];
+    if (input.slice) {
+      const { collections, mounts, prior } = input.slice;
+      // Which collections' routes the file holds: the slice's own, plus
+      // whatever the previous file covered (everything, for a full build).
+      const covered = new Set(collections);
+      let fromPrior = 0;
+      if (prior) {
+        const priorCovered = new Set(prior.slice?.covered ?? Object.keys(mounts));
+        const fromOutside = (key: string) => {
+          const owner = routeOwner(key, mounts);
+          if (owner === undefined) return true;
+          return !collections.includes(owner) && priorCovered.has(owner);
+        };
+        for (const route of prior.knownRoutes) {
+          if (!fromOutside(route) || routes.has(route)) continue;
+          routes.add(route);
+          fromPrior++;
+        }
+        const seen = new Set(redirects.map((r) => r.from));
+        for (const r of prior.redirects) {
+          if (seen.has(r.from) || !fromOutside(routeKey(r.from))) continue;
+          redirects.push(r);
+          seen.add(r.from);
+        }
+        const seenPages = new Set(redirectPages.map((r) => r.from));
+        for (const r of prior.redirectPages) {
+          if (seenPages.has(r.from) || !fromOutside(routeKey(r.from))) continue;
+          redirectPages.push(r);
+          seenPages.add(r.from);
+        }
+        for (const name of priorCovered) covered.add(name);
+      }
+      sliceRecord = {
+        collections: [...collections],
+        mounts,
+        covered: Object.keys(mounts).filter((name) => covered.has(name)),
+      };
+      const uncovered = Object.keys(mounts).filter((name) => !covered.has(name));
+      input.logger.info(
+        `slice route truth: ${routes.size} routes` +
+          (prior ? ` (${fromPrior} from the previous build)` : " (no previous build)") +
+          (uncovered.length > 0
+            ? `; links into ${uncovered.join(", ")} will be skipped by lint.`
+            : "."),
+      );
+    }
 
     const truth: RouteTruth = {
       version: ROUTE_TRUTH_VERSION,
       base: input.base,
       knownRoutes: [...routes].sort(),
-      redirects: siteRedirects({
-        distDir: input.distDir,
-        file: input.redirects.file,
-        defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
-        logger: input.logger,
-      }),
-      redirectPages: normalizeRedirects(input.redirects.astro, input.base).redirects,
+      redirects,
+      redirectPages,
       redirectRules: input.redirects.rules,
       // Nimbus collections remain enumerable even when their HTML is rendered
       // on request, so broad opaque namespaces would only hide broken links.
       opaqueNamespaces: [],
+      ...(sliceRecord
+        ? { slice: sliceRecord, builtAt: new Date().toISOString() }
+        : {}),
     };
     const dir = path.join(input.projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });

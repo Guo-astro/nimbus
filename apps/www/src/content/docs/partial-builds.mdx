@@ -9,7 +9,7 @@ sidebar:
 
 A site with several locales or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice is a static site of its own; your host routes each slice's path prefix to it, so visitors see one hostname.
 
-The unit is a collection. A translation is a collection with its own route prefix, the API reference is a collection, and so is any part you keep separate, so "build one locale" and "build one part" are the same operation.
+The unit is a collection. A translation is a collection with its own route prefix, the API reference is a collection, and so is any part you keep separate, so "build one locale" and "build one part" are the same operation. Set the collections up first as you would without slices: a second locale is a [new collection](/registry#new-collection) with its own route and sidebar entry, an API is an [API reference](/api-reference).
 
 ## Build a slice
 
@@ -57,7 +57,7 @@ Deploy every slice's `dist/` as its own site, then route by path prefix on the h
 
 A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and come from the root slice, so a change there deploys the root slice.
 
-Any host that routes by prefix works. Three ways:
+Give every collection to exactly one slice: two deployments that both hold `api` would answer the same URLs. Any host that routes by prefix works. Three ways:
 
 **Cloudflare**, one Worker per slice with zone routes (`workers.dev` hostnames take no routes):
 
@@ -87,6 +87,8 @@ location /                { proxy_pass https://docs-root.internal; }
 
 **A static host with rewrites**, such as Netlify or Vercel: deploy each slice as its own site and add rewrites on the root site to the slice's deployment, for example `/docs-es/* https://docs-es.example.app/docs-es/:splat 200` in `_redirects`, or the equivalent `rewrites` entries in `vercel.json`, for the three prefixes.
 
+Each slice's `_headers` and `_redirects` cover that slice's files; hosts that don't read those files need the same rules in their own configuration, as for a whole-site build ([Docs for agents](/ai/docs-for-agents#agent-discovery)).
+
 ### Announce every sitemap
 
 `robots.txt` is yours (`src/pages/robots.txt.ts`), and search engines read sitemaps from it. Add one `Sitemap:` line per slice:
@@ -98,7 +100,31 @@ location /                { proxy_pass https://docs-root.internal; }
 
 ### Check a slice before it's live
 
-A slice's own deployment serves its own pages, so check them on that deployment's preview URL. The composition, links from one slice into another, needs the routing in front, so check it on a staging hostname with the same prefixes. One local server can't compose slices.
+A slice's own deployment serves its own pages, so check them on that deployment's preview URL. The composition, links from one slice into another, needs the routing in front: a staging hostname with the same prefixes, or locally, one static server per slice's `dist/` and a small router in front that applies the rule:
+
+```js title="scripts/compose.mjs"
+// node scripts/compose.mjs  →  http://localhost:8788, with each slice's
+// dist/ served by `npx serve -l <port> <dir>` (or any static server).
+import { createServer, request } from "node:http";
+
+const slices = [
+  { prefix: "/docs-es", port: 8791 },
+  { prefix: "/api", port: 8792 },
+];
+const root = 8790;
+
+createServer((req, res) => {
+  const path = new URL(req.url, "http://x").pathname;
+  const slice = slices.find(
+    ({ prefix }) => path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`/og${prefix}/`),
+  );
+  const upstream = request({ port: slice?.port ?? root, path: req.url, method: req.method, headers: req.headers }, (up) => {
+    res.writeHead(up.statusCode ?? 502, up.headers);
+    up.pipe(res);
+  });
+  req.pipe(upstream);
+}).listen(8788);
+```
 
 ## Search across slices
 

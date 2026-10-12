@@ -23,7 +23,8 @@ interface PagefindFilters {
 
 interface PagefindApi {
   init(): Promise<void>;
-  mergeIndex(indexPath: string): Promise<void>;
+  options(options: { baseUrl?: string }): Promise<void>;
+  mergeIndex(indexPath: string, options?: { baseUrl?: string }): Promise<void>;
   search(query: string, options?: { filters?: PagefindFilters }): Promise<PagefindSearchResponse>;
 }
 
@@ -67,12 +68,18 @@ export const provider: SearchProvider = {
     // `/pagefind/pagefind.js`.
     const pagefindUrl = new URL(withBase(`${searchIndex.bundle}pagefind.js`), window.location.origin);
     const loaded = (await import(/* @vite-ignore */ pagefindUrl.href)) as PagefindApi;
+    // Every index is built from the site root, so result URLs already carry
+    // their prefix; a bundle served from under a prefix must not add it again.
+    const baseUrl = withBase("/");
+    await loaded.options({ baseUrl });
     await loaded.init();
     // A slice that holds several collections writes one bundle; the other
     // collections' URLs answer 404 and are skipped.
     await Promise.all(
       searchIndex.merge.map((bundle) =>
-        loaded.mergeIndex(new URL(withBase(bundle), window.location.origin).href).catch(() => undefined),
+        loaded
+          .mergeIndex(new URL(withBase(bundle), window.location.origin).href, { baseUrl })
+          .catch(() => undefined),
       ),
     );
     pagefind = loaded;

@@ -850,7 +850,14 @@ function siteIndexAsset(
     ...(options.fullDocument === false
       ? []
       : [
-          `Full documentation (discoverable current pages, ${fullSplit ? "split by section" : "one document"}): ${absoluteUrl(options.site, options.base, "/llms-full.txt")}`,
+          `Full documentation${options.absentSections?.length ? " of this part" : ""} (discoverable current pages, ${fullSplit ? "split by section" : "one document"}): ${absoluteUrl(options.site, options.base, "/llms-full.txt")}`,
+          ...(options.absentSections?.length
+            ? [
+                `Other parts have their own: ${options.absentSections
+                  .map((section) => absoluteUrl(options.site, options.base, `/${section.slug}/llms-full.txt`))
+                  .join(", ")}`,
+              ]
+            : []),
           "",
         ]),
     "## Pages",

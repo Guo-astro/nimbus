@@ -27,7 +27,7 @@ const WHOLE_SITE = { bundle: "/pagefind/", merge: [] };
 async function pagefindUrlFor(
   base: string,
   searchIndex: { bundle: string; merge: string[] } = WHOLE_SITE,
-): Promise<{ loaded: string; merged: string[] }> {
+): Promise<{ loaded: string; merged: string[]; baseUrls: string[] }> {
   const source = fs
     .readFileSync(PROVIDER, "utf8")
     .replace(
@@ -44,6 +44,7 @@ async function pagefindUrlFor(
   const globals = globalThis as Globals;
   let loaded = "";
   const merged: string[] = [];
+  const baseUrls: string[] = [];
   Object.assign(globals, {
     __config: {},
     __searchIndex: searchIndex,
@@ -52,8 +53,12 @@ async function pagefindUrlFor(
       loaded = href;
       return {
         init: async () => {},
-        mergeIndex: async (href: string) => {
+        options: async (options: { baseUrl?: string }) => {
+          if (options.baseUrl) baseUrls.push(options.baseUrl);
+        },
+        mergeIndex: async (href: string, options?: { baseUrl?: string }) => {
           merged.push(href);
+          if (options?.baseUrl) baseUrls.push(options.baseUrl);
         },
         search: async () => ({ results: [] }),
       };
@@ -63,7 +68,7 @@ async function pagefindUrlFor(
   try {
     const { provider } = (await import(pathToFileURL(file).href)) as { provider: { init(): Promise<void> } };
     await provider.init();
-    return { loaded, merged };
+    return { loaded, merged, baseUrls };
   } finally {
     delete globals.__config;
     delete globals.__searchIndex;
@@ -79,6 +84,7 @@ test("search loads Pagefind below the site's base, with or without a trailing sl
   assert.equal((await pagefindUrlFor("/docs")).loaded, "https://example.com/docs/pagefind/pagefind.js");
   assert.equal((await pagefindUrlFor("/docs/")).loaded, "https://example.com/docs/pagefind/pagefind.js");
   assert.deepEqual((await pagefindUrlFor("/")).merged, [], "a whole-site build merges nothing");
+  assert.deepEqual((await pagefindUrlFor("/docs/")).baseUrls, ["/docs/"], "result URLs resolve under the base");
 });
 
 
@@ -89,4 +95,9 @@ test("a slice build loads its own bundle and merges the other slices' bundles", 
   });
   assert.equal(loaded, "https://example.com/docs-es/pagefind/pagefind.js");
   assert.deepEqual(merged, ["https://example.com/pagefind/", "https://example.com/api/pagefind/"]);
+});
+
+test("a slice's results resolve from the site root, not from under the slice's bundle", async () => {
+  const { baseUrls } = await pagefindUrlFor("/", { bundle: "/docs-es/pagefind/", merge: ["/pagefind/"] });
+  assert.deepEqual(baseUrls, ["/", "/"], "the slice's own index and the merged one both resolve at /");
 });

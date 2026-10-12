@@ -51,6 +51,7 @@ test("only universally skippable entries are optional", () => {
       "math-rendering",
       "nested-llms-scopes",
       "page-actions-out-of-search",
+      "page-not-found-head",
       "page-urls-and-llms-routes",
       "publish-agent-skills",
       "shared-markdown-routes",

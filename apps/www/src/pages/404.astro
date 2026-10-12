@@ -2,14 +2,13 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { LinkButton } from "@/components/ui/link-button";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
-import { config } from "virtual:nimbus/config";
 
 const homeHref = withBase("/", import.meta.env.BASE_URL);
 const componentsHref = withBase("/components", import.meta.env.BASE_URL);
 ---
 
 <BaseLayout
-  title={`404 — Page not found · ${config.title}`}
+  title="Page not found"
   description="The page you are looking for does not exist or has moved."
   noindex
 >

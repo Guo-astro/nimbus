@@ -67,6 +67,14 @@ export interface VirtualConfigExtras {
   headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
+    /** Generated OG cards: their paths and fixed size. */
+    ogCard: {
+      sitePath: string;
+      pagePrefix: string;
+      size: { width: number; height: number };
+    };
+    /** Sizes of social images measured in `public/`, by logical path. */
+    imageSizes: Record<string, { width: number; height: number }>;
   };
   /**
    * The file whose edits change the page-collection list. In dev an edit

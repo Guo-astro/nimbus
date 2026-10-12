@@ -36,6 +36,8 @@ declare module "virtual:nimbus/config" {
   export const headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
+    ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } };
+    imageSizes: Record<string, { width: number; height: number }>;
   };
 }
 

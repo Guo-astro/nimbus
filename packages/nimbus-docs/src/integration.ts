@@ -177,9 +177,13 @@ import {
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
 import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
+import { OG_CARD } from "./_internal/page-urls.js";
+import { measureSocialImages } from "./_internal/social-image-size.js";
+import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
+import { isSitemapRoutePattern, sitemapAliasIntegration } from "./_internal/sitemap-alias.js";
 import { setMarkdownFeatures } from "./_internal/markdown-features.js";
 import { MATH_PLUGIN } from "./markdown/math.js";
-import { buildLastUpdatedIndex } from "./_internal/git-last-updated.js";
+import { loadLastUpdatedIndex } from "./_internal/git-last-updated.js";
 import { virtualLastUpdatedPlugin } from "./_internal/last-updated-virtual.js";
 import {
   markdownRoutesPlugin,
@@ -1356,6 +1360,14 @@ export function nimbus(
           : fs.existsSync(path.join(publicDir, "logo.png"))
             ? "/logo.png"
             : "/og.png";
+        // `og:image:width`/`height` are written only when they describe the
+        // image: measured here for files in `public/`, fixed for the
+        // generated cards, and otherwise left out (see `NimbusHead`).
+        const socialImageSizes = await measureSocialImages({
+          publicDir,
+          paths: [config.socialImage, defaultSocialImage],
+          warn: (message) => logger.warn(message),
+        });
 
         // Resolve `site` from platform env when it's still a placeholder, before
         // anything reads it. Mutating the validated config propagates the origin
@@ -2210,11 +2222,20 @@ export function nimbus(
             // and drops on any falsy return (so `null` is correct at
             // runtime). The values are identical — the gap is purely nominal,
             // so cast at this boundary.
-            ...(sitemapOpts?.serialize && {
-              serialize: sitemapOpts.serialize as unknown as NonNullable<
-                Parameters<typeof sitemap>[0]
-              >["serialize"],
-            }),
+            // `lastmod` from each page's frontmatter or git, then the site's
+            // own `serialize`, which may change or drop it.
+            serialize: createSitemapSerialize({
+              sources: () =>
+                sitemapSources({
+                  snapshot: getPreparedMarkdownSnapshot(projectRoot),
+                  base: astroConfig.base || "/",
+                  versions: config.versions ?? null,
+                }),
+              dates: () => lastUpdatedByPath,
+              serialize: sitemapOpts?.serialize,
+            }) as unknown as NonNullable<
+              Parameters<typeof sitemap>[0]
+            >["serialize"],
             ...((sitemapOpts?.customPages || requestRenderingConfigured) && {
               customPages: sitemapCustomPages,
             }),
@@ -2229,6 +2250,14 @@ export function nimbus(
             },
           });
           integrationsToAdd.push(sitemapIntegration);
+          integrationsToAdd.push(
+            sitemapAliasIntegration({
+              hasOwnSitemapRoute: () =>
+                resolvedRoutesForBuild.some((route) =>
+                  isSitemapRoutePattern(route.pattern),
+                ),
+            }),
+          );
         }
 
         const admonitionOptions: AdmonitionOptions | undefined =
@@ -2251,9 +2280,21 @@ export function nimbus(
           path.isAbsolute(d) ? d : path.join(projectRoot, d),
         );
         const authoredLinkSourceDirs = [srcDir];
-        const lastUpdatedByPath = requestRenderingConfigured
-          ? await buildLastUpdatedIndex(projectRoot)
-          : null;
+        // One `git log` per build. Request rendering needs the dates at
+        // runtime; a production build with a sitemap needs them for
+        // `lastmod`, and prerendered pages then read the same map instead of
+        // running their own pass.
+        let lastUpdatedByPath: Record<string, string> | null = null;
+        if (requestRenderingConfigured || (command === "build" && wantSitemap)) {
+          const index = await loadLastUpdatedIndex(projectRoot);
+          lastUpdatedByPath = index.dates;
+          if (index.shallow && command === "build") {
+            logger.info(
+              "nimbus: this is a shallow clone, so pages get no git dates (sitemap lastmod, " +
+                '"Last updated"). Run git fetch --unshallow, or set fetch-depth: 0 in CI, to restore them.',
+            );
+          }
+        }
 
         const markdownProcessor =
           admonitionOptions && !mdxOptions.processor
@@ -2525,7 +2566,12 @@ export function nimbus(
                 requestRenderingCollections: [...requestRenderingCollections],
                 versionAlternates,
                 apiCollections,
-                headDefaults: { favicon, socialImage: defaultSocialImage },
+                headDefaults: {
+                  favicon,
+                  socialImage: defaultSocialImage,
+                  ogCard: OG_CARD,
+                  imageSizes: socialImageSizes,
+                },
                 contentConfigPath,
               }),
               ...(options.icons !== false
@@ -2782,7 +2828,7 @@ export function nimbus(
             "  /** Subset of `indexedCollections` that are OpenAPI reference collections. Server-only. */",
             "  export const apiCollections: readonly string[];",
             "  /** Build-time defaults derived from Astro's public directory. */",
-            "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string };",
+            "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string; ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } }; imageSizes: Record<string, { width: number; height: number }> };",
             "}",
             "",
           ].join("\n"),

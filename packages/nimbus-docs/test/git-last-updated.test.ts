@@ -16,6 +16,7 @@ import {
   buildLastUpdatedIndex,
   getLastUpdatedFromGit,
   getLastUpdatedStats,
+  loadLastUpdatedIndex,
   parseGitLog,
 } from "../src/_internal/git-last-updated.js";
 
@@ -154,4 +155,28 @@ test("e2e: untracked file → undefined, miss counted, no throw", async () => {
 
 test("e2e: empty filePath short-circuits to undefined", async () => {
   assert.equal(await getLastUpdatedFromGit(""), undefined);
+});
+
+// --- shallow clones --------------------------------------------------------
+
+test("e2e: a shallow clone yields no dates at all, by design", async () => {
+  const shallow = mkdtempSync(join(tmpdir(), "nimbus-git-shallow-"));
+  try {
+    execFileSync("git", ["clone", "-q", "--depth", "1", `file://${repo}`, shallow], { stdio: "pipe" });
+    // The build's one pass reports the clone and carries no dates.
+    const index = await loadLastUpdatedIndex(shallow);
+    assert.deepEqual(index, { dates: {}, shallow: true });
+    assert.deepEqual(await buildLastUpdatedIndex(shallow), {});
+    // The lazy fallback (dev, no prepared index) follows the same rule.
+    process.chdir(shallow);
+    __resetLastUpdatedForTests();
+    assert.equal(await getLastUpdatedFromGit("src/content/docs/guide/page.mdx"), undefined);
+    const stats = getLastUpdatedStats();
+    assert.equal(stats.isShallow, true);
+    assert.equal(stats.bulkLoaded, true);
+    assert.equal(stats.bulkCount, 0);
+  } finally {
+    process.chdir(repo);
+    rmSync(shallow, { recursive: true, force: true });
+  }
 });

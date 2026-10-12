@@ -53,6 +53,12 @@ export interface Props {
    * if it exists in `public/`, otherwise `/og.png`.
    */
   socialImage?: string;
+  /**
+   * Pixel size of `socialImage`, for `og:image:width`/`height`. Without it,
+   * the size is known for Nimbus's generated cards and for images measured
+   * in `public/`; any other image gets no size tags.
+   */
+  socialImageSize?: { width: number; height: number };
   /** Drives `<meta property="article:modified_time">` on non-home pages. */
   lastUpdated?: Date;
   /** Per-page head extras, appended after `config.head`. */
@@ -80,6 +86,7 @@ const {
   noindex,
   markdownUrl,
   socialImage,
+  socialImageSize,
   lastUpdated,
   head: pageHead = [],
   collection,
@@ -206,6 +213,19 @@ const ogImage = socialImagePath
     : withBase(socialImagePath, baseUrl)
   : null;
 const ogImageAlt = config.socialImageAlt;
+// Size precedence: the page's own, a file measured in `public/`, a generated
+// card, else none. A remote image, or a frontmatter image with no size, gets
+// no width/height rather than a wrong one.
+const { ogCard } = headDefaults;
+const isOgCard =
+  !!socialImagePath &&
+  (socialImagePath === ogCard.sitePath ||
+    (socialImagePath.startsWith(ogCard.pagePrefix) && socialImagePath.endsWith(".png")));
+const ogImageSize = socialImagePath
+  ? (socialImageSize ??
+    headDefaults.imageSizes[socialImagePath] ??
+    (isOgCard ? ogCard.size : null))
+  : null;
 
 const structuredData = canonical
   ? JSON.stringify({
@@ -277,8 +297,8 @@ const shikiCssHref = withBase(
 {hasSite && canonical && <meta property="og:url" content={canonical} />}
 {ogImage && <meta property="og:image" content={ogImage} />}
 {ogImage && ogImageAlt && <meta property="og:image:alt" content={ogImageAlt} />}
-{ogImage && <meta property="og:image:width" content="1200" />}
-{ogImage && <meta property="og:image:height" content="630" />}
+{ogImage && ogImageSize && <meta property="og:image:width" content={String(ogImageSize.width)} />}
+{ogImage && ogImageSize && <meta property="og:image:height" content={String(ogImageSize.height)} />}
 {!isHomePage && lastUpdated && (
   <meta property="article:modified_time" content={lastUpdated.toISOString()} />
 )}

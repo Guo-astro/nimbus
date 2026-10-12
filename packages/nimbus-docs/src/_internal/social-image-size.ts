@@ -25,6 +25,30 @@ export function isPublicImagePath(value: string): boolean {
   );
 }
 
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif"]);
+
+/**
+ * Logical paths (`/og/hero.png`) of every image file under `public/<dir>`.
+ * The generated cards live at `/og/<page>.png`, so a user's own file there
+ * must be measured rather than assumed to be a card.
+ */
+export function listPublicImages(publicDir: string, dir: string): string[] {
+  const root = path.resolve(publicDir, dir);
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return [];
+  const found: string[] = [];
+  const walk = (current: string) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(file);
+      else if (entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        found.push(`/${path.relative(path.resolve(publicDir), file).split(path.sep).join("/")}`);
+      }
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
 /** Width and height of an image file, or `null` when it can't be read as an image. */
 export async function measureImageFile(file: string): Promise<ImageSize | null> {
   try {

@@ -70,5 +70,10 @@ test("isSitemapRoutePattern: exactly /sitemap.xml", () => {
   assert.equal(isSitemapRoutePattern("/sitemap.xml/"), true);
   assert.equal(isSitemapRoutePattern("/sitemap-index.xml"), false);
   assert.equal(isSitemapRoutePattern("/docs/sitemap.xml"), false);
+  // a dynamic root .xml route would answer /sitemap.xml too
+  assert.equal(isSitemapRoutePattern("/[name].xml"), true);
+  assert.equal(isSitemapRoutePattern("/[...all].xml"), true);
+  assert.equal(isSitemapRoutePattern("/feeds/[name].xml"), false);
+  assert.equal(isSitemapRoutePattern("/[...slug]"), false);
   assert.equal(isSitemapRoutePattern("/[...slug]"), false);
 });

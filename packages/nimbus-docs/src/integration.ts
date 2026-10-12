@@ -178,12 +178,12 @@ import {
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
 import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
-import { measureSocialImages } from "./_internal/social-image-size.js";
+import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
 import { isSitemapRoutePattern, sitemapAliasIntegration } from "./_internal/sitemap-alias.js";
 import { setMarkdownFeatures } from "./_internal/markdown-features.js";
 import { MATH_PLUGIN } from "./markdown/math.js";
-import { loadLastUpdatedIndex } from "./_internal/git-last-updated.js";
+import { SHALLOW_CLONE_MESSAGE, loadLastUpdatedIndex } from "./_internal/git-last-updated.js";
 import { virtualLastUpdatedPlugin } from "./_internal/last-updated-virtual.js";
 import {
   markdownRoutesPlugin,
@@ -1362,10 +1362,12 @@ export function nimbus(
             : "/og.png";
         // `og:image:width`/`height` are written only when they describe the
         // image: measured here for files in `public/`, fixed for the
-        // generated cards, and otherwise left out (see `NimbusHead`).
+        // generated cards, and otherwise left out (see `NimbusHead`). A
+        // user's own file under `public/og/` shares the cards' path shape, so
+        // everything there is measured too.
         const socialImageSizes = await measureSocialImages({
           publicDir,
-          paths: [config.socialImage, defaultSocialImage],
+          paths: [config.socialImage, defaultSocialImage, ...listPublicImages(publicDir, "og")],
           warn: (message) => logger.warn(message),
         });
 
@@ -2289,10 +2291,7 @@ export function nimbus(
           const index = await loadLastUpdatedIndex(projectRoot);
           lastUpdatedByPath = index.dates;
           if (index.shallow && command === "build") {
-            logger.info(
-              "nimbus: this is a shallow clone, so pages get no git dates (sitemap lastmod, " +
-                '"Last updated"). Run git fetch --unshallow, or set fetch-depth: 0 in CI, to restore them.',
-            );
+            logger.info(`nimbus: ${SHALLOW_CLONE_MESSAGE}`);
           }
         }
 

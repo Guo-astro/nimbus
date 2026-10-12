@@ -21,9 +21,11 @@ export function shouldCopySitemapAlias(options: {
   return !fs.existsSync(path.join(options.outDir, SITEMAP_ALIAS_FILE));
 }
 
-/** A route pattern that serves `/sitemap.xml` itself. */
+/** A route pattern that serves `/sitemap.xml` itself: the exact path, or a
+ *  dynamic root `.xml` route such as `/[name].xml` that would answer it. */
 export function isSitemapRoutePattern(pattern: string): boolean {
-  return pattern.replace(/\/+$/u, "") === `/${SITEMAP_ALIAS_FILE}`;
+  const trimmed = pattern.replace(/\/+$/u, "");
+  return trimmed === `/${SITEMAP_ALIAS_FILE}` || /^\/\[[^/\]]+\]\.xml$/u.test(trimmed);
 }
 
 /** Runs after `@astrojs/sitemap` (added right behind it), so the index exists. */

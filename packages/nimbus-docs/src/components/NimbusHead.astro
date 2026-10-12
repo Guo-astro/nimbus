@@ -215,7 +215,8 @@ const ogImage = socialImagePath
 const ogImageAlt = config.socialImageAlt;
 // Size precedence: the page's own, a file measured in `public/`, a generated
 // card, else none. A remote image, or a frontmatter image with no size, gets
-// no width/height rather than a wrong one.
+// no width/height rather than a wrong one. Files under `public/og/` are
+// measured at setup, so only a path with no file behind it counts as a card.
 const { ogCard } = headDefaults;
 const isOgCard =
   !!socialImagePath &&

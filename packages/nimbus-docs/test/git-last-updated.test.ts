@@ -17,6 +17,7 @@ import {
   getLastUpdatedFromGit,
   getLastUpdatedStats,
   loadLastUpdatedIndex,
+  SHALLOW_CLONE_MESSAGE,
   parseGitLog,
 } from "../src/_internal/git-last-updated.js";
 
@@ -170,7 +171,17 @@ test("e2e: a shallow clone yields no dates at all, by design", async () => {
     // The lazy fallback (dev, no prepared index) follows the same rule.
     process.chdir(shallow);
     __resetLastUpdatedForTests();
-    assert.equal(await getLastUpdatedFromGit("src/content/docs/guide/page.mdx"), undefined);
+    // ...and says so once, since no build-time pass printed it.
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (message: string) => void warnings.push(String(message));
+    try {
+      assert.equal(await getLastUpdatedFromGit("src/content/docs/guide/page.mdx"), undefined);
+      assert.equal(await getLastUpdatedFromGit("src/content/docs/other.mdx"), undefined);
+    } finally {
+      console.warn = realWarn;
+    }
+    assert.deepEqual(warnings, [`[nimbus] ${SHALLOW_CLONE_MESSAGE}`]);
     const stats = getLastUpdatedStats();
     assert.equal(stats.isShallow, true);
     assert.equal(stats.bulkLoaded, true);

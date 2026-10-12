@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -16,6 +15,8 @@ import nimbus from "../src/index.js";
 import { __resetLastUpdatedForTests, getLastUpdatedStats } from "../src/_internal/git-last-updated.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
 import { pngBytes } from "./fixtures/png.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
+import { testAdapter } from "./fixtures/agent-site.js";
 
 const module = (file: string) =>
   JSON.stringify(pathToFileURL(path.resolve(import.meta.dirname, "../src", file)).href);
@@ -66,6 +67,7 @@ export const collections = { docs: defineCollection(docsCollection()) };
   await write("src/content/docs/card.mdx", "---\ntitle: Card\nsocialImage: /og/card.png\n---\nA generated card.\n");
   await write("src/content/docs/remote.mdx", "---\ntitle: Remote\nsocialImage: https://cdn.example/card.png\n---\nRemote.\n");
   await write("src/content/docs/unsized.mdx", "---\ntitle: Unsized\nsocialImage: /img/wide.png\n---\nNo size known.\n");
+  await write("src/content/docs/hero.mdx", "---\ntitle: Hero\nsocialImage: /og/hero.png\n---\nA file of our own under og/.\n");
 }
 
 function git(cwd: string, args: string[], date?: string) {
@@ -95,7 +97,7 @@ const lastmodOf = (sitemap: string, url: string) =>
   sitemap.match(new RegExp(`<url><loc>${url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</loc>(?:<lastmod>([^<]*)</lastmod>)?`))?.[1];
 
 async function withSite(prefix: string, run: (root: string, write: (file: string, body: string | Buffer) => Promise<void>) => Promise<void>) {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), prefix)));
+  const root = await realpath(await mkdtemp(path.join(TEST_TMP, prefix)));
   const write = async (file: string, body: string | Buffer) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body);
@@ -111,6 +113,7 @@ async function withSite(prefix: string, run: (root: string, write: (file: string
 test("head and sitemap: measured og:image sizes, 404 noindex, lastmod, /sitemap.xml", { timeout: 180_000 }, async () => {
   await withSite("nimbus-head-", async (root, write) => {
     await write("public/og4.png", pngBytes(987, 555));
+    await write("public/og/hero.png", pngBytes(800, 800));
     commitAll(root);
     __resetLastUpdatedForTests();
     await build({
@@ -138,6 +141,11 @@ test("head and sitemap: measured og:image sizes, 404 noindex, lastmod, /sitemap.
     assert.equal(ogImage(card), "https://example.test/og/card.png");
     assert.equal(ogWidth(card), "1200");
     assert.equal(ogHeight(card), "630");
+    // a user's own file under public/og/ is measured, not assumed to be a card
+    const hero = await dist("hero/index.html");
+    assert.equal(ogImage(hero), "https://example.test/og/hero.png");
+    assert.equal(ogWidth(hero), "800");
+    assert.equal(ogHeight(hero), "800");
     // a remote image, or a frontmatter image with no size: no width/height
     for (const page of ["remote/index.html", "unsized/index.html"]) {
       const html = await dist(page);
@@ -224,5 +232,34 @@ test("sitemap off: no alias; an unreadable social image builds without sizes", {
     assert.equal(ogWidth(home), undefined);
     assert.equal(existsSync(path.join(root, "dist", "sitemap-index.xml")), false);
     assert.equal(existsSync(path.join(root, "dist", "sitemap.xml")), false);
+  });
+});
+
+test("server output: the alias lands in the client dir; a public/ sitemap.xml is kept", { timeout: 180_000 }, async () => {
+  await withSite("nimbus-head-server-", async (root, write) => {
+    await write("public/sitemap.xml", "<mine/>");
+    await write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+    commitAll(root);
+    __resetLastUpdatedForTests();
+    await build({
+      root: pathToFileURL(root + path.sep),
+      configFile: false,
+      cacheDir: path.join(root, ".astro"),
+      outDir: "./dist",
+      build: { server: path.join(root, ".server"), client: path.join(root, "dist") },
+      vite: { cacheDir: path.join(root, ".vite") },
+      output: "server",
+      adapter: testAdapter(path.join(root, "server-entry.mjs")),
+      logLevel: "silent",
+      integrations: [nimbus({ site: "https://example.test", title: "Example", search: false }, { icons: false })],
+    });
+    const dist = (file: string) => readFile(path.join(root, "dist", file), "utf8");
+    assert.equal(await dist("sitemap.xml"), "<mine/>", "the site's own file is kept");
+    assert.ok(existsSync(path.join(root, "dist", "sitemap-index.xml")));
+    const sitemap = await dist("sitemap-0.xml");
+    assert.equal(lastmodOf(sitemap, "https://example.test/guides/setup/"), "2023-06-02T11:00:00.000Z");
+    const notFound = await dist("404.html");
+    assert.equal(title(notFound), "Page not found | Example");
+    assert.match(notFound, /<meta name="robots" content="noindex">/);
   });
 });

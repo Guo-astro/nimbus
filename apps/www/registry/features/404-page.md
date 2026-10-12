@@ -54,7 +54,7 @@ import { withBase } from "@cloudflare/nimbus-docs/runtime";
 const homeHref = withBase("/", import.meta.env.BASE_URL);
 ---
 
-<BaseLayout title="404 — Page not found">
+<BaseLayout title="Page not found" noindex>
   <section class="mx-auto flex max-w-2xl flex-col items-start gap-6 py-24">
     <p class="text-sm font-mono text-muted-foreground">404</p>
     <h1 class="text-3xl font-semibold tracking-tight">Page not found</h1>
@@ -66,7 +66,7 @@ const homeHref = withBase("/", import.meta.env.BASE_URL);
 </BaseLayout>
 ```
 
-Adapt this to whatever the actual layout's props look like. If `BaseLayout` does not accept a `title` prop, drop it. If the project's pages use a different content wrapper, match that.
+Adapt this to whatever the actual layout's props look like. If `BaseLayout` does not accept a `title` prop, drop it; if it has no `noindex` prop, add `<meta name="robots" content="noindex">` to the page's head instead. Keep the title plain: the layout appends the site name, so `"Page not found"` renders as `Page not found | <site>`. If the project's pages use a different content wrapper, match that.
 
 ## 4. Verification
 

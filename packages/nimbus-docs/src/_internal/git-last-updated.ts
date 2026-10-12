@@ -143,9 +143,14 @@ export async function buildLastUpdatedIndex(
   return (await loadLastUpdatedIndex(cwd)).dates;
 }
 
+export const SHALLOW_CLONE_MESSAGE =
+  "this is a shallow clone, so pages get no git dates (sitemap lastmod, " +
+  '"Last updated"). Run git fetch --unshallow, or set fetch-depth: 0 in CI, to restore them.';
+
 async function doBulkLoad(): Promise<void> {
   try {
     isShallow = await detectShallow();
+    if (isShallow) runtimeWarn(SHALLOW_CLONE_MESSAGE);
     if (!isShallow) await streamBulk();
     bulkLoaded = true;
     bulkCount = cache.size;

@@ -951,6 +951,12 @@ export interface BasePageProps {
    */
   socialImage?: string;
   /**
+   * Pixel size of `socialImage`, for `og:image:width`/`height`, when it's an
+   * image Nimbus can't measure (a remote URL, a per-page file). Generated
+   * cards and files in `public/` referenced by the config are sized already.
+   */
+  socialImageSize?: { width: number; height: number };
+  /**
    * ISO date for `article:modified_time`. Today this is sourced from
    * frontmatter `lastUpdated`; a future git-based source can populate the
    * same prop without touching the layout.

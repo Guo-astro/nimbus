@@ -212,7 +212,7 @@ const hasPagination = Astro.slots.has("pagination");
                     {capabilities.mcpUrl ? (
                       <div class:list={["not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", description ? undefined : "mt-3"]}>
                         <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class="ml-0" />
-                        {(markdownUrl || lastUpdated) && <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>}
+                        {(markdownUrl || lastUpdated) && <span aria-hidden="true" class="hidden select-none text-muted-foreground/40 sm:inline">|</span>}
                         <ConnectMcp />
                       </div>
                     ) : (

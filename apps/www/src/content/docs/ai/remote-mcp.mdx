@@ -59,13 +59,13 @@ A page or content entry at either path fails the build, since the server would h
 
 ## The tools
 
-**`list_pages`** returns pages with their `title`, `url`, `markdownUrl`, `description`, `section` and `version`, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; a root content page is `index`), or by one `version` from the site's `versions` manifest. A `version` filter returns that version's docs pages only; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
+**`list_pages`** returns pages with their `title`, `url`, `markdownUrl` and `section`, plus `description` and `version` when the page has them, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; a root content page is `index`), or by one `version` from the site's `versions` manifest. A `version` filter returns that version's docs pages only; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
 
 ```json
 { "section": "guide" }
 ```
 
-**`get_page`** returns one page as Markdown: `{ "title", "url", "markdownUrl", "content" }`. Pass the `url` that `list_pages` returned, or a site-relative path such as `/guide/`. Pages over about 100,000 characters are cut with `"truncated": true`; the `markdownUrl` serves the whole page.
+**`get_page`** returns one page as Markdown: `{ "title", "url", "markdownUrl", "content" }`. Pass the `url` that `list_pages` returned, or a site-relative path such as `/guide/`; only the path of an absolute URL is used. Pages over about 100,000 characters are cut with `"truncated": true`; the `markdownUrl` serves the whole page.
 
 ```json
 { "url": "https://docs.example.com/guide/" }
@@ -101,6 +101,8 @@ A site made before the action existed can add the two starter files:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/connect-mcp.client.ts --apply" />
 
+`diff` needs a site on a released version. Otherwise, copy both files from a newly scaffolded site.
+
 Then in `src/layouts/DocsLayout.astro`, render it after `<PageActions />` when the server is on, in one row:
 
 ```astro title="src/layouts/DocsLayout.astro"
@@ -112,7 +114,7 @@ import { capabilities } from "virtual:nimbus/agent-capabilities";
 {capabilities.mcpUrl ? (
   <div class:list={["not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", description ? undefined : "mt-3"]}>
     <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class="ml-0" />
-    {(markdownUrl || lastUpdated) && <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>}
+    {(markdownUrl || lastUpdated) && <span aria-hidden="true" class="hidden select-none text-muted-foreground/40 sm:inline">|</span>}
     <ConnectMcp />
   </div>
 ) : (

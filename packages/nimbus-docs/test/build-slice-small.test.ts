@@ -94,6 +94,23 @@ test("an unknown collection fails the build naming the site's page collections",
   }
 });
 
+test("a slice build fails when the site is deployed under a base", async () => {
+  const site = await sliceSite({ pages: PAGES });
+  try {
+    await assert.rejects(
+      withBuildOnly("docs-es", () => build({ ...site.config, base: "/docs" })),
+      /NIMBUS_BUILD_ONLY builds a site deployed at "\/", but astro\.config sets base to "\/docs"\./,
+    );
+    // The same site builds whole under the base, and in a slice at the root.
+    await withBuildOnly(null, () => build({ ...site.config, base: "/docs" }));
+    assert.ok(existsSync(path.join(site.root, `dist/docs-es/${site.corpus.es[0]!.slug}/index.html`)));
+    await withBuildOnly("docs-es", () => build(site.config));
+    assert.equal((await htmlPaths(site)).length, PAGES);
+  } finally {
+    await site.remove();
+  }
+});
+
 test("a slice with docs but not docs-v1 fails on a versioned site", async () => {
   const site = await sliceSite({ pages: PAGES, versions: true });
   try {

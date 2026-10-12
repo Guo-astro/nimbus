@@ -1,5 +1,5 @@
 import type { SearchProvider, SearchResult } from "@cloudflare/nimbus-docs/types";
-import { config } from "virtual:nimbus/config";
+import { config, searchIndex } from "virtual:nimbus/config";
 
 interface PagefindSubResult {
   title?: string;
@@ -23,6 +23,7 @@ interface PagefindFilters {
 
 interface PagefindApi {
   init(): Promise<void>;
+  mergeIndex(indexPath: string): Promise<void>;
   search(query: string, options?: { filters?: PagefindFilters }): Promise<PagefindSearchResponse>;
 }
 
@@ -58,11 +59,23 @@ const defaultFilters: PagefindFilters | undefined =
 export const provider: SearchProvider = {
   async init() {
     if (pagefind) return;
-    // Not `new URL("pagefind/pagefind.js", BASE_URL)`: with `base: "/docs"`
-    // (no trailing slash) that resolves to `/pagefind/pagefind.js`.
-    const pagefindUrl = new URL(withBase("/pagefind/pagefind.js"), window.location.origin);
-    pagefind = (await import(/* @vite-ignore */ pagefindUrl.href)) as PagefindApi;
-    await pagefind.init();
+    // `searchIndex.bundle` is `/pagefind/` for a whole-site build; a site
+    // built in slices (`NIMBUS_BUILD_ONLY`) keeps each slice's bundle under
+    // its prefix, and `merge` names the other slices' bundles, so one search
+    // box still covers the site. Not `new URL("pagefind/pagefind.js",
+    // BASE_URL)`: with `base: "/docs"` (no trailing slash) that resolves to
+    // `/pagefind/pagefind.js`.
+    const pagefindUrl = new URL(withBase(`${searchIndex.bundle}pagefind.js`), window.location.origin);
+    const loaded = (await import(/* @vite-ignore */ pagefindUrl.href)) as PagefindApi;
+    await loaded.init();
+    // A slice that holds several collections writes one bundle; the other
+    // collections' URLs answer 404 and are skipped.
+    await Promise.all(
+      searchIndex.merge.map((bundle) =>
+        loaded.mergeIndex(new URL(withBase(bundle), window.location.origin).href).catch(() => undefined),
+      ),
+    );
+    pagefind = loaded;
   },
 
   async search(query) {

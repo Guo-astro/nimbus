@@ -1108,6 +1108,15 @@ export function nimbus(
         sliceLayoutForBuild = buildSliceForBuild
           ? buildSliceLayout(buildSliceForBuild, versionMounts())
           : null;
+        if (sliceLayoutForBuild && astroConfig.base && astroConfig.base !== "/") {
+          // Every path a slice writes and advertises would need the base
+          // prepended, and a mistake there surfaces as production 404s
+          // under zone routes; not supported yet.
+          throw authorError(
+            `nimbus-docs: ${BUILD_ONLY_ENV} builds a site deployed at "/", but astro.config sets base to "${astroConfig.base}".`,
+            `Deploy the site at the origin root to build it in slices, or unset ${BUILD_ONLY_ENV}.`,
+          );
+        }
         if (sliceLayoutForBuild && !sliceLayoutForBuild.root) {
           // The slice's pages load their bundled CSS and JS from the assets
           // directory, which at the root the zone routes to another Worker.
@@ -2961,6 +2970,10 @@ export function nimbus(
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
             "  export const emptyCollections: readonly string[];",
+            "  /** The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice without the root collection keeps its site-wide files under `prefix`. */",
+            "  export const buildSlice: { collections: readonly string[]; prefix: string; search: { bundle: string; merge: readonly string[] } } | null;",
+            "  /** The Pagefind bundle to load, site-root-relative, and the other slices' bundles to merge into it (none in a whole-site build). */",
+            "  export const searchIndex: { bundle: string; merge: readonly string[] };",
             "  /** Collections whose canonical routes render on request. Build-only. */",
             "  export const requestRenderingCollections: readonly string[];",
             "  /** Build-time cross-version alternates table. See `getVersionAlternates()`. */",

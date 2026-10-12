@@ -46,6 +46,7 @@ import {
   apiNavList,
   apiNavListFiles,
   clearApiNavLists,
+  getApiNavListManifest,
   recordApiNavList,
 } from "./nav-list.js";
 import { prepareApiNav, type PreparedApiNav } from "./prepared.js";
@@ -842,7 +843,9 @@ export async function apiPageAssetDeploymentFiles(
       ...Object.entries(families)
         .filter(([family]) => !only || only.includes(family))
         .flatMap(([, files]) => [...files]),
-      ...apiNavListFiles(root),
+      ...Object.entries(getApiNavListManifest(root))
+        .filter(([collection]) => !only || only.includes(collection))
+        .flatMap(([, versions]) => Object.values(versions)),
     ]),
   ].sort();
 }

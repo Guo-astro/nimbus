@@ -12,6 +12,7 @@
  * and the integration reach this module through different package entries.
  */
 
+import { collectionMountPrefix, type VersionInfo } from "./collection-mount.js";
 import { preparedMarkdownRootKey } from "./prepared-markdown-registry.js";
 
 export const BUILD_ONLY_ENV = "NIMBUS_BUILD_ONLY";
@@ -115,4 +116,71 @@ export function routeOwner(
     }
   }
   return owner;
+}
+
+/**
+ * Where a partial build writes. A slice holding the root collection is a
+ * root slice and writes where a full build does. Any other slice writes its
+ * site-wide artifacts (sitemap files, the Pagefind bundle, `_nimbus/`, its
+ * bundled CSS and JS) under its prefix: the mount of the first collection
+ * the variable names, so a Worker on that prefix's zone routes serves them.
+ */
+export interface BuildSliceLayout {
+  collections: readonly string[];
+  /** `""` for a root slice; the leading collection's mount (`/docs-es`) otherwise. */
+  prefix: string;
+  root: boolean;
+}
+
+export function buildSliceLayout(
+  slice: readonly string[],
+  versions: VersionInfo | null,
+): BuildSliceLayout {
+  const mounts = slice.map((name) => collectionMountPrefix(name, versions));
+  const root = mounts.includes("");
+  return { collections: [...slice], prefix: root ? "" : mounts[0]!, root };
+}
+
+/**
+ * The starter's root routes, which a non-root slice drops from its output:
+ * the root slice serves them, and the zone never sends them to another
+ * slice's Worker. Each is excluded from the slice's sitemap too.
+ */
+export const STARTER_ROOT_ROUTES: readonly string[] = [
+  "/",
+  "/robots.txt",
+  "/og.png",
+  "/nimbus-api/coordinates.json",
+];
+
+/**
+ * The Pagefind bundle a page collection's slice serves, by its mount: the
+ * root collection's at `/pagefind/`, a mounted one's under its prefix. A
+ * slice of several collections writes one bundle, under its first
+ * collection's prefix; the others' URLs then answer 404 and the client
+ * skips them.
+ */
+export function pagefindBundlePath(mount: string): string {
+  return `${mount}/pagefind/`;
+}
+
+/**
+ * What the search client loads: this build's bundle, and the bundles of the
+ * page collections outside the slice to merge into it, so one search box
+ * still covers the site. A full build merges nothing.
+ */
+export function searchIndexLayout(
+  layout: BuildSliceLayout | null,
+  pageCollections: readonly string[],
+  versions: VersionInfo | null,
+): { bundle: string; merge: string[] } {
+  if (!layout) return { bundle: pagefindBundlePath(""), merge: [] };
+  const merge = [
+    ...new Set(
+      pageCollections
+        .filter((name) => !layout.collections.includes(name))
+        .map((name) => pagefindBundlePath(collectionMountPrefix(name, versions))),
+    ),
+  ];
+  return { bundle: pagefindBundlePath(layout.prefix), merge };
 }

@@ -183,6 +183,17 @@ export interface SliceSiteOptions {
   server?: boolean;
   /** `bundle: false` on the API collection (its pages become static assets). */
   apiBundle?: false;
+  /**
+   * The starter's root routes (home, 404, robots.txt, og.png, the coordinates
+   * manifest) and its agent files (`llms-full.txt`, section `llms.txt`,
+   * per-page `index.md`), plus a client script that writes the search
+   * config into every page.
+   */
+  starterRoutes?: boolean;
+  /** Pagefind on (the build needs the binary on PATH; see `withPagefind`). */
+  search?: boolean;
+  /** `@astrojs/sitemap` on. */
+  sitemap?: boolean;
   rules?: Record<string, unknown>;
   logLevel?: "silent" | "info" | "warn";
 }
@@ -259,7 +270,10 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
     );
   }
   const corpus = generateCorpus(options.pages);
-  await write("src/content/docs/index.mdx", "---\ntitle: Home\n---\n\nWelcome.\n");
+  // The starter's home is `src/pages/index.astro`, not a docs entry.
+  if (!options.starterRoutes) {
+    await write("src/content/docs/index.mdx", "---\ntitle: Home\n---\n\nWelcome.\n");
+  }
   for (const page of corpus.en) await write(`src/content/docs/${page.slug}.mdx`, page.body);
   for (const page of corpus.es) await write(`src/content/docs-es/${page.slug}.mdx`, page.body);
   if (options.versions) {
@@ -269,6 +283,10 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
     );
   }
 
+  // The client probe: the search config a page's search provider would read.
+  const probe = options.starterRoutes
+    ? `<script>import { searchIndex } from "virtual:nimbus/config"; document.documentElement.dataset.search = JSON.stringify(searchIndex);</script>`
+    : "";
   await write(
     "src/pages/[...slug].astro",
     [
@@ -278,9 +296,39 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
       "export const getStaticPaths = getDocsStaticPaths;",
       "const { entry, Content } = await getDocsPageProps(Astro);",
       "---",
-      "<html><head><title>{entry.data.title}</title></head><body><main data-collection=\"docs\"><Content /></main></body></html>",
+      `<html><head><title>{entry.data.title}</title></head><body><main data-collection="docs"><Content /></main>${probe}</body></html>`,
     ].join("\n"),
   );
+  if (options.starterRoutes) {
+    const page = (name: string) =>
+      `---\nexport const prerender = true;\n---\n<html><head><title>${name}</title></head><body><main data-page=${JSON.stringify(name)}>${name}</main></body></html>\n`;
+    await write("src/pages/index.astro", page("home"));
+    await write("src/pages/404.astro", page("404"));
+    await write(
+      "src/pages/robots.txt.ts",
+      `import { config } from "virtual:nimbus/config";\nexport const prerender = true;\nexport function GET() { return new Response(\`User-agent: *\\nAllow: /\\n\\nSitemap: \${new URL("/sitemap-index.xml", config.site).href}\\n\`); }\n`,
+    );
+    await write(
+      "src/pages/og.png.ts",
+      `export const prerender = true;\nexport function GET() { return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { "Content-Type": "image/png" } }); }\n`,
+    );
+    await write(
+      "src/pages/nimbus-api/coordinates.json.ts",
+      `import { getCoordinatesManifest } from ${src("runtime.ts")};\nexport const prerender = true;\nexport async function GET() { return new Response(JSON.stringify(await getCoordinatesManifest()), { headers: { "Content-Type": "application/json" } }); }\n`,
+    );
+    await write(
+      "src/pages/llms-full.txt.ts",
+      `import { llmsFullRoute } from ${src("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET } = llmsFullRoute();\n`,
+    );
+    await write(
+      "src/pages/[...section]/llms.txt.ts",
+      `import { llmsSectionRoute } from ${src("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = llmsSectionRoute();\n`,
+    );
+    await write(
+      "src/pages/[...slug]/index.md.ts",
+      `import { markdownRoute } from ${src("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = markdownRoute();\n`,
+    );
+  }
   // The Spanish route reads the indexed-entry list on every render, the way
   // a navigation surface would, so a request-rendered build exercises it per
   // request.
@@ -301,7 +349,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
       "const indexed = (await getIndexedEntries()).length;",
       "const { entry, Content } = page;",
       "---",
-      `<html><head><title>{entry.data.title}</title></head><body><main data-collection=${JSON.stringify(collection)} data-indexed={indexed}><Content /></main></body></html>`,
+      `<html><head><title>{entry.data.title}</title></head><body><main data-collection=${JSON.stringify(collection)} data-indexed={indexed}><Content /></main>${probe}</body></html>`,
     ].join("\n");
   await write("src/pages/docs-es/[...slug].astro", collectionRoute("docs-es"));
   if (options.versions) await write("src/pages/v1/[...slug].astro", collectionRoute("docs-v1"));
@@ -351,7 +399,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
           site: "https://docs.example.test",
           title: "Slice Docs",
           description: "A two-locale site with an API reference.",
-          search: false,
+          ...(options.search ? {} : { search: false }),
           api: [
             {
               collection: "api",
@@ -366,7 +414,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
         } as Parameters<typeof nimbus>[0],
         {
           admonitions: false,
-          sitemap: false,
+          sitemap: options.sitemap === true,
           icons: false,
           validateMdx: false,
           ...(options.rules ? { rules: options.rules } : {}),
@@ -383,6 +431,81 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
     write,
     remove: () => rm(root, { recursive: true, force: true }),
   };
+}
+
+/**
+ * Run `fn` with the workspace's Pagefind binary on PATH (the starter's
+ * devDependency; this package has none), restoring it after. Null when the
+ * binary isn't installed, so a test can skip.
+ */
+export async function withPagefind<T>(fn: () => Promise<T>): Promise<T | null> {
+  const bin = path.resolve(import.meta.dirname, "../../../nimbus-starter-source/node_modules/.bin");
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(path.join(bin, process.platform === "win32" ? "pagefind.cmd" : "pagefind"))) {
+    return null;
+  }
+  const key = Object.keys(process.env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  const previous = process.env[key];
+  process.env[key] = [bin, previous].filter(Boolean).join(path.delimiter);
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+}
+
+/** Every file under a directory of `dist/`, as site paths (files only). */
+export async function filePaths(site: SliceSite, dir = "dist"): Promise<string[]> {
+  const { readdir } = await import("node:fs/promises");
+  const out: string[] = [];
+  const walk = async (relative: string) => {
+    for (const entry of await readdir(path.join(site.root, relative), { withFileTypes: true })) {
+      const next = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) await walk(next);
+      else out.push(`/${path.posix.relative(dir, next)}`);
+    }
+  };
+  await walk(dir);
+  return out.sort();
+}
+
+/**
+ * The search config the fixture's client probe wrote into a built page: in
+ * the page's inline script, or in the bundled scripts under the assets
+ * directory the page's module script loads from.
+ */
+export async function builtSearchConfig(
+  site: SliceSite,
+  htmlPath: string,
+): Promise<{ bundle: string; merge: string[] }> {
+  const html = await site.read(htmlPath);
+  // Vite re-emits the literal minified: unquoted keys, backtick strings.
+  const find = (source: string) => {
+    const match =
+      /\{\s*"?bundle"?\s*:\s*[`"']([^`"']*)[`"']\s*,\s*"?merge"?\s*:\s*\[([^\]]*)\]\s*\}/u.exec(
+        source,
+      );
+    if (!match) return undefined;
+    const merge = [...match[2]!.matchAll(/[`"']([^`"']*)[`"']/gu)].map((item) => item[1]!);
+    return JSON.stringify({ bundle: match[1]!, merge });
+  };
+  const found = new Set<string>();
+  const inline = find(html);
+  if (inline) found.add(inline);
+  const script = /<script[^>]*\bsrc="([^"]+)"/u.exec(html)?.[1];
+  if (!inline && script?.startsWith("/")) {
+    const assetsDir = path.posix.dirname(script);
+    for (const file of await filePaths(site)) {
+      if (!file.startsWith(`${assetsDir}/`) || !file.endsWith(".js")) continue;
+      const json = find(await site.read(path.posix.join("dist", file)));
+      if (json) found.add(json);
+    }
+  }
+  if (found.size !== 1) {
+    throw new Error(`expected one search config for ${htmlPath}, found ${found.size}`);
+  }
+  return JSON.parse([...found][0]!) as { bundle: string; merge: string[] };
 }
 
 /** Run `fn` with `NIMBUS_BUILD_ONLY` set (or unset for null), restoring it after. */

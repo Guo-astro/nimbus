@@ -99,10 +99,9 @@ test("partial builds: a docs-es slice, then the sequence full, slice, full", asy
           /href="\/api\/charges\/create\/?"/,
         );
       }
-      // The agent index lists only what was built.
-      const llms = await site.read("dist/llms.txt");
-      assert.match(llms, /\/docs-es\/llms\.txt/);
-      assert.doesNotMatch(llms, /\/api\/llms\.txt/);
+      // The site's agent index is the root slice's: this slice drops it from
+      // its output, with every other root file.
+      assert.ok(!existsSync(path.join(site.root, "dist/llms.txt")));
       // The slice's route truth records the slice and when it was built.
       const truth = JSON.parse(await site.read(".nimbus/routes.json")) as {
         slice: { collections: string[]; covered: string[] };

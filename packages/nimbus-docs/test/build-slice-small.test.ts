@@ -17,11 +17,14 @@ import {
   routeOwner,
 } from "../src/_internal/build-slice.ts";
 import {
+  builtSearchConfig,
   captureOutput,
+  filePaths,
   htmlPaths,
   persistedStoreCounts,
   sliceSite,
   withBuildOnly,
+  withPagefind,
   type SliceSite,
 } from "./fixtures/slice-site.ts";
 import { TEST_TMP } from "./fixtures/temp-root.ts";
@@ -98,14 +101,18 @@ test("a slice with docs but not docs-v1 fails on a versioned site", async () => 
       withBuildOnly("docs,api", () => build(site.config)),
       /NIMBUS_BUILD_ONLY holds "docs" but not "docs-v1"\. A site's docs version collections \(docs, docs-v1\) build together\./,
     );
-    // The other locale alone is fine on the same site. (The version redirect
-    // pages under `/v1/` are still written: they come from a filesystem scan,
-    // and this build doesn't filter them.)
+    // The other locale alone is fine on the same site, and writes none of
+    // the redirect pages from old-version URLs: those are the slice holding
+    // the version collections to write.
     await withBuildOnly("docs-es", () => build(site.config));
     const paths = await htmlPaths(site);
     assert.equal(paths.filter((file) => file.startsWith("/docs-es/")).length, PAGES);
-    assert.ok(paths.every((file) => file.startsWith("/docs-es/") || file.startsWith("/v1/")), paths.join(" "));
+    assert.ok(paths.every((file) => file.startsWith("/docs-es/")), paths.join(" "));
     assert.ok(!existsSync(path.join(site.root, `dist/${site.corpus.en[0]!.slug}`)));
+    await withBuildOnly("docs,docs-v1", () => build(site.config));
+    const versioned = await htmlPaths(site);
+    assert.ok(versioned.some((file) => file.startsWith("/v1/")), versioned.join(" "));
+    assert.ok(!versioned.some((file) => file.startsWith("/docs-es/")));
   } finally {
     await site.remove();
   }
@@ -373,7 +380,12 @@ test("a request-rendered docs-es slice serves its pages and logs no empty-collec
     // Nothing of `docs` or `api` is prerendered, and neither is the slice
     // (it renders on request).
     assert.deepEqual(await htmlPaths(site), []);
-    assert.ok(!existsSync(path.join(site.root, "dist/docs-es")));
+    // Under the prefix: only the slice's stylesheet and bundled assets.
+    assert.ok(
+      (await filePaths(site))
+        .filter((file) => file.startsWith("/docs-es/"))
+        .every((file) => /^\/docs-es\/(_nimbus|_astro)\//.test(file)),
+    );
     assert.deepEqual(await persistedStoreCounts(site), { "docs-es": PAGES });
 
     const { app } = (await import(
@@ -397,6 +409,145 @@ test("a request-rendered docs-es slice serves its pages and logs no empty-collec
     }
     assert.doesNotMatch(served.output, /does not exist or is empty/);
     assert.doesNotMatch(served.output, /\[WARN\]/);
+  } finally {
+    await site.remove();
+  }
+});
+
+test("a slice writes its site-wide files under its prefix, and the root slice knows the absent slices", async (t) => {
+  const site = await sliceSite({
+    pages: PAGES,
+    starterRoutes: true,
+    search: true,
+    sitemap: true,
+    logLevel: "info",
+  });
+  const esTitle = (slug: string) => `${slug.split("/").pop()!.replace(/-/g, " ")} (es)`;
+  const sitemapUrls = async (file: string) =>
+    [...(await site.read(file)).matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!);
+  try {
+    // A slice without the root collection: nothing at the output root but
+    // the scoped `_headers` and the 404 page, which Workers reads there.
+    const es = await withPagefind(() =>
+      captureOutput(() => withBuildOnly("docs-es", () => build(site.config))),
+    );
+    if (!es) return t.skip("pagefind is not installed in the workspace");
+    assert.deepEqual((await readdir(path.join(site.root, "dist"))).sort(), [
+      "404.html",
+      "_headers",
+      "docs-es",
+    ]);
+    assert.match(
+      es.output,
+      /partial build without the root collection: dropped \/, \/robots\.txt, \/og\.png, \/nimbus-api\/coordinates\.json, \/llms\.txt, \/llms-full\.txt, \/\.well-known from the output; the root slice serves them\./,
+    );
+    const esFiles = await filePaths(site);
+    for (const file of [
+      "/docs-es/sitemap-index.xml",
+      "/docs-es/sitemap-0.xml",
+      "/docs-es/sitemap.xml",
+      "/docs-es/pagefind/pagefind.js",
+      "/docs-es/_nimbus/shiki.css",
+      "/docs-es/llms.txt",
+      "/docs-es/llms-full.txt",
+      `/docs-es/${site.corpus.es[0]!.slug}/index.md`,
+    ]) {
+      assert.ok(esFiles.includes(file), file);
+    }
+    // Its sitemap index lists its own file under the prefix, and its sitemap
+    // never lists the root.
+    assert.deepEqual(await sitemapUrls("dist/docs-es/sitemap-index.xml"), [
+      "https://docs.example.test/docs-es/sitemap-0.xml",
+    ]);
+    const esUrls = await sitemapUrls("dist/docs-es/sitemap-0.xml");
+    assert.ok(esUrls.length >= PAGES);
+    assert.ok(
+      esUrls.every((url) => url.startsWith("https://docs.example.test/docs-es/")),
+      esUrls.join(" "),
+    );
+    // Its full document holds every page of the slice.
+    const full = await site.read("dist/docs-es/llms-full.txt");
+    for (const page of site.corpus.es) assert.ok(full.includes(esTitle(page.slug)), page.slug);
+    // `_headers` covers the slice's files, not the origin root.
+    const esHeaders = await site.read("dist/_headers");
+    assert.doesNotMatch(esHeaders, /^\/$/m);
+    assert.doesNotMatch(esHeaders, /\.well-known/);
+    assert.match(esHeaders, /llms\.txt/);
+    // Its pages load their assets from under the prefix, and their search
+    // config names the slice's bundle and the other slices' to merge.
+    const esPage = `dist/docs-es/${site.corpus.es[0]!.slug}/index.html`;
+    assert.doesNotMatch(await site.read(esPage), /"\/_astro\//);
+    assert.deepEqual(await builtSearchConfig(site, esPage), {
+      bundle: "/docs-es/pagefind/",
+      merge: ["/pagefind/", "/api/pagefind/"],
+    });
+    // The route truth has none of the dropped routes, and not the bundle.
+    const esTruth = JSON.parse(await site.read(".nimbus/routes.json")) as { knownRoutes: string[] };
+    for (const route of ["/", "/robots.txt", "/og.png", "/llms.txt", "/llms-full.txt"]) {
+      assert.ok(!esTruth.knownRoutes.includes(route), route);
+    }
+    assert.ok(!esTruth.knownRoutes.some((route) => route.includes("/pagefind/")));
+    assert.ok(esTruth.knownRoutes.includes("/docs-es/llms-full.txt"));
+
+    // The root slice writes the root files where a full build does, lists
+    // the absent slice's `llms.txt`, and its sitemap index lists only its own
+    // files.
+    await withPagefind(() => withBuildOnly("docs,api", () => build(site.config)));
+    assert.ok(!existsSync(path.join(site.root, "dist/docs-es")));
+    const rootFiles = await filePaths(site);
+    for (const file of [
+      "/index.html",
+      "/robots.txt",
+      "/og.png",
+      "/nimbus-api/coordinates.json",
+      "/llms.txt",
+      "/llms-full.txt",
+      "/index.md",
+      "/.well-known/ard.json",
+      "/_nimbus/shiki.css",
+      "/pagefind/pagefind.js",
+      "/sitemap-index.xml",
+      "/api/openapi.json",
+      "/api/llms.txt",
+    ]) {
+      assert.ok(rootFiles.includes(file), file);
+    }
+    const rootLlms = await site.read("dist/llms.txt");
+    assert.match(rootLlms, /^- \[Docs Es\]\(https:\/\/docs\.example\.test\/docs-es\/llms\.txt\)$/m);
+    assert.match(rootLlms, /\(https:\/\/docs\.example\.test\/api\/llms\.txt\)/);
+    assert.deepEqual(await sitemapUrls("dist/sitemap-index.xml"), [
+      "https://docs.example.test/sitemap-0.xml",
+    ]);
+    const rootUrls = await sitemapUrls("dist/sitemap-0.xml");
+    assert.ok(rootUrls.includes("https://docs.example.test/"));
+    assert.ok(!rootUrls.some((url) => url.startsWith("https://docs.example.test/docs-es/")));
+    assert.match(await site.read("dist/_headers"), /^\/$/m);
+    const enPage = `dist/${site.corpus.en[0]!.slug}/index.html`;
+    assert.deepEqual(await builtSearchConfig(site, enPage), {
+      bundle: "/pagefind/",
+      merge: ["/docs-es/pagefind/"],
+    });
+
+    // The root slice without the API: its spec is the API slice's to write,
+    // and the index still lists the API by its label.
+    await withPagefind(() => withBuildOnly("docs", () => build(site.config)));
+    assert.ok(!existsSync(path.join(site.root, "dist/api")));
+    assert.match(
+      await site.read("dist/llms.txt"),
+      /^- \[SmallCo API\]\(https:\/\/docs\.example\.test\/api\/llms\.txt\)$/m,
+    );
+    assert.deepEqual(await builtSearchConfig(site, enPage), {
+      bundle: "/pagefind/",
+      merge: ["/docs-es/pagefind/", "/api/pagefind/"],
+    });
+
+    // A full build merges nothing and writes everything where it always did.
+    await withPagefind(() => withBuildOnly(null, () => build(site.config)));
+    assert.deepEqual(await builtSearchConfig(site, enPage), { bundle: "/pagefind/", merge: [] });
+    assert.ok(existsSync(path.join(site.root, "dist/pagefind/pagefind.js")));
+    assert.ok(!existsSync(path.join(site.root, "dist/docs-es/pagefind")));
+    assert.ok(existsSync(path.join(site.root, "dist/docs-es/llms.txt")));
+    assert.ok(!existsSync(path.join(site.root, "dist/docs-es/sitemap-index.xml")));
   } finally {
     await site.remove();
   }

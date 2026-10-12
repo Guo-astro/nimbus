@@ -170,6 +170,8 @@ export function agentDiscoveryHeaderRules(
   ),
   text: {
     paths?: readonly string[];
+    /** The published skills files (index, SKILL.md and archives), origin-root paths. */
+    skillPaths?: readonly string[];
     ownerHeaders?: string;
     warn?: (message: string) => void;
   } = {},
@@ -213,7 +215,7 @@ export function agentDiscoveryHeaderRules(
         );
       return;
     }
-    rules.push({ pattern, headers: [["Content-Type", `${type}; charset=utf-8`]] });
+    rules.push({ pattern, headers: [["Content-Type", `${type}; charset=utf-8`]], evaluated: true });
   };
   if (capabilities.homepageMarkdownUrl) {
     const pathname = new URL(capabilities.homepageMarkdownUrl).pathname;
@@ -269,17 +271,26 @@ export function agentDiscoveryHeaderRules(
     });
   if (capabilities.skillsIndexUrl) {
     // Static hosts infer SKILL.md and .tar.gz types from the extension; the
-    // RFC wants CORS on everything and application/json on the index.
-    rules.push(
-      { pattern: "/.well-known/agent-skills/*", headers: [["Access-Control-Allow-Origin", "*"]] },
-      { pattern: "/.well-known/agent-skills/index.json", headers: [["Content-Type", "application/json"]] },
-      { pattern: "/.well-known/agent-skills/*.tar.gz", headers: [["Content-Type", "application/gzip"]] },
-    );
+    // RFC wants CORS on everything and application/json on the index. The
+    // wildcards are checked against the files they cover, like the text
+    // families, so an owner `/*.json` rule counts and a `/*.woff2` one doesn't.
+    const index = new URL(capabilities.skillsIndexUrl).pathname;
+    const skillPaths = [...new Set([index, ...(text.skillPaths ?? [])])];
+    for (const [pattern, name, value] of [
+      ["/.well-known/agent-skills/*", "Access-Control-Allow-Origin", "*"],
+      ["/.well-known/agent-skills/index.json", "Content-Type", "application/json"],
+      ["/.well-known/agent-skills/*.tar.gz", "Content-Type", "application/gzip"],
+    ] as const) {
+      const members = skillPaths.filter((pathname) => headerPatternMatches(pattern, pathname));
+      if (!ownerSetsHeaderOnMembers(owner, pattern, name, members, text.warn)) {
+        rules.push({ pattern, headers: [[name, value]], evaluated: true });
+      }
+    }
   }
   const kept = rules.flatMap((rule) => {
-    const headers = rule.headers.filter(([name]) =>
-      !ownerSetsHeader(owner, rule.pattern, name, text.warn),
-    );
+    const headers = rule.evaluated
+      ? rule.headers
+      : rule.headers.filter(([name]) => !ownerSetsHeader(owner, rule.pattern, name, text.warn));
     return headers.length ? [{ pattern: rule.pattern, headers }] : [];
   });
   return `# Nimbus agent discovery (generated)\n${kept
@@ -293,6 +304,8 @@ export function agentDiscoveryHeaderRules(
 interface HeaderRule {
   pattern: string;
   headers: Array<readonly [name: string, value: string]>;
+  /** Already checked against the owner rules by the concrete paths it covers. */
+  evaluated?: boolean;
 }
 
 /** One owner rule: its path pattern and the header names it sets or removes. */
@@ -331,20 +344,48 @@ function ownerSetsHeader(
     } else if (headerPatternMatches(pattern, representativePath(policy.pattern))) {
       covered = true;
       warn?.(
-        `Owner ${name} rule ${policy.pattern} overlaps ${pattern}; set ${name} for every path under ${pattern} in public/_headers.`,
+        `Owner ${name} rule ${policy.pattern} overlaps ${pattern}; in public/_headers, replace it with one rule covering ${pattern}, or add exact rules for the other files under ${pattern}.`,
       );
     }
   }
   return covered;
 }
 
+/**
+ * Whether an owner rule already sets a header on any of the concrete paths a
+ * generated rule covers. All covered: the owner has it. Some covered: a
+ * generated wildcard can't exclude those paths, so the owner wins for the
+ * family, with a warning saying how to cover the rest.
+ */
+function ownerSetsHeaderOnMembers(
+  owner: readonly OwnerHeaderPolicy[],
+  pattern: string,
+  name: string,
+  members: readonly string[],
+  warn?: (message: string) => void,
+): boolean {
+  const header = name.toLowerCase();
+  if (MULTI_VALUED_HEADERS.has(header) || members.length === 0) return false;
+  const covering = owner.filter(
+    (policy) =>
+      policy.headers.has(header) &&
+      members.some((pathname) => headerPatternMatches(policy.pattern, pathname)),
+  );
+  if (covering.length === 0) return false;
+  const covered = members.filter((pathname) =>
+    covering.some((policy) => headerPatternMatches(policy.pattern, pathname)),
+  );
+  if (covered.length < members.length) {
+    warn?.(
+      `Owner ${name} rule ${covering.map((policy) => policy.pattern).join(", ")} overlaps ${pattern}; in public/_headers, replace it with one rule covering ${pattern}, or add exact rules for the other files under ${pattern}.`,
+    );
+  }
+  return true;
+}
+
 /** A concrete path a pattern matches, for testing one pattern against another. */
 function representativePath(pattern: string): string {
-  if (pattern.startsWith("https://")) {
-    const pathStart = pattern.indexOf("/", "https://".length);
-    pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
-  }
-  return pattern.replace(/\*|:[A-Za-z]\w*/g, "x");
+  return (normalizeHeaderPattern(pattern) ?? pattern).replace(/\*|:[A-Za-z]\w*/g, "x");
 }
 
 export function appendAgentDiscoveryHeaders(
@@ -363,10 +404,13 @@ export function appendAgentDiscoveryHeaders(
         return [path!, headers.join("\n")] as const;
       }),
   );
-  const paths = [...owner.matchAll(/^[^\s#][^\r\n]*/gm)];
+  // A path line is read by its shape after trimming, as hosts read it.
+  const paths = [...owner.matchAll(/^[ \t\uFEFF]*(\S[^\r\n]*)/gm)].filter((match) =>
+    HEADER_PATH_LINE.test(match[1]!.trim()),
+  );
   for (let index = paths.length - 1; index >= 0; index--) {
     const match = paths[index]!;
-    const headers = rules.get(match[0].trimEnd());
+    const headers = rules.get(match[1]!.trim());
     if (!headers) continue;
     const end = paths[index + 1]?.index ?? owner.length;
     const offset = match.index + owner.slice(match.index, end).trimEnd().length;
@@ -378,7 +422,7 @@ export function appendAgentDiscoveryHeaders(
       "# End Nimbus agent discovery headers",
     ].join(newline);
     owner = owner.slice(0, offset) + block + owner.slice(offset);
-    rules.delete(match[0].trimEnd());
+    rules.delete(match[1]!.trim());
   }
   if (!rules.size) return owner;
   const remaining = `# Nimbus agent discovery (generated)\n${[...rules].map(([path, headers]) => `${path}\n${headers}`).join("\n\n")}\n# End Nimbus agent discovery\n`;
@@ -403,37 +447,52 @@ function withoutGeneratedHeaders(headers: string): string {
     );
 }
 
+/** Hosts trim each line and read a path by its shape, not its indentation. */
+const HEADER_PATH_LINE = /^([^\s]+:\/\/|\/)/;
+
 function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
   const policies: OwnerHeaderPolicy[] = [];
   let current: OwnerHeaderPolicy | undefined;
-  for (const line of withoutGeneratedHeaders(headers).split(/\r?\n/)) {
-    if (!line.trim() || line.trimStart().startsWith("#")) continue;
-    if (!/^\s/.test(line)) {
-      current = { pattern: line.trimEnd(), headers: new Set() };
+  for (const raw of withoutGeneratedHeaders(headers).replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (HEADER_PATH_LINE.test(line)) {
+      current = { pattern: line, headers: new Set() };
       policies.push(current);
       continue;
     }
-    // `  Name: value` sets a header; `  ! Name` removes one. Both are the
-    // owner's policy for that header on the rule's paths.
-    const header = /^\s*!\s*([^:\s]+)\s*$/.exec(line)?.[1] ?? /^\s*([^:\s]+)\s*:/.exec(line)?.[1];
+    // `Name: value` sets a header; `! Name` (the host's unset operator, with
+    // the space) removes one. Both are the owner's policy for that header on
+    // the rule's paths.
+    const header = /^! ([^:\s]+)$/.exec(line)?.[1] ?? /^([^:\s]+)\s*:/.exec(line)?.[1];
     if (header && current) current.headers.add(header.toLowerCase());
   }
   return policies;
 }
 
-function headerPatternMatches(pattern: string, pathname: string): boolean {
+/**
+ * A pattern's path, as the host compares it: a host-qualified owner rule
+ * reduced to its path, and raw Unicode or spaces URL-normalized.
+ */
+function normalizeHeaderPattern(pattern: string): string | undefined {
   // Path-only generated rules apply on preview hosts too. Conservatively
   // honor an absolute owner policy even when its hostname differs from site.
-  if (pattern.startsWith("https://")) {
-    const pathStart = pattern.indexOf("/", "https://".length);
+  if (/^[^\s]+:\/\//.test(pattern)) {
+    const pathStart = pattern.indexOf("/", pattern.indexOf("://") + 3);
     pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
   }
   try {
     // Static hosts URL-normalize raw Unicode and spaces in owner paths.
-    pattern = new URL(`//${pattern}`, "relative://").pathname;
+    return new URL(`//${pattern}`, "relative://").pathname;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function headerPatternMatches(pattern: string, pathname: string): boolean {
+  const normalized = normalizeHeaderPattern(pattern);
+  if (normalized === undefined) return false;
+  pattern = normalized;
   let source = "";
   let offset = 0;
   for (const token of pattern.matchAll(/\*|:[A-Za-z]\w*/g)) {

@@ -3409,6 +3409,7 @@ export function nimbus(
               discovery.specFiles.map((spec) => ({ pathname: new URL(spec.url).pathname, type: spec.type })),
               {
                 paths: emittedPaths,
+                skillPaths: discovery.skills?.artifacts.map((artifact) => artifact.pathname) ?? [],
                 ownerHeaders,
                 warn: (message) => logger.warn(message),
               },

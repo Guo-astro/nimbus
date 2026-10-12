@@ -493,6 +493,7 @@ test("an owner rule narrower than a generated wildcard wins, with a warning, and
   });
   const warnings: string[] = [];
   const narrower = agentDiscoveryHeaderRules(skills, options, [], {
+    skillPaths: ["/.well-known/agent-skills/index.json", "/.well-known/agent-skills/deploy/SKILL.md"],
     ownerHeaders: "/.well-known/agent-skills/index.json\n  Access-Control-Allow-Origin: https://app.example.com\n",
     warn: (message) => warnings.push(message),
   });
@@ -500,11 +501,17 @@ test("an owner rule narrower than a generated wildcard wins, with a warning, and
   assert.match(narrower, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json\n  Access-Control-Allow-Origin: \*$/m, "other paths keep theirs");
   assert.equal(warnings.length, 1);
   assert.match(warnings[0]!, /Access-Control-Allow-Origin rule \/\.well-known\/agent-skills\/index\.json overlaps \/\.well-known\/agent-skills\/\*/);
-  for (const removal of ["/.well-known/*\n  ! Access-Control-Allow-Origin\n", "/.well-known/*\n  !Access-Control-Allow-Origin\n"]) {
-    const generated = agentDiscoveryHeaderRules(skills, options, [], { ownerHeaders: removal });
-    assert.doesNotMatch(generated, /Access-Control-Allow-Origin/, removal);
-    assert.match(generated, /Content-Type: application\/json/);
-  }
+  const removal = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/.well-known/*\n  ! Access-Control-Allow-Origin\n",
+  });
+  assert.doesNotMatch(removal, /Access-Control-Allow-Origin/);
+  assert.match(removal, /Content-Type: application\/json/);
+  // Hosts read the unset operator as `! ` with the space; `!Name` is invalid
+  // there and is not a policy here either.
+  const notAnUnset = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/.well-known/*\n  !Access-Control-Allow-Origin\n",
+  });
+  assert.match(notAnUnset, /Access-Control-Allow-Origin: \*/);
   // Link may repeat: hosts join it with a comma, which is valid for Link.
   const linked = agentDiscoveryHeaderRules(minimal, options, [], {
     ownerHeaders: "/*\n  Link: <https://example.net/>; rel=help\n",
@@ -516,4 +523,93 @@ test("an owner rule narrower than a generated wildcard wins, with a warning, and
   });
   assert.doesNotMatch(cased, /Access-Control-Allow-Origin/);
   assert.match(cased, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json$/m);
+});
+
+test("owner wildcards that cover some skills files win for the family, with a warning; disjoint ones don't", () => {
+  const skills = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json`,
+  });
+  const skillPaths = [
+    "/.well-known/agent-skills/index.json",
+    "/.well-known/agent-skills/deploy/SKILL.md",
+    "/.well-known/agent-skills/deploy.tar.gz",
+  ];
+  for (const pattern of ["/*.json", "/*/index.json", "https://docs.example.com/*.json", "/.well-known/agent-skills/deploy/*"]) {
+    const warnings: string[] = [];
+    const generated = agentDiscoveryHeaderRules(skills, options, [], {
+      skillPaths,
+      ownerHeaders: `${pattern}\n  Access-Control-Allow-Origin: *\n`,
+      warn: (message) => warnings.push(message),
+    });
+    assert.doesNotMatch(generated, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin/m, pattern);
+    assert.match(generated, /^\/\.well-known\/agent-skills\/\*\.tar\.gz\n  Content-Type: application\/gzip$/m, pattern);
+    assert.ok(warnings.some((message) => message.includes(pattern) && message.includes("/.well-known/agent-skills/*")), pattern);
+    // The exact discovery files are covered only by a pattern that matches them.
+    const ardKeepsCors = /^\/\.well-known\/ard\.json\n[^\n]*\n  Access-Control-Allow-Origin/m.test(generated);
+    assert.equal(ardKeepsCors, !pattern.endsWith("*.json"), pattern);
+  }
+  // An owner rule covering every skills file drops the header silently.
+  const all: string[] = [];
+  const whole = agentDiscoveryHeaderRules(skills, options, [], {
+    skillPaths,
+    ownerHeaders: "/.well-known/agent-skills/*\n  Access-Control-Allow-Origin: https://app.example.com\n",
+    warn: (message) => all.push(message),
+  });
+  assert.doesNotMatch(whole, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin/m);
+  assert.deepEqual(all, []);
+  // Disjoint wildcards leave the generated rule alone: fonts, an asset folder,
+  // and a `:param` that spans one segment and never reaches the skills index.
+  const disjoint = agentDiscoveryHeaderRules(skills, options, [], {
+    skillPaths,
+    ownerHeaders: "/assets/*\n  Access-Control-Allow-Origin: *\n/*.woff2\n  Access-Control-Allow-Origin: *\n/:dir/index.json\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.match(disjoint, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin: \*$/m);
+  // Without the artifact list, the index is still a known member.
+  const indexOnly = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/*.json\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(indexOnly, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin/m);
+});
+
+test("owner files are read the way hosts read them: trimmed lines, paths by shape, a leading BOM ignored", () => {
+  const skills = createAgentCapabilities({
+    llmsUrl: minimal.llmsUrl,
+    skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json`,
+  });
+  // An unindented header line still belongs to the rule above it.
+  const unindented = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/*\nAccess-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(unindented, /Access-Control-Allow-Origin/);
+  // An indented path line starts a rule; its header is not credited to /*.
+  const indentedPath = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "/*\n  X-Frame-Options: DENY\n  /.well-known/ard.json\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(indentedPath, /^\/\.well-known\/ard\.json\n[^\n]*\n  Access-Control-Allow-Origin/m);
+  assert.match(indentedPath, /^\/\.well-known\/ai-catalog\.json\n  Content-Type: application\/json\n  Access-Control-Allow-Origin: \*$/m);
+  assert.match(indentedPath, /^\/\.well-known\/agent-skills\/\*\n  Access-Control-Allow-Origin: \*$/m);
+  // A BOM before the first path.
+  const bom = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "\uFEFF/*\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(bom, /Access-Control-Allow-Origin/);
+  // The splice step reads path lines the same way.
+  const owner = "\uFEFF  /.well-known/ard.json\n  X-Robots-Tag: none\n";
+  const generated = agentDiscoveryHeaderRules(skills, options, [], { ownerHeaders: owner });
+  const merged = appendAgentDiscoveryHeaders(owner, generated);
+  assert.equal((merged.match(/^\s*\/\.well-known\/ard\.json$/gm) ?? []).length, 1, "merged into the owner's block");
+  assert.match(merged, /X-Robots-Tag: none\n# Nimbus agent discovery headers \(generated\)\n  Content-Type: application\/json\n  Access-Control-Allow-Origin: \*\n# End/);
+  assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged);
+});
+
+test("an owner rule for a page that isn't emitted doesn't drop a text family that is", () => {
+  const warnings: string[] = [];
+  const generated = agentDiscoveryHeaderRules(minimal, options, [], {
+    paths: ["/other/index.md"],
+    ownerHeaders: "/docs/guide/index.md\n  Content-Type: text/markdown\n",
+    warn: (message) => warnings.push(message),
+  });
+  assert.match(generated, /^\/docs\/\*\/index\.md\n  Content-Type: text\/markdown; charset=utf-8$/m);
+  assert.deepEqual(warnings, []);
 });

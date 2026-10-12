@@ -344,7 +344,7 @@ Every group page lists its operations and its subsections, and the API overview 
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
 
-For each component already in your project, it asks whether to overwrite it, even if your copy is unchanged. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` skips the questions and replaces every component `api-layout` uses, including the docs sidebar.
+For each component already in your project whose copy differs from the registry, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` replaces every component `api-layout` uses that you haven't edited, including the docs sidebar, and asks about the ones you have; without a terminal it keeps those and lists them, and `--overwrite --yes` replaces them too.
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 
@@ -454,7 +454,7 @@ curl --request GET \
 
 An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker and in the page's Markdown version. An entry without a `label` uses its `lang`, and a repeated name is numbered: `Python`, `Python (2)`.
 
-Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs add api-code-rail` and choose **Overwrite** for `ApiCodeRail.astro` and `code-rail.client.ts`, and **Skip** for the other components.
+Giving each sample in one language its own picker option needs the `api-code-rail` component from 0.16.0 or later. To update it, run `nimbus-docs outdated`, then `nimbus-docs diff <file> --apply` for each clean file it lists, and `nimbus-docs add api-code-rail --overwrite` for the rest, which asks before replacing a file you've edited.
 
 If the installed httpsnippet writes a body in a layout Nimbus doesn't recognize, that language's sample is left out rather than shown with a wrong body; the other languages are unaffected. On the page, the request body appears inside the code samples, and the page's Markdown version also lists it as an example request. An operation with no samples at all, such as with `samples.generate: []` and no `x-codeSamples`, shows its request example on the page instead. That needs the `api-layout` component from this release: commit first, then run `nimbus-docs add api-layout --overwrite`. It also replaces the components it depends on, including the sidebar, so review the change with `git diff` and reapply your own edits.
 

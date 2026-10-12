@@ -59,6 +59,7 @@ const isOpen = Boolean(hasActive || collapsed === false || collapsed === undefin
 ---
 
 <details
+  data-slot="sidebar-group"
   data-nb-sidebar-group
   open={isOpen || undefined}
   class={cn("group/accordion", className)}

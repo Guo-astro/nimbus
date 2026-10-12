@@ -10,7 +10,7 @@ interface Props extends HTMLAttributes<"div"> {
 const { class: className, placeholder = "Filter…", ...attrs } = Astro.props;
 ---
 
-<div class={cn("relative mb-3", className)} {...attrs}>
+<div data-slot="sidebar-filter" class={cn("relative mb-3", className)} {...attrs}>
   <input
     data-nb-sidebar-filter-input
     type="search"

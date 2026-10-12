@@ -23,6 +23,7 @@ function buildPanel(
   panel.id = panelId;
   panel.setAttribute("aria-labelledby", tabId);
   panel.dataset.cgPanel = "";
+  panel.dataset.slot = "code-group-panel";
   panel.className =
     "relative overflow-hidden rounded-lg bg-card text-inherit ring ring-border";
   if (!selected) panel.hidden = true;
@@ -39,6 +40,7 @@ function buildPanel(
   copyBtn.dataset.cgCopy = "";
   copyBtn.dataset.code = extractCodeText(pre);
   copyBtn.setAttribute("aria-label", "Copy to clipboard");
+  copyBtn.dataset.slot = "code-group-copy";
   copyBtn.appendChild(cloneIcon(copyTpl));
   row.appendChild(copyBtn);
 
@@ -82,9 +84,11 @@ mount("[data-cg]", (root) => {
     btn.setAttribute("aria-controls", panelId);
     btn.setAttribute("aria-selected", selected ? "true" : "false");
     btn.textContent = label;
+    btn.title = label;
     btn.dataset.cgTab = "";
+    btn.dataset.slot = "code-group-tab";
     btn.className =
-      "m-0 cursor-pointer rounded-md border-0 bg-transparent px-2 py-0.5 text-xs leading-5 font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-selected:bg-selected aria-selected:text-foreground";
+      "m-0 max-w-64 shrink-0 cursor-pointer truncate rounded-md border-0 bg-transparent px-2 py-0.5 text-xs leading-5 font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-selected:bg-selected aria-selected:text-foreground";
     tablist.appendChild(btn);
 
     panelsHost.appendChild(buildPanel(pre, panelId, tabId, selected, copyTpl));
@@ -108,9 +112,11 @@ mount("[data-cg]", (root) => {
         return;
       }
       btn.replaceChildren(cloneIcon(checkTpl));
+      btn.setAttribute("aria-label", "Copied");
       const timer = window.setTimeout(() => {
         timers.delete(timer);
         btn.replaceChildren(cloneIcon(copyTpl));
+        btn.setAttribute("aria-label", "Copy to clipboard");
       }, 1500);
       timers.add(timer);
     };

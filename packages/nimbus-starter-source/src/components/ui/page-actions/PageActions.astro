@@ -25,6 +25,7 @@ const formattedDate = lastUpdated
 {(markdownUrl || lastUpdated) && (
   <div
     data-nb-page-actions
+    data-slot="page-actions"
     data-pagefind-ignore
     data-md-url={resolvedMarkdownUrl}
     class={cn("not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem] leading-5", className)}
@@ -38,7 +39,7 @@ const formattedDate = lastUpdated
     )}
 
     {markdownUrl && lastUpdated && (
-      <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>
+      <span aria-hidden="true" data-slot="page-actions-separator" class="hidden select-none text-muted-foreground/40 sm:inline">|</span>
     )}
 
     {markdownUrl && (
@@ -49,7 +50,7 @@ const formattedDate = lastUpdated
           <span data-nb-page-actions-label aria-live="polite">Copy page</span>
         </button>
 
-        <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>
+        <span aria-hidden="true" data-slot="page-actions-separator" class="hidden select-none text-muted-foreground/40 sm:inline">|</span>
 
         <a
           href={resolvedMarkdownUrl}

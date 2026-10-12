@@ -3,7 +3,7 @@ import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 ---
 
-<Dialog aria-label="Search documentation" data-search-dialog>
+<Dialog data-slot="search-dialog" aria-label="Search documentation" data-search-dialog>
   <DialogContent class="max-w-xl bg-muted shadow-xl ring-border">
     <div class="flex flex-col overflow-hidden rounded-t-lg bg-card border-b border-border">
       <div class="flex items-center gap-3 border-b border-border px-4 py-3">

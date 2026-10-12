@@ -28,6 +28,7 @@ const hasHeadings = headings.length > 0;
 {
   hasHeadings && (
     <nav
+      data-slot="mobile-toc"
       data-nb-mobile-toc
       aria-label="On this page"
       class={cn("relative", className)}

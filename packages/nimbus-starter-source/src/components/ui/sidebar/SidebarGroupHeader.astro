@@ -31,6 +31,7 @@ const { label, hasActive, badge, icon, deprecated } = Astro.props;
 ---
 
 <summary
+  data-slot="sidebar-group-header"
   class="nb-sidebar-row"
   data-nb-sidebar-group-label
   data-nb-active={hasActive ? "" : undefined}

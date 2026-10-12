@@ -16,7 +16,7 @@ const { headings, class: className, ...attrs } = Astro.props;
 ---
 
 {headings.length > 0 && (
-  <div data-nb-toc class={cn("toc-container", className)} {...attrs}>
+  <div data-slot="toc" data-nb-toc class={cn("toc-container", className)} {...attrs}>
     <h2 class="mb-2 text-sm font-semibold text-foreground">On this page</h2>
     <nav aria-label="Table of contents" class="relative">
       <svg
@@ -65,8 +65,8 @@ const { headings, class: className, ...attrs } = Astro.props;
                 class="grid grid-cols-1 border-l-2 border-border pl-5 py-1.5 text-[0.8125rem] leading-5 text-muted-foreground no-underline transition-colors duration-150 hover:border-foreground/20 hover:text-foreground aria-[current=true]:font-medium aria-[current=true]:text-foreground"
                 style={`margin-left: calc(${indent}rem - 0.125rem);`}
               >
-                <span class="col-start-1 row-start-1">{h.text}</span>
-                <span aria-hidden="true" class="col-start-1 row-start-1 invisible font-medium">{h.text}</span>
+                <span class="col-start-1 row-start-1 [overflow-wrap:anywhere]">{h.text}</span>
+                <span aria-hidden="true" class="col-start-1 row-start-1 invisible font-medium [overflow-wrap:anywhere]">{h.text}</span>
               </a>
               {goingShallower && (
                 <svg

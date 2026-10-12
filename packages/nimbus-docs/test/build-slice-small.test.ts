@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -243,14 +243,118 @@ test("links into another slice resolve against the previous build, as warnings, 
       [["error", 'broken link "/docs-es/guides/does-not-exist/"']],
     );
 
+    // A root slice after that lone docs-es slice: the union borrows the
+    // docs-es routes from it (so links into docs-es are checked, as
+    // warnings), and the record says when they were built.
+    await site.write(
+      "src/content/docs/guides/broken.mdx",
+      "---\ntitle: Broken (en)\n---\n\n[missing here](/guides/does-not-exist/) and [missing there](/docs-es/guides/does-not-exist/).\n",
+    );
+    const esBuiltAt = (JSON.parse(await site.read(".nimbus/routes.json")) as { builtAt: string }).builtAt;
+    const rootAfterSlice = await captureOutput(() =>
+      withBuildOnly("docs,api", () => build(site.config)),
+    );
+    assert.match(rootAfterSlice.output, /building only docs, api \(NIMBUS_BUILD_ONLY\); docs-es is empty in this build\./);
+    assert.match(rootAfterSlice.output, /slice route truth: \d+ routes \(\d+ from the previous build\)\./);
+    const rootTruth = JSON.parse(await site.read(".nimbus/routes.json")) as {
+      slice: { collections: string[]; covered: string[]; priorBuiltAt: string };
+      knownRoutes: string[];
+    };
+    assert.deepEqual(rootTruth.slice.collections, ["docs", "api"]);
+    assert.deepEqual(rootTruth.slice.covered, ["docs", "docs-es", "api"]);
+    assert.equal(rootTruth.slice.priorBuiltAt, esBuiltAt);
+    assert.ok(rootTruth.knownRoutes.includes(`/docs-es/${site.corpus.es[0]!.slug}`));
+    assert.ok(rootTruth.knownRoutes.includes("/api/charges/create"));
+    // `src/content/docs` also matches `docs-es`; keep the English page's findings.
+    const enBroken = (d: { file: string }) => d.file === "src/content/docs/guides/broken.mdx";
+    const rootChecked = lintCli(site, "src/content/docs");
+    assert.deepEqual(
+      rootChecked.envelope.diagnostics
+        .filter((d) => d.code === "nimbus/internal-link" && enBroken(d))
+        .map((d) => [d.severity, d.message.replace(/ — .*$/, "")]),
+      [
+        ["error", 'broken link "/guides/does-not-exist/"'],
+        ["warn", 'broken link "/docs-es/guides/does-not-exist/"'],
+      ],
+    );
+
+    // The same root slice with no previous build: links into docs-es are
+    // skipped, and lint names the prefix.
+    await rm(path.join(site.root, ".nimbus/routes.json"));
+    const rootAlone = await captureOutput(() => withBuildOnly("docs,api", () => build(site.config)));
+    assert.match(rootAlone.output, /slice route truth: \d+ routes \(no previous build\); links into docs-es will be skipped by lint\./);
+    assert.deepEqual(
+      (JSON.parse(await site.read(".nimbus/routes.json")) as { slice: { covered: string[] } }).slice.covered,
+      ["docs", "api"],
+    );
+    const rootSkipped = lintCli(site, "src/content/docs");
+    assert.equal(
+      rootSkipped.stderr.match(/nimbus\/internal-link: this route truth is from a partial build \(docs, api\) with no previous build covering docs-es, so links into \/docs-es are not checked\./g)?.length,
+      1,
+      rootSkipped.stderr,
+    );
+    assert.deepEqual(
+      rootSkipped.envelope.diagnostics
+        .filter((d) => d.code === "nimbus/internal-link" && enBroken(d))
+        .map((d) => [d.severity, d.message.replace(/ — .*$/, "")]),
+      [["error", 'broken link "/guides/does-not-exist/"']],
+    );
+
     // A full build's truth has no slice record, and lint prints no notice.
     await withBuildOnly(null, () => build(site.config));
     const full = lintCli(site, dir);
     assert.doesNotMatch(full.stderr, /partial build/);
     assert.deepEqual(
-      full.envelope.diagnostics.map((d) => d.severity),
+      full.envelope.diagnostics
+        .filter((d) => d.file === "src/content/docs-es/guides/broken.mdx")
+        .map((d) => d.severity),
       ["error", "error"],
     );
+  } finally {
+    await site.remove();
+  }
+});
+
+test("an API collection with bundle: false stays outside the slice too", async () => {
+  // `bundle: false` stages the API's pages as static assets, and the
+  // citation index prepares that family at config setup whatever the slice
+  // holds; the empty check has to come before the assets branch, and the
+  // deployment files of a family outside the slice are not staged.
+  const site = await sliceSite({
+    pages: PAGES,
+    server: true,
+    apiBundle: false,
+    rendering: { collections: { "docs-es": "request", api: "request" } },
+    logLevel: "warn",
+  });
+  try {
+    // A page that cites the absent API.
+    await site.write(
+      "src/content/docs-es/guides/cited.mdx",
+      "---\ntitle: Cited (es)\n---\n\nCreate one with [create](api.ref:api:create).\n",
+    );
+    const built = await captureOutput(() => withBuildOnly("docs-es", () => build(site.config)));
+    assert.doesNotMatch(built.output, /does not exist or is empty/);
+    assert.deepEqual(await persistedStoreCounts(site), { "docs-es": PAGES + 1 });
+    const staged = existsSync(path.join(site.root, "dist/_nimbus/pages"))
+      ? await readdir(path.join(site.root, "dist/_nimbus/pages"))
+      : [];
+    assert.deepEqual(staged.filter((file) => /^(index|record|pack)-/.test(file)), []);
+    const { app } = (await import(
+      pathToFileURL(path.join(site.root, ".server", "entry.mjs")).href
+    )) as { app: { render(request: Request): Promise<Response> } };
+    const served = await captureOutput(async () => {
+      const response = await app.render(
+        new Request("https://docs.example.test/docs-es/guides/cited/"),
+      );
+      return [response.status, await response.text()] as const;
+    });
+    assert.equal(served.result[0], 200);
+    assert.match(served.result[1], new RegExp(`data-indexed="${PAGES + 1}"`));
+    // The citation into the absent API still resolves.
+    assert.match(served.result[1], /href="\/api\/charges\/create\/?"/);
+    assert.doesNotMatch(served.output, /does not exist or is empty/);
+    assert.doesNotMatch(served.output, /\[WARN\]/);
   } finally {
     await site.remove();
   }

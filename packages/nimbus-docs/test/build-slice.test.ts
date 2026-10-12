@@ -46,7 +46,7 @@ async function expectFullOutput(site: SliceSite): Promise<void> {
   });
   const truth = JSON.parse(await site.read(".nimbus/routes.json")) as Record<string, unknown>;
   assert.equal(truth.slice, undefined);
-  assert.equal(truth.builtAt, undefined);
+  assert.ok(!Number.isNaN(Date.parse(truth.builtAt as string)));
 }
 
 async function expectSliceOutput(site: SliceSite): Promise<void> {
@@ -125,10 +125,11 @@ test("partial builds: a docs-es slice, then the sequence full, slice, full", asy
       await expectSliceOutput(site);
       assert.match(output, /slice route truth: \d+ routes \(\d+ from the previous build\)\./);
       const truth = JSON.parse(await site.read(".nimbus/routes.json")) as {
-        slice: { collections: string[]; covered: string[] };
+        slice: { collections: string[]; covered: string[]; priorBuiltAt: string };
         knownRoutes: string[];
       };
       assert.deepEqual(truth.slice.covered, ["docs", "docs-es", "api"]);
+      assert.ok(!Number.isNaN(Date.parse(truth.slice.priorBuiltAt)));
       // The prior's routes for the other slices are in the union; the
       // slice's own routes come from this build only.
       assert.ok(truth.knownRoutes.includes(`/${site.corpus.en[0]!.slug}`));

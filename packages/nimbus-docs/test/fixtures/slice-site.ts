@@ -8,7 +8,7 @@
 // to its twin in the other locale and two pages of its own, and a few
 // `api.ref:` citations.
 
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -181,6 +181,8 @@ export interface SliceSiteOptions {
   rendering?: unknown;
   /** Server output through an adapter named `@astrojs/cloudflare`. */
   server?: boolean;
+  /** `bundle: false` on the API collection (its pages become static assets). */
+  apiBundle?: false;
   rules?: Record<string, unknown>;
   logLevel?: "silent" | "info" | "warn";
 }
@@ -212,7 +214,8 @@ function cloudflareNamedAdapter(entrypoint: string): AstroIntegration {
 }
 
 export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
-  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-slice-"));
+  // Astro recognises `src/live.config.ts` by path, so the root is a real path.
+  const root = await realpath(await mkdtemp(path.join(TEST_TMP, "nimbus-slice-")));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body, "utf8");
@@ -243,6 +246,18 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
       "",
     ].join("\n"),
   );
+  if (options.apiBundle === false) {
+    // `bundle: false` reads API pages through a live collection.
+    await write(
+      "src/live.config.ts",
+      [
+        `import { defineLiveCollection } from "astro:content";`,
+        `import { apiPagesLoader } from ${src("live.ts")};`,
+        `export const collections = { apiPages: defineLiveCollection({ loader: apiPagesLoader() }) };`,
+        "",
+      ].join("\n"),
+    );
+  }
   const corpus = generateCorpus(options.pages);
   await write("src/content/docs/index.mdx", "---\ntitle: Home\n---\n\nWelcome.\n");
   for (const page of corpus.en) await write(`src/content/docs/${page.slug}.mdx`, page.body);
@@ -343,6 +358,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
               spec: SMALLCO_SPEC,
               label: "SmallCo API",
               routes: { convention: "resource-action-v2" },
+              ...(options.apiBundle === false ? { bundle: false } : {}),
             },
           ],
           ...(options.versions ? { versions: { current: "v2", others: ["v1"] } } : {}),

@@ -1,14 +1,6 @@
 ---
-/**
- * ConnectMcp — a page action that shows how to connect an agent to the
- * site's remote MCP server: the server URL and a client config snippet,
- * each with a copy button. Render it only when `capabilities.mcpUrl` is
- * set, so sites without the server don't ship its script.
- */
-import { capabilities, options } from "virtual:nimbus/agent-capabilities";
+import { capabilities } from "virtual:nimbus/agent-capabilities";
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
-import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
-import { buttonVariants } from "@/components/ui/button/variants";
 import { cn } from "@/lib/cn";
 import type { HTMLAttributes } from "astro/types";
 
@@ -16,15 +8,6 @@ type Props = HTMLAttributes<"div">;
 
 const { class: className, ...attrs } = Astro.props;
 const url = capabilities.mcpUrl;
-const slug =
-  options.title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "docs";
-const key = /(^|-)docs$/.test(slug) ? slug : `${slug}-docs`;
-const config = url
-  ? JSON.stringify({ mcpServers: { [key]: { type: "http", url } } }, null, 2)
-  : "";
 
 const actionBtn =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-md bg-transparent px-2 py-1 text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2";
@@ -32,52 +15,11 @@ const actionBtn =
 
 {url && (
   <div data-nb-connect-mcp data-pagefind-ignore class={cn("not-prose inline-flex text-[0.8125rem]", className)} {...attrs}>
-    <button type="button" data-nb-connect-mcp-open aria-haspopup="dialog" class={actionBtn}>
+    <button type="button" data-nb-connect-mcp-copy data-copy={url} title="Copy MCP server URL" class={actionBtn}>
       <Icon name="ph:plugs-connected" class="w-3.5 h-3.5" />
-      Connect MCP
+      <span data-nb-connect-mcp-label>Copy MCP URL</span>
     </button>
-
-    <Dialog aria-labelledby="nb-connect-mcp-title">
-      <DialogContent class="max-w-xl gap-4 p-5 text-[0.9375rem]">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h2 id="nb-connect-mcp-title" class="m-0 text-base font-semibold text-foreground">
-              Connect an agent to {options.title}
-            </h2>
-            <p class="m-0 mt-1 text-muted-foreground">
-              A remote MCP server with two read tools, <code>list_pages</code> and <code>get_page</code>. No key needed.
-            </p>
-          </div>
-          <DialogClose class={cn(buttonVariants({ variant: "ghost", size: "sm", shape: "square" }), "shrink-0")} aria-label="Close">
-            <Icon name="ph:x" class="h-4 w-4" />
-          </DialogClose>
-        </div>
-
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Server URL</span>
-          <div class="flex items-center gap-2">
-            <code class="min-w-0 flex-1 truncate rounded-md bg-background px-2.5 py-1.5 text-[0.8125rem] ring-1 ring-border">{url}</code>
-            <button type="button" data-nb-connect-mcp-copy data-copy={url} aria-label="Copy server URL" class={buttonVariants({ variant: "secondary", size: "sm" })}>
-              <span data-nb-connect-mcp-label>Copy</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="flex flex-col gap-1.5">
-          <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">Client config</span>
-          <pre class="m-0 overflow-x-auto rounded-md bg-background p-3 text-[0.8125rem] ring-1 ring-border"><code>{config}</code></pre>
-          <div>
-            <button type="button" data-nb-connect-mcp-copy data-copy={config} class={buttonVariants({ variant: "secondary", size: "sm" })}>
-              <span data-nb-connect-mcp-label>Copy config</span>
-            </button>
-          </div>
-          <p class="m-0 text-muted-foreground">
-            Paste it into your client's MCP settings, or add the URL where it asks for a remote server.
-          </p>
-          <span class="sr-only" aria-live="polite" data-nb-connect-mcp-status></span>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <span class="sr-only" role="status" data-nb-connect-mcp-status></span>
   </div>
 )}
 

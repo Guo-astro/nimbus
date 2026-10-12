@@ -796,17 +796,17 @@
       "introducedIn": "0.19.0",
       "mode": "optional",
       "changeset": "remote-mcp",
-      "summary": "Optionally serve a remote MCP server at /mcp and show a Connect MCP page action.",
+      "summary": "Optionally serve a remote MCP server at /mcp and show a Copy MCP URL page action.",
       "affected": "Sites scaffolded before 0.19.0 that want agents to read the docs over MCP.",
       "instructions": [
         "No action is needed: sites without agents.mcp are unchanged.",
         "To serve the server, add a server adapter if the site has none (nimbus-docs add adapter-cloudflare), install @modelcontextprotocol/server@2, and set agents: { mcp: true } in the Nimbus config.",
-        "To show the Connect MCP action, run nimbus-docs diff src/components/ConnectMcp.astro --apply and nimbus-docs diff src/components/connect-mcp.client.ts --apply.",
+        "To show the Copy MCP URL action, run nimbus-docs diff src/components/ConnectMcp.astro --apply and nimbus-docs diff src/components/connect-mcp.client.ts --apply.",
         "Then in src/layouts/DocsLayout.astro, import ConnectMcp from \"@/components/ConnectMcp.astro\" and { capabilities } from \"virtual:nimbus/agent-capabilities\", and when capabilities.mcpUrl is set render <ConnectMcp /> after <PageActions />, as the starter's DocsLayout.astro does (nimbus-docs diff src/layouts/DocsLayout.astro shows the change). Without the server, keep <PageActions /> as it is."
       ],
       "verify": [
         "Build, then POST an MCP initialize request to /mcp and confirm a 200 that names the site.",
-        "Open a docs page, click Connect MCP, and confirm the dialog shows the /mcp URL and copies it."
+        "Open a docs page, click Copy MCP URL, and confirm it copies the /mcp URL and briefly shows Copied."
       ]
     }
   ]

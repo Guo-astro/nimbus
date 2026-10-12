@@ -97,6 +97,9 @@
 	--nb-sidebar-width: 18.75rem;
 	--nb-toc-width: 18rem;
 	--nb-content-max: 43.5rem;
+	/* The sticky header's height: taller on phones when the section tabs take
+	   a row of their own (set below). Sticky bars and scroll margins read it. */
+	--nb-header-height: 3.5rem;
 	/* Used only by the API reference (registry: api-layout); harmless elsewhere. */
 	--nb-code-rail-width: 34rem;
 
@@ -737,5 +740,12 @@ body:not(:has([data-mobile-sidebar])) [data-menu-btn] {
 	::view-transition-old(root),
 	::view-transition-new(root) {
 		animation: none;
+	}
+}
+
+/* Phones: the section tabs sit on a second header row. */
+@media (max-width: 47.999rem) {
+	:root:has([data-nb-header-tabs]) {
+		--nb-header-height: 6rem;
 	}
 }

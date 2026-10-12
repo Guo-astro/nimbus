@@ -61,7 +61,7 @@
 .fl-item {
   padding: 8px 0;
   border-top: 1px solid color-mix(in oklab, var(--color-border) 40%, transparent);
-  scroll-margin-top: 6rem;
+  scroll-margin-top: calc(var(--nb-header-height) + 2.5rem);
 }
 .fl-item:first-child {
   border-top: none;

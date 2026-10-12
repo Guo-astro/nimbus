@@ -104,7 +104,7 @@ const deprecationHtml = page.deprecated
 {/* Header order (locked): title → description → endpoint → page actions. The
     endpoint bar carries the sidebar method chip + verb + path; page actions sit
     beneath so they read as page-level utilities, not part of the endpoint. */}
-<div class="mt-6 flex flex-col gap-4">
+<div data-slot="page-header" class="mt-6 flex flex-col gap-4">
   <h1 class="mb-0 leading-tight text-foreground [text-wrap:balance]" style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)">{page.title}</h1>
 
   {page.descriptionHtml && (

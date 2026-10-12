@@ -108,17 +108,16 @@
   margin-top: 0.5rem;
 }
 
-.docs-content :where(h1:not([class]), h2:not([class]), h3:not([class]), h4:not([class])) {
-  scroll-margin-top: 5rem;
-}
-
+/* Clear the sticky header, plus the On this page bar below xl. */
+.docs-content :where(h1:not([class]), h2:not([class]), h3:not([class]), h4:not([class])),
 .docs-content :where([data-footnote-ref][id], [data-footnotes] li[id]) {
-  scroll-margin-top: 8rem;
+  scroll-margin-top: calc(var(--nb-header-height) + 4.5rem);
 }
 
 @media (min-width: 80rem) {
+  .docs-content :where(h1:not([class]), h2:not([class]), h3:not([class]), h4:not([class])),
   .docs-content :where([data-footnote-ref][id], [data-footnotes] li[id]) {
-    scroll-margin-top: 5rem;
+    scroll-margin-top: calc(var(--nb-header-height) + 1.5rem);
   }
 }
 

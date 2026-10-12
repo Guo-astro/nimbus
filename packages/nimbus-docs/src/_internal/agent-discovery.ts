@@ -473,9 +473,16 @@ function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
     if (!line || line.startsWith("#")) continue;
     if (HEADER_PATH_LINE.test(line)) {
       // A rule the host rejects (several wildcards, a scheme other than
-      // https, a port) never applies, so its headers are no policy.
+      // https, a port) never applies, so its headers are no policy. Hosts
+      // key rules by path, so a later rule for the same path replaces an
+      // earlier one, headers included.
       current = validOwnerPattern(line) ? { pattern: line, sets: new Set(), unsets: new Set() } : undefined;
-      if (current) policies.push(current);
+      if (current) {
+        const key = ownerRuleKey(line);
+        const replaced = policies.findIndex((policy) => ownerRuleKey(policy.pattern) === key);
+        if (replaced !== -1) policies.splice(replaced, 1);
+        policies.push(current);
+      }
       continue;
     }
     if (!current) continue;
@@ -491,6 +498,12 @@ function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
 
 /** A host-qualified rule as the host reads it: `https://` plus any slashes, host, path. */
 const HOST_RULE = /^https:\/\/+(?<host>[^/]+)\/?(?<path>.*)$/;
+
+/** The identity hosts give a rule: its host, when it has one, and its normalized path. */
+function ownerRuleKey(pattern: string): string {
+  const host = HOST_RULE.exec(pattern)?.groups?.host ?? "";
+  return `${host}\0${normalizeHeaderPattern(pattern) ?? pattern}`;
+}
 
 /** The path rules Cloudflare accepts: one wildcard, and only an https host without a port. */
 function validOwnerPattern(pattern: string): boolean {
@@ -511,7 +524,8 @@ function normalizeHeaderPattern(pattern: string): string | undefined {
   // honor an absolute owner policy even when its hostname differs from site.
   if (/^[^\s]+:\/\//.test(pattern)) {
     if (!validOwnerPattern(pattern)) return undefined;
-    pattern = `/${HOST_RULE.exec(pattern)?.groups?.path ?? ""}`;
+    const path = HOST_RULE.exec(pattern)?.groups?.path ?? "";
+    pattern = path.startsWith("/") ? path : `/${path}`;
   }
   try {
     // Static hosts URL-normalize raw Unicode and spaces in owner paths.

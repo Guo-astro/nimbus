@@ -662,8 +662,15 @@ test("an owner line that normalizes to a generated path is the same rule, and ex
   assert.equal((spacedMerged.match(/^\s*\/pets(%20| )api\/openapi\.json$/gm) ?? []).length, 1);
   assert.match(spacedMerged, /\/pets api\/openapi\.json\n  Access-Control-Allow-Origin: https:\/\/app\.example\.com\n# Nimbus agent discovery headers \(generated\)\n  Content-Type: application\/vnd/);
   const skills = createAgentCapabilities({ llmsUrl: minimal.llmsUrl, skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json` });
-  const slashes = agentDiscoveryHeaderRules(skills, options, [], {
-    ownerHeaders: "https:///docs.example.com/*\n  Access-Control-Allow-Origin: *\n",
+  for (const pattern of ["https:///docs.example.com/*", "https://docs.example.com//.well-known/*"]) {
+    const slashes = agentDiscoveryHeaderRules(skills, options, [], {
+      ownerHeaders: `${pattern}\n  Access-Control-Allow-Origin: *\n`,
+    });
+    assert.doesNotMatch(slashes, /^\/\.well-known\/ard\.json\n[^\n]*\n  Access-Control-Allow-Origin/m, pattern);
+  }
+  // A later owner rule for the same path replaces an earlier one, as on the host.
+  const replaced = agentDiscoveryHeaderRules(minimal, options, [], {
+    ownerHeaders: "/.well-known/ard.json\n  Content-Type: application/json\n/.well-known/ard.json?x=1\n  X-Other: 1\n",
   });
-  assert.doesNotMatch(slashes, /Access-Control-Allow-Origin/);
+  assert.match(replaced, /^\/\.well-known\/ard\.json\n  Content-Type: application\/json/m, "the surviving rule sets no Content-Type, so the generated one stays");
 });

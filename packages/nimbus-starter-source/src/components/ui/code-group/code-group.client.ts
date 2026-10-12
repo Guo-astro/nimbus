@@ -54,6 +54,7 @@ mount("[data-cg]", (root) => {
   const panelsHost = root.querySelector<HTMLElement>("[data-cg-panels]");
   const copyTpl = root.querySelector<HTMLTemplateElement>("[data-cg-icon-copy]");
   const checkTpl = root.querySelector<HTMLTemplateElement>("[data-cg-icon-check]");
+  const failTpl = root.querySelector<HTMLTemplateElement>("[data-cg-icon-fail]");
   if (!tablist || !rawHost || !panelsHost) return () => {};
 
   const pres = Array.from(rawHost.querySelectorAll<HTMLPreElement>("pre"));
@@ -106,13 +107,15 @@ mount("[data-cg]", (root) => {
     const onCopy = async () => {
       const code = btn.dataset.code ?? "";
       if (!code) return;
+      // Say so when the clipboard refuses, as the package managers block does.
+      let copied = true;
       try {
         await navigator.clipboard.writeText(code);
       } catch {
-        return;
+        copied = false;
       }
-      btn.replaceChildren(cloneIcon(checkTpl));
-      btn.setAttribute("aria-label", "Copied");
+      btn.replaceChildren(cloneIcon(copied ? checkTpl : (failTpl ?? copyTpl)));
+      btn.setAttribute("aria-label", copied ? "Copied" : "Couldn't copy");
       const timer = window.setTimeout(() => {
         timers.delete(timer);
         btn.replaceChildren(cloneIcon(copyTpl));

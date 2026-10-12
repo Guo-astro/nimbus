@@ -10,26 +10,32 @@ function initConnectMcp(root: HTMLElement): () => void {
   const onOpen = () => dialog.showModal();
   open.addEventListener("click", onOpen);
 
-  const timers = new Map<HTMLButtonElement, number>();
+  const status = root.querySelector<HTMLElement>("[data-nb-connect-mcp-status]");
+  const timers = new Set<number>();
   const copies = [...root.querySelectorAll<HTMLButtonElement>("[data-nb-connect-mcp-copy]")];
   const handlers = copies.map((button) => {
-    const idle = button.querySelector<HTMLElement>("[data-nb-connect-mcp-idle]");
-    const done = button.querySelector<HTMLElement>("[data-nb-connect-mcp-done]");
-    const show = (copied: boolean) => {
-      if (idle) idle.hidden = copied;
-      if (done) done.hidden = !copied;
-    };
+    const label = button.querySelector<HTMLElement>("[data-nb-connect-mcp-label]");
+    const idle = label?.textContent ?? "";
+    let timer: number | undefined;
     const handler = async () => {
+      let copied = true;
       try {
         await navigator.clipboard.writeText(button.dataset.copy ?? "");
       } catch {
-        // Clipboard unavailable (insecure context) or permission denied.
-        return;
+        copied = false;
       }
-      show(true);
-      const pending = timers.get(button);
-      if (pending) window.clearTimeout(pending);
-      timers.set(button, window.setTimeout(() => show(false), RESET_MS));
+      const message = copied ? "Copied" : "Couldn't copy";
+      if (label) label.textContent = message;
+      if (status) status.textContent = message;
+      if (timer) {
+        window.clearTimeout(timer);
+        timers.delete(timer);
+      }
+      timer = window.setTimeout(() => {
+        if (label) label.textContent = idle;
+        if (status) status.textContent = "";
+      }, RESET_MS);
+      timers.add(timer);
     };
     button.addEventListener("click", handler);
     return handler;
@@ -38,7 +44,7 @@ function initConnectMcp(root: HTMLElement): () => void {
   return () => {
     open.removeEventListener("click", onOpen);
     copies.forEach((button, index) => button.removeEventListener("click", handlers[index]!));
-    for (const timer of timers.values()) window.clearTimeout(timer);
+    for (const timer of timers) window.clearTimeout(timer);
   };
 }
 

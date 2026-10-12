@@ -21,7 +21,7 @@ Every framework package includes this guide at `node_modules/@cloudflare/nimbus-
 - **Version labels** — on versioned sites, every alternate Markdown version's frontmatter carries a `version:` key (resolved from your `versions` manifest) so agents can pin a version. Unversioned sites emit nothing.
 - **JSON-LD in every page head** — structured data so search and agent tools recognize what they're looking at.
 - **`/robots.txt` and a sitemap** — wired automatically when `site` is set.
-- **A remote MCP server**, when `agents: { mcp: true }` is set on a site with a server adapter — `/mcp` serves `list_pages` and `get_page` over the same pages, with a Server Card at `/mcp/server-card`. See [Remote MCP server](/ai/remote-mcp).
+- **A remote MCP server**, when `agents: { mcp: true }` is set on a site with a server adapter — `/mcp` serves `list_pages` and `get_page` over the published Markdown pages, with a Server Card at `/mcp/server-card`. See [Remote MCP server](/ai/remote-mcp).
 
 ```text title="/llms.txt"
 # Nimbus

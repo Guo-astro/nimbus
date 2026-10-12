@@ -16,6 +16,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { ImageZoom } from "@/components/ui/image-zoom";
 import { PageActions } from "@/components/ui/page-actions";
 import ConnectMcp from "@/components/ConnectMcp.astro";
+import { capabilities } from "virtual:nimbus/agent-capabilities";
 import { Badge } from "@/components/ui/badge";
 import type { DocsPageProps } from "@cloudflare/nimbus-docs/types";
 import { getVersionStatus, getVersionAlternates, withBase } from "@cloudflare/nimbus-docs/runtime";
@@ -208,10 +209,15 @@ const hasPagination = Astro.slots.has("pagination");
                     {description && (
                       <p class="text-[0.9375rem] sm:text-[1.0625rem] text-muted-foreground leading-relaxed mt-2 mb-2 [text-wrap:pretty]">{description}</p>
                     )}
-                    <div class:list={["flex flex-wrap items-center gap-x-1", description ? undefined : "mt-3"]}>
-                      <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} />
-                      <ConnectMcp />
-                    </div>
+                    {capabilities.mcpUrl ? (
+                      <div class:list={["not-prose -ml-2 flex flex-wrap items-center gap-y-1 text-[0.8125rem]", description ? undefined : "mt-3"]}>
+                        <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class="ml-0" />
+                        {(markdownUrl || lastUpdated) && <span aria-hidden="true" class="select-none text-muted-foreground/40">|</span>}
+                        <ConnectMcp />
+                      </div>
+                    ) : (
+                      <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class={description ? undefined : "mt-3"} />
+                    )}
                     {headings !== false && headings.length > 0 && (
                       <div class="border-border bg-background/95 supports-[backdrop-filter]:bg-background/80 sticky top-14 z-20 -mx-4 mt-3 border-y px-4 py-2 backdrop-blur md:-mx-6 md:px-6 xl:hidden">
                         <MobileTOC headings={headings} />

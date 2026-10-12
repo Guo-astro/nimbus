@@ -1,0 +1,253 @@
+---
+title: Build one locale or one part
+description: Build one collection, or a set, and deploy each slice as its own Worker, composed by zone routes.
+aiGenerated: true
+sidebar:
+  order: 9.5
+  label: Partial builds
+---
+
+A site with several locales or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice deploys as its own Worker, and zone routes compose them under one hostname.
+
+The unit is a collection. A translation is a collection with its own route prefix, the API reference is a collection, and so is any part you keep separate, so "build one locale" and "build one part" are the same operation.
+
+## Build a slice
+
+Set `NIMBUS_BUILD_ONLY` to a collection name, or several separated by commas, and build:
+
+```sh
+NIMBUS_BUILD_ONLY=docs-es pnpm build
+NIMBUS_BUILD_ONLY=docs,api pnpm build
+```
+
+Every other page collection is empty in that build: Astro never compiles, renders or indexes its pages, and build time and memory scale with the slice. The build says what it holds:
+
+```text
+[@cloudflare/nimbus-docs] building only docs-es (NIMBUS_BUILD_ONLY); docs, api are empty in this build.
+```
+
+Only `astro build` honours the variable. `astro dev`, `astro sync` and `nimbus-docs check` use the whole site and say so once, so a job-level variable doesn't change what the other steps of a CI job do.
+
+A build fails when:
+
+- a name isn't one of the site's page collections. Page collections are known after content sync, so a mistyped name costs one sync before failing;
+- the docs version collections (`docs` and every `docs-<version>`) are split across slices. They build together;
+- `astro.config` sets a `base` other than `/`. A sliced site deploys at the origin root.
+
+## What a slice writes
+
+The slice that holds `docs` is the **root slice**: it writes where a whole-site build does, and serves the homepage, `robots.txt`, `llms.txt`, `.well-known` and the rest of the origin root.
+
+Any other slice writes its site-wide files under its prefix, where its own Worker serves them, and drops the root files the root slice serves:
+
+| Under the slice's prefix (`/docs-es/…`) | Dropped from the output | At the asset root |
+|---|---|---|
+| `sitemap-index.xml`, `sitemap-0.xml`, `sitemap.xml` | `/`, `/robots.txt`, `/og.png`, `/nimbus-api/coordinates.json` | `_headers`, with rules for the slice's files only |
+| `pagefind/` | `/llms.txt`, `/llms-full.txt`, `/index.md` | `404.html`, served by the Worker's not-found handling |
+| `llms-full.txt`, one per collection in the slice | `/.well-known/` | `_redirects`, when the site emits one |
+| `_nimbus/shiki.css`, `_astro/` (bundled CSS and JS) | another collection's `openapi.json` and nav lists | |
+
+A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/docs-es/…` for a page under `/docs-es/`, so the slice's Worker takes that route too (below).
+
+The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
+
+## Deploy each slice as a Worker
+
+Each slice is a Worker with static assets and zone routes. Routes need a zone: `workers.dev` hostnames take no routes. The most specific route wins, so the slice on `/docs-es/*` composes with the root slice on `/*` without a router.
+
+```jsonc title="wrangler.jsonc (root slice)"
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "docs-site",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "docs.example.com/*", "zone_name": "example.com" }]
+}
+```
+
+```jsonc title="wrangler.docs-es.jsonc (the docs-es slice)"
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "docs-site-es",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "docs.example.com/docs-es", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/docs-es/*", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/og/docs-es/*", "zone_name": "example.com" }
+  ]
+}
+```
+
+Three routes per slice: the prefix itself (`/docs-es` without a trailing slash would otherwise reach the root Worker), everything under it, and its OG images. Build and deploy each slice on its own, in any order:
+
+```sh
+NIMBUS_BUILD_ONLY=docs,api pnpm build && npx wrangler deploy
+NIMBUS_BUILD_ONLY=docs-es pnpm build && npx wrangler deploy --config wrangler.docs-es.jsonc
+```
+
+A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current.
+
+### Announce every sitemap
+
+`robots.txt` is yours (`src/pages/robots.txt.ts`), and search engines read sitemaps from it. Add one `Sitemap:` line per slice:
+
+```ts title="src/pages/robots.txt.ts"
+`Sitemap: ${new URL("/sitemap-index.xml", config.site).href}`,
+`Sitemap: ${new URL("/docs-es/sitemap-index.xml", config.site).href}`,
+```
+
+### Check a slice before it's live
+
+`wrangler dev` serves one Worker and can't express zone routes, so it can't compose slices. Check a slice's own pages on a [preview URL](https://developers.cloudflare.com/workers/configuration/previews/) (`wrangler versions upload`), and the composition, links from one slice into another, on a hostname with the same routes, such as a staging zone.
+
+## Search across slices
+
+Each slice builds its own Pagefind index. The search client loads its slice's bundle and merges the other slices' bundles into it, so one search box still covers the site. The merge is paid on the first search: about 127 KB for a 40-page slice, growing with each slice's size.
+
+The starter's provider does this. A custom provider reads the same configuration from `virtual:nimbus/config`:
+
+```ts
+import { searchIndex } from "virtual:nimbus/config";
+
+searchIndex.bundle; // "/docs-es/pagefind/" in the docs-es slice, "/pagefind/" otherwise
+searchIndex.merge; // the other slices' bundles, [] in a whole-site build
+```
+
+A slice of several collections writes one bundle; the other collections' bundle URLs answer 404 and the client skips them.
+
+## Links between slices
+
+A slice build knows only its own routes. To check links into the other slices, it reads `.nimbus/routes.json` from the previous build and keeps those slices' routes, so `nimbus-docs lint` still checks them, as warnings rather than errors, and says so once. Without a previous build, links into the other slices are skipped, with one notice. A whole-site build restores the full check.
+
+In CI, cache `.nimbus/routes.json` from the whole-site build of the base branch and restore it before a slice build (below).
+
+## Build only what a pull request touched
+
+A script maps changed paths to slices, and a workflow builds each one. Keep the map of slices in one place:
+
+```js title="scripts/pick-slice.mjs"
+// Reads changed paths on stdin (git diff --name-only) and prints the slices
+// to build as JSON. A path outside a collection's content folder (a
+// component, the config, a partial, an API spec) touches every slice;
+// `--all` picks every slice.
+import { readFileSync } from "node:fs";
+
+const SLICES = [
+  { name: "docs-site", config: "wrangler.jsonc", only: "docs,api" },
+  { name: "docs-site-es", config: "wrangler.docs-es.jsonc", only: "docs-es" },
+];
+
+const paths = process.argv.includes("--all")
+  ? ["astro.config.ts"]
+  : readFileSync(0, "utf8").split("\n").filter(Boolean);
+const picked = new Set();
+for (const path of paths) {
+  const collection = /^src\/content\/([^/]+)\//.exec(path)?.[1];
+  const slice =
+    collection && collection !== "partials"
+      ? SLICES.find((candidate) => candidate.only.split(",").includes(collection))
+      : undefined;
+  if (slice) picked.add(slice);
+  else for (const candidate of SLICES) picked.add(candidate);
+}
+console.log(JSON.stringify([...picked]));
+```
+
+```yaml title=".github/workflows/slices.yml"
+name: Slices
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    outputs:
+      slices: ${{ steps.pick.outputs.slices }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" | node scripts/pick-slice.mjs
+          else
+            node scripts/pick-slice.mjs --all
+          fi | sed 's/^/slices=/' >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: pick
+    if: needs.pick.outputs.slices != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        slice: ${{ fromJSON(needs.pick.outputs.slices) }}
+    name: ${{ matrix.slice.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The previous whole-site build's routes, for links into other slices.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .nimbus/routes.json
+          key: routes-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: routes-
+
+      - run: pnpm build
+        env:
+          NIMBUS_BUILD_ONLY: ${{ matrix.slice.only }}
+      - run: npx nimbus-docs lint
+
+      - if: github.event_name == 'pull_request'
+        run: npx wrangler versions upload --config ${{ matrix.slice.config }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - if: github.event_name == 'push'
+        run: npx wrangler deploy --config ${{ matrix.slice.config }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  # The whole site, once per push: the route truth every slice build borrows.
+  routes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/cache/save@v4
+        with:
+          path: .nimbus/routes.json
+          key: routes-${{ github.sha }}
+```
+
+A pull request that touches only `src/content/docs-es/` builds and previews the `docs-es` slice; one that touches a component builds every slice. A push to `main` deploys every slice and saves the whole site's routes for the next pull request.
+
+## Limits
+
+- Request rendering holds only the slice: a slice's Worker renders its own collections' pages on request and nothing else. Nimbus has no cache layer to invalidate.
+- The site's WebMCP search uses the root slice's bundle.
+- Cross-slice version pickers aren't supported: the docs version collections build together.
+- A slice can't span part of a collection.

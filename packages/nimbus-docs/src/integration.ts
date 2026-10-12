@@ -2534,9 +2534,16 @@ export function nimbus(
                 applyToEnvironment: (environment) =>
                   environment.name === "client",
                 async writeBundle(outputOptions) {
+                  // A slice stages only the families it holds: the others
+                  // were prepared for citations at config:setup, but their
+                  // collections are empty in this build.
+                  const staged = pageAssetCollections.filter(
+                    (collection) =>
+                      !buildSliceForBuild || buildSliceForBuild.includes(collection),
+                  );
                   if (
                     outputOptions.dir &&
-                    (pageAssetCollections.length ||
+                    (staged.length ||
                       (
                         await import("./_internal/api/nav-list.js")
                       ).apiNavListFiles(projectRoot).length)
@@ -2544,6 +2551,7 @@ export function nimbus(
                     await pageAssetsBuild.stagePageAssetDeployment(
                       projectRoot,
                       outputOptions.dir,
+                      staged,
                     );
                   }
                 },
@@ -2596,15 +2604,14 @@ export function nimbus(
                 getNavLists: () => getApiNavListManifest(projectRoot),
                 getIndexedCollections: getPageCollectionsForBuild,
                 getEmptyCollections: async () => {
-                  // Only a slice build leaves page collections empty on
-                  // purpose. In dev the record changes under a running
-                  // server, so the list stays empty there.
+                  // The page collections outside the slice: empty on
+                  // purpose, as opposed to a slice collection that happens
+                  // to have no pages. In dev the record changes under a
+                  // running server, so the list stays empty there.
                   if (!buildSliceForBuild) return [];
-                  const snapshot = getPreparedMarkdownSnapshot(projectRoot);
-                  return (await getPageCollectionsForBuild()).filter((name) => {
-                    const record = snapshot?.collections.get(name);
-                    return record !== undefined && record.entries.size === 0;
-                  });
+                  return (await getPageCollectionsForBuild()).filter(
+                    (name) => !buildSliceForBuild!.includes(name),
+                  );
                 },
                 requestRenderingCollections: [...requestRenderingCollections],
                 versionAlternates,
@@ -3148,13 +3155,16 @@ export function nimbus(
         if (agents.isAgentEndpointAssetRequested(projectRootForBuild))
           await agents.stageAgentEndpointAssets(projectRootForBuild, target);
         const { apiNavListFiles } = await import("./_internal/api/nav-list.js");
-        if (
-          pageAssetCollections.length ||
-          apiNavListFiles(projectRootForBuild).length
-        ) {
+        // A slice stages only the families it holds (see the client-side
+        // staging plugin for the same rule).
+        const staged = pageAssetCollections.filter(
+          (collection) =>
+            !buildSliceForBuild || buildSliceForBuild.includes(collection),
+        );
+        if (staged.length || apiNavListFiles(projectRootForBuild).length) {
           const { stagePageAssetDeployment } =
             await import("./_internal/api/page-assets-build.js");
-          await stagePageAssetDeployment(projectRootForBuild, target);
+          await stagePageAssetDeployment(projectRootForBuild, target, staged);
         }
       },
       "astro:routes:resolved": ({ routes, logger }) => {
@@ -3673,6 +3683,7 @@ function materializeRouteTruth(input: {
         collections: [...collections],
         mounts,
         covered: Object.keys(mounts).filter((name) => covered.has(name)),
+        ...(prior?.builtAt ? { priorBuiltAt: prior.builtAt } : {}),
       };
       const uncovered = Object.keys(mounts).filter((name) => !covered.has(name));
       input.logger.info(
@@ -3694,9 +3705,10 @@ function materializeRouteTruth(input: {
       // Nimbus collections remain enumerable even when their HTML is rendered
       // on request, so broad opaque namespaces would only hide broken links.
       opaqueNamespaces: [],
-      ...(sliceRecord
-        ? { slice: sliceRecord, builtAt: new Date().toISOString() }
-        : {}),
+      // Every build dates its file, so a later slice build can say how old
+      // the routes it borrows are.
+      builtAt: new Date().toISOString(),
+      ...(sliceRecord ? { slice: sliceRecord } : {}),
     };
     const dir = path.join(input.projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });

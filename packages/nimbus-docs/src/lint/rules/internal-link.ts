@@ -112,7 +112,9 @@ export const internalLink: Rule = {
       if (resolution.kind === "valid") continue;
 
       // A partial build's truth: a link into another slice is advisory when
-      // the previous build covered that slice, and unknowable otherwise.
+      // the previous build covered that slice, and unknowable otherwise. The
+      // disposition keys on the link's own path, so a redirect whose target
+      // is in another slice is judged by its source.
       const disposition = sliceDisposition(env, key);
       if (disposition === "skip") continue;
       const report = (finding: RuleReport) =>

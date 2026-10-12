@@ -365,10 +365,12 @@ export async function getIndexedEntries(
     // Surfaces a failed registered collection instead of silently dropping it.
     const { hasApiPageAssets, getApiAssetEntries } =
       await import("./_internal/api/page-assets-runtime.js");
-    const { entries, warning } = (await hasApiPageAssets(name))
-      ? { entries: await getApiAssetEntries(name), warning: undefined }
-      : empty.has(name)
-        ? { entries: [], warning: undefined }
+    // The empty check comes first: an API collection with `bundle: false`
+    // has its asset family staged whether or not the slice holds it.
+    const { entries, warning } = empty.has(name)
+      ? { entries: [], warning: undefined }
+      : (await hasApiPageAssets(name))
+        ? { entries: await getApiAssetEntries(name), warning: undefined }
         : await loadCollectionOrWarn<
       import("astro:content").CollectionEntry<string>
     >(name, (n) => getCollection(n as any));

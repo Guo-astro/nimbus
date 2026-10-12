@@ -84,6 +84,7 @@ function isSlice(value: unknown): value is RouteTruthSlice {
     slice !== null &&
     isStringArray(slice.collections) &&
     isStringArray(slice.covered) &&
+    (slice.priorBuiltAt === undefined || typeof slice.priorBuiltAt === "string") &&
     typeof slice.mounts === "object" &&
     slice.mounts !== null &&
     Object.values(slice.mounts).every((prefix) => typeof prefix === "string")

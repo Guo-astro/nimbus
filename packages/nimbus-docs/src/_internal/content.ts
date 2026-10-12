@@ -101,20 +101,23 @@ async function loadVisibleEntries<C extends CollectionKey>(
   name: C,
   ctx?: ProjectionContext,
 ): Promise<CollectionEntry<C>[]> {
+  const cacheKey = `${name}::${audienceCacheKey(resolveAudience(ctx))}`;
+  const cached = visibleEntriesByName.get(cacheKey) as CollectionEntry<C>[] | undefined;
+  if (cached) return cached;
+  // A partial build's empty collections are known to be empty. Checked
+  // before the page-assets branch (an API collection with `bundle: false`
+  // has its asset family staged whether or not the slice holds it) and
+  // before asking Astro, which would log "does not exist or is empty" on
+  // every static-path and request-time read.
+  const empty = await loadEmptyCollections().catch(() => [] as readonly string[]);
+  if (empty.includes(name)) {
+    visibleEntriesByName.set(cacheKey, []);
+    return [];
+  }
   const { hasApiPageAssets, getApiAssetEntries } =
     await import("./api/page-assets-runtime.js");
   if (await hasApiPageAssets(name))
     return (await getApiAssetEntries(name)) as CollectionEntry<C>[];
-  const cacheKey = `${name}::${audienceCacheKey(resolveAudience(ctx))}`;
-  const cached = visibleEntriesByName.get(cacheKey) as CollectionEntry<C>[] | undefined;
-  if (cached) return cached;
-  // A partial build's empty collections are known to be empty; asking Astro
-  // would log "does not exist or is empty" on every static-path and
-  // request-time read.
-  if ((await loadEmptyCollections()).includes(name)) {
-    visibleEntriesByName.set(cacheKey, []);
-    return [];
-  }
   const { getCollection } = await import("astro:content");
   const all = await getCollection(name).catch(
     () => [] as CollectionEntry<C>[],

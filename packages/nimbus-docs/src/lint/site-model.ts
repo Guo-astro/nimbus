@@ -377,7 +377,7 @@ export interface RouteTruth {
    * covers it, and reported as a warning; otherwise it is skipped.
    */
   slice?: RouteTruthSlice;
-  /** When a partial build wrote the file (ISO 8601). */
+  /** When the build wrote the file (ISO 8601). Absent in files older builds wrote. */
   builtAt?: string;
 }
 
@@ -388,4 +388,6 @@ export interface RouteTruthSlice {
   mounts: Record<string, string>;
   /** The collections whose routes `knownRoutes` holds: the slice, plus what the previous file covered. */
   covered: string[];
+  /** When the previous build, whose routes this file borrows, wrote its file. */
+  priorBuiltAt?: string;
 }

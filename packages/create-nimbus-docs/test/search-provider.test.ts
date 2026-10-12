@@ -12,18 +12,28 @@ const PROVIDER = path.resolve(
 
 type Globals = {
   __config?: unknown;
+  __searchIndex?: { bundle: string; merge: string[] };
   __BASE_URL?: string;
   __import?: (href: string) => Promise<unknown>;
   window?: unknown;
 };
 
-// Runs the starter's provider outside Vite: its two build-time inputs (the
-// Nimbus config and `import.meta.env.BASE_URL`) and the dynamic import of
-// Pagefind become globals, so the test sees the URL search would load.
-async function pagefindUrlFor(base: string): Promise<string> {
+const WHOLE_SITE = { bundle: "/pagefind/", merge: [] };
+
+// Runs the starter's provider outside Vite: its build-time inputs (the
+// Nimbus config, the search index record and `import.meta.env.BASE_URL`) and
+// the dynamic import of Pagefind become globals, so the test sees the URLs
+// search would load and merge.
+async function pagefindUrlFor(
+  base: string,
+  searchIndex: { bundle: string; merge: string[] } = WHOLE_SITE,
+): Promise<{ loaded: string; merged: string[] }> {
   const source = fs
     .readFileSync(PROVIDER, "utf8")
-    .replace('import { config } from "virtual:nimbus/config";', "const config = (globalThis as any).__config;")
+    .replace(
+      /import \{[^}]*\} from "virtual:nimbus\/config";/,
+      "const config = (globalThis as any).__config; const searchIndex = (globalThis as any).__searchIndex;",
+    )
     .replaceAll("import.meta.env.BASE_URL", "(globalThis as any).__BASE_URL")
     .replace(/await import\(\/\* @vite-ignore \*\/ ([^)]+)\)/, "await (globalThis as any).__import($1)");
   assert.match(source, /__import\(/, "the provider still loads Pagefind with a dynamic import");
@@ -33,21 +43,30 @@ async function pagefindUrlFor(base: string): Promise<string> {
   fs.writeFileSync(file, source);
   const globals = globalThis as Globals;
   let loaded = "";
+  const merged: string[] = [];
   Object.assign(globals, {
     __config: {},
+    __searchIndex: searchIndex,
     __BASE_URL: base,
     __import: async (href: string) => {
       loaded = href;
-      return { init: async () => {}, search: async () => ({ results: [] }) };
+      return {
+        init: async () => {},
+        mergeIndex: async (href: string) => {
+          merged.push(href);
+        },
+        search: async () => ({ results: [] }),
+      };
     },
     window: { location: { origin: "https://example.com" } },
   });
   try {
     const { provider } = (await import(pathToFileURL(file).href)) as { provider: { init(): Promise<void> } };
     await provider.init();
-    return loaded;
+    return { loaded, merged };
   } finally {
     delete globals.__config;
+    delete globals.__searchIndex;
     delete globals.__BASE_URL;
     delete globals.__import;
     delete globals.window;
@@ -56,7 +75,18 @@ async function pagefindUrlFor(base: string): Promise<string> {
 }
 
 test("search loads Pagefind below the site's base, with or without a trailing slash", async () => {
-  assert.equal(await pagefindUrlFor("/"), "https://example.com/pagefind/pagefind.js");
-  assert.equal(await pagefindUrlFor("/docs"), "https://example.com/docs/pagefind/pagefind.js");
-  assert.equal(await pagefindUrlFor("/docs/"), "https://example.com/docs/pagefind/pagefind.js");
+  assert.equal((await pagefindUrlFor("/")).loaded, "https://example.com/pagefind/pagefind.js");
+  assert.equal((await pagefindUrlFor("/docs")).loaded, "https://example.com/docs/pagefind/pagefind.js");
+  assert.equal((await pagefindUrlFor("/docs/")).loaded, "https://example.com/docs/pagefind/pagefind.js");
+  assert.deepEqual((await pagefindUrlFor("/")).merged, [], "a whole-site build merges nothing");
+});
+
+
+test("a slice build loads its own bundle and merges the other slices' bundles", async () => {
+  const { loaded, merged } = await pagefindUrlFor("/", {
+    bundle: "/docs-es/pagefind/",
+    merge: ["/pagefind/", "/api/pagefind/"],
+  });
+  assert.equal(loaded, "https://example.com/docs-es/pagefind/pagefind.js");
+  assert.deepEqual(merged, ["https://example.com/pagefind/", "https://example.com/api/pagefind/"]);
 });

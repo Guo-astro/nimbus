@@ -647,3 +647,23 @@ test("owner rules the host rejects are no policy, a blank value is ignored, and 
   assert.doesNotMatch(unsetLink, /Link:/);
   assert.match(unsetLink, /^\/\.well-known\/ard\.json\n  Content-Type/m, "other headers stay");
 });
+
+test("an owner line that normalizes to a generated path is the same rule, and extra slashes after https: are read like the host does", () => {
+  const owner = "/.well-known/ard.json?x=1\n  Access-Control-Allow-Origin: https://app.example.com\n  X-Robots-Tag: none\n";
+  const generated = agentDiscoveryHeaderRules(minimal, options, [], { ownerHeaders: owner });
+  assert.doesNotMatch(generated, /^\/\.well-known\/ard\.json\n[^\n]*\n  Access-Control-Allow-Origin/m);
+  const merged = appendAgentDiscoveryHeaders(owner, generated);
+  assert.equal((merged.match(/^\s*\/\.well-known\/ard\.json(\?x=1)?$/gm) ?? []).length, 1, "spliced into the owner's rule, not a second rule for the same key");
+  assert.match(merged, /X-Robots-Tag: none\n# Nimbus agent discovery headers \(generated\)\n  Content-Type: application\/json\n# End/);
+  assert.equal(appendAgentDiscoveryHeaders(merged, generated), merged);
+  const spaced = "/pets api/openapi.json\n  Access-Control-Allow-Origin: https://app.example.com\n";
+  const specs = [{ pathname: "/pets%20api/openapi.json", type: "application/vnd.oai.openapi+json" }];
+  const spacedMerged = appendAgentDiscoveryHeaders(spaced, agentDiscoveryHeaderRules(minimal, options, specs, { ownerHeaders: spaced }));
+  assert.equal((spacedMerged.match(/^\s*\/pets(%20| )api\/openapi\.json$/gm) ?? []).length, 1);
+  assert.match(spacedMerged, /\/pets api\/openapi\.json\n  Access-Control-Allow-Origin: https:\/\/app\.example\.com\n# Nimbus agent discovery headers \(generated\)\n  Content-Type: application\/vnd/);
+  const skills = createAgentCapabilities({ llmsUrl: minimal.llmsUrl, skillsIndexUrl: `${options.site}/.well-known/agent-skills/index.json` });
+  const slashes = agentDiscoveryHeaderRules(skills, options, [], {
+    ownerHeaders: "https:///docs.example.com/*\n  Access-Control-Allow-Origin: *\n",
+  });
+  assert.doesNotMatch(slashes, /Access-Control-Allow-Origin/);
+});

@@ -402,6 +402,8 @@ export function appendAgentDiscoveryHeaders(
   generated: string,
 ): string {
   let owner = withoutGeneratedHeaders(ownerHeaders);
+  // Generated rules are path-only; hosts key rules by the normalized path,
+  // so an owner line that normalizes to the same path is the same rule.
   const rules = new Map(
     generated
       .replace(/^#.*\r?\n?/gm, "")
@@ -410,17 +412,21 @@ export function appendAgentDiscoveryHeaders(
       .filter(Boolean)
       .map((rule) => {
         const [path, ...headers] = rule.split(/\r?\n/);
-        return [path!, headers.join("\n")] as const;
+        return [normalizeHeaderPattern(path!) ?? path!, { path: path!, headers: headers.join("\n") }] as const;
       }),
   );
+  const ownerKey = (line: string) =>
+    /:\/\//.test(line) ? undefined : (normalizeHeaderPattern(line) ?? line);
   // A path line is read by its shape after trimming, as hosts read it.
   const paths = [...owner.matchAll(/^[ \t\uFEFF]*(\S[^\r\n]*)/gm)].filter((match) =>
     HEADER_PATH_LINE.test(match[1]!.trim()),
   );
   for (let index = paths.length - 1; index >= 0; index--) {
     const match = paths[index]!;
-    const headers = rules.get(match[1]!.trim());
-    if (!headers) continue;
+    const key = ownerKey(match[1]!.trim());
+    const rule = key === undefined ? undefined : rules.get(key);
+    if (!rule) continue;
+    const headers = rule.headers;
     const end = paths[index + 1]?.index ?? owner.length;
     const offset = match.index + owner.slice(match.index, end).trimEnd().length;
     const newline = owner.includes("\r\n") ? "\r\n" : "\n";
@@ -431,10 +437,10 @@ export function appendAgentDiscoveryHeaders(
       "# End Nimbus agent discovery headers",
     ].join(newline);
     owner = owner.slice(0, offset) + block + owner.slice(offset);
-    rules.delete(match[1]!.trim());
+    rules.delete(key!);
   }
   if (!rules.size) return owner;
-  const remaining = `# Nimbus agent discovery (generated)\n${[...rules].map(([path, headers]) => `${path}\n${headers}`).join("\n\n")}\n# End Nimbus agent discovery\n`;
+  const remaining = `# Nimbus agent discovery (generated)\n${[...rules.values()].map(({ path, headers }) => `${path}\n${headers}`).join("\n\n")}\n# End Nimbus agent discovery\n`;
   const separator =
     !owner || owner.endsWith("\n\n")
       ? ""
@@ -483,12 +489,14 @@ function ownerHeaderPolicies(headers: string): OwnerHeaderPolicy[] {
   return policies;
 }
 
+/** A host-qualified rule as the host reads it: `https://` plus any slashes, host, path. */
+const HOST_RULE = /^https:\/\/+(?<host>[^/]+)\/?(?<path>.*)$/;
+
 /** The path rules Cloudflare accepts: one wildcard, and only an https host without a port. */
 function validOwnerPattern(pattern: string): boolean {
   if (/:\/\//.test(pattern)) {
-    if (!pattern.startsWith("https://")) return false;
-    const host = pattern.slice("https://".length).split("/")[0] ?? "";
-    if (/:\d+$/.test(host)) return false;
+    const host = HOST_RULE.exec(pattern)?.groups?.host;
+    if (!host || /:\d+$/.test(host)) return false;
   }
   const wildcards = (pattern.match(/\*/g) ?? []).length + (/:splat(?!\w)/.test(pattern) ? 1 : 0);
   return wildcards <= 1;
@@ -503,8 +511,7 @@ function normalizeHeaderPattern(pattern: string): string | undefined {
   // honor an absolute owner policy even when its hostname differs from site.
   if (/^[^\s]+:\/\//.test(pattern)) {
     if (!validOwnerPattern(pattern)) return undefined;
-    const pathStart = pattern.indexOf("/", "https://".length);
-    pattern = pathStart === -1 ? "/" : pattern.slice(pathStart);
+    pattern = `/${HOST_RULE.exec(pattern)?.groups?.path ?? ""}`;
   }
   try {
     // Static hosts URL-normalize raw Unicode and spaces in owner paths.

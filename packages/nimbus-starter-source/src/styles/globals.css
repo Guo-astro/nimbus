@@ -489,7 +489,9 @@ pre.astro-code span {
 	transition: opacity 0.15s ease;
 	z-index: 1;
 }
-.nb-code-figure:hover::before {
+/* The badge clears for the copy button: on hover, and when the button has
+   keyboard focus. Same selector chain as the badge, so it wins. */
+.nb-code-figure[data-nb-lang]:not(.nb-code-figure-titled):is(:hover, :has(.nb-code-copy:focus-visible))::before {
 	opacity: 0;
 }
 /* Keep a short line clear of the badge. On a phone a long line scrolls under

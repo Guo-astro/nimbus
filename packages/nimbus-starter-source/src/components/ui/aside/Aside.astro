@@ -58,17 +58,19 @@ const displayTitle = title ?? d.label;
 <style>
   .aside-card {
     --_c: var(--nb-info);
+    --_f: var(--nb-info-foreground);
     --_t: var(--nb-info-muted);
     border: 1px solid color-mix(in oklch, var(--_c) 25%, transparent);
     background: var(--_t);
   }
-  .aside-card[data-type="tip"]     { --_c: var(--nb-success); --_t: var(--nb-success-muted); }
-  .aside-card[data-type="caution"] { --_c: var(--nb-warning); --_t: var(--nb-warning-muted); }
-  .aside-card[data-type="danger"]  { --_c: var(--nb-danger);  --_t: var(--nb-danger-muted); }
+  .aside-card[data-type="tip"]     { --_c: var(--nb-success); --_f: var(--nb-success-foreground); --_t: var(--nb-success-muted); }
+  .aside-card[data-type="caution"] { --_c: var(--nb-warning); --_f: var(--nb-warning-foreground); --_t: var(--nb-warning-muted); }
+  .aside-card[data-type="danger"]  { --_c: var(--nb-danger);  --_f: var(--nb-danger-foreground);  --_t: var(--nb-danger-muted); }
 
-  /* Icon + title stay in semantic color; body text stays readable */
+  /* Icon + title in the type's text colour; body text stays readable.
+     --_c tints the border and inline code, --_f is for text. */
   .aside-card-icon,
-  .aside-card-title { color: var(--_c); }
+  .aside-card-title { color: var(--_f); }
   .aside-card-body { color: var(--nb-foreground); }
 
   .aside-card-body :global(p) { margin: 0; }

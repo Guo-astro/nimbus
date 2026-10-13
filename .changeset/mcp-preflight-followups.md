@@ -1,6 +1,5 @@
 ---
 "@cloudflare/nimbus-docs": patch
-"@cloudflare/create-nimbus-docs": patch
 ---
 
-Check server-adapter prerequisites before building, drain oversized MCP requests without retaining excess data, handle server-card preflight, and keep MCP routes under the configured base. Remove the disabled Connect MCP client from starter builds and correct preview freshness messages, adapter install flags, and rendering-policy wording.
+`nimbus-docs check` now reports a missing server adapter for `agents.mcp`, request rendering and `api` with `bundle: false`, and a missing MCP SDK, before a build. The MCP server keeps serving requests on a connection after it rejects an oversized body. Preview builds report starter freshness and diffs correctly, `add adapter-*` keeps the adapter's version range, and `agents: { MCP: true }` suggests `mcp`.

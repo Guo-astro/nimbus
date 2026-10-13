@@ -54,7 +54,7 @@ import {
 } from "./_internal/build-report.js";
 import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
-import { mcpSdkMessage, serverAdapterMessage } from "./_internal/server-adapter.js";
+import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
 import { parseComponentsRegistry } from "./_internal/parse-components-registry.js";
@@ -2792,34 +2792,21 @@ export function nimbus(
           buildOutput ??
           (astroConfig.output === "server" ? "server" : "static");
         adapterNameForBuild = astroConfig.adapter?.name ?? null;
+        const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
+        const serverFeature = serverAdapterFeature({
+          unbundledApi: pageAssetCollections.length > 0,
+          requestRendering: requestRenderingConfigured,
+          mcp: !!config.agents?.mcp,
+        });
+        if (building && serverFeature && !adapterNameForBuild) {
+          throw new Error(serverAdapterMessage(serverFeature, root));
+        }
         if (config.agents?.mcp) {
-          const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
-          if (building && (outputModeForBuild !== "server" || !adapterNameForBuild)) {
-            throw new Error(
-              serverAdapterMessage("MCP", root, outputModeForBuild, adapterNameForBuild ?? "none"),
-            );
-          }
           try {
             createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server");
           } catch {
-            throw new Error(
-              mcpSdkMessage(root),
-            );
+            throw new Error(mcpSdkMessage(root));
           }
-        }
-        if (
-          building &&
-          requestRenderingConfigured &&
-          (outputModeForBuild !== "server" || !adapterNameForBuild)
-        ) {
-          throw new Error(
-            serverAdapterMessage(
-              pageAssetCollections.length ? "api bundle: false" : "request rendering",
-              projectRootForBuild,
-              outputModeForBuild,
-              adapterNameForBuild ?? "none",
-            ),
-          );
         }
         if (
           pageAssetCollections.length &&
@@ -2874,7 +2861,6 @@ export function nimbus(
         injectTypes({
           filename: "virtual-config.d.ts",
           content: [
-            'declare module "virtual:nimbus/connect-mcp-client" {}',
             'declare module "virtual:nimbus/agent-capabilities" {',
             '  export const capabilities: import("@cloudflare/nimbus-docs/types").AgentCapabilities;',
             '  export const options: { site: string; title: string; base: string; output: "static" | "server" };',

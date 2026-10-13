@@ -1,5 +1,4 @@
 import type { AgentCapabilities } from "../types.js";
-import path from "node:path";
 import type { AgentDiscoveryOptions } from "./agent-discovery.js";
 import type { ViteDevServer } from "vite";
 import type { VitePluginLike } from "./virtual-config.js";
@@ -26,7 +25,6 @@ export function virtualAgentCapabilitiesPlugin(
   configureServer(server: Pick<ViteDevServer, "middlewares">): void;
 } {
   const id = "virtual:nimbus/agent-capabilities";
-  const clientId = "virtual:nimbus/connect-mcp-client";
   return {
     name: "nimbus-docs:agent-capabilities",
     configureServer(server) {
@@ -118,20 +116,8 @@ export function virtualAgentCapabilitiesPlugin(
           .catch(next);
       });
     },
-    resolveId(source, importer) {
-      if (source === id) return `\0${id}`;
-      if (source === clientId && importer) {
-        return `\0${clientId}:${encodeURIComponent(path.dirname(importer.split("?")[0]!))}`;
-      }
-      return undefined;
-    },
+    resolveId: (source) => (source === id ? `\0${id}` : undefined),
     async load(source) {
-      if (source.startsWith(`\0${clientId}:`)) {
-        const { capabilities } = await get();
-        if (!capabilities.mcpUrl) return "export {};";
-        const directory = decodeURIComponent(source.slice(`\0${clientId}:`.length));
-        return `import ${JSON.stringify(path.join(directory, "connect-mcp.client.ts").replaceAll("\\", "/"))};`;
-      }
       if (source !== `\0${id}`) return undefined;
       const { capabilities, options } = await get();
       return `export const capabilities = ${JSON.stringify(capabilities)};\nexport const options = ${JSON.stringify(options)};\n`;

@@ -1028,7 +1028,7 @@ test("an explicitly empty rendering policy applies the build default", async (t)
   assert.equal(blog.prerender, false);
 });
 
-test("production request rendering requires server output and an adapter", async (t) => {
+test("production request rendering requires an adapter", async (t) => {
   const staticBuild = await setupIntegration(
     t,
     { collections: { docs: "request" } },
@@ -1041,7 +1041,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter.*output=static, adapter=none/,
+    /rendering mode "request" needs a server adapter.*add adapter-cloudflare/,
   );
 
   const adapterlessBuild = await setupIntegration(
@@ -1056,7 +1056,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "server", adapter: null },
         buildOutput: "server",
       } as never),
-    /output=server, adapter=none/,
+    /rendering mode "request" needs a server adapter/,
   );
 
   const serverBuild = await setupIntegration(
@@ -1174,7 +1174,7 @@ test("required canonical routes retain rendering policy when their file is missi
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter/,
+    /rendering mode "request" needs a server adapter/,
   );
 });
 

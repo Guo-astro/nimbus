@@ -35,6 +35,21 @@ test("placeholder site warns; missing search still errors with exit 1", async ()
   }
 });
 
+test("a spread after search: false leaves search unknown, not missing", async () => {
+  for (const config of [
+    `{ site: "https://docs.example.com", title: "X", search: false, ...shared }`,
+    `{ site: "https://docs.example.com", title: "X", ...shared }`,
+  ]) {
+    const dir = project(config);
+    try {
+      const r = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+      assert.ok(!r.findings.some((f) => f.code === "nimbus/pagefind-missing"), config);
+    } finally {
+      cleanup(dir);
+    }
+  }
+});
+
 test("real site with search disabled passes env with exit 0", async () => {
   const dir = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
   try {

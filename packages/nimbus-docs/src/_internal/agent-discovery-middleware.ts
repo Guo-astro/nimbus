@@ -3,8 +3,6 @@ import { capabilities, options } from "virtual:nimbus/agent-capabilities";
 import { agentHomepageLinks } from "./agent-discovery.js";
 import { prefersMarkdown } from "./markdown-negotiation.js";
 import { toRouteKey, withBase } from "./url.js";
-import { MCP_PATH, MCP_CARD_PATH } from "./mcp/identity.js";
-import { OPTIONS as mcpCardOptions } from "./mcp/card-route.js";
 
 const home = withBase("/", options.base).replace(/\/$/, "");
 const isHome = (pathname: string) => pathname.replace(/\/$/, "") === home;
@@ -95,17 +93,6 @@ async function publishedMarkdown(context: APIContext, pathname: string): Promise
 }
 
 export const onRequest: MiddlewareHandler = async (context, next) => {
-  if (capabilities.mcpUrl) {
-    const pathname = context.url.pathname.replace(/\/+$/, "");
-    if (options.base.replace(/\/+$/, "") && [MCP_PATH, MCP_CARD_PATH].includes(pathname)) {
-      return new Response("Not found", { status: 404 });
-    }
-    // The card's GET stays prerendered. Server output handles preflight here,
-    // because Astro doesn't route OPTIONS to a prerendered endpoint.
-    if (context.request.method === "OPTIONS" && pathname === withBase(MCP_CARD_PATH, options.base)) {
-      return mcpCardOptions();
-    }
-  }
   if (!["GET", "HEAD"].includes(context.request.method)) return next();
   // Static builds copy the site's emitted llms.txt after prerendering. In dev
   // and for request-rendered llms.txt routes, reuse the owner's existing route.

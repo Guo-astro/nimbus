@@ -202,19 +202,6 @@ function suite(name: string, options: { host: string; base?: string }) {
       await rm(site.root, { recursive: true, force: true, maxRetries: 5 });
     });
 
-    test("the static server card has a CORS preflight and MCP root aliases stay outside base", async () => {
-      const response = await site.app.render(new Request(`${endpoint}/server-card`, {
-        method: "OPTIONS", headers: { Origin: "https://client.example", "Access-Control-Request-Method": "GET" },
-      }));
-      assert.equal(response.status, 204);
-      assert.equal(response.headers.get("access-control-allow-origin"), "*");
-      assert.equal(response.headers.get("access-control-allow-methods"), "GET, HEAD, OPTIONS");
-      if (prefix) for (const path of ["/mcp", "/mcp/", "/mcp/server-card"]) {
-        const alias = await site.app.render(new Request(`${origin}${path}`, { method: "OPTIONS" }));
-        assert.equal(alias.status, 404, path);
-      }
-    });
-
     test("initialize answers at the endpoint and at the slashed form, reporting the derived name and package version", async () => {
       for (const url of [endpoint, `${endpoint}/`]) {
         const response = await site.app.render(rpcRequest(url, "initialize", INITIALIZE_PARAMS, 1, { Origin: "https://client.example" }));
@@ -336,6 +323,6 @@ suite("under base /docs", { host: "based.test", base: "/docs" });
 test("a static build with agents.mcp is an author error that names the adapter flip", async () => {
   await assert.rejects(
     () => buildSite({ host: "static.test", adapter: false }),
-    /agents\.mcp serves \/mcp from the site's own server, which needs a server adapter[\s\S]*add adapter-cloudflare/,
+    /rendering mode "request" needs a server adapter[\s\S]*add adapter-cloudflare/,
   );
 });

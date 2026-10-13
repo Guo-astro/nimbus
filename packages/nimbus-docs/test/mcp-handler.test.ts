@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   MCP_LIST_PAGE_SIZE,
+  MCP_MAX_DRAIN_BYTES,
   MCP_MAX_REQUEST_BODY_BYTES,
   MCP_PAGE_CONTENT_LIMIT,
   createDocsMcpHandler,
@@ -69,33 +70,54 @@ function handlerFor(index: McpPageIndex, base = "/", pages: Record<string, strin
 
 const URL_ = `${SITE}/mcp`;
 
-test("oversized streamed and declared bodies are drained before returning 413", async () => {
-  for (const declared of [false, true]) {
-    let cancelled = false;
-    let read = 0;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (read === 3) { controller.close(); return; }
-        read++;
-        controller.enqueue(new Uint8Array(MCP_MAX_REQUEST_BODY_BYTES / 2));
-      },
-      cancel() { cancelled = true; },
-    });
-    const request = new Request(URL_, {
-      method: "POST", body, duplex: "half",
-      headers: { "Content-Type": "application/json", ...(declared ? { "Content-Length": String(MCP_MAX_REQUEST_BODY_BYTES + 1) } : {}) },
-    } as RequestInit);
+function oversizedPost(chunks: number, chunkSize: number, contentLength?: number) {
+  const state = { read: 0, cancelled: false };
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (state.read === chunks) return controller.close();
+      state.read++;
+      controller.enqueue(new Uint8Array(chunkSize));
+    },
+    cancel() {
+      state.cancelled = true;
+    },
+  });
+  const request = new Request(URL_, {
+    method: "POST",
+    body,
+    duplex: "half",
+    headers: { "Content-Type": "application/json", ...(contentLength ? { "Content-Length": String(contentLength) } : {}) },
+  } as RequestInit);
+  return { request, state };
+}
+
+test("a body over the limit is read to its end before the 413, so the connection stays usable", async () => {
+  for (const declared of [undefined, MCP_MAX_REQUEST_BODY_BYTES * 2]) {
     const handler = handlerFor(INDEX);
+    const { request, state } = oversizedPost(4, MCP_MAX_REQUEST_BODY_BYTES / 2, declared);
     const response = await handler.fetch(request);
     assert.equal(response.status, 413);
-    assert.equal(read, 3, declared ? "Content-Length limit" : "stream limit");
-    assert.equal(cancelled, false);
-    assert.equal(request.bodyUsed, true);
-    assert.equal(request.body?.locked, false);
     assert.equal(response.headers.get("access-control-allow-origin"), "*");
-    const next = await handler.fetch(rpcRequest(URL_, "initialize", INITIALIZE_PARAMS));
-    assert.equal(next.status, 200);
+    assert.deepEqual(state, { read: 4, cancelled: false });
+    assert.equal((await handler.fetch(rpcRequest(URL_, "initialize", INITIALIZE_PARAMS))).status, 200);
   }
+});
+
+test("a body past the drain cap is cancelled: at once when declared, at the cap when streamed", async () => {
+  const handler = handlerFor(INDEX);
+  const atCap = oversizedPost(16, 64 * 1024, MCP_MAX_DRAIN_BYTES);
+  assert.equal((await handler.fetch(atCap.request)).status, 413);
+  assert.deepEqual(atCap.state, { read: 16, cancelled: false });
+
+  const declared = oversizedPost(Infinity, 64 * 1024, MCP_MAX_DRAIN_BYTES + 1);
+  assert.equal((await handler.fetch(declared.request)).status, 413);
+  assert.equal(declared.state.cancelled, true);
+  assert.ok(declared.state.read <= 1, `read ${declared.state.read} chunks`);
+
+  const streamed = oversizedPost(Infinity, 64 * 1024);
+  assert.equal((await handler.fetch(streamed.request)).status, 413);
+  assert.equal(streamed.state.cancelled, true);
+  assert.ok(streamed.state.read <= MCP_MAX_DRAIN_BYTES / (64 * 1024) + 2, `read ${streamed.state.read} chunks`);
 });
 
 test("OPTIONS is answered with CORS; GET and DELETE are 405 with Allow; a bad Origin is 403", async () => {

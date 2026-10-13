@@ -64,7 +64,7 @@ Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
 #### Enable request rendering
 
-Request rendering requires three things: `output: "server"` in the Astro config, a compatible Astro adapter, and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
+Request rendering requires a compatible Astro adapter and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
 
 Set the default when most or all canonical collection routes should render on request:
 

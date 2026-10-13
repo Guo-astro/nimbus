@@ -47,7 +47,6 @@ export type InstalledComponent = z.infer<typeof installedComponentSchema>;
 const nimbusJsonSchema = z
   .object({
     $schema: z.string().optional(),
-    // The create-nimbus-docs version that scaffolded the site, not the framework version.
     version: z.string().nullable().optional(),
     lastReviewedNimbusVersion: z.string().nullable().optional(),
     templatesTag: z.string().nullable().optional(),

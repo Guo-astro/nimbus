@@ -174,127 +174,39 @@ export function parseNimbusOptions(cwd: string): OptionsParseResult {
  */
 export function parseAstroConfigFields(cwd: string): {
   output?: string;
-  adapter?: boolean;
+  adapter: boolean;
   trailingSlash?: string;
   buildFormat?: string;
   unresolved: string[];
 } | null {
   const found = findConfigFile(cwd);
   if (!found) return null;
-  const sourceFile = ts.createSourceFile(
-    found.file,
-    found.source,
-    ts.ScriptTarget.Latest,
-    true,
-    configScriptKind(found.file),
+  const { sourceFile, checker } = configProgram(found.file, found.source);
+  const exported = sourceFile.statements.find(
+    (statement): statement is ts.ExportAssignment => ts.isExportAssignment(statement) && !statement.isExportEquals,
   );
-  const constants = new Map<string, ts.Expression>();
-  const bindingNames = new Map<string, ts.Identifier>();
-  const bindingUses = new Set<ts.Identifier>();
-  // Only Astro's `defineConfig` passes the config through unchanged; any
-  // other call may rewrite it, so its fields are unknown.
-  const passThrough = new Set<string>();
-  let exported: ts.Expression | undefined;
-  for (const statement of sourceFile.statements) {
-    if (
-      ts.isImportDeclaration(statement) &&
-      ts.isStringLiteral(statement.moduleSpecifier) &&
-      statement.moduleSpecifier.text === "astro/config" &&
-      statement.importClause?.namedBindings &&
-      ts.isNamedImports(statement.importClause.namedBindings)
-    ) {
-      for (const element of statement.importClause.namedBindings.elements) {
-        if ((element.propertyName ?? element.name).text === "defineConfig")
-          passThrough.add(element.name.text);
-      }
-    }
-    if (
-      ts.isVariableStatement(statement) &&
-      statement.declarationList.flags & ts.NodeFlags.Const
-    ) {
-      for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name) && declaration.initializer) {
-          constants.set(declaration.name.text, declaration.initializer);
-          bindingNames.set(declaration.name.text, declaration.name);
-        }
-      }
-    }
-    if (ts.isExportAssignment(statement) && !statement.isExportEquals)
-      exported = statement.expression;
-  }
-  const objectOf = (
-    expression: ts.Expression | undefined,
-    depth = 0,
-  ): ts.ObjectLiteralExpression | undefined => {
-    if (!expression || depth > 3) return undefined;
-    if (
-      ts.isParenthesizedExpression(expression) ||
-      ts.isAsExpression(expression) ||
-      ts.isSatisfiesExpression(expression)
-    ) {
-      return objectOf(expression.expression, depth + 1);
-    }
-    if (ts.isObjectLiteralExpression(expression)) return expression;
-    if (ts.isCallExpression(expression)) {
-      return ts.isIdentifier(expression.expression) &&
-        passThrough.has(expression.expression.text)
-        ? objectOf(expression.arguments[0], depth + 1)
-        : undefined;
-    }
-    if (ts.isIdentifier(expression)) {
-      bindingUses.add(expression);
-      return objectOf(constants.get(expression.text), depth + 1);
-    }
-    return undefined;
-  };
-  const config = objectOf(exported);
+  const config = exported && configObjectExpression(exported.expression, checker, "astro/config");
   if (!config) return null;
-  // A const object can still be mutated or handed to a function before export.
-  // Read only bindings used exclusively by the resolved export chain.
-  let hasOtherUse = false;
-  const inspectUses = (node: ts.Node): void => {
-    if (
-      ts.isIdentifier(node) &&
-      [...bindingUses].some((use) => use.text === node.text) &&
-      node !== bindingNames.get(node.text) &&
-      !bindingUses.has(node)
-    )
-      hasOtherUse = true;
-    ts.forEachChild(node, inspectUses);
-  };
-  inspectUses(sourceFile);
-  if (hasOtherUse) return null;
   const unresolved: string[] = [];
-  // The last assignment wins; a spread or shorthand could set any field.
-  const field = (
-    object: ts.ObjectLiteralExpression | undefined,
-    name: string,
-  ): ts.Expression | undefined => {
+  // The last assignment wins; a spread or computed key could set any field.
+  const field = (object: ts.ObjectLiteralExpression | undefined, name: string): ts.Expression | undefined => {
     let value: ts.Expression | undefined;
     for (const property of object?.properties ?? []) {
-      if (
-        ts.isSpreadAssignment(property) ||
-        (property.name && ts.isComputedPropertyName(property.name))
-      ) {
+      const key = ts.isSpreadAssignment(property) ? null : propertyKey(property.name);
+      if (key === null) {
         if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      } else if (!ts.isPropertyAssignment(property)) {
-        if (
-          property.name &&
-          propertyKey(property.name) === name &&
-          !unresolved.includes(name)
-        )
-          unresolved.push(name);
-      } else if (propertyKey(property.name) === null) {
-        if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      } else if (propertyKey(property.name) === name)
+      } else if (key !== name) {
+        continue;
+      } else if (ts.isPropertyAssignment(property)) {
         value = property.initializer;
+      } else {
+        value = undefined;
+        if (!unresolved.includes(name)) unresolved.push(name);
+      }
     }
     return value;
   };
-  const text = (
-    name: string,
-    expression: ts.Expression | undefined,
-  ): string | undefined => {
+  const text = (name: string, expression: ts.Expression | undefined): string | undefined => {
     if (!expression) return undefined;
     const value = literalValue(expression);
     if (value.ok && typeof value.value === "string") return value.value;
@@ -304,33 +216,14 @@ export function parseAstroConfigFields(cwd: string): {
   const build = field(config, "build");
   if (build && !ts.isObjectLiteralExpression(build)) unresolved.push("build");
   const adapter = field(config, "adapter");
-  let hasAdapter: boolean | undefined = false;
-  if (adapter) {
-    if (
-      adapter.kind === ts.SyntaxKind.NullKeyword ||
-      (ts.isIdentifier(adapter) && adapter.text === "undefined")
-    )
-      hasAdapter = false;
-    else if (
-      ts.isCallExpression(adapter) ||
-      ts.isObjectLiteralExpression(adapter)
-    )
-      hasAdapter = true;
-    else {
-      hasAdapter = undefined;
-      unresolved.push("adapter");
-    }
-  }
+  const hasAdapter = !!adapter && (ts.isCallExpression(adapter) || ts.isObjectLiteralExpression(adapter));
+  const noAdapter = !adapter || adapter.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(adapter) && adapter.text === "undefined");
+  if (!hasAdapter && !noAdapter) unresolved.push("adapter");
   return {
-    adapter: hasAdapter,
     output: text("output", field(config, "output")),
+    adapter: hasAdapter,
     trailingSlash: text("trailingSlash", field(config, "trailingSlash")),
-    buildFormat: text(
-      "build.format",
-      build && ts.isObjectLiteralExpression(build)
-        ? field(build, "format")
-        : undefined,
-    ),
+    buildFormat: text("build.format", build && ts.isObjectLiteralExpression(build) ? field(build, "format") : undefined),
     unresolved,
   };
 }
@@ -467,29 +360,13 @@ function findConfigFile(cwd: string): { file: string; source: string } | null {
   return null;
 }
 
-// Building the TypeScript program costs a few hundred ms; `check` reads both
-// the config and the options from the same file.
-const parsedCalls = new Map<string, ReturnType<typeof parseNimbusCallUncached>>();
+// Building the TypeScript program costs a few hundred ms; `check` reads the
+// Nimbus config, its options and Astro fields from the same file.
+let cachedProgram: { key: string; sourceFile: ts.SourceFile; checker: ts.TypeChecker } | undefined;
 
-function parseNimbusCall(file: string, source: string): ReturnType<typeof parseNimbusCallUncached> {
+function configProgram(file: string, source: string): { sourceFile: ts.SourceFile; checker: ts.TypeChecker } {
   const key = `${file}\0${source}`;
-  let parsed = parsedCalls.get(key);
-  if (!parsed) {
-    parsed = parseNimbusCallUncached(file, source);
-    parsedCalls.clear();
-    parsedCalls.set(key, parsed);
-  }
-  return parsed;
-}
-
-function parseNimbusCallUncached(file: string, source: string): {
-  local: string | null;
-  argument: { start: number; end: number } | null;
-  objectStart: number;
-  ambiguous: boolean;
-  /** The options object (second argument); `undefined` when absent, `null` when unreadable. */
-  options?: ts.ObjectLiteralExpression | null;
-} {
+  if (cachedProgram?.key === key) return cachedProgram;
   const options: ts.CompilerOptions = { allowJs: true, noResolve: true, target: ts.ScriptTarget.Latest };
   const host = ts.createCompilerHost(options);
   const getSourceFile = host.getSourceFile.bind(host);
@@ -500,7 +377,19 @@ function parseNimbusCallUncached(file: string, source: string): {
       : getSourceFile(fileName, languageVersion, onError, shouldCreateNewSourceFile);
   const program = ts.createProgram({ rootNames: [file], options, host });
   const sourceFile = program.getSourceFile(file) ?? ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
-  const checker = program.getTypeChecker();
+  cachedProgram = { key, sourceFile, checker: program.getTypeChecker() };
+  return cachedProgram;
+}
+
+function parseNimbusCall(file: string, source: string): {
+  local: string | null;
+  argument: { start: number; end: number } | null;
+  objectStart: number;
+  ambiguous: boolean;
+  /** The options object (second argument); `undefined` when absent, `null` when unreadable. */
+  options?: ts.ObjectLiteralExpression | null;
+} {
+  const { sourceFile, checker } = configProgram(file, source);
   const importBindings: ts.Identifier[] = [];
   for (const statement of sourceFile.statements) {
     if (
@@ -571,6 +460,7 @@ function nodeSpan(node: ts.Node, sourceFile: ts.SourceFile): { start: number; en
 function configObjectExpression(
   expression: ts.Expression,
   checker: ts.TypeChecker,
+  wrapperModule = NIMBUS_PACKAGE,
   seen = new Set<ts.Symbol>(),
 ): ts.ObjectLiteralExpression | null {
   let current = expression;
@@ -583,9 +473,9 @@ function configObjectExpression(
   if (ts.isObjectLiteralExpression(current)) return current;
   if (ts.isCallExpression(current)) {
     return ts.isIdentifier(current.expression) &&
-      isNimbusConfigWrapper(current.expression, checker) &&
+      isDefineConfig(current.expression, checker, wrapperModule) &&
       current.arguments.length === 1
-      ? configObjectExpression(current.arguments[0]!, checker, seen)
+      ? configObjectExpression(current.arguments[0]!, checker, wrapperModule, seen)
       : null;
   }
   if (!ts.isIdentifier(current)) return null;
@@ -603,10 +493,10 @@ function configObjectExpression(
     !(declaration.parent.flags & ts.NodeFlags.Const) ||
     hasOtherSymbolReference(declaration.getSourceFile(), checker, symbol, declaration.name, current)
   ) return null;
-  return configObjectExpression(declaration.initializer, checker, seen);
+  return configObjectExpression(declaration.initializer, checker, wrapperModule, seen);
 }
 
-function isNimbusConfigWrapper(identifier: ts.Identifier, checker: ts.TypeChecker): boolean {
+function isDefineConfig(identifier: ts.Identifier, checker: ts.TypeChecker, module: string): boolean {
   const declarations = checker.getSymbolAtLocation(identifier)?.declarations ?? [];
   const imported = declarations[0];
   if (declarations.length !== 1 || !imported || !ts.isImportSpecifier(imported)) return false;
@@ -614,7 +504,7 @@ function isNimbusConfigWrapper(identifier: ts.Identifier, checker: ts.TypeChecke
   return (imported.propertyName?.text ?? imported.name.text) === "defineConfig" &&
     ts.isImportDeclaration(declaration) &&
     ts.isStringLiteral(declaration.moduleSpecifier) &&
-    declaration.moduleSpecifier.text === NIMBUS_PACKAGE;
+    declaration.moduleSpecifier.text === module;
 }
 
 function hasOtherSymbolReference(
@@ -653,17 +543,17 @@ function readFields(
   const config: Record<string, unknown> = {};
   const unresolved: string[] = [];
 
+  // A spread, computed key or accessor can override every field before it.
+  const opaque = () => {
+    if (!unresolved.includes("...spread")) unresolved.push("...spread");
+    for (const key of Object.keys(config)) delete config[key];
+  };
+
   for (const entry of splitEntriesWithOffsets(masked, objectStart + 1, objectEnd)) {
     const text = entry.text.trim();
     if (!text) continue;
-    if (text.startsWith("...")) {
-      if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      for (const key of Object.keys(config)) delete config[key];
-      continue;
-    }
-    if (text.startsWith("[")) {
-      if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      for (const key of Object.keys(config)) delete config[key];
+    if (text.startsWith("...") || text.startsWith("[")) {
+      opaque();
       continue;
     }
 
@@ -672,10 +562,7 @@ function readFields(
       if (/^[A-Za-z_$][\w$]*$/.test(text)) {
         unresolved.push(text);
         delete config[text];
-      } else {
-        if (!unresolved.includes("...spread")) unresolved.push("...spread");
-        for (const key of Object.keys(config)) delete config[key];
-      }
+      } else opaque();
       continue;
     }
     // Read the key from `source`: a quoted key ("site":) is blanked in `masked`.
@@ -685,8 +572,7 @@ function readFields(
       .trim()
       .replace(/^['"`]|['"`]$/g, "");
     if (!/^[A-Za-z_$][\w$]*$/.test(rawKey)) {
-      if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      for (const key of Object.keys(config)) delete config[key];
+      opaque();
       continue;
     }
 

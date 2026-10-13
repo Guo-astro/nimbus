@@ -17,7 +17,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { cloudflareTrailingSlashWarning } from "../_internal/cloudflare-trailing-slash.js";
-import { mcpSdkMessage, serverAdapterMessage, type ServerFeature } from "../_internal/server-adapter.js";
+import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage, type ServerFeature } from "../_internal/server-adapter.js";
 import { parseAstroConfigFields, type ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
@@ -57,13 +57,19 @@ export async function checkStructure(
   const notes: Note[] = [];
 
   const config = checkConfigZod(findings, notes, parsed);
+  await checkApiCollections(cwd, findings, notes, parsed, config);
+  const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config);
   if (parsed.ok && config && !parsed.unresolved.includes("...spread")) {
-    if (!parsed.unresolved.includes("agents") && config.agents?.mcp) {
-      checkServerAdapter(cwd, findings, notes, "MCP");
+    const mcp = !parsed.unresolved.includes("agents") && !!config.agents?.mcp;
+    const feature = serverAdapterFeature({
+      unbundledApi: !parsed.unresolved.includes("api") && !!config.api?.some((entry) => entry.bundle === false),
+      requestRendering,
+      mcp,
+    });
+    if (feature) checkServerAdapter(cwd, findings, notes, feature);
+    if (mcp) {
       try {
-        createRequire(path.join(cwd, "package.json")).resolve(
-          "@modelcontextprotocol/server",
-        );
+        createRequire(path.join(cwd, "package.json")).resolve("@modelcontextprotocol/server");
       } catch {
         findings.push({
           scope: "structure",
@@ -74,15 +80,7 @@ export async function checkStructure(
         });
       }
     }
-    if (
-      !parsed.unresolved.includes("api") &&
-      config.api?.some((entry) => entry.bundle === false)
-    ) {
-      checkServerAdapter(cwd, findings, notes, "api bundle: false");
-    }
   }
-  await checkApiCollections(cwd, findings, notes, parsed, config);
-  await checkRequestRendering(cwd, findings, notes, parsed, config);
   await checkDuplicateRoutes(cwd, findings, parsed);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
@@ -90,45 +88,23 @@ export async function checkStructure(
   return { scope: "structure", findings, notes, evaluated: true };
 }
 
-function checkServerAdapter(
-  cwd: string,
-  findings: CheckFinding[],
-  notes: Note[],
-  feature: ServerFeature,
-): void {
+function checkServerAdapter(cwd: string, findings: CheckFinding[], notes: Note[], feature: ServerFeature): void {
   const fields = parseAstroConfigFields(cwd);
-  if (
-    !fields ||
-    fields.unresolved.some((name) =>
-      ["...spread", "adapter", "output"].includes(name),
-    )
-  ) {
-    if (
-      !notes.some((note) => note.code === "nimbus/server-adapter-unconfirmed")
-    ) {
-      notes.push(
-        skippedNote(
-          "nimbus/server-adapter-unconfirmed",
-          "The exported Astro config is computed, so its server output and adapter can't be confirmed statically.",
-        ),
-      );
-    }
+  if (!fields || fields.unresolved.includes("...spread") || fields.unresolved.includes("adapter")) {
+    notes.push(skippedNote(
+      "nimbus/server-adapter-unconfirmed",
+      "The exported Astro config is computed, so its adapter can't be confirmed statically.",
+    ));
     return;
   }
-  const output = fields.output ?? "static";
-  if (!fields.adapter || output !== "server")
-    findings.push({
-      scope: "structure",
-      code: "nimbus/server-adapter-missing",
-      severity: "error",
-      message: serverAdapterMessage(
-        feature,
-        cwd,
-        output,
-        fields.adapter ? "configured" : "none",
-      ),
-      fixable: false,
-    });
+  if (fields.adapter) return;
+  findings.push({
+    scope: "structure",
+    code: "nimbus/server-adapter-missing",
+    severity: "error",
+    message: serverAdapterMessage(feature, cwd),
+    fixable: false,
+  });
 }
 
 /** The build warns about this too; `check` says it before a deploy. */
@@ -250,16 +226,16 @@ async function checkRequestRendering(
   notes: Note[],
   parsed: ConfigParseResult,
   config: NimbusConfig | null,
-): Promise<void> {
-  if (!parsed.ok || config === null) return;
+): Promise<boolean> {
+  if (!parsed.ok || config === null) return false;
   if (parsed.unresolved.includes("rendering") || parsed.unresolved.includes("...spread")) {
     notes.push(skippedNote(
       "nimbus/rendering-policy-skipped",
       "Rendering policy checks skipped: the `rendering` config isn't a plain literal, so request-rendered collections and their routes weren't verified.",
     ));
-    return;
+    return false;
   }
-  if (!config.rendering) return;
+  if (!config.rendering) return false;
 
   const srcDir = path.join(cwd, "src");
   // The same before-sync candidate set the build uses: `docs`, version
@@ -355,10 +331,9 @@ async function checkRequestRendering(
       message: err instanceof Error ? err.message : String(err),
       fixable: false,
     });
-    return;
+    return false;
   }
-  if (!hasRequestRoute) return;
-  checkServerAdapter(cwd, findings, notes, "request rendering");
+  if (!hasRequestRoute) return false;
 
   // Not `requiresBuild`: check never reads server output, so a build can't
   // clear this note. It stays, and the build is the gate.
@@ -367,6 +342,7 @@ async function checkRequestRendering(
     reason:
       "`nimbus-docs check` doesn't verify request-rendered pages, even after a build; a passing production build is the gate for them",
   });
+  return true;
 }
 
 function checkConfigZod(
@@ -404,9 +380,8 @@ function checkConfigZod(
   ) {
     probe.title = "placeholder";
   }
+  // An unreadable policy may render request; don't assume the build default.
   if (probe.rendering === undefined && (hasSpread || parsed.unresolved.includes("rendering"))) {
-    // Validate the literal API shape without assuming its unreadable policy
-    // uses the default build mode. Request-route checks still stay skipped.
     probe.rendering = { default: "request" };
   }
 

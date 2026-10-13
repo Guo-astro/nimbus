@@ -191,6 +191,7 @@ function checkPagefind(
   const search = parsed.config.search;
   if (search === false) return;
   if (parsed.unresolved.includes("search")) return;
+  if (search === undefined && parsed.unresolved.includes("...spread")) return;
   if (usesCustomSearchProvider(search)) return;
 
   if (depInstalled(cwd, "pagefind")) return;

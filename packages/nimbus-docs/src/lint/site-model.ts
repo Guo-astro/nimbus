@@ -370,4 +370,24 @@ export interface RouteTruth {
    * statically enumerated. Empty in the current all-prerendered path.
    */
   opaqueNamespaces: string[];
+  /**
+   * Present when the build was partial (`NIMBUS_BUILD_ONLY`). Lint never
+   * reads such a file as full truth: a link into a collection outside the
+   * slice is checked against the previous build's routes when the file
+   * covers it, and reported as a warning; otherwise it is skipped.
+   */
+  slice?: RouteTruthSlice;
+  /** When the build wrote the file (ISO 8601). Absent in files older builds wrote. */
+  builtAt?: string;
+}
+
+export interface RouteTruthSlice {
+  /** The collections the build held. */
+  collections: string[];
+  /** Every page collection's mount (`""` for the root collection). */
+  mounts: Record<string, string>;
+  /** The collections whose routes `knownRoutes` holds: the slice, plus what the previous file covered. */
+  covered: string[];
+  /** When the previous build, whose routes this file borrows, wrote its file. */
+  priorBuiltAt?: string;
 }

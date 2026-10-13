@@ -21,7 +21,7 @@ test("a multi-file spec publishes as one self-contained document with the pinned
   assert.equal(result.error, undefined);
   // The shape is the bundler's; pinning it makes a dependency upgrade that
   // changes the published output fail here instead of on a live site.
-  assert.equal(result.spec!.contents, readFileSync(path.join(fixtures, "multi/openapi.bundled.json"), "utf8"));
+  assert.equal(result.spec!.contents, readFileSync(path.join(fixtures, "multi/openapi.bundled.json"), "utf8").replace(/\r\n/g, "\n"));
   const document = JSON.parse(result.spec!.contents);
   const resolved = (await dereference(document)) as { errors?: unknown[]; schema: Record<string, never> };
   assert.deepEqual(resolved.errors ?? [], []);
@@ -29,7 +29,7 @@ test("a multi-file spec publishes as one self-contained document with the pinned
   assert.deepEqual(pet.properties.friends.items, pet, "recursion survives bundling");
   assert.deepEqual(resolved.schema.components.schemas.Local, pet);
   assert.deepEqual(
-    result.spec!.files.map((file) => path.relative(fixtures, file)).sort(),
+    result.spec!.files.map((file) => path.relative(fixtures, file).split(path.sep).join("/")).sort(),
     ["multi/openapi.yaml", "multi/paths/owner.yaml", "multi/schemas.yaml"],
   );
 });

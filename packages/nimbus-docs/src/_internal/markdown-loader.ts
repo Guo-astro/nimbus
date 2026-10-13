@@ -26,6 +26,13 @@ export interface PrepareMarkdownLoaderOptions extends NimbusMarkdownCapability {
    * pages; `partials` stay component content. Default `page`.
    */
   role?: "page" | "partials";
+  /**
+   * Commit the collection empty without running the loader: a partial build
+   * (`NIMBUS_BUILD_ONLY`) leaves collections outside its slice this way. The
+   * store is cleared unconditionally, because Astro persists it between
+   * builds and the previous build's entries must not survive into the slice.
+   */
+  empty?: boolean;
 }
 
 type StoreEntry = Parameters<LoaderContext["store"]["set"]>[0];
@@ -333,6 +340,28 @@ export function prepareMarkdownLoader<T extends Loader>(
   const load = Reflect.get(loader, "load", loader) as Loader["load"];
   const preparedLoad: Loader["load"] = async (context) => {
     const root = preparedMarkdownRootKey(context.config.root);
+    if (options.empty) {
+      await runPreparedMarkdownTransaction(root, context.collection, async () => {
+        const epoch = beginPreparedMarkdownLoad(root, context.collection, true);
+        context.store.clear();
+        context.meta.delete(NIMBUS_MARKDOWN_META_KEY);
+        const committed = commitPreparedMarkdownCollection(
+          root,
+          context.collection,
+          epoch,
+          capability,
+          [],
+          new Map(),
+          options.role ?? "page",
+        );
+        if (!committed) {
+          throw new Error(
+            `Nimbus Markdown preparation became obsolete for collection ${context.collection}`,
+          );
+        }
+      });
+      return;
+    }
     await runPreparedMarkdownTransaction(root, context.collection, async () => {
       const currentCapability = preparedMarkdownCollectionCapability(
         context.collection,

@@ -161,7 +161,7 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
       if (isDisabled(disables, rule.code, report.line)) continue;
       out.push({
         code: rule.code,
-        severity,
+        severity: report.severity === "warn" ? "warn" : severity,
         source: "docs-compiler",
         file: file.path,
         message: report.message,

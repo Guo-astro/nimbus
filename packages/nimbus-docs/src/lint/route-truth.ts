@@ -9,7 +9,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { ROUTE_TRUTH_VERSION, type RouteTruth } from "./site-model.js";
+import { ROUTE_TRUTH_VERSION, type RouteTruth, type RouteTruthSlice } from "./site-model.js";
 
 /** Project-relative path, as diagnostics print it. */
 export const ROUTE_TRUTH_FILE = ".nimbus/routes.json";
@@ -41,6 +41,7 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
   }
 
   const record = (parsed ?? {}) as Partial<Record<keyof RouteTruth | "incomplete", unknown>>;
+  const slice = record.slice;
   if (record.incomplete === true) {
     return {
       problem: `\`${ROUTE_TRUTH_FILE}\` is from a build that didn't finish. Run \`astro build\` first; it writes the list of routes that links are checked against.`,
@@ -56,7 +57,8 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
     !isStringArray(record.opaqueNamespaces) ||
     !isRedirectArray(record.redirects) ||
     !isRedirectArray(record.redirectPages) ||
-    (record.redirectRules !== "cloudflare" && record.redirectRules !== "netlify")
+    (record.redirectRules !== "cloudflare" && record.redirectRules !== "netlify") ||
+    (slice !== undefined && !isSlice(slice))
   ) {
     return { problem: `\`${ROUTE_TRUTH_FILE}\` doesn't have the expected shape. ${REBUILD}` };
   }
@@ -69,8 +71,24 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
       redirectPages: record.redirectPages,
       redirectRules: record.redirectRules,
       opaqueNamespaces: record.opaqueNamespaces,
+      ...(slice ? { slice } : {}),
+      ...(typeof record.builtAt === "string" ? { builtAt: record.builtAt } : {}),
     },
   };
+}
+
+function isSlice(value: unknown): value is RouteTruthSlice {
+  const slice = value as Partial<RouteTruthSlice> | null;
+  return (
+    typeof slice === "object" &&
+    slice !== null &&
+    isStringArray(slice.collections) &&
+    isStringArray(slice.covered) &&
+    (slice.priorBuiltAt === undefined || typeof slice.priorBuiltAt === "string") &&
+    typeof slice.mounts === "object" &&
+    slice.mounts !== null &&
+    Object.values(slice.mounts).every((prefix) => typeof prefix === "string")
+  );
 }
 
 function isRedirectArray(value: unknown): value is RouteTruth["redirects"] {

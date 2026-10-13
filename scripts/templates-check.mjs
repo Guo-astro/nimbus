@@ -176,20 +176,29 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = 
     if (MCP) {
       const card = await fetch(`${siteUrl}/mcp/server-card`, { signal: AbortSignal.timeout(5_000) });
       assert.equal(card.status, 200, `${base}/mcp/server-card`);
+      assert.equal(card.headers.get("Content-Type"), "application/mcp-server-card+json");
+      assert.equal(card.headers.get("Access-Control-Allow-Origin"), "*");
       assert.match((await card.json()).remotes?.[0]?.url ?? "", new RegExp(`${base}/mcp/?$`));
-      const initialize = await fetch(`${siteUrl}/mcp`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "templates-check", version: "0" } },
-        }),
-        signal: AbortSignal.timeout(5_000),
+      const rpc = (id, method, params) =>
+        fetch(`${siteUrl}/mcp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+          body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+          signal: AbortSignal.timeout(5_000),
+        });
+      const initialize = await rpc(1, "initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "templates-check", version: "0" },
       });
       assert.equal(initialize.status, 200, `${base}/mcp initialize`);
       assert.match(await initialize.text(), /"serverInfo"/);
+      const call = await rpc(2, "tools/call", { name: "get_page", arguments: { url: `${base}/owned-by-slug/` } });
+      assert.equal(call.status, 200, `${base}/mcp get_page`);
+      const message = JSON.parse((await call.text()).match(/^data: (.*)$/m)?.[1] ?? "{}");
+      const page = JSON.parse(message.result?.content?.[0]?.text ?? "{}");
+      assert.ok(page.content?.includes("This text lives in"), `get_page reads the deployed Markdown: ${JSON.stringify(message).slice(0, 300)}`);
+      assert.equal(page.truncated, undefined);
     }
     for (const route of ["/", "/owned-by-slug/"]) {
       const markdown = await fetch(`${siteUrl}${route}`, {

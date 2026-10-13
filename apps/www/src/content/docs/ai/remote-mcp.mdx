@@ -38,7 +38,7 @@ A build with `agents.mcp` and no server adapter, or without the SDK installed, s
 
 ## Try it locally
 
-`astro dev` serves `/mcp`, without an adapter, from the last content sync. List the tools with the MCP Inspector:
+`astro dev` serves `/mcp`, without an adapter, from the last content sync. List the tools with the MCP Inspector, using the URL exactly as the site serves it: with the `base` path, and as `/mcp/` under `trailingSlash: "always"`, since the Inspector doesn't follow redirects.
 
 <PackageManagers pkg="@modelcontextprotocol/inspector" type="dlx" args="--cli http://localhost:4321/mcp --transport http --method tools/list" />
 

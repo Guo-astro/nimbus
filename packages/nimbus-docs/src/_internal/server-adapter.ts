@@ -21,13 +21,16 @@ export function serverAdapterFeature(features: {
 
 /** Shared by the build gate and `check`. */
 export function serverAdapterMessage(feature: ServerFeature, root: string): string {
-  const add = (hosts: string) => `Add the one for your host: run \`${invocation("add adapter-<host>", root)}\`, where <host> is ${hosts}.`;
+  const add = (...hosts: string[]) => {
+    const commands = hosts.map((host) => `\`${invocation(`add adapter-${host}`, root)}\``);
+    return `Add the one for your host: ${commands.slice(0, -1).join(", ")} or ${commands.at(-1)}.`;
+  };
   switch (feature) {
     case "MCP":
-      return `nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. ${add("cloudflare, netlify, node or vercel")} Or set agents.mcp to false.`;
+      return `nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. ${add("cloudflare", "netlify", "node", "vercel")} Or set agents.mcp to false.`;
     case "request rendering":
-      return `nimbus-docs: rendering mode "request" needs a server adapter for production builds. ${add("cloudflare, netlify, node or vercel")}`;
+      return `nimbus-docs: rendering mode "request" needs a server adapter for production builds. ${add("cloudflare", "netlify", "node", "vercel")}`;
     case "api bundle: false":
-      return `nimbus-docs: api bundle: false needs the Cloudflare or Node adapter. ${add("cloudflare or node")}`;
+      return `nimbus-docs: api bundle: false needs the Cloudflare or Node adapter. ${add("cloudflare", "node")} Or remove \`bundle: false\` to deploy elsewhere.`;
   }
 }

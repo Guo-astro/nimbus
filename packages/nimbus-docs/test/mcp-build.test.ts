@@ -313,6 +313,7 @@ function suite(name: string, options: { host: string; base?: string }) {
       const response = await site.app.render(new Request(`${endpoint}/server-card`));
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("content-type"), "application/mcp-server-card+json");
+      assert.equal(response.headers.get("cache-control"), "public, max-age=300, s-maxage=300");
       assert.equal(response.headers.get("access-control-allow-origin"), "*");
       const card = await response.json();
       assert.equal(validateCard(card), true, JSON.stringify(validateCard.errors));
@@ -348,7 +349,7 @@ test("a site without agents.mcp has no server, no card, no llms.txt line and no 
 test("a static build with agents.mcp is an author error that names the adapter", async () => {
   await assert.rejects(
     () => buildSite({ host: "static.test", adapter: false }),
-    /rendering mode "request" needs a server adapter[\s\S]*add adapter-<host>/,
+    /rendering mode "request" needs a server adapter[\s\S]*add adapter-node/,
   );
 });
 

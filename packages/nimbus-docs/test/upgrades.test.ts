@@ -66,6 +66,16 @@ test("only universally skippable entries are optional", () => {
   );
 });
 
+test("upgrade guidance names each adapter command as it runs", () => {
+  for (const entry of UPGRADE_MANIFEST.entries) {
+    for (const line of entry.instructions) assert.doesNotMatch(line, /add adapter-</, entry.id);
+  }
+  const connect = UPGRADE_MANIFEST.entries.find((entry) => entry.id === "connect-mcp")!;
+  for (const host of ["cloudflare", "netlify", "node", "vercel"]) {
+    assert.ok(connect.instructions.some((line) => line.includes(`nimbus-docs add adapter-${host}`)), host);
+  }
+});
+
 test("upgrade guidance targets canonical agent endpoint APIs", () => {
   const instructions = (id: string) =>
     UPGRADE_MANIFEST.entries.find((entry) => entry.id === id)?.instructions.join("\n") ?? "";

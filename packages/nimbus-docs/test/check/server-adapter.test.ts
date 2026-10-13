@@ -41,7 +41,17 @@ test("server features fail preflight without a configured adapter", async () => 
   ]) {
     const [finding] = missing(await check(config));
     assert.equal(finding?.severity, "error", config);
-    assert.match(finding!.message, /pnpm dlx @cloudflare\/nimbus-docs add adapter-<host>`, where <host> is /);
+    assert.match(finding!.message, /`pnpm dlx @cloudflare\/nimbus-docs add adapter-node`/);
+  }
+});
+
+test("adapter messages offer every supported host as a command that runs as printed", async () => {
+  for (const config of ["agents: { mcp: true }", 'rendering: { default: "request" }']) {
+    const { message } = missing(await check(config))[0]!;
+    for (const host of ["cloudflare", "netlify", "node", "vercel"]) {
+      assert.ok(message.includes(`\`pnpm dlx @cloudflare/nimbus-docs add adapter-${host}\``), `${config}: ${host}`);
+    }
+    for (const [, command] of message.matchAll(/`([^`]+)`/g)) assert.doesNotMatch(command!, /[<>]/);
   }
 });
 
@@ -52,6 +62,7 @@ test("several server features report the missing adapter once, with the strictes
   assert.equal(missing(report).length, 1);
   assert.match(missing(report)[0]!.message, /api bundle: false needs the Cloudflare or Node adapter/);
   assert.doesNotMatch(missing(report)[0]!.message, /vercel|netlify/);
+  assert.match(missing(report)[0]!.message, /Or remove `bundle: false` to deploy elsewhere\./);
 });
 
 test("MCP with request rendering names request rendering, without offering to turn MCP off", async () => {

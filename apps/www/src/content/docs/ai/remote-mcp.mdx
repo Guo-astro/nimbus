@@ -36,24 +36,26 @@ const nimbusConfig = defineNimbusConfig({
 
 A build with `agents.mcp` and no server adapter, or without the SDK installed, stops with a message that says what to add; `nimbus-docs check` reports both before a build.
 
+To turn it off, set `agents.mcp` to `false`: `/mcp`, the card and the Copy MCP URL action go away. You can then remove `@modelcontextprotocol/server`, and the adapter if nothing else on the site renders on request.
+
 ## Try it locally
 
-`astro dev` serves `/mcp`, without an adapter, from the last content sync. List the tools with the MCP Inspector, using the URL exactly as the site serves it: with the `base` path, and as `/mcp/` under `trailingSlash: "always"`, since the Inspector doesn't follow redirects.
+`astro dev` serves `/mcp`, without an adapter, from the last content sync. List the tools with the MCP Inspector, at the address `astro dev` prints, with the `base` path, and as `/mcp/` under `trailingSlash: "always"`:
 
 <PackageManagers pkg="@modelcontextprotocol/inspector" type="dlx" args="--cli http://localhost:4321/mcp --transport http --method tools/list" />
 
-To try the production build, run it with the adapter's own preview, such as `astro preview` with the Node adapter or `wrangler dev` with the Cloudflare adapter. The URLs the server returns, and the one the Copy MCP URL action copies, are built from `site`, not from the address you requested; point the client at the local address yourself.
+To try the production build, run it the way the adapter runs in production: on Node, `node dist/server/entry.mjs` (set `HOST` and `PORT`), which serves `dist/client` next to it; on Cloudflare, `wrangler dev`. The URLs the server returns, and the one the Copy MCP URL action copies, are built from `site`, not from the address you requested; point the client at the local address yourself.
 
 ## What the site serves
 
 | Path | What it is |
 | --- | --- |
 | `/mcp` | The server. `POST` a JSON-RPC message; `GET` and `DELETE` answer `405`, since the server is stateless and keeps no sessions. A `DELETE` without a `Content-Type` or the site's own `Origin` gets Astro's origin-check `403` instead. `OPTIONS` answers the browser preflight. |
-| `/mcp/server-card` | The [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL, served on request as `application/mcp-server-card+json` with `Access-Control-Allow-Origin: *`. |
+| `/mcp/server-card` | The [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL, served on request as `application/mcp-server-card+json` with `Access-Control-Allow-Origin: *`, cacheable for five minutes (`Cache-Control: public, max-age=300, s-maxage=300`). |
 
 The card is listed in `/.well-known/ai-catalog.json`, and `llms.txt` names the endpoint, so agents that start from either find the server. The server's name is the site's hostname reversed plus `/docs`: `docs.example.com` becomes `com.example.docs/docs`. A site on `localhost` or an IP address is `local.nimbus/docs`.
 
-Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the paths are `/mcp/` and `/mcp/server-card/`; Astro answers the other form with a redirect, and a `308` keeps a `POST`. The redirect carries no CORS headers, so give browser clients the URL the site advertises.
+Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the paths are `/mcp/` and `/mcp/server-card/`. Use exactly that form: `astro dev` answers the other with `404`, and a production server may redirect it. The Node adapter redirects with a `301`, which clients follow as a `GET`, so the server answers `405`. Redirects also carry no CORS headers. The card, `llms.txt` and the Copy MCP URL action all give the right form.
 
 A page or content entry at either path fails the build, since the server would hide it.
 
@@ -71,7 +73,7 @@ A page or content entry at either path fails the build, since the server would h
 { "url": "https://docs.example.com/guide/" }
 ```
 
-Both tools return errors in the result, with `isError` set. Arguments that don't match the tool's schema get the MCP SDK's validation message. Other errors are `{ "error": { "code", "message" } }`, with the code `invalid_input` (an unknown version, or a cursor from other filters), `not_found` (no published page at that URL) or `unavailable` (the site's published files couldn't be read).
+Both tools return their result as JSON in a text content block. They return errors in the result, with `isError` set. Arguments that don't match the tool's schema get the MCP SDK's validation message. Other errors are `{ "error": { "code", "message" } }`, with the code `invalid_input` (an unknown version, or a cursor from other filters), `not_found` (no published page at that URL) or `unavailable` (the site's published files couldn't be read).
 
 ## Which pages
 

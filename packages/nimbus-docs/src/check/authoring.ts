@@ -26,6 +26,7 @@ import {
   type CollectionsConfig,
   type RulesConfig,
 } from "../lint/index.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "./finding.js";
 
@@ -60,12 +61,18 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   }
 
-  const files = findMdxFiles([path.join(cwd, "src", "content")]);
+  const lintScope = pageCollectionLintScope(cwd);
+  const files = [
+    ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
+  ].sort();
+  for (const note of lintScope.notes) {
+    notes.push({ code: "nimbus/page-collection-not-on-disk", reason: note });
+  }
   if (files.length === 0) {
     return { scope: "authoring", findings, notes, evaluated: true };
   }
 
-  let effective = config;
+  let effective = { ...config, collectionOf: lintScope.collectionOf };
   if (!hasLintJson) {
     notes.push({
       code: "nimbus/authoring-optin-skipped",

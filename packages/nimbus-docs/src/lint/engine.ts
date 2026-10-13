@@ -57,6 +57,12 @@ export interface LintOptions {
    * killing the process mid-rename.
    */
   signal?: AbortSignal;
+  /**
+   * The collection a file belongs to, for files outside `src/content` (a
+   * page collection whose glob reads another folder). Falls back to the
+   * `src/content/<name>/` path.
+   */
+  collectionOf?: (absPath: string) => string | null;
 }
 
 export interface LintSummary {
@@ -249,7 +255,8 @@ export function lintPaths(
       const parsed = parseSource(source, {
         path: rel,
         absPath: abs,
-        collection: inferCollection(rel),
+        collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
       });
       out.push(...lintFile(parsed, opts));
     } catch (err) {
@@ -321,7 +328,8 @@ export function fixPaths(
         const parsed = parseSource(current, {
           path: rel,
           absPath: abs,
-          collection: inferCollection(rel),
+          collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
         });
         const diagnostics = lintFile(parsed, opts);
         const result = applyFixes(current, diagnostics);

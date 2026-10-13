@@ -88,14 +88,21 @@ export interface ScannedCodeBlock {
 export async function scanCodeBlocks(
   projectRoot: string,
   langAlias: Record<string, string> = {},
+  extraDirs: readonly string[] = [],
 ): Promise<ScannedCodeBlock[]> {
   const blocks: ScannedCodeBlock[] = [];
-  const contentRoot = resolve(projectRoot, "src/content");
+  const roots = [resolve(projectRoot, "src/content"), ...extraDirs];
+  const files: string[] = [];
+  for (const root of roots) {
+    for await (const { abs } of walkFiles(root, {
+      extensions: [".mdx", ".md"],
+      onReadError: "lenient",
+    })) {
+      files.push(abs);
+    }
+  }
 
-  for await (const { abs } of walkFiles(contentRoot, {
-    extensions: [".mdx", ".md"],
-    onReadError: "lenient",
-  })) {
+  for (const abs of files) {
     let content: string;
     try {
       content = await readFile(abs, "utf8");

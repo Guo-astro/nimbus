@@ -33,6 +33,33 @@ export interface PreparedMarkdownCollection {
   role: PreparedMarkdownCollectionRole;
   capability: PreparedMarkdownCollectionCapability;
   entries: ReadonlyMap<string, PreparedMarkdownEntry>;
+  /**
+   * The folder and pattern of a glob Nimbus constructed itself
+   * (`docsCollection()` and friends): the duplicate-slug walk reads them.
+   */
+  files?: PreparedMarkdownFiles;
+  /**
+   * Same-id writes from two files the store couldn't both keep, in a
+   * collection without `files`, still standing when the load committed.
+   */
+  collisions?: ReadonlyArray<PreparedMarkdownCollision>;
+}
+
+export interface PreparedMarkdownFiles {
+  /** Absolute folder. */
+  base: string;
+  pattern: string | string[];
+}
+
+export interface PreparedMarkdownCollision {
+  id: string;
+  /** Root-relative file paths, earlier write first. */
+  files: [string, string];
+}
+
+export interface PreparedMarkdownCommitDetails {
+  files?: PreparedMarkdownFiles;
+  collisions?: ReadonlyArray<PreparedMarkdownCollision>;
 }
 
 export interface PreparedMarkdownCollectionCapability extends NimbusMarkdownCapability {
@@ -48,6 +75,8 @@ interface MutableCollection {
   role: PreparedMarkdownCollectionRole;
   capability: PreparedMarkdownCollectionCapability;
   entries: Map<string, PreparedMarkdownEntry>;
+  files?: PreparedMarkdownFiles;
+  collisions?: ReadonlyArray<PreparedMarkdownCollision>;
 }
 
 interface MutableRoot {
@@ -232,12 +261,17 @@ export function commitPreparedMarkdownCollection(
     Array<{ depth: number; text: string; slug: string }>
   > = new Map(),
   role: PreparedMarkdownCollectionRole = "page",
+  details: PreparedMarkdownCommitDetails = {},
 ): boolean {
   const current = state.roots.get(root);
   if (!current || current.activeEpochs.get(collection) !== epoch) return false;
   const sourceEntries = [...entries];
-  const nextCollection = {
+  const nextCollection: MutableCollection = {
     role,
+    ...(details.files ? { files: structuredClone(details.files) } : {}),
+    ...(details.collisions?.length
+      ? { collisions: structuredClone(details.collisions) }
+      : {}),
     capability: preparedMarkdownCollectionCapability(
       collection,
       sourceEntries,
@@ -350,6 +384,10 @@ export function getPreparedMarkdownSnapshot(
         {
           role: value.role,
           capability: structuredClone(value.capability),
+          ...(value.files ? { files: structuredClone(value.files) } : {}),
+          ...(value.collisions
+            ? { collisions: structuredClone(value.collisions) }
+            : {}),
           entries: new Map(
             [...value.entries].map(([id, entry]) => [
               id,
@@ -360,6 +398,54 @@ export function getPreparedMarkdownSnapshot(
       ]),
     ),
   };
+}
+
+const sourceFileIndexes = new WeakMap<
+  MutableRoot,
+  { revision: number; files: ReadonlySet<string> }
+>();
+
+function canonicalFile(file: string): string {
+  try {
+    return realpathSync.native(file);
+  } catch {
+    return file;
+  }
+}
+
+/**
+ * Whether `file` (absolute) is a recorded entry of a page or partials
+ * collection. Synchronous, so the Sätteri callout plugin can ask it per
+ * file; the index is rebuilt once per registry revision. Both sides compare
+ * canonical paths, so a symlinked checkout matches its real files.
+ */
+export function isPreparedMarkdownSourceFile(
+  root: URL | string,
+  file: string,
+): boolean {
+  let key: string;
+  try {
+    key = preparedMarkdownRootKey(root);
+  } catch {
+    return false;
+  }
+  const current = state.roots.get(key);
+  if (!current) return false;
+  let index = sourceFileIndexes.get(current);
+  if (!index || index.revision !== current.revision) {
+    const files = new Set<string>();
+    for (const collection of current.collections.values()) {
+      if (collection.role === "api") continue;
+      for (const entry of collection.entries.values()) {
+        if (entry.filePath) {
+          files.add(canonicalFile(path.resolve(key, entry.filePath)));
+        }
+      }
+    }
+    index = { revision: current.revision, files };
+    sourceFileIndexes.set(current, index);
+  }
+  return index.files.has(canonicalFile(path.resolve(file)));
 }
 
 export function getPreparedMarkdownRevision(

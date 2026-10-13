@@ -21,6 +21,7 @@ import path from "node:path";
 import type { Features } from "satteri";
 
 import { setMarkdownFeatures } from "../_internal/markdown-features.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { materializedFeatures } from "../check/authoring.js";
 import { isBuildValidator } from "../lint/diagnostic.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
@@ -54,7 +55,8 @@ export function lintHelp(usage: string): string {
   return `
   Usage:  ${usage}
 
-  Lints .mdx files under src/content/ with the rules enabled in the Nimbus
+  Lints the .mdx files under src/content/, and those of any page collection
+  whose loader reads another folder, with the rules enabled in the Nimbus
   integration's \`rules\` option. Exits 1 when an error-severity finding remains.
 
   Flags:
@@ -100,7 +102,9 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     }
   }
 
-  const files = findMdxFiles([contentDir]);
+  const scope = pageCollectionLintScope(cwd);
+  const files = [...new Set([...findMdxFiles([contentDir]), ...scope.files])].sort();
+  for (const note of scope.notes) process.stderr.write(`nimbus-docs: ${note}\n`);
   if (files.length === 0) {
     // Exit nonzero: a lint step that finds nothing to lint is almost always a
     // misconfigured working directory, not a clean pass. Failing loudly stops a
@@ -146,6 +150,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     // can't force-enable a build validator).
     only: flags.rule as import("../lint/diagnostic.js").AuthoringRuleCode | undefined,
   });
+  opts.collectionOf = scope.collectionOf;
 
   let diagnostics: Diagnostic[];
   let interrupted = false;

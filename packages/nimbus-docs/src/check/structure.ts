@@ -19,6 +19,7 @@ import { cloudflareTrailingSlashWarning } from "../_internal/cloudflare-trailing
 import { parseAstroConfigFields, type ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
+  parsePageCollectionFolders,
   parseContentCollections,
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
@@ -39,6 +40,7 @@ import { isRequiredCanonicalRouteComponent } from "../_internal/route-ownership.
 import {
   contentEntryUrl,
   enumerateEntriesByBase,
+  enumerateGlobEntries,
   enumerateStaticPageRoutes,
   findDuplicateRoutes,
   type RouteOwner,
@@ -360,10 +362,12 @@ async function checkDuplicateRoutes(
 ): Promise<void> {
   const srcDir = path.join(cwd, "src");
   const contentRoot = path.join(srcDir, "content");
-  if (!existsSync(contentRoot)) return;
 
   const contentConfigPath = path.join(srcDir, "content.config.ts");
   const collectionBases = await parseCollectionBases(contentConfigPath);
+  // Where each page collection's files are, wherever the folder: the same
+  // static reading `lint` uses. Collections it can't place are skipped.
+  const placed = parsePageCollectionFolders(cwd, contentConfigPath);
 
   const versions =
     parsed.ok && isVersionsObject(parsed.config.versions)
@@ -383,28 +387,46 @@ async function checkDuplicateRoutes(
           )
           .filter((name): name is string => typeof name === "string")
       : [];
+  // Without a build record, add the page collections the config shows
+  // statically: a Nimbus factory or `withNimbusMarkdown()` over a folder.
   const pageCollections =
     readPageCollectionsFile(cwd)?.collections ?? [
       ...new Set([
         "docs",
         ...(versions?.others ?? []).map((version) => `docs-${version}`),
         ...apiCollections,
+        ...[...(placed ?? [])]
+          .filter(([, place]) => place.kind === "folder" && place.role === "page")
+          .map(([key]) => key),
       ]),
     ];
 
   const indexedBases = new Map<string, string>();
+  const contentOwners: RouteOwner[] = [];
   for (const key of pageCollections) {
+    const place = placed?.get(key);
+    if (place?.kind === "unplaced") continue;
+    if (place?.kind === "folder") {
+      for (const entry of enumerateGlobEntries(key, place.dir, place.pattern, cwd)) {
+        contentOwners.push({
+          url: contentEntryUrl(entry, versions),
+          source: entry.relPath,
+          kind: "content",
+        });
+      }
+      continue;
+    }
     indexedBases.set(key, collectionBases?.get(key) ?? key);
   }
-
-  const contentOwners: RouteOwner[] = enumerateEntriesByBase(
-    contentRoot,
-    indexedBases,
-  ).map((entry) => ({
-    url: contentEntryUrl(entry, versions),
-    source: `src/content/${entry.relPath}`,
-    kind: "content" as const,
-  }));
+  if (existsSync(contentRoot)) {
+    for (const entry of enumerateEntriesByBase(contentRoot, indexedBases)) {
+      contentOwners.push({
+        url: contentEntryUrl(entry, versions),
+        source: `src/content/${entry.relPath}`,
+        kind: "content",
+      });
+    }
+  }
 
   const pagesRoot = path.join(srcDir, "pages");
   const pageOwners: RouteOwner[] = existsSync(pagesRoot)

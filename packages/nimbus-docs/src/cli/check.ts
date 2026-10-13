@@ -15,6 +15,7 @@ import { isAbsoluteHttpUrl } from "../_internal/validate.js";
 import { depInstalled, hasPackageJson } from "../check/probe.js";
 import { loadMaterializedConfig } from "../check/authoring.js";
 import { findMdxFiles, fixPaths } from "../lint/index.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import {
   ALL_SCOPES,
   exitCodeFor,
@@ -140,10 +141,17 @@ async function applyFixes(
   const applied: string[] = [];
 
   if (ctx.scopes.authoring && !ctx.signal.aborted) {
-    const files = findMdxFiles([path.join(cwd, "src", "content")]);
+    const lintScope = pageCollectionLintScope(cwd);
+    const files = [
+      ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
+    ].sort();
     if (files.length > 0) {
       const { config } = loadMaterializedConfig(cwd);
-      const run = fixPaths(files, cwd, { ...config, signal: ctx.signal });
+      const run = fixPaths(files, cwd, {
+        ...config,
+        collectionOf: lintScope.collectionOf,
+        signal: ctx.signal,
+      });
       if (run.fixed > 0) {
         applied.push(
           `fixed ${run.fixed} authoring issue(s) across ${run.filesChanged} file(s)`,

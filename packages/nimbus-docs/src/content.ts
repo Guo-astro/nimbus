@@ -142,6 +142,19 @@ const NIMBUS_MARKDOWN_GENERATION = 1;
 // unchanged (whatever role it was wrapped with), or the nested wrappers would
 // queue the same collection transaction inside itself and deadlock the load.
 const wrappedMarkdownLoaders = new WeakMap<Loader, Loader>();
+// The folder and pattern of each glob a Nimbus factory constructs, so the
+// duplicate-slug pass walks exactly those files. Nimbus's own values; a
+// hand-written glob has none and is checked through its store writes.
+const nimbusGlobFiles = new WeakMap<
+  Loader,
+  { base: string; pattern: string | string[] }
+>();
+
+function nimbusGlob(base: string, pattern: string): Loader {
+  const loader = glob({ base, pattern });
+  nimbusGlobFiles.set(loader, { base, pattern });
+  return loader;
+}
 
 type ApiLoaderModule = typeof import("./_internal/api-loader.js");
 
@@ -172,6 +185,7 @@ function wrapNimbusMarkdown<T extends Loader>(
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
 
+  const globFiles = nimbusGlobFiles.get(loader);
   const wrappedLoad: Loader["load"] = async (context) => {
     const base = context.config.base || "/";
     const normalizeAuthoredLinks = getAuthoredLinkNormalizer();
@@ -184,6 +198,17 @@ function wrapNimbusMarkdown<T extends Loader>(
         role === "page" &&
         !isCollectionInBuildSlice(context.config.root, context.collection),
       transformRenderMarkdown: false,
+      ...(globFiles
+        ? {
+            files: {
+              base: path.resolve(
+                fileURLToPath(context.config.root),
+                globFiles.base,
+              ),
+              pattern: globFiles.pattern,
+            },
+          }
+        : {}),
       transform: (source, sourceId) =>
         normalizeAuthoredLinks(source, {
           base,
@@ -223,7 +248,7 @@ export function docsCollection<
   });
 
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema,
   };
 }
@@ -248,7 +273,7 @@ export function partialsCollection<
     : partialsSchema;
 
   return {
-    loader: wrapNimbusMarkdown(glob({ base, pattern }), "partials"),
+    loader: wrapNimbusMarkdown(nimbusGlob(base, pattern), "partials"),
     schema,
   };
 }
@@ -281,7 +306,7 @@ export function componentsCollection(
   const pattern = options.pattern ?? DEFAULT_PATTERN;
 
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema: componentsSchema,
   };
 }

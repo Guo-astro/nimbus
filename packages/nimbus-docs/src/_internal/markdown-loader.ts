@@ -1,5 +1,12 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { Loader, LoaderContext } from "astro/loaders";
+import { runInPageLoadScope } from "./page-load-scope.js";
 import {
+  type PreparedMarkdownCollision,
+  type PreparedMarkdownFiles,
   abortPreparedMarkdownLoad,
   beginPreparedMarkdownLoad,
   commitPreparedMarkdownCollection,
@@ -33,6 +40,11 @@ export interface PrepareMarkdownLoaderOptions extends NimbusMarkdownCapability {
    * builds and the previous build's entries must not survive into the slice.
    */
   empty?: boolean;
+  /**
+   * The folder and pattern of a glob Nimbus constructed: recorded so the
+   * duplicate-slug pass walks the files instead of reading the store.
+   */
+  files?: PreparedMarkdownFiles;
 }
 
 type StoreEntry = Parameters<LoaderContext["store"]["set"]>[0];
@@ -42,6 +54,12 @@ interface StoreMutationState {
   count: number;
   baseline: Map<string, StoreEntry> | null;
   overlay: Map<string, StoreEntry> | null;
+  /**
+   * Same-id writes from a different file that still exists, noted during a
+   * load or watcher transaction and decided when it commits. `null` when
+   * the collection's files are walked instead.
+   */
+  candidates: PreparedMarkdownCollision[] | null;
 }
 
 function discardStoreMutations(
@@ -53,10 +71,44 @@ function discardStoreMutations(
   state.count = previousCount;
 }
 
+/**
+ * The candidates that stand once the load's final entries are known: a
+ * file that moved to another id isn't a collision, whatever the write order.
+ */
+function standingCollisions(
+  candidates: readonly PreparedMarkdownCollision[] | null,
+  entries: readonly StoreEntry[],
+  rootDir: string,
+): PreparedMarkdownCollision[] {
+  if (!candidates?.length) return [];
+  const idsByFile = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    if (!entry.filePath) continue;
+    const ids = idsByFile.get(entry.filePath) ?? new Set<string>();
+    ids.add(entry.id);
+    idsByFile.set(entry.filePath, ids);
+  }
+  const seen = new Set<string>();
+  const out: PreparedMarkdownCollision[] = [];
+  for (const candidate of candidates) {
+    const [earlier, later] = candidate.files;
+    const movedAway = [...(idsByFile.get(earlier) ?? [])].some(
+      (id) => id !== candidate.id,
+    );
+    if (movedAway || !existsSync(path.resolve(rootDir, earlier))) continue;
+    const key = JSON.stringify([candidate.id, [earlier, later].sort()]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  return out;
+}
+
 function proxyStore(
   store: LoaderContext["store"],
   transform: (source: string, sourceId?: string) => string,
   mutationState: StoreMutationState,
+  rootDir: string,
 ): LoaderContext["store"] {
   const set = Reflect.get(store, "set", store) as LoaderContext["store"]["set"];
   const deleteEntry = Reflect.get(
@@ -73,6 +125,19 @@ function proxyStore(
     mutationState.count += 1;
   };
   const currentEntries = () => mutationState.overlay;
+  const noteCandidate = (
+    prepared: StoreEntry,
+    current: StoreEntry | undefined,
+  ) => {
+    const candidates = mutationState.candidates;
+    if (!candidates || !current?.filePath || !prepared.filePath) return;
+    if (current.filePath === prepared.filePath) return;
+    if (!existsSync(path.resolve(rootDir, current.filePath))) return;
+    candidates.push({
+      id: prepared.id,
+      files: [current.filePath, prepared.filePath],
+    });
+  };
   const preparedSet = (entry: StoreEntry) => {
     const prepared =
       typeof entry.body === "string"
@@ -85,6 +150,7 @@ function proxyStore(
     const overlay = currentEntries();
     if (!overlay) {
       const current = store.get(prepared.id);
+      noteCandidate(prepared, current);
       if (
         prepared.digest &&
         current?.digest === prepared.digest &&
@@ -94,6 +160,7 @@ function proxyStore(
       }
       return Reflect.apply(set, store, [prepared]);
     }
+    noteCandidate(prepared, overlay.get(prepared.id));
     if (
       prepared.digest &&
       overlay.get(prepared.id)?.digest === prepared.digest &&
@@ -181,6 +248,7 @@ function proxyWatcher(
       return runTransaction(async () => {
         if (!isActive()) return undefined;
         const mutationCount = mutationState.count;
+        if (mutationState.candidates) mutationState.candidates = [];
         mutationState.baseline = new Map(
           [...context.store.values()].map((entry) => [
             entry.id,
@@ -194,7 +262,9 @@ function proxyWatcher(
           ]),
         );
         try {
-          const result = await Reflect.apply(handler, this, args);
+          const result = await runInPageLoadScope(context.collection, () =>
+            Reflect.apply(handler, this, args),
+          );
           if (!isActive()) {
             discardStoreMutations(mutationState, mutationCount);
             return result;
@@ -288,7 +358,12 @@ function proxyContext(
   ) => Promise<boolean>,
   mutationState: StoreMutationState,
 ): LoaderContext {
-  const store = proxyStore(context.store, options.transform, mutationState);
+  const store = proxyStore(
+    context.store,
+    options.transform,
+    mutationState,
+    fileURLToPath(context.config.root),
+  );
   const watcher = proxyWatcher(
     context,
     isActive,
@@ -353,6 +428,7 @@ export function prepareMarkdownLoader<T extends Loader>(
           [],
           new Map(),
           options.role ?? "page",
+          { files: options.files },
         );
         if (!committed) {
           throw new Error(
@@ -418,6 +494,14 @@ export function prepareMarkdownLoader<T extends Loader>(
             sourceEntries,
             headings,
             options.role ?? "page",
+            {
+              files: options.files,
+              collisions: standingCollisions(
+                mutationState.candidates,
+                sourceEntries,
+                fileURLToPath(context.config.root),
+              ),
+            },
           );
         } catch (error) {
           rollback?.();
@@ -441,6 +525,7 @@ export function prepareMarkdownLoader<T extends Loader>(
         count: 0,
         baseline: null,
         overlay: null,
+        candidates: options.files ? null : [],
       };
       const runWatcherTransaction = <T>(operation: () => T | Promise<T>) =>
         runPreparedMarkdownTransaction(root, context.collection, operation);
@@ -448,16 +533,17 @@ export function prepareMarkdownLoader<T extends Loader>(
       if (!reusable) context.store.clear();
       context.meta.delete(NIMBUS_MARKDOWN_META_KEY);
       try {
-        await Reflect.apply(load, loader, [
-          proxyContext(
-            context,
-            options,
-            () => isPreparedMarkdownLoadActive(root, context.collection, epoch),
-            runWatcherTransaction,
-            commit,
-            mutationState,
-          ),
-        ]);
+        const prepared = proxyContext(
+          context,
+          options,
+          () => isPreparedMarkdownLoadActive(root, context.collection, epoch),
+          runWatcherTransaction,
+          commit,
+          mutationState,
+        );
+        await runInPageLoadScope(context.collection, () =>
+          Reflect.apply(load, loader, [prepared]),
+        );
         if (!(await commit())) {
           throw new Error(
             `Nimbus Markdown preparation became obsolete for collection ${context.collection}`,

@@ -27,7 +27,7 @@ export const redirectedLink: Rule = {
     // Same draft skip as `internal-link`: drafts aren't in route truth.
     if (ctx.file.frontmatter?.draft === true) return;
 
-    const env = loadLinkEnv(inferProjectRoot(ctx.file.absPath));
+    const env = loadLinkEnv(ctx.file.projectRoot ?? inferProjectRoot(ctx.file.absPath));
     if (!env) return;
 
     const ignore = ctx.options.ignore;

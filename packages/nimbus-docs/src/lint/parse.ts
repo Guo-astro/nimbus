@@ -70,6 +70,11 @@ export interface ParsedFile {
   /** Set when the MDX body failed to parse (won't render). Rules are
    * skipped; the engine emits a single `nimbus/mdx-syntax` diagnostic. */
   parseError: { message: string; line: number; column: number } | null;
+  /**
+   * The project root, when the caller knows it. A page collection's file
+   * can live outside `src/`, where the root can't be inferred from its path.
+   */
+  projectRoot?: string;
 }
 
 /** Depth-first walk of an mdast tree, visitor called on every node. */
@@ -138,7 +143,7 @@ export function findNodeAt(
  */
 export function parseSource(
   source: string,
-  meta: { path: string; absPath: string; collection: string | null },
+  meta: { path: string; absPath: string; collection: string | null; projectRoot?: string },
 ): ParsedFile {
   let tree: MdRoot;
   let parseError: ParsedFile["parseError"] = null;
@@ -171,6 +176,7 @@ export function parseSource(
   }
 
   return {
+    ...(meta.projectRoot === undefined ? {} : { projectRoot: meta.projectRoot }),
     path: meta.path,
     absPath: meta.absPath,
     source,

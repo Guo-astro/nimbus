@@ -18,6 +18,11 @@ import {
 export interface AdmonitionOptions extends AdmonitionTransformOptions {
   contentDirs: readonly string[];
   skip?: (filePath: string) => boolean;
+  /**
+   * Also in scope: a file outside `contentDirs` that is a recorded entry
+   * of a page or partials collection. Asked per file at compile time.
+   */
+  isRecorded?: (filePath: string) => boolean;
 }
 export function satteriAdmonitions(
   options: AdmonitionOptions,
@@ -41,7 +46,10 @@ export function satteriAdmonitions(
       if (
         !filePath.endsWith(".mdx") ||
         ctx.fileURL.search ||
-        !directories.some((dir) => filePath.startsWith(dir)) ||
+        !(
+          directories.some((dir) => filePath.startsWith(dir)) ||
+          options.isRecorded?.(filePath)
+        ) ||
         options.skip?.(filePath)
       )
         return;

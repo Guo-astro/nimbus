@@ -33,7 +33,9 @@
  *     back to `["docs"]`.
  */
 
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import {
   findMatchingBrace,
@@ -322,4 +324,108 @@ function findStatementEnd(source: string, from: number): number {
     }
   }
   return source.length;
+}
+
+/** Where a page collection's files are, as far as the config shows statically. */
+export type StaticPageCollection =
+  | { kind: "folder"; dir: string; pattern: string | string[]; role: "page" | "partials" }
+  /** A page collection whose files can't be placed without running the config. */
+  | { kind: "unplaced" };
+
+// The factory as the collection's whole value (`defineCollection(docsCollection(…))`
+// or bare `docsCollection(…)`), not a `schema: docsCollection().schema` inside
+// a hand-written collection.
+const NIMBUS_FACTORY =
+  /^\s*(?:defineCollection\s*\(\s*)?(docsCollection|partialsCollection|componentsCollection)\s*\(/;
+const FACTORY_DEFAULT_BASE: Record<string, string> = {
+  docsCollection: "docs",
+  partialsCollection: "partials",
+  componentsCollection: "components",
+};
+const DEFAULT_PAGE_PATTERN = "**/*.{md,mdx}";
+
+function literalOption(text: string, name: string): string | undefined {
+  return text.match(new RegExp(`\\b${name}\\s*:\\s*["'\`]([^"'\`$]+)["'\`]`))?.[1];
+}
+
+/**
+ * The static phase of the page-collection contract, for `lint` and `check`
+ * (which run without a build): each page and partials collection in
+ * `content.config.ts` with the folder its files load from.
+ *
+ *   - a Nimbus factory (`docsCollection()` and friends): `src/content/<base>`,
+ *     with a literal `pattern` when given;
+ *   - `withNimbusMarkdown(glob({ base: "…" }))`, written inline or through a
+ *     local `const`: the literal `base`, relative to the project root;
+ *   - any other `withNimbusMarkdown()` loader (in-memory, computed options):
+ *     `unplaced`, so callers can name it as not inspected.
+ *
+ * Plain Astro collections aren't page collections and are left out. `null`
+ * when the file is missing or has no parseable registration.
+ */
+export function parsePageCollectionFolders(
+  projectRoot: string,
+  contentConfigPath: string,
+): Map<string, StaticPageCollection> | null {
+  let source: string;
+  try {
+    source = readFileSync(contentConfigPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const stripped = stripComments(source);
+  const prefixMatch = stripped.match(EXPORT_PREFIX_PATTERN);
+  if (!prefixMatch || prefixMatch.index === undefined) return null;
+  const objectStart = prefixMatch.index + prefixMatch[0].length;
+  const objectEnd = findMatchingBrace(stripped, objectStart - 1);
+  if (objectEnd === -1) return null;
+
+  const out = new Map<string, StaticPageCollection>();
+  for (const raw of splitTopLevelCommas(stripped.slice(objectStart, objectEnd))) {
+    const entry = raw.trim();
+    if (!entry || entry.startsWith("...") || entry.startsWith("[")) continue;
+    const colonIdx = entry.indexOf(":");
+    const key = (colonIdx === -1 ? entry : entry.slice(0, colonIdx))
+      .trim()
+      .replace(/^['"`]|['"`]$/g, "");
+    if (!COLLECTION_KEY.test(key)) continue;
+    const value =
+      colonIdx === -1 ? findLocalDeclarationValue(stripped, key) : entry.slice(colonIdx + 1);
+
+    const factory = value.match(NIMBUS_FACTORY);
+    if (factory) {
+      const options = value.slice(factory.index! + factory[0].length);
+      const base = literalOption(options, "base") ?? FACTORY_DEFAULT_BASE[factory[1]!]!;
+      out.set(key, {
+        kind: "folder",
+        dir: path.join(projectRoot, "src/content", base),
+        pattern: literalOption(options, "pattern") ?? DEFAULT_PAGE_PATTERN,
+        role: factory[1] === "partialsCollection" ? "partials" : "page",
+      });
+      continue;
+    }
+    const wrapper = value.match(/\bwithNimbusMarkdown\s*\(\s*/);
+    if (!wrapper) continue;
+    let loaderText = value.slice(wrapper.index! + wrapper[0].length);
+    const identifier = loaderText.match(/^([A-Za-z_$][\w$]*)\s*\)/)?.[1];
+    if (identifier) loaderText = findLocalDeclarationValue(stripped, identifier);
+    const globCall = loaderText.match(/^\s*glob\s*\(\s*\{/);
+    const globOptions = globCall
+      ? loaderText.slice(globCall[0].length, findMatchingBrace(loaderText, globCall[0].length - 1))
+      : "";
+    const base = globCall ? literalOption(globOptions, "base") : undefined;
+    out.set(
+      key,
+      base
+        ? {
+            kind: "folder",
+            dir: path.resolve(projectRoot, base),
+            pattern: literalOption(globOptions, "pattern") ?? DEFAULT_PAGE_PATTERN,
+            role: "page",
+          }
+        : { kind: "unplaced" },
+    );
+  }
+  return out;
 }

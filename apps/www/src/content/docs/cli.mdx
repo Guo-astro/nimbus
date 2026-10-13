@@ -43,11 +43,11 @@ For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copie
   </Step>
 </Steps>
 
-If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Missing files are always added, and `add` lists every file it adds and every differing file it keeps. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component. Edits are detected from its install record in `nimbus.json` or, for a component that came with the starter, from the starter release your site came from (`--template-dir <path>` compares against a local checkout offline). When neither is available, it asks anyway. Review the change with `git diff`:
+If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Missing files are always added, and `add` lists every file it adds and every differing file it keeps. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component, dependencies included. Without a terminal, such as an agent, CI or a pipe, there is nobody to ask, so edited components are kept and listed with the commands that replace them, and the command exits 1; `--overwrite --yes` replaces them and says how many carried edits. Edits are detected from the component's install record in `nimbus.json` or, for a component that came with the starter, from the starter release your site came from, downloaded from GitHub (set `GIGET_AUTH` to a GitHub token if it's rate-limited, or pass `--template-dir <path>` to compare against a local checkout offline). When neither is available, it asks in a terminal and keeps the files otherwise. Commit first, run it, and review the change with `git diff`:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 
-For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files."
+For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files," and `--overwrite --yes` only when you've decided to discard your edits. To upgrade a site, run `outdated`, apply each clean starter file it lists with `diff <file> --apply`, and update registry components with `add <slug> --overwrite`.
 
 Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
 
@@ -146,7 +146,7 @@ After completing all reported work, explicitly confirm it and advance the commit
 pnpm nimbus-docs migrate --from PREVIOUS_VERSION --yes
 ```
 
-Repeat `--from` only when the project has no recorded baseline. A clean rerun in a terminal asks before recording the reviewed version in `nimbus.json`. Without a terminal, such as in CI or an agent, `migrate` records it only with `--yes`. Nimbus never records completion while a detectable migration remains. Then run `outdated` to review user-owned starter and registry code, followed by `nimbus-docs check`, `astro check`, and the production build. The `migrate` output is the version-selected upgrade guide.
+Repeat `--from` only when the project has no recorded baseline. A clean rerun in a terminal asks before recording the reviewed version in `nimbus.json`. Without a terminal, such as in CI or an agent, `migrate` records it only with `--yes`. Nimbus never records completion while a detectable migration remains. A required review also stops the dev server; `astro dev` prints the reason, while `astro dev --background` reports only that the server exited before becoming ready, so run `astro dev logs` or `nimbus-docs check`, which names the review. Then run `outdated` to review user-owned starter and registry code, followed by `nimbus-docs check`, `astro check`, and the production build. The `migrate` output is the version-selected upgrade guide.
 
 ### `nimbus-docs outdated`
 

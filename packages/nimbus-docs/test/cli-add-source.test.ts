@@ -10,11 +10,12 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { sourceRegistry } from "./fixtures/source-registry.ts";
 import { TEST_TMP } from "./fixtures/temp-root.ts";
 
 const CLI = fileURLToPath(new URL("../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
-const REGISTRY = path.resolve(import.meta.dirname, "../../../apps/www/public/registry");
+const REGISTRY = sourceRegistry();
 const served = (file: string) => readFileSync(path.join(REGISTRY, file), "utf8");
 
 let server: http.Server;
@@ -22,7 +23,6 @@ let origin = "";
 const requests: string[] = [];
 
 before(async () => {
-  assert.ok(existsSync(path.join(REGISTRY, "sources/git.md")), "run `pnpm --filter @nimbus/www generate-registry` first");
   server = http.createServer((request, response) => {
     requests.push(request.url ?? "");
     const file = path.join(REGISTRY, decodeURIComponent((request.url ?? "/").replace(/^\/+/, "")));
@@ -36,7 +36,10 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
-after(() => server.close());
+after(() => {
+  server.close();
+  rmSync(REGISTRY, { recursive: true, force: true });
+});
 
 function project(): string {
   const dir = mkdtempSync(path.join(TEST_TMP, "nimbus-add-source-"));

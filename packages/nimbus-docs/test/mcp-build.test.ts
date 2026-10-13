@@ -323,6 +323,6 @@ suite("under base /docs", { host: "based.test", base: "/docs" });
 test("a static build with agents.mcp is an author error that names the adapter flip", async () => {
   await assert.rejects(
     () => buildSite({ host: "static.test", adapter: false }),
-    /agents\.mcp serves \/mcp from the site's own server, which needs a server adapter[\s\S]*add adapter-cloudflare/,
+    /rendering mode "request" needs a server adapter[\s\S]*add adapter-cloudflare/,
   );
 });

@@ -54,6 +54,7 @@ import {
 } from "./_internal/build-report.js";
 import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
+import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
 import { parseComponentsRegistry } from "./_internal/parse-components-registry.js";
@@ -2791,32 +2792,21 @@ export function nimbus(
           buildOutput ??
           (astroConfig.output === "server" ? "server" : "static");
         adapterNameForBuild = astroConfig.adapter?.name ?? null;
+        const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
+        const serverFeature = serverAdapterFeature({
+          unbundledApi: pageAssetCollections.length > 0,
+          requestRendering: requestRenderingConfigured,
+          mcp: !!config.agents?.mcp,
+        });
+        if (building && serverFeature && !adapterNameForBuild) {
+          throw new Error(serverAdapterMessage(serverFeature, root));
+        }
         if (config.agents?.mcp) {
-          const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
-          if (building && (outputModeForBuild !== "server" || !adapterNameForBuild)) {
-            throw new Error(
-              "nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. " +
-                `Run \`${invocation("add adapter-cloudflare", root)}\` (or add adapter-node, adapter-vercel or adapter-netlify), or set agents.mcp to false. ` +
-                `Received output=${outputModeForBuild}, adapter=${adapterNameForBuild ?? "none"}.`,
-            );
-          }
           try {
             createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server");
           } catch {
-            throw new Error(
-              "nimbus-docs: agents.mcp needs the MCP server SDK in this project. Install it:\n\n  npm install @modelcontextprotocol/server\n",
-            );
+            throw new Error(mcpSdkMessage(root));
           }
-        }
-        if (
-          building &&
-          requestRenderingConfigured &&
-          (outputModeForBuild !== "server" || !adapterNameForBuild)
-        ) {
-          throw new Error(
-            'nimbus-docs: rendering mode "request" requires Astro `output: "server"` and a compatible adapter for production builds. ' +
-              `Received output=${outputModeForBuild}, adapter=${adapterNameForBuild ?? "none"}.`,
-          );
         }
         if (
           pageAssetCollections.length &&
@@ -3152,7 +3142,7 @@ export function nimbus(
         const staticPaths = [...policyRoutesWithStaticPaths].sort().join(", ");
         if (staticPaths && staticPaths !== reportedPolicyRoutesWithStaticPaths) {
           logger.info(
-            `The rendering policy renders ${staticPaths} on request, so Astro ignores their getStaticPaths(). ` +
+            `The rendering policy renders ${staticPaths} on request, so Astro ignores ${policyRoutesWithStaticPaths.size === 1 ? "its" : "their"} getStaticPaths(). ` +
               "That's expected: don't add `export const prerender`; set `rendering` in the Nimbus config to change it.",
           );
         }

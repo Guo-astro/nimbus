@@ -4,6 +4,15 @@ import { validateNimbusConfig } from "../src/_internal/validate.js";
 
 const site = { site: "https://docs.example.com", title: "Example" };
 
+test("a differently cased MCP key suggests the supported mcp spelling", () => {
+  for (const key of ["MCP", "Mcp", "mCp"]) {
+    assert.throws(
+      () => validateNimbusConfig({ ...site, agents: { [key]: true } }),
+      /Unknown agents sub-key.*Did you mean `mcp`\?/s,
+    );
+  }
+});
+
 test("agents.mcp is a boolean under a strict agents block", () => {
   assert.equal(validateNimbusConfig({ ...site, agents: { mcp: true } }).agents?.mcp, true);
   assert.equal(validateNimbusConfig({ ...site, agents: {} }).agents?.mcp, undefined);

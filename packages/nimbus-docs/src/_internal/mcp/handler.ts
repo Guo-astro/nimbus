@@ -18,6 +18,8 @@ import { stripBase, toRouteKey } from "../url.js";
 
 /** Bodies over this are answered `413` before anything is parsed. */
 export const MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
+/** A body over the limit is still read up to this, so `wrangler dev` can reuse the connection. */
+export const MCP_MAX_DRAIN_BYTES = 1024 * 1024;
 /** `list_pages` returns this many pages per call. */
 export const MCP_LIST_PAGE_SIZE = 200;
 /** `get_page` content is cut near this many code points, with `truncated: true`. */
@@ -290,6 +292,32 @@ function toolResult(value: unknown, isError = false) {
   };
 }
 
+async function readBody(request: Request): Promise<Blob | null> {
+  if (!request.body) return new Blob();
+  if (Number(request.headers.get("content-length")) > MCP_MAX_DRAIN_BYTES) {
+    await request.body.cancel();
+    return null;
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MCP_MAX_DRAIN_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      if (size <= MCP_MAX_REQUEST_BODY_BYTES) chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return size > MCP_MAX_REQUEST_BODY_BYTES ? null : new Blob(chunks);
+}
+
 export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHandler {
   const { identity, base, source } = options;
   const validator = new CfWorkerJsonSchemaValidator();
@@ -407,7 +435,14 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
         return json({ error: { code: "invalid_origin", message: "The Origin header is not a valid origin." } }, 403);
       }
       serving = request;
-      const response = await handler().fetch(request);
+      const body = await readBody(request);
+      if (!body) {
+        return json(
+          { jsonrpc: "2.0", id: null, error: { code: -32000, message: `Request body exceeds ${MCP_MAX_REQUEST_BODY_BYTES} bytes.` } },
+          413,
+        );
+      }
+      const response = await handler().fetch(new Request(request, { body }));
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

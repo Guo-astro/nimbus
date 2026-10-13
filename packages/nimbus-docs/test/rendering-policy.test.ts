@@ -1028,7 +1028,7 @@ test("an explicitly empty rendering policy applies the build default", async (t)
   assert.equal(blog.prerender, false);
 });
 
-test("production request rendering requires server output and an adapter", async (t) => {
+test("production request rendering requires an adapter", async (t) => {
   const staticBuild = await setupIntegration(
     t,
     { collections: { docs: "request" } },
@@ -1041,7 +1041,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter.*output=static, adapter=none/,
+    /rendering mode "request" needs a server adapter.*add adapter-cloudflare/,
   );
 
   const adapterlessBuild = await setupIntegration(
@@ -1056,7 +1056,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "server", adapter: null },
         buildOutput: "server",
       } as never),
-    /output=server, adapter=none/,
+    /rendering mode "request" needs a server adapter/,
   );
 
   const serverBuild = await setupIntegration(
@@ -1097,6 +1097,53 @@ test("generated API request rendering retains its adapter compatibility guard", 
   }
 });
 
+test("unbundled API adapter errors recommend only supported adapters", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { api: "request" } },
+    "build",
+    "export const collections = { api: {} };\n",
+    [
+      {
+        collection: "api",
+        spec: {
+          openapi: "3.1.0",
+          info: { title: "API", version: "1" },
+          paths: {
+            "/ping": {
+              get: {
+                operationId: "ping",
+                responses: { "200": { description: "OK" } },
+              },
+            },
+          },
+        },
+        bundle: false,
+      },
+    ],
+  );
+  for (const output of ["static", "server"] as const) {
+    assert.throws(
+      () =>
+        integration.configDone({
+          injectTypes: () => new URL("file:///noop"),
+          config: { output, adapter: null },
+          buildOutput: output,
+        } as never),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /api bundle: false/);
+        assert.match(
+          error.message,
+          /add adapter-cloudflare.*or add adapter-node/,
+        );
+        assert.doesNotMatch(error.message, /adapter-vercel|adapter-netlify/);
+        return true;
+      },
+    );
+  }
+});
+
 test("required canonical routes retain rendering policy when their file is missing", async (t) => {
   const integration = await setupIntegration(
     t,
@@ -1127,7 +1174,7 @@ test("required canonical routes retain rendering policy when their file is missi
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter/,
+    /rendering mode "request" needs a server adapter/,
   );
 });
 

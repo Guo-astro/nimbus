@@ -32,18 +32,18 @@ const nimbusConfig = defineNimbusConfig({
 });
 ```
 
-A build with `agents.mcp` on a static site, or without the SDK installed, stops with a message that says what to add. `astro dev` serves `/mcp` too, from the last content sync.
+A build with `agents.mcp` on a site without a server adapter, or without the SDK installed, stops with a message that says what to add; `nimbus-docs check` reports both before a build. `astro dev` serves `/mcp` too, from the last content sync.
 
 ## What the site serves
 
 | Path | What it is |
 | --- | --- |
-| `/mcp` | The server. `POST` a JSON-RPC message; `GET` and `DELETE` answer `405`, since the server is stateless and keeps no sessions. `OPTIONS` answers the browser preflight. |
-| `/mcp/server-card` | The [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL, served as `application/mcp-server-card+json`. |
+| `/mcp` | The server. `POST` a JSON-RPC message; `GET` and `DELETE` answer `405`, since the server is stateless and keeps no sessions. A `DELETE` without a `Content-Type` or the site's own `Origin` gets Astro's origin-check `403` instead. `OPTIONS` answers the browser preflight. |
+| `/mcp/server-card` | The [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL. It is a static file; on Cloudflare, the `_headers` rule serves it as `application/mcp-server-card+json` with `Access-Control-Allow-Origin: *`, and other hosts apply their own headers. |
 
 The card is listed in `/.well-known/ai-catalog.json`, and `llms.txt` names the endpoint, so agents that start from either find the server. The server's name is the site's hostname reversed plus `/docs`: `docs.example.com` becomes `com.example.docs/docs`. A site on `localhost` or an IP address is `local.nimbus/docs`.
 
-Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the endpoint is `/mcp/`; Astro answers the other form with a `308`, which keeps a `POST`.
+Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the endpoint is `/mcp/`; Astro answers the other form with a `308`, which keeps a `POST` but carries no CORS headers, so give browser clients the URL the site advertises.
 
 ## The tools
 

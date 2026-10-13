@@ -9,6 +9,23 @@ import { test } from "node:test";
 const CLI = fileURLToPath(new URL("../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
 
+test("adapter install commands preserve the supported range without claiming an exact pin", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-adapter-cli-"));
+  fs.writeFileSync(path.join(dir, "astro.config.ts"), 'export default {\n // nimbus:adapter\n output: "static"\n};');
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ packageManager: "pnpm@9.0.0", dependencies: { astro: "7.3.1" } }));
+  try {
+    const result = spawnSync(process.execPath, ["--import", TSX, CLI, "add", "adapter-cloudflare"], {
+      cwd: dir, encoding: "utf8", timeout: 30_000,
+      env: { ...process.env, AI_AGENT: "", CODEX_SANDBOX: "", CODEX_CI: "", CODEX_THREAD_ID: "", NO_COLOR: "1", CI: "1", npm_config_offline: "true" },
+    });
+    const output = result.stdout + result.stderr;
+    assert.match(output, /pnpm add .*@astrojs\/cloudflare@~14\.3\.0/);
+    assert.doesNotMatch(output, /--save-exact/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("adapter no-op reports a wrangler write", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-adapter-cli-"));
   fs.writeFileSync(

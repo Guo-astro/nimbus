@@ -32,6 +32,12 @@ export interface ParitySiteOptions {
   extraCollections?: string[];
   /** Nimbus integration options (callouts, MDX validation). */
   integration?: Record<string, unknown>;
+  /** Nimbus config `sources`. */
+  sources?: Record<string, unknown>;
+  /** Extra Nimbus config fields. */
+  nimbus?: Record<string, unknown>;
+  /** Extra route files, `src/pages/...` → contents. */
+  routes?: Record<string, string>;
   logLevel?: "silent" | "warn" | "info";
   /**
    * Write `src/components.ts` (a global `Aside` and `Badge`) and pass it to
@@ -43,6 +49,8 @@ export interface ParitySiteOptions {
 export interface ParitySite {
   root: string;
   config: AstroInlineConfig;
+  /** A fresh config with other `sources` or Nimbus fields (each build gets its own integration). */
+  configure: (patch?: { sources?: Record<string, unknown>; nimbus?: Record<string, unknown> }) => AstroInlineConfig;
   write: (file: string, body: string) => Promise<void>;
   read: (file: string) => Promise<string>;
   remove: () => Promise<void>;
@@ -156,7 +164,9 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
     `import { markdownRoute } from ${src("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = markdownRoute();\n`,
   );
 
-  const config: AstroInlineConfig = {
+  for (const [file, body] of Object.entries(options.routes ?? {})) await write(file, body);
+
+  const configure = (patch: { sources?: Record<string, unknown>; nimbus?: Record<string, unknown> } = {}): AstroInlineConfig => ({
     root: `${root}${path.sep}`,
     configFile: false,
     cacheDir: path.join(root, ".astro"),
@@ -177,6 +187,9 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
               routes: { convention: "resource-action-v2" },
             },
           ],
+          ...((patch.sources ?? options.sources) ? { sources: patch.sources ?? options.sources } : {}),
+          ...options.nimbus,
+          ...patch.nimbus,
         } as Parameters<typeof nimbus>[0],
         {
           admonitions: false,
@@ -187,11 +200,13 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
         } as Parameters<typeof nimbus>[1],
       ),
     ],
-  };
+  });
+  const config = configure();
 
   return {
     root,
     config,
+    configure,
     write,
     read: (file) => readFile(path.join(root, file), "utf8"),
     remove: () => rm(root, { recursive: true, force: true }),

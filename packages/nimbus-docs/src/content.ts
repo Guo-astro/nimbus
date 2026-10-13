@@ -18,6 +18,7 @@
  *   })),
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,6 +51,11 @@ import {
 import { isCollectionInBuildSlice } from "./_internal/build-slice.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import { prepareMarkdownLoader } from "./_internal/markdown-loader.js";
+import {
+  registeredContentSourceNames,
+  resolveContentSource,
+} from "./_internal/content-sources.js";
+import { normalizeSourcePath } from "./_internal/source-repo.js";
 import {
   beginPreparedMarkdownLoad,
   cancelPreparedMarkdownLoad,
@@ -84,8 +90,9 @@ export interface DocsCollectionOptions<
   TFields extends Record<string, z.ZodTypeAny> = Record<string, never>,
 > {
   /**
-   * Directory under `src/content/` to load docs from.
-   * Default: `"docs"`.
+   * Directory under `src/content/` to load docs from. Default: `"docs"`.
+   * With `source`, a folder inside the source's `path` instead (default
+   * `""`, the whole `path`); it may not contain `..`.
    */
   base?: string;
   /**
@@ -93,6 +100,13 @@ export interface DocsCollectionOptions<
    * Default: `"** /*.{md,mdx}"` (space added to avoid breaking this comment).
    */
   pattern?: string;
+  /**
+   * Read the collection from a content source declared in the Nimbus
+   * config's `sources`, by name, instead of `src/content`. The integration
+   * resolves the source to a snapshot before content sync; `base` is then
+   * relative to the source's `path`.
+   */
+  source?: string;
   /**
    * Extra fields merged into the default docs schema. Lets users add
    * project-specific frontmatter (author, tags, etc.) without rebuilding
@@ -145,9 +159,10 @@ const wrappedMarkdownLoaders = new WeakMap<Loader, Loader>();
 // The folder and pattern of each glob a Nimbus factory constructs, so the
 // duplicate-slug pass walks exactly those files. Nimbus's own values; a
 // hand-written glob has none and is checked through its store writes.
+type GlobFiles = { base: string; pattern: string | string[] };
 const nimbusGlobFiles = new WeakMap<
   Loader,
-  { base: string; pattern: string | string[] }
+  GlobFiles | ((root: URL) => GlobFiles | undefined)
 >();
 
 function nimbusGlob(base: string, pattern: string): Loader {
@@ -185,9 +200,11 @@ function wrapNimbusMarkdown<T extends Loader>(
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
 
-  const globFiles = nimbusGlobFiles.get(loader);
+  const globFilesOf = nimbusGlobFiles.get(loader);
   const wrappedLoad: Loader["load"] = async (context) => {
     const base = context.config.base || "/";
+    const globFiles =
+      typeof globFilesOf === "function" ? globFilesOf(context.config.root) : globFilesOf;
     const normalizeAuthoredLinks = getAuthoredLinkNormalizer();
     const prepared = prepareMarkdownLoader(loader, {
       generation: NIMBUS_MARKDOWN_GENERATION,
@@ -247,10 +264,87 @@ export function docsCollection<
     strictFrontmatter: options.strictFrontmatter,
   });
 
+  if (options.source !== undefined) {
+    return {
+      loader: withNimbusMarkdown(sourceGlob(options.source, options.base, pattern)),
+      schema,
+    };
+  }
+
   return {
     loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema,
   };
+}
+
+/**
+ * The glob behind `docsCollection({ source })`: Astro's glob over
+ * `<snapshot>/<path>/<base>`, looked up at load time, by project root, from
+ * the snapshots the integration resolved at setup. A snapshot is frozen for
+ * the process, so the glob gets no watcher.
+ */
+function sourceGlob(source: string, rawBase: string | undefined, pattern: string): Loader {
+  const sourceBase = normalizeSourcePath(rawBase);
+  if (/^[A-Za-z]:|^[\\/]/.test(rawBase ?? "") || sourceBase.split("/").includes("..")) {
+    throw authorError(
+      `nimbus-docs: docsCollection({ source: ${JSON.stringify(source)}, base: ${JSON.stringify(rawBase)} }): ` +
+        "with source, base is a folder inside the source's path and may not be absolute or contain \"..\".",
+    );
+  }
+  const folderOf = (root: URL) => {
+    const snapshot = resolveContentSource(root, source);
+    return snapshot && path.join(snapshot.contentDir, sourceBase);
+  };
+  const loader: Loader = {
+    name: "nimbus-docs:content-source",
+    async load(context) {
+      const snapshot = resolveContentSource(context.config.root, source);
+      if (!snapshot) {
+        const declared = registeredContentSourceNames(context.config.root);
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" in src/content.config.ts sets source: ${JSON.stringify(source)}, ` +
+            `but the Nimbus config declares no source named "${source}" in \`sources\`.`,
+          declared.length
+            ? `Declared sources: ${declared.map((name) => `"${name}"`).join(", ")}.`
+            : `Add sources: { ${JSON.stringify(source)}: { repo, ref, path } } to the Nimbus config.`,
+        );
+      }
+      const folder = path.join(snapshot.contentDir, sourceBase);
+      let empty: boolean;
+      try {
+        empty = fs.readdirSync(folder).length === 0;
+      } catch {
+        empty = true;
+      }
+      if (empty) {
+        const where = [snapshot.path, sourceBase].filter(Boolean).join("/");
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" reads source "${source}" at commit ${snapshot.commit.slice(0, 12)}, ` +
+            `but ${where ? `the folder "${where}"` : "the repository"} is missing or empty there.`,
+          `Check sources.${source}.path, the collection's base, and the ref.`,
+        );
+      }
+      // Astro's glob keeps a stored entry (and its old filePath) when the
+      // file's digest is unchanged, so a new snapshot folder would leave
+      // unchanged pages pointing at the previous one. Start from an empty
+      // store whenever the snapshot or folder changes.
+      const META_KEY = "nimbus:content-source";
+      const stamp = `${snapshot.identity}:${snapshot.commit}:${sourceBase}`;
+      if (context.meta.get(META_KEY) !== stamp) {
+        context.store.clear();
+        context.meta.set(META_KEY, stamp);
+      }
+      const rootDir = fileURLToPath(context.config.root);
+      const relative = path.relative(rootDir, folder).split(path.sep).join("/");
+      const inner = glob({ base: `./${relative}`, pattern });
+      await inner.load(transparentProxy(context, new Map([["watcher", undefined]])));
+    },
+  };
+  nimbusGlobFiles.set(loader, (root) => {
+    const folder = folderOf(root);
+    return folder ? { base: folder, pattern } : undefined;
+  });
+  return loader;
 }
 
 /**

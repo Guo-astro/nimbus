@@ -329,6 +329,8 @@ function findStatementEnd(source: string, from: number): number {
 /** Where a page collection's files are, as far as the config shows statically. */
 export type StaticPageCollection =
   | { kind: "folder"; dir: string; pattern: string | string[]; role: "page" | "partials" }
+  /** `docsCollection({ source })`: the folder is inside that source's snapshot. */
+  | { kind: "source"; source: string; base: string; pattern: string | string[]; role: "page" }
   /** A page collection whose files can't be placed without running the config. */
   | { kind: "unplaced" };
 
@@ -396,6 +398,22 @@ export function parsePageCollectionFolders(
     const factory = value.match(NIMBUS_FACTORY);
     if (factory) {
       const options = value.slice(factory.index! + factory[0].length);
+      const source = literalOption(options, "source");
+      if (factory[1] === "docsCollection" && /\bsource\s*:/.test(options)) {
+        out.set(
+          key,
+          source
+            ? {
+                kind: "source",
+                source,
+                base: literalOption(options, "base") ?? "",
+                pattern: literalOption(options, "pattern") ?? DEFAULT_PAGE_PATTERN,
+                role: "page",
+              }
+            : { kind: "unplaced" },
+        );
+        continue;
+      }
       const base = literalOption(options, "base") ?? FACTORY_DEFAULT_BASE[factory[1]!]!;
       out.set(key, {
         kind: "folder",
@@ -426,6 +444,38 @@ export function parsePageCollectionFolders(
           }
         : { kind: "unplaced" },
     );
+  }
+  return out;
+}
+
+export type PlacedPageCollection =
+  | { kind: "folder"; dir: string; pattern: string | string[]; role: "page" | "partials"; source?: string }
+  | { kind: "unplaced"; reason: string };
+
+/**
+ * Resolve each `source` collection to a folder inside the snapshot the last
+ * build or dev start selected (`snapshots`: source name → its `path` folder).
+ * A source with no snapshot yet stays unplaced, with the reason.
+ */
+export function placeStaticCollections(
+  parsed: ReadonlyMap<string, StaticPageCollection> | null,
+  snapshots: ReadonlyMap<string, { contentDir: string }>,
+): Map<string, PlacedPageCollection> {
+  const out = new Map<string, PlacedPageCollection>();
+  for (const [key, place] of parsed ?? []) {
+    if (place.kind === "folder") out.set(key, place);
+    else if (place.kind === "unplaced") {
+      out.set(key, { kind: "unplaced", reason: "its loader isn't a glob over a folder" });
+    } else {
+      const snapshot = snapshots.get(place.source);
+      const base = place.base.replaceAll("\\", "/").replace(/^\.\//, "");
+      out.set(
+        key,
+        snapshot && !base.split("/").includes("..")
+          ? { kind: "folder", dir: path.join(snapshot.contentDir, base), pattern: place.pattern, role: "page", source: place.source }
+          : { kind: "unplaced", reason: `source "${place.source}" has no snapshot yet; run a build or start the dev server` },
+      );
+    }
   }
   return out;
 }

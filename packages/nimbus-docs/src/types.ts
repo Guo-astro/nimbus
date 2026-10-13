@@ -150,6 +150,15 @@ export interface NimbusConfig {
    */
   api?: ApiSpec[];
   /**
+   * Git repositories whose files this site reads at build time, by name.
+   * A collection reads one with `docsCollection({ source: "<name>" })` and
+   * an API spec with `api[].spec: { source: "<name>", path }`. Each resolves
+   * before content sync to a snapshot under `.nimbus/sources/`: a pinned
+   * commit is fetched once and reused with no network call; a branch or tag
+   * is resolved at every build. The name: lowercase letters, digits, dashes.
+   */
+  sources?: Record<string, ContentSource>;
+  /**
    * Remote API references this site only *cites* — it does not build or publish
    * them. Each entry names a `collection` and points at another Nimbus site's
    * published `coordinates.json` (the {@link NimbusConfig.api} half emits one at
@@ -255,6 +264,61 @@ export interface ApiRoutePolicy {
 }
 
 /**
+ * A git repository whose files the site reads at build time. Declared by name
+ * in {@link NimbusConfig.sources}.
+ */
+export interface ContentSource {
+  /**
+   * Anything `git clone` accepts: an https or ssh URL, or a local path
+   * (relative to the project root). Never a credential: a URL with a token
+   * or password in it is refused. Give credentials to git instead (a
+   * credential helper, an SSH key, or `http.<url>.extraHeader` in CI).
+   */
+  repo: string;
+  /**
+   * A 40-character commit, or a branch or tag name. A commit is fetched once
+   * and reused; a branch or tag is resolved at every build, so pages can
+   * change under it (`nimbus-docs check` reports it as floating). Template it
+   * for previews: `process.env.SDK_DOCS_REF ?? "<commit>"`.
+   */
+  ref: string;
+  /**
+   * Folder inside the repository to check out, relative to its root. `""`
+   * (the default) is the whole repository. Collections read inside it.
+   */
+  path?: string;
+  /**
+   * Edit-link pattern for pages read from this source, used by `getEditUrl`.
+   * `{path}` is the file's repository-relative path and `{ref}` is `ref` as
+   * written here. Without it, pages from this source get no edit link.
+   * Example: `"https://github.com/acme/sdk/edit/{ref}/{path}"`.
+   */
+  editPattern?: string;
+}
+
+/**
+ * What the page bundle (`virtual:nimbus/config`) carries of a content source:
+ * the inputs of `getEditUrl`, never `repo` or `path`.
+ */
+export type RuntimeContentSource = Pick<ContentSource, "ref" | "editPattern">;
+
+/** The Nimbus config as the runtime helpers read it: `sources` reduced to {@link RuntimeContentSource}. */
+export type RuntimeNimbusConfig = Omit<NimbusConfig, "sources"> & {
+  sources?: Record<string, RuntimeContentSource>;
+};
+
+/**
+ * An `api[].spec` that lives in a declared content source. A type alias, not
+ * an interface, so it stays assignable where the inline-object form is.
+ */
+export type ApiSpecSource = {
+  /** A key of {@link NimbusConfig.sources}. */
+  source: string;
+  /** The spec file, relative to the repository root, inside the source's `path`. */
+  path: string;
+};
+
+/**
  * One OpenAPI reference spec, mounted as a content collection named
  * `collection` at `/<collection>`. Declared once in the Nimbus config's `api`
  * array and registered in `src/content.config.ts` with `apiCollection()`.
@@ -268,10 +332,12 @@ export interface ApiSpec {
   /** Collection name + base URL prefix, e.g. `"api"` → routes under `/api`. */
   collection: string;
   /**
-   * Local file path (relative to the project root) or an inline OpenAPI
-   * document object. Not a remote URL in v1. Omit when `versions` is set.
+   * Local file path (relative to the project root), a file inside a declared
+   * content source (`{ source, path }`, `path` relative to that repository's
+   * root), or an inline OpenAPI document object. Not a remote URL in v1.
+   * Omit when `versions` is set.
    */
-  spec?: string | Record<string, unknown>;
+  spec?: string | ApiSpecSource | Record<string, unknown>;
   /** Human label for build diagnostics (falls back to `collection`). */
   label?: string;
   /**
@@ -440,8 +506,11 @@ export interface ApiVersionSpec {
    * once shipped (it becomes part of every non-default URL).
    */
   version: string;
-  /** Local file path (relative to the project root) or inline OpenAPI object. */
-  spec: string | Record<string, unknown>;
+  /**
+   * Local file path (relative to the project root), a file inside a declared
+   * content source (`{ source, path }`), or an inline OpenAPI object.
+   */
+  spec: string | ApiSpecSource | Record<string, unknown>;
   /**
    * Marks the family default — mounts at the bare `/<collection>` and is the
    * canonical target for cross-version links. At most one version may set this;

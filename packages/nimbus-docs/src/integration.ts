@@ -91,7 +91,18 @@ import { formatLabel } from "./_internal/sidebar.js";
 import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
 import { entryRouteUrl } from "./_internal/astro-slug.js";
-import { parsePageCollectionFolders } from "./_internal/parse-content-collections.js";
+import {
+  parsePageCollectionFolders,
+  placeStaticCollections,
+} from "./_internal/parse-content-collections.js";
+import {
+  applySourceSpecs,
+  collectSourceSpecs,
+  registerContentSources,
+  releaseContentSourceLeases,
+  resolveContentSources,
+  SOURCES_DIR,
+} from "./_internal/content-sources.js";
 import {
   pageCollectionsFilePath,
   resolvePageCollections,
@@ -555,6 +566,10 @@ export function nimbus(
     { rules: options.rules, collections: options.collections },
     IMPLEMENTED_CODES,
   );
+
+  // The `api[].spec: { source, path }` entries, found once: each setup run
+  // points them at the snapshot of that run.
+  const sourceSpecs = collectSourceSpecs(config.api);
 
   // Threaded from `astro:config:setup` to `astro:build:done` so the post-
   // build materialization knows where to write `.nimbus/routes.json` and
@@ -1178,6 +1193,17 @@ export function nimbus(
         }
         navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
+        // Content sources come first: the API spec read and the citation
+        // index below read files inside the snapshots, and so do the loaders
+        // at content sync. A dev restart re-resolves (a config edit may
+        // change a branch) and drops the previous run's leases first.
+        releaseContentSourceLeases(projectRoot);
+        const sourceSnapshots = await resolveContentSources(config.sources, {
+          projectRoot,
+          log: (level, message) => logger[level](message),
+        });
+        registerContentSources(astroConfig.root, sourceSnapshots);
+        applySourceSpecs(sourceSpecs, sourceSnapshots, projectRoot);
         beginPreparedMarkdownSession(astroConfig.root);
         registerApiCollections(
           astroConfig.root,
@@ -1652,17 +1678,17 @@ export function nimbus(
         // otherwise depends on which file hits a grammar first).
         const contentRootForScan = path.join(projectRoot, "src", "content");
         const outsideFolders = [
-          ...(parsePageCollectionFolders(
-            projectRoot,
-            path.join(srcDir, "content.config.ts"),
-          ) ?? new Map()).values(),
+          ...placeStaticCollections(
+            parsePageCollectionFolders(projectRoot, path.join(srcDir, "content.config.ts")),
+            sourceSnapshots,
+          ).values(),
         ]
-          .filter(
-            (place): place is { kind: "folder"; dir: string } =>
-              place.kind === "folder" &&
-              path.relative(contentRootForScan, place.dir).startsWith(".."),
-          )
-          .map((place) => place.dir);
+          .flatMap((place) =>
+            place.kind === "folder" &&
+            path.relative(contentRootForScan, place.dir).startsWith("..")
+              ? [place.dir]
+              : [],
+          );
         const codeBlocks = await scanCodeBlocks(
           projectRoot,
           SHIKI_LANG_ALIAS,
@@ -2632,6 +2658,13 @@ export function nimbus(
               "import.meta.env.NIMBUS_PROJECT_ROOT":
                 JSON.stringify(projectRoot),
             },
+            // A snapshot is frozen for the dev server's lifetime (it holds a
+            // lease); watching thousands of source files buys nothing.
+            server: {
+              watch: {
+                ignored: [path.join(projectRoot, SOURCES_DIR, "**").replaceAll("\\", "/")],
+              },
+            },
             plugins: [
               {
                 name: "nimbus-docs:api-picker-upgrade",
@@ -3027,8 +3060,9 @@ export function nimbus(
             '  export const options: { site: string; title: string; base: string; output: "static" | "server" };',
             "}",
             'declare module "virtual:nimbus/config" {',
-            '  import type { NimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
-            "  export const config: NimbusConfig;",
+            '  import type { RuntimeNimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
+            "  /** The validated config, with `sources` reduced to each source's `ref` and `editPattern`. */",
+            "  export const config: RuntimeNimbusConfig;",
             "  /** The page-collection list: collections made with Nimbus's helpers, plus API collections. See `getIndexedEntries()`. */",
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
@@ -3206,6 +3240,7 @@ export function nimbus(
         }
       },
       "astro:server:done": async () => {
+        releaseContentSourceLeases(projectRootForBuild);
         // The restart refresh re-runs loaders against the first server's
         // watcher (see `initialDevWatchers`); close it again so a stopped dev
         // server lets the process exit. Idempotent when nothing reopened it.
@@ -3404,6 +3439,8 @@ export function nimbus(
       },
       "astro:build:done": async ({ dir, pages, logger }) => {
         const distDir = fileURLToPath(dir);
+        // The build has read every page; a failed build releases at exit.
+        releaseContentSourceLeases(projectRootForBuild);
         // A slice without the root collection: its site-wide files go under
         // its prefix, and the root files it can't serve go (`slice-output.ts`).
         const sliceOutput =

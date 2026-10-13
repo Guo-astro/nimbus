@@ -19,7 +19,7 @@
  * object when the site is unversioned. See `version-alternates.ts`.
  */
 
-import type { NimbusConfig } from "../types.js";
+import type { NimbusConfig, RuntimeContentSource, RuntimeNimbusConfig } from "../types.js";
 import type { VersionAlternatesTable } from "./version-alternates.js";
 
 const VIRTUAL_ID = "virtual:nimbus/config";
@@ -101,12 +101,23 @@ export interface VirtualConfigExtras {
   contentConfigPath?: string;
 }
 
+function runtimeSources(sources: NimbusConfig["sources"]): RuntimeNimbusConfig["sources"] {
+  const out: Record<string, RuntimeContentSource> = {};
+  for (const [name, source] of Object.entries(sources ?? {})) {
+    if (source.editPattern) out[name] = { ref: source.ref, editPattern: source.editPattern };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export function virtualConfigPlugin(
   config: NimbusConfig,
   extras: VirtualConfigExtras,
 ): VitePluginLike {
-  const runtimeConfig: NimbusConfig = {
+  const runtimeConfig: RuntimeNimbusConfig = {
     ...config,
+    // The page bundle gets only what `getEditUrl` reads of a source: its
+    // configured `ref` and `editPattern`, never `repo` or `path`.
+    sources: runtimeSources(config.sources),
     ...(config.api
       ? {
           api: config.api.map((entry) =>

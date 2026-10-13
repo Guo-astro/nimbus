@@ -32,7 +32,10 @@ import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "
 
 const LINK_RULES = ["nimbus/internal-link", "nimbus/redirected-link"] as const;
 
-export function checkAuthoring(cwd: string): ScopeReport {
+export function checkAuthoring(
+  cwd: string,
+  snapshots: ReadonlyMap<string, { contentDir: string }> = new Map(),
+): ScopeReport {
   const findings: CheckFinding[] = [];
   const notes: Note[] = [];
   const hasLintJson = fs.existsSync(path.join(cwd, ".nimbus", "lint.json"));
@@ -61,7 +64,7 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   }
 
-  const lintScope = pageCollectionLintScope(cwd);
+  const lintScope = pageCollectionLintScope(cwd, snapshots);
   const files = [
     ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
   ].sort();
@@ -72,7 +75,12 @@ export function checkAuthoring(cwd: string): ScopeReport {
     return { scope: "authoring", findings, notes, evaluated: true };
   }
 
-  let effective = { ...config, collectionOf: lintScope.collectionOf };
+  let effective = {
+    ...config,
+    collectionOf: lintScope.collectionOf,
+    displayPath: lintScope.displayPath,
+    readOnlySource: lintScope.readOnlySource,
+  };
   if (!hasLintJson) {
     notes.push({
       code: "nimbus/authoring-optin-skipped",

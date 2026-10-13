@@ -16,6 +16,7 @@ import { depInstalled, hasPackageJson } from "../check/probe.js";
 import { loadMaterializedConfig } from "../check/authoring.js";
 import { findMdxFiles, fixPaths } from "../lint/index.js";
 import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { leaseCurrentSources } from "../_internal/content-sources.js";
 import {
   ALL_SCOPES,
   exitCodeFor,
@@ -141,7 +142,8 @@ async function applyFixes(
   const applied: string[] = [];
 
   if (ctx.scopes.authoring && !ctx.signal.aborted) {
-    const lintScope = pageCollectionLintScope(cwd);
+    const sources = await leaseCurrentSources(cwd);
+    const lintScope = pageCollectionLintScope(cwd, sources.snapshots);
     const files = [
       ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
     ].sort();
@@ -150,6 +152,8 @@ async function applyFixes(
       const run = fixPaths(files, cwd, {
         ...config,
         collectionOf: lintScope.collectionOf,
+        displayPath: lintScope.displayPath,
+        readOnlySource: lintScope.readOnlySource,
         signal: ctx.signal,
       });
       if (run.fixed > 0) {
@@ -158,6 +162,7 @@ async function applyFixes(
         );
       }
     }
+    sources.release();
   }
 
   for (const f of result.findings) {

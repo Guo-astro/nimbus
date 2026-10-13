@@ -1,8 +1,10 @@
 /**
  * The files `nimbus-docs lint` reads beyond `src/content`: the `.mdx` files
  * of page collections whose loader reads another folder, as far as
- * `content.config.ts` shows statically. A page collection whose files can't
- * be placed (an in-memory loader, computed options) is named, not guessed.
+ * `content.config.ts` shows statically, including a git source's snapshot
+ * (the one the last build or dev start selected). A page collection whose
+ * files can't be placed (an in-memory loader, computed options, a source
+ * never resolved) is named, not guessed.
  */
 
 import path from "node:path";
@@ -10,13 +12,24 @@ import path from "node:path";
 import picomatch from "picomatch";
 
 import { walkFilesSync } from "../_internal/fs-walk.js";
-import { parsePageCollectionFolders } from "../_internal/parse-content-collections.js";
+import {
+  parsePageCollectionFolders,
+  placeStaticCollections,
+} from "../_internal/parse-content-collections.js";
+import { parseContentSourcePath, SOURCES_DIR } from "../_internal/source-paths.js";
 
 export interface PageCollectionLintScope {
   /** Absolute `.mdx` paths outside `src/content`. */
   files: string[];
   /** The collection of a file outside `src/content`, or null. */
   collectionOf: (absPath: string) => string | null;
+  /**
+   * How a snapshot file is named in findings: `<source>: <repository path>`,
+   * where its author fixes it. `undefined` for any other file.
+   */
+  displayPath: (absPath: string) => string | undefined;
+  /** The source a file's snapshot belongs to: such a file is never written. */
+  readOnlySource: (absPath: string) => string | undefined;
   /** One line per collection lint can't see. */
   notes: string[];
 }
@@ -26,18 +39,21 @@ function inside(dir: string, file: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function pageCollectionLintScope(projectRoot: string): PageCollectionLintScope {
+export function pageCollectionLintScope(
+  projectRoot: string,
+  snapshots: ReadonlyMap<string, { contentDir: string }> = new Map(),
+): PageCollectionLintScope {
   const contentDir = path.join(projectRoot, "src", "content");
-  const folders = parsePageCollectionFolders(
-    projectRoot,
-    path.join(projectRoot, "src", "content.config.ts"),
+  const places = placeStaticCollections(
+    parsePageCollectionFolders(projectRoot, path.join(projectRoot, "src", "content.config.ts")),
+    snapshots,
   );
   const owners: Array<{ dir: string; collection: string }> = [];
-  const files: string[] = [];
+  const files = new Set<string>();
   const unplaced: string[] = [];
-  for (const [collection, place] of folders ?? []) {
+  for (const [collection, place] of places) {
     if (place.kind === "unplaced") {
-      unplaced.push(collection);
+      unplaced.push(`${collection} (${place.reason})`);
       continue;
     }
     if (inside(contentDir, place.dir)) continue;
@@ -47,19 +63,25 @@ export function pageCollectionLintScope(projectRoot: string): PageCollectionLint
     const negative = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
     const matches = picomatch(positive, negative.length > 0 ? { ignore: negative } : {});
     for (const { abs, rel } of walkFilesSync(place.dir, { extensions: [".mdx"] })) {
-      if (matches(rel)) files.push(abs);
+      if (matches(rel)) files.add(abs);
     }
   }
   // The deepest folder wins when one collection's folder holds another's.
   owners.sort((a, b) => b.dir.length - a.dir.length);
+  const sourceOf = (absPath: string) => {
+    const relative = path.relative(projectRoot, absPath).split(path.sep).join("/");
+    return relative.startsWith(`${SOURCES_DIR}/`) ? parseContentSourcePath(relative) : undefined;
+  };
   return {
-    files,
+    files: [...files].sort(),
     collectionOf: (absPath) => owners.find((owner) => inside(owner.dir, absPath))?.collection ?? null,
+    displayPath: (absPath) => {
+      const source = sourceOf(absPath);
+      return source ? `${source.name}: ${source.path}` : undefined;
+    },
+    readOnlySource: (absPath) => sourceOf(absPath)?.name,
     notes: unplaced.length
-      ? [
-          `not inspected: ${unplaced.join(", ")} (a page collection whose loader isn't a glob over a folder ` +
-            "has no files for lint to read).",
-        ]
+      ? [`not inspected: ${unplaced.join(", ")}.`]
       : [],
   };
 }

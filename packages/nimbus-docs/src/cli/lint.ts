@@ -22,6 +22,7 @@ import type { Features } from "satteri";
 
 import { setMarkdownFeatures } from "../_internal/markdown-features.js";
 import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { leaseCurrentSources } from "../_internal/content-sources.js";
 import { materializedFeatures } from "../check/authoring.js";
 import { isBuildValidator } from "../lint/diagnostic.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
@@ -102,7 +103,10 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     }
   }
 
-  const scope = pageCollectionLintScope(cwd);
+  // Read source snapshots under a lease, so a build can't prune one mid-read.
+  const sources = await leaseCurrentSources(cwd);
+  process.once("exit", sources.release);
+  const scope = pageCollectionLintScope(cwd, sources.snapshots);
   const files = [...new Set([...findMdxFiles([contentDir]), ...scope.files])].sort();
   for (const note of scope.notes) process.stderr.write(`nimbus-docs: ${note}\n`);
   if (files.length === 0) {
@@ -151,6 +155,8 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     only: flags.rule as import("../lint/diagnostic.js").AuthoringRuleCode | undefined,
   });
   opts.collectionOf = scope.collectionOf;
+  opts.displayPath = scope.displayPath;
+  opts.readOnlySource = scope.readOnlySource;
 
   let diagnostics: Diagnostic[];
   let interrupted = false;

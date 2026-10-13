@@ -54,6 +54,7 @@ import {
 } from "./_internal/build-report.js";
 import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
+import { mcpSdkMessage, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
 import { parseComponentsRegistry } from "./_internal/parse-components-registry.js";
@@ -2795,16 +2796,14 @@ export function nimbus(
           const root = astroConfig.root ? fileURLToPath(astroConfig.root) : projectRootForBuild;
           if (building && (outputModeForBuild !== "server" || !adapterNameForBuild)) {
             throw new Error(
-              "nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. " +
-                `Run \`${invocation("add adapter-cloudflare", root)}\` (or add adapter-node, adapter-vercel or adapter-netlify), or set agents.mcp to false. ` +
-                `Received output=${outputModeForBuild}, adapter=${adapterNameForBuild ?? "none"}.`,
+              serverAdapterMessage("MCP", root, outputModeForBuild, adapterNameForBuild ?? "none"),
             );
           }
           try {
             createRequire(path.join(root, "package.json")).resolve("@modelcontextprotocol/server");
           } catch {
             throw new Error(
-              "nimbus-docs: agents.mcp needs the MCP server SDK in this project. Install it:\n\n  npm install @modelcontextprotocol/server\n",
+              mcpSdkMessage(root),
             );
           }
         }
@@ -2814,8 +2813,12 @@ export function nimbus(
           (outputModeForBuild !== "server" || !adapterNameForBuild)
         ) {
           throw new Error(
-            'nimbus-docs: rendering mode "request" requires Astro `output: "server"` and a compatible adapter for production builds. ' +
-              `Received output=${outputModeForBuild}, adapter=${adapterNameForBuild ?? "none"}.`,
+            serverAdapterMessage(
+              pageAssetCollections.length ? "api bundle: false" : "request rendering",
+              projectRootForBuild,
+              outputModeForBuild,
+              adapterNameForBuild ?? "none",
+            ),
           );
         }
         if (
@@ -2871,6 +2874,7 @@ export function nimbus(
         injectTypes({
           filename: "virtual-config.d.ts",
           content: [
+            'declare module "virtual:nimbus/connect-mcp-client" {}',
             'declare module "virtual:nimbus/agent-capabilities" {',
             '  export const capabilities: import("@cloudflare/nimbus-docs/types").AgentCapabilities;',
             '  export const options: { site: string; title: string; base: string; output: "static" | "server" };',
@@ -3152,7 +3156,7 @@ export function nimbus(
         const staticPaths = [...policyRoutesWithStaticPaths].sort().join(", ");
         if (staticPaths && staticPaths !== reportedPolicyRoutesWithStaticPaths) {
           logger.info(
-            `The rendering policy renders ${staticPaths} on request, so Astro ignores their getStaticPaths(). ` +
+            `The rendering policy renders ${staticPaths} on request, so Astro ignores ${policyRoutesWithStaticPaths.size === 1 ? "its" : "their"} getStaticPaths(). ` +
               "That's expected: don't add `export const prerender`; set `rendering` in the Nimbus config to change it.",
           );
         }

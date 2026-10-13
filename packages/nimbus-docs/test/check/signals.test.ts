@@ -31,6 +31,12 @@ function addDocsRoute(dir: string): void {
   fs.writeFileSync(path.join(dir, "src", "pages", "[...slug].astro"), "");
 }
 
+function addServerDocsRoute(dir: string): void {
+  addDocsRoute(dir);
+  const file = path.join(dir, "astro.config.ts");
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace("export default {", 'export default { output: "server", adapter: cloudflare(),'));
+}
+
 const ENV_ONLY = {
   env: true,
   structure: false,
@@ -152,7 +158,7 @@ test("computed site → structure config-unresolved note → readiness unknown (
 test("request rendering requires a production build before readiness is known", async () => {
   const dir = project(
     `{ site: "https://docs.example.com", title: "X", search: false, rendering: { collections: { docs: "request" } } }`,
-    addDocsRoute,
+    addServerDocsRoute,
   );
   try {
     const r = await runChecks(dir, ENV_STRUCT);
@@ -234,7 +240,7 @@ test("opaque collections no longer block a request default; a build confirms pag
   const dir = project(
     `{ site: "https://docs.example.com", title: "X", search: false, rendering: { default: "request" } }`,
     (d) => {
-      addDocsRoute(d);
+      addServerDocsRoute(d);
       fs.mkdirSync(path.join(d, "src"), { recursive: true });
       fs.writeFileSync(
         path.join(d, "src", "content.config.ts"),

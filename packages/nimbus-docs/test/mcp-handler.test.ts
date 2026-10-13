@@ -69,6 +69,35 @@ function handlerFor(index: McpPageIndex, base = "/", pages: Record<string, strin
 
 const URL_ = `${SITE}/mcp`;
 
+test("oversized streamed and declared bodies are drained before returning 413", async () => {
+  for (const declared of [false, true]) {
+    let cancelled = false;
+    let read = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (read === 3) { controller.close(); return; }
+        read++;
+        controller.enqueue(new Uint8Array(MCP_MAX_REQUEST_BODY_BYTES / 2));
+      },
+      cancel() { cancelled = true; },
+    });
+    const request = new Request(URL_, {
+      method: "POST", body, duplex: "half",
+      headers: { "Content-Type": "application/json", ...(declared ? { "Content-Length": String(MCP_MAX_REQUEST_BODY_BYTES + 1) } : {}) },
+    } as RequestInit);
+    const handler = handlerFor(INDEX);
+    const response = await handler.fetch(request);
+    assert.equal(response.status, 413);
+    assert.equal(read, 3, declared ? "Content-Length limit" : "stream limit");
+    assert.equal(cancelled, false);
+    assert.equal(request.bodyUsed, true);
+    assert.equal(request.body?.locked, false);
+    assert.equal(response.headers.get("access-control-allow-origin"), "*");
+    const next = await handler.fetch(rpcRequest(URL_, "initialize", INITIALIZE_PARAMS));
+    assert.equal(next.status, 200);
+  }
+});
+
 test("OPTIONS is answered with CORS; GET and DELETE are 405 with Allow; a bad Origin is 403", async () => {
   const handler = handlerFor(INDEX);
   const preflight = await handler.fetch(new Request(URL_, { method: "OPTIONS" }));

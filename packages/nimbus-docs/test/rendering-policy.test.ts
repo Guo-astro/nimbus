@@ -1097,6 +1097,53 @@ test("generated API request rendering retains its adapter compatibility guard", 
   }
 });
 
+test("unbundled API adapter errors recommend only supported adapters", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { api: "request" } },
+    "build",
+    "export const collections = { api: {} };\n",
+    [
+      {
+        collection: "api",
+        spec: {
+          openapi: "3.1.0",
+          info: { title: "API", version: "1" },
+          paths: {
+            "/ping": {
+              get: {
+                operationId: "ping",
+                responses: { "200": { description: "OK" } },
+              },
+            },
+          },
+        },
+        bundle: false,
+      },
+    ],
+  );
+  for (const output of ["static", "server"] as const) {
+    assert.throws(
+      () =>
+        integration.configDone({
+          injectTypes: () => new URL("file:///noop"),
+          config: { output, adapter: null },
+          buildOutput: output,
+        } as never),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /api bundle: false/);
+        assert.match(
+          error.message,
+          /add adapter-cloudflare.*or add adapter-node/,
+        );
+        assert.doesNotMatch(error.message, /adapter-vercel|adapter-netlify/);
+        return true;
+      },
+    );
+  }
+});
+
 test("required canonical routes retain rendering policy when their file is missing", async (t) => {
   const integration = await setupIntegration(
     t,

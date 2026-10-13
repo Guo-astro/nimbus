@@ -174,14 +174,23 @@ export function parseNimbusOptions(cwd: string): OptionsParseResult {
  */
 export function parseAstroConfigFields(cwd: string): {
   output?: string;
+  adapter?: boolean;
   trailingSlash?: string;
   buildFormat?: string;
   unresolved: string[];
 } | null {
   const found = findConfigFile(cwd);
   if (!found) return null;
-  const sourceFile = ts.createSourceFile(found.file, found.source, ts.ScriptTarget.Latest, true, configScriptKind(found.file));
+  const sourceFile = ts.createSourceFile(
+    found.file,
+    found.source,
+    ts.ScriptTarget.Latest,
+    true,
+    configScriptKind(found.file),
+  );
   const constants = new Map<string, ts.Expression>();
+  const bindingNames = new Map<string, ts.Identifier>();
+  const bindingUses = new Set<ts.Identifier>();
   // Only Astro's `defineConfig` passes the config through unchanged; any
   // other call may rewrite it, so its fields are unknown.
   const passThrough = new Set<string>();
@@ -195,46 +204,97 @@ export function parseAstroConfigFields(cwd: string): {
       ts.isNamedImports(statement.importClause.namedBindings)
     ) {
       for (const element of statement.importClause.namedBindings.elements) {
-        if ((element.propertyName ?? element.name).text === "defineConfig") passThrough.add(element.name.text);
+        if ((element.propertyName ?? element.name).text === "defineConfig")
+          passThrough.add(element.name.text);
       }
     }
-    if (ts.isVariableStatement(statement)) {
+    if (
+      ts.isVariableStatement(statement) &&
+      statement.declarationList.flags & ts.NodeFlags.Const
+    ) {
       for (const declaration of statement.declarationList.declarations) {
         if (ts.isIdentifier(declaration.name) && declaration.initializer) {
           constants.set(declaration.name.text, declaration.initializer);
+          bindingNames.set(declaration.name.text, declaration.name);
         }
       }
     }
-    if (ts.isExportAssignment(statement) && !statement.isExportEquals) exported = statement.expression;
+    if (ts.isExportAssignment(statement) && !statement.isExportEquals)
+      exported = statement.expression;
   }
-  const objectOf = (expression: ts.Expression | undefined, depth = 0): ts.ObjectLiteralExpression | undefined => {
+  const objectOf = (
+    expression: ts.Expression | undefined,
+    depth = 0,
+  ): ts.ObjectLiteralExpression | undefined => {
     if (!expression || depth > 3) return undefined;
-    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)) {
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isSatisfiesExpression(expression)
+    ) {
       return objectOf(expression.expression, depth + 1);
     }
     if (ts.isObjectLiteralExpression(expression)) return expression;
     if (ts.isCallExpression(expression)) {
-      return ts.isIdentifier(expression.expression) && passThrough.has(expression.expression.text)
+      return ts.isIdentifier(expression.expression) &&
+        passThrough.has(expression.expression.text)
         ? objectOf(expression.arguments[0], depth + 1)
         : undefined;
     }
-    if (ts.isIdentifier(expression)) return objectOf(constants.get(expression.text), depth + 1);
+    if (ts.isIdentifier(expression)) {
+      bindingUses.add(expression);
+      return objectOf(constants.get(expression.text), depth + 1);
+    }
     return undefined;
   };
   const config = objectOf(exported);
   if (!config) return null;
+  // A const object can still be mutated or handed to a function before export.
+  // Read only bindings used exclusively by the resolved export chain.
+  let hasOtherUse = false;
+  const inspectUses = (node: ts.Node): void => {
+    if (
+      ts.isIdentifier(node) &&
+      [...bindingUses].some((use) => use.text === node.text) &&
+      node !== bindingNames.get(node.text) &&
+      !bindingUses.has(node)
+    )
+      hasOtherUse = true;
+    ts.forEachChild(node, inspectUses);
+  };
+  inspectUses(sourceFile);
+  if (hasOtherUse) return null;
   const unresolved: string[] = [];
   // The last assignment wins; a spread or shorthand could set any field.
-  const field = (object: ts.ObjectLiteralExpression | undefined, name: string): ts.Expression | undefined => {
+  const field = (
+    object: ts.ObjectLiteralExpression | undefined,
+    name: string,
+  ): ts.Expression | undefined => {
     let value: ts.Expression | undefined;
     for (const property of object?.properties ?? []) {
-      if (!ts.isPropertyAssignment(property)) {
+      if (
+        ts.isSpreadAssignment(property) ||
+        (property.name && ts.isComputedPropertyName(property.name))
+      ) {
         if (!unresolved.includes("...spread")) unresolved.push("...spread");
-      } else if (propertyKey(property.name) === name) value = property.initializer;
+      } else if (!ts.isPropertyAssignment(property)) {
+        if (
+          property.name &&
+          propertyKey(property.name) === name &&
+          !unresolved.includes(name)
+        )
+          unresolved.push(name);
+      } else if (propertyKey(property.name) === null) {
+        if (!unresolved.includes("...spread")) unresolved.push("...spread");
+      } else if (propertyKey(property.name) === name)
+        value = property.initializer;
     }
     return value;
   };
-  const text = (name: string, expression: ts.Expression | undefined): string | undefined => {
+  const text = (
+    name: string,
+    expression: ts.Expression | undefined,
+  ): string | undefined => {
     if (!expression) return undefined;
     const value = literalValue(expression);
     if (value.ok && typeof value.value === "string") return value.value;
@@ -243,10 +303,34 @@ export function parseAstroConfigFields(cwd: string): {
   };
   const build = field(config, "build");
   if (build && !ts.isObjectLiteralExpression(build)) unresolved.push("build");
+  const adapter = field(config, "adapter");
+  let hasAdapter: boolean | undefined = false;
+  if (adapter) {
+    if (
+      adapter.kind === ts.SyntaxKind.NullKeyword ||
+      (ts.isIdentifier(adapter) && adapter.text === "undefined")
+    )
+      hasAdapter = false;
+    else if (
+      ts.isCallExpression(adapter) ||
+      ts.isObjectLiteralExpression(adapter)
+    )
+      hasAdapter = true;
+    else {
+      hasAdapter = undefined;
+      unresolved.push("adapter");
+    }
+  }
   return {
+    adapter: hasAdapter,
     output: text("output", field(config, "output")),
     trailingSlash: text("trailingSlash", field(config, "trailingSlash")),
-    buildFormat: text("build.format", build && ts.isObjectLiteralExpression(build) ? field(build, "format") : undefined),
+    buildFormat: text(
+      "build.format",
+      build && ts.isObjectLiteralExpression(build)
+        ? field(build, "format")
+        : undefined,
+    ),
     unresolved,
   };
 }
@@ -574,19 +658,37 @@ function readFields(
     if (!text) continue;
     if (text.startsWith("...")) {
       if (!unresolved.includes("...spread")) unresolved.push("...spread");
+      for (const key of Object.keys(config)) delete config[key];
       continue;
     }
-    if (text.startsWith("[")) continue; // computed key
+    if (text.startsWith("[")) {
+      if (!unresolved.includes("...spread")) unresolved.push("...spread");
+      for (const key of Object.keys(config)) delete config[key];
+      continue;
+    }
 
     const colon = topLevelColon(entry.text);
-    if (colon === -1) continue; // shorthand/malformed
+    if (colon === -1) {
+      if (/^[A-Za-z_$][\w$]*$/.test(text)) {
+        unresolved.push(text);
+        delete config[text];
+      } else {
+        if (!unresolved.includes("...spread")) unresolved.push("...spread");
+        for (const key of Object.keys(config)) delete config[key];
+      }
+      continue;
+    }
     // Read the key from `source`: a quoted key ("site":) is blanked in `masked`.
     const keyStart = entry.start + (entry.text.length - entry.text.trimStart().length);
     const rawKey = source
       .slice(keyStart, entry.start + colon)
       .trim()
       .replace(/^['"`]|['"`]$/g, "");
-    if (!/^[A-Za-z_$][\w$]*$/.test(rawKey)) continue;
+    if (!/^[A-Za-z_$][\w$]*$/.test(rawKey)) {
+      if (!unresolved.includes("...spread")) unresolved.push("...spread");
+      for (const key of Object.keys(config)) delete config[key];
+      continue;
+    }
 
     const rawValueRel = entry.text.slice(colon + 1);
     const leading = rawValueRel.length - rawValueRel.trimStart().length;
@@ -602,7 +704,10 @@ function readFields(
 
     const evaluated = evaluateLiteral(source.slice(valueStart, valueEnd));
     if (evaluated.ok) config[rawKey] = evaluated.value;
-    else unresolved.push(rawKey);
+    else {
+      unresolved.push(rawKey);
+      delete config[rawKey];
+    }
   }
 
   return { fields, config, unresolved };

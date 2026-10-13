@@ -290,6 +290,39 @@ function toolResult(value: unknown, isError = false) {
   };
 }
 
+async function boundedBody(
+  request: Request,
+): Promise<Uint8Array<ArrayBuffer> | null> {
+  let tooLarge =
+    Number(request.headers.get("content-length")) > MCP_MAX_REQUEST_BODY_BYTES;
+  if (!request.body) return tooLarge ? null : new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MCP_MAX_REQUEST_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+      }
+      if (!tooLarge) chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (tooLarge) return null;
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHandler {
   const { identity, base, source } = options;
   const validator = new CfWorkerJsonSchemaValidator();
@@ -407,7 +440,16 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
         return json({ error: { code: "invalid_origin", message: "The Origin header is not a valid origin." } }, 403);
       }
       serving = request;
-      const response = await handler().fetch(request);
+      // Bound and consume the network stream before the SDK clones it. Its
+      // stateless handler otherwise leaves a tee branch unread on a 413.
+      // Drain oversized bodies without retaining them: cancelling alone
+      // leaves local Workers keep-alive connections unable to serve the next POST.
+      const body = await boundedBody(request);
+      if (body === null) return json({
+        jsonrpc: "2.0", id: null,
+        error: { code: -32000, message: `Request body exceeds ${MCP_MAX_REQUEST_BODY_BYTES} bytes.` },
+      }, 413);
+      const response = await handler().fetch(new Request(request, { body }));
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

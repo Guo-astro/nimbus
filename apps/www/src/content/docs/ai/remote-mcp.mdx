@@ -16,7 +16,11 @@ The server reads what the build already publishes: the same pages and Markdown v
 
 The server needs a server adapter, because `/mcp` answers requests at run time. If the site is static, install one first; the Cloudflare adapter is the one Nimbus verifies:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+<PackageManagers
+  pkg="@cloudflare/nimbus-docs"
+  type="exec"
+  args="add adapter-cloudflare"
+/>
 
 Install the MCP server SDK in the project. It is an optional dependency of Nimbus: sites without the server never install it.
 
@@ -34,16 +38,24 @@ const nimbusConfig = defineNimbusConfig({
 
 A build with `agents.mcp` on a static site, or without the SDK installed, stops with a message that says what to add. `astro dev` serves `/mcp` too, from the last content sync.
 
+Run `nimbus-docs check` before building to catch a missing server adapter or MCP SDK. If the exported Astro config is computed or uses a spread, the adapter check reports a note because it cannot confirm those settings without running the config.
+
 ## What the site serves
 
-| Path | What it is |
-| --- | --- |
-| `/mcp` | The server. `POST` a JSON-RPC message; `GET` and `DELETE` answer `405`, since the server is stateless and keeps no sessions. `OPTIONS` answers the browser preflight. |
-| `/mcp/server-card` | The [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL, served as `application/mcp-server-card+json`. |
+| Path               | What it is                                                                                                                                                                                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/mcp`             | The server. `POST` a JSON-RPC message; `GET` answers `405`, since the server is stateless and keeps no sessions. `OPTIONS` answers the browser preflight. Astro may reject a cross-origin `DELETE` with `403` before Nimbus handles it.                               |
+| `/mcp/server-card` | The static [Server Card](https://github.com/modelcontextprotocol/ext-server-card): the server's name, the installed Nimbus version, a description and the endpoint URL, served as `application/mcp-server-card+json`. Server output also handles `OPTIONS` preflight. |
 
 The card is listed in `/.well-known/ai-catalog.json`, and `llms.txt` names the endpoint, so agents that start from either find the server. The server's name is the site's hostname reversed plus `/docs`: `docs.example.com` becomes `com.example.docs/docs`. A site on `localhost` or an IP address is `local.nimbus/docs`.
 
 Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the endpoint is `/mcp/`; Astro answers the other form with a `308`, which keeps a `POST`.
+
+For `base: "/docs"`, the root aliases `/mcp` and `/mcp/server-card` return `404`.
+
+Use the exact endpoint URL advertised by the site or server card. Astro's redirect does not include CORS headers, so a browser preflight to the non-canonical form can fail. Nimbus keeps Astro's origin checks enabled; unsupported cross-origin methods can receive Astro's `403` instead of Nimbus's JSON `405`.
+
+The server card's version is the installed `@cloudflare/nimbus-docs` version. The `version` in `nimbus.json` records the `create-nimbus-docs` scaffolder version, which releases independently. Different preview versions in these two places are expected.
 
 ## The tools
 

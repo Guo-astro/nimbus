@@ -619,7 +619,9 @@ function classifyRegistryLocal(cwd: string, nimbus: NimbusJson, component: Insta
 
 function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): string {
   const lines: string[] = [];
-  const unavailable = (scope: OutdatedResult["errors"][number]["scope"]): boolean => result.errors.some((error) => error.scope === scope);
+  const unavailable = (scope: OutdatedResult["errors"][number]["scope"]): boolean =>
+    result.errors.some((error) => error.scope === scope) ||
+    result.warnings.some((warning) => warning.scope === scope && warning.code === "preview-build");
   const requiredPackageApis = result.packageApis.filter((item) => item.mode !== "optional");
   const optionalPackageApis = result.packageApis.filter((item) => item.mode === "optional");
   if (requiredPackageApis.length === 0 && unavailable("package-apis")) lines.push("Package APIs: unavailable");
@@ -676,8 +678,8 @@ export async function diffCommand(
   if (!nimbus.templatesTag) {
     p.log.error(
       isPreviewScaffold(nimbus)
-        ? `This site was scaffolded from a preview build (${nimbus.version}), which has no published starter to compare against. ` +
-            "Starter diffs work once the site is on a released version."
+        ? `This site uses preview scaffolder version ${nimbus.version}, which has no published starter to compare against. ` +
+            "Copy the file from a fresh scaffold of the same preview and review your local edits. Starter diffs work once the site is on a released version."
         : "No recorded template tag (adopted via `init`) — starter diff needs one. " +
             "Set `templatesTag` in nimbus.json if you know the version you scaffolded with.",
     );

@@ -151,6 +151,8 @@ declare module "virtual:nimbus/agent-capabilities" {
   export const options: import("../_internal/agent-discovery.js").AgentDiscoveryOptions;
 }
 
+declare module "virtual:nimbus/connect-mcp-client" {}
+
 declare module "virtual:nimbus/staged-asset-loader" {
   export const base: string;
   export function fetchStagedAsset(

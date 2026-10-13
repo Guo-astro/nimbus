@@ -595,7 +595,11 @@ const agentsSchema = withStrictKeys(
       .boolean({ error: '"agents.mcp" must be true or false' })
       .optional(),
   }),
-  { removedKeys: {}, contextLabel: "agents sub-key" },
+  {
+    removedKeys: {},
+    contextLabel: "agents sub-key",
+    unknownHint: (key) => key.toLowerCase() === "mcp" ? "Did you mean `mcp`?" : "",
+  },
 ).optional();
 
 const nimbusConfigSchema = withStrictKeys(

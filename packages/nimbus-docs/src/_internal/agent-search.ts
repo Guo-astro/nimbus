@@ -47,8 +47,8 @@ function sectionUrl(
   ) {
     url.pathname = base + url.pathname;
   }
-  // A page-level match points to the document top; don't invent a heading slug.
-  return url.href.includes("#") ? url.href : `${url.href}#`;
+  // A page-level match is the page itself; a bare `#` would read as a section.
+  return url.href;
 }
 
 /** Load the existing build's Pagefind index; this function never builds an index. */

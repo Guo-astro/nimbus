@@ -17,6 +17,7 @@ import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ApiFieldList, ApiUnionExplorer } from "@/components/ui/api-field-row";
 import { PageActions } from "@/components/ui/page-actions";
 import ApiEndpointCard from "./ApiEndpointCard.astro";
+import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { authFields } from "./auth";
 import { cn } from "@/lib/cn";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
@@ -121,7 +122,7 @@ const deprecationHtml = page.deprecated
   {page.kind === "operation" && (
     <>
       {authFieldList.length > 0 && (
-        <ApiFieldList as="h2" title="Authorisation" fields={authFieldList} />
+        <ApiFieldList as="h2" title="Authorization" fields={authFieldList} />
       )}
 
       {page.parameters.map((group) => (
@@ -205,20 +206,43 @@ const deprecationHtml = page.deprecated
       ))}
 
       {page.responses.length > 0 && (
-        <section class="scroll-mt-24">
+        <section class="scroll-mt-24" data-api-responses>
           <h2 class="mb-3 text-sm font-normal text-muted-foreground">Returns</h2>
           <div class="flex flex-col gap-6">
-            {page.responses.map((r) => (
-              <div id={r.anchor} class="scroll-mt-24">
+            {page.responses.map((r) => {
+              // Error responses start closed so the success shape leads; a
+              // link into one opens it.
+              const collapsed = /^[45]/.test(r.status);
+              const Response = collapsed ? "details" : "div";
+              const Head = collapsed ? "summary" : "div";
+              // A summary holds phrasing content only: a one-paragraph
+              // description goes inline, a longer one into the body.
+              const inline = collapsed
+                ? /^\s*<p>((?:(?!<\/?p\b)[\s\S])*)<\/p>\s*$/.exec(r.descriptionHtml ?? "")?.[1]
+                : undefined;
+              const bodyDescription = collapsed && inline === undefined ? r.descriptionHtml : undefined;
+              return (
+              <Response id={r.anchor} class="group/response scroll-mt-24">
                 {/* The status is the response's heading (h3, under the Returns h2);
                     the JSON badge on the body list marks it, so no "Body" label is
                     needed. Description sits inline as a sibling, not inside the h3. */}
-                <div class="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <Head
+                  class={cn(
+                    "mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1",
+                    collapsed && "cursor-pointer list-none group-not-open/response:mb-0 [&::-webkit-details-marker]:hidden",
+                  )}
+                >
+                  {collapsed && (
+                    <Icon name="ph:caret-right" class="size-3 self-center text-muted-foreground transition-transform group-open/response:rotate-90" />
+                  )}
                   <h3 class={cn("font-mono text-sm font-medium", statusToneClass(r.status))}>{r.status}</h3>
-                  {r.descriptionHtml && (
+                  {inline !== undefined ? (
+                    <span class="nb-md text-sm text-muted-foreground" set:html={inline} />
+                  ) : !collapsed && r.descriptionHtml && (
                     <div class="nb-md text-sm text-muted-foreground" set:html={r.descriptionHtml} />
                   )}
-                </div>
+                </Head>
+                {bodyDescription && <div class="nb-md mb-3 text-sm text-muted-foreground" set:html={bodyDescription} />}
                 <div class="flex flex-col gap-4">
                   {(r.headers?.length ?? 0) > 0 && (
                     <ApiFieldList as="h4" title="Headers" fields={r.headers ?? []} />
@@ -250,8 +274,9 @@ const deprecationHtml = page.deprecated
                     <ApiFieldList badge="JSON" fields={r.fields} truncated={r.truncated} />
                   )}
                 </div>
-              </div>
-            ))}
+              </Response>
+              );
+            })}
           </div>
         </section>
       )}
@@ -339,6 +364,7 @@ const deprecationHtml = page.deprecated
 
 <script>
   import "./request-examples.client";
+  import "./responses.client";
 </script>
 
 <style is:global>

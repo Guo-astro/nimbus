@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
@@ -9,6 +8,7 @@ import { build } from "astro";
 
 import nimbus from "../src/index.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const content = pathToFileURL(
   path.resolve(import.meta.dirname, "../src/content.ts"),
@@ -27,7 +27,7 @@ const runtime = pathToFileURL(
  * collection becomes pages.
  */
 async function mixedSite(extraFiles: Record<string, string> = {}) {
-  const root = await mkdtemp(path.join(tmpdir(), "nimbus-page-collections-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-page-collections-"));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), body);
@@ -110,6 +110,8 @@ async function mixedSite(extraFiles: Record<string, string> = {}) {
   const config = {
     root: pathToFileURL(root + path.sep),
     configFile: false as const,
+    cacheDir: path.join(root, ".astro"),
+    vite: { cacheDir: path.join(root, ".vite") },
     logLevel: "silent" as const,
     integrations: [
       nimbus(

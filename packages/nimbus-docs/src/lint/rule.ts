@@ -17,6 +17,12 @@ export interface RuleReport {
   endLine?: number;
   endColumn?: number;
   fix?: DiagnosticFix;
+  /**
+   * Lower this finding to a warning whatever the configured severity. A rule
+   * can only lower a finding, never raise it: `internal-link` uses it for
+   * links into another slice of a partial build, which are advisory.
+   */
+  severity?: "warn";
 }
 
 export interface RuleContext {

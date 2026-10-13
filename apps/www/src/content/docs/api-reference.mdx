@@ -141,9 +141,9 @@ paths:
       tags: [Events]
 ```
 
-This operation's coordinate is `retrieveEvent`. Without a route policy, its first tag and operation ID produce `/api/Events/retrieveEvent`.
+This operation's coordinate is `retrieveEvent`. Without a route policy, its first tag and operation ID produce `/api/Events/retrieveEvent`. A config without `routes` keeps these URLs, so an existing site never moves.
 
-The optional `resource-action-v1` policy instead derives routes from HTTP methods and paths:
+Sites set up with the recipe get the `resource-action-v2` policy, which derives routes from HTTP methods and paths instead:
 
 ```ts
 api: [
@@ -152,7 +152,7 @@ api: [
     spec: "./src/api/openapi.yaml",
     requireOperationId: true,
     routes: {
-      convention: "resource-action-v1",
+      convention: "resource-action-v2",
       stripPathPrefixes: ["/v1"],
     },
   },
@@ -161,13 +161,15 @@ api: [
 
 Here, Nimbus removes `/v1` and publishes the operation at `/api/events/retrieve`; its coordinate remains `retrieveEvent`.
 
-Derivation recognizes `/<resource>` and `/<resource>/{parameter}` after prefix removal. It maps collection `GET`/`POST` to `list`/`create`, and member `GET`/`PUT`/`PATCH`/`DELETE` to `retrieve`/`update`/`update`/`delete`. Tags do not affect policy routes. Other shapes or unsupported method/shape combinations normally fall back to a normalized coordinate with a build warning; the build fails if that coordinate cannot produce a non-empty route.
+Derivation recognizes `/<resource>` and `/<resource>/{parameter}` after prefix removal. It maps collection `GET`/`POST` to `list`/`create`, and member `GET`/`PUT`/`PATCH`/`DELETE` to `retrieve`/`update`/`update`/`delete`. Tags do not affect operation routes derived by either convention. Other shapes or unsupported method/shape combinations normally fall back to a normalized coordinate with a build warning; the build fails if that coordinate cannot produce a non-empty route.
+
+Tag pages follow the convention too. `resource-action-v2` publishes them at lowercase URLs: `/api/tags/locations` for the tag `Locations`, `/api/tags/user-management` for `User Management`. The earlier `resource-action-v1` derives the same operation routes but keeps a tag's own casing, `/api/tags/Locations` and `/api/tags/User-Management`. A tag's coordinate, `tags.Locations`, is the same under every convention. Each convention's rules are frozen: a change in routing ships as a new name, never as an edit to an existing one.
 
 An explicit operation override, keyed by the exact usable `operationId`, takes precedence and can preserve an existing URL or handle a path that cannot be derived:
 
 ```ts
 routes: {
-  convention: "resource-action-v1",
+  convention: "resource-action-v2",
   operations: {
     retrieveEvent: "events/get",
   },
@@ -177,6 +179,10 @@ routes: {
 Without a usable `operationId`, Nimbus derives a fallback coordinate from the method and path. `requireOperationId: true` rejects that fallback, but changing an existing operation ID still changes the coordinate. Webhooks always use their map keys as coordinates and publish below `webhooks/<key>`; configuring an operation override for a webhook fails the build.
 
 Renaming a coordinate requires updating citations and affects cross-version matching. Changing only a route leaves coordinate-based citations intact, but breaks direct links to the previous URL. Nimbus does not create that redirect automatically; add it in Astro or on the deployment platform.
+
+#### Switching conventions
+
+Moving a collection from `resource-action-v1` to `resource-action-v2` changes its tag page URLs and nothing else. Adding `routes` to a collection that had none changes its operation URLs as well. Citations keep resolving, since they name coordinates. Add redirects on the deployment platform for the old `tags/<Tag>` URLs, and for the old operation URLs when they moved. Readers' open sidebar groups reset once, as after any deployment that changes hrefs. A version family may use a different convention per version; the version picker still pairs each page with its counterpart by coordinate.
 
 #### Link from prose by coordinate
 

@@ -1,4 +1,5 @@
 import type { ApiNav, ApiNavItem, ApiPageProps } from "./api-view-types.js";
+import { apiPrevNext } from "./nav-bounds.js";
 
 export const preparedApiVersion = 2;
 
@@ -32,6 +33,7 @@ export function activatePreparedApiNav(
 ): ApiNav {
   const path = prepared.paths[coordinate];
   if (!path) return prepared.nav;
+  const prevNext = apiPrevNext(prepared.nav.items, coordinate);
   const onPath = new Set(path);
   const overlay = (item: ApiNavItem): ApiNavItem => {
     if (!onPath.has(item.coordinate)) return item;
@@ -40,7 +42,7 @@ export function activatePreparedApiNav(
     else next.expanded = true;
     return next;
   };
-  return { ...prepared.nav, items: prepared.nav.items.map(overlay) };
+  return { ...prepared.nav, items: prepared.nav.items.map(overlay), ...(prevNext && { prevNext }) };
 }
 
 export function isPreparedApiPage(value: unknown): value is PreparedApiPage {

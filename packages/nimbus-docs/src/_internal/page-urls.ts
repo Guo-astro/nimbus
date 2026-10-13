@@ -15,18 +15,30 @@ export interface PageUrls {
 
 const OG_IMAGE_ROUTE = "/og/";
 
+/**
+ * Nimbus's generated cards, which `NimbusHead` recognises by logical path:
+ * the site card at `/og.png` and one `/og/<route>.png` per page, all at
+ * astro-og-canvas's default size.
+ */
+export const OG_CARD = {
+  sitePath: "/og.png",
+  pagePrefix: OG_IMAGE_ROUTE,
+  size: { width: 1200, height: 630 },
+} as const;
+
 /** `ogImageUrl` is `/og/<route>.png`, with `index` for the site root. */
 export function pageUrls(
   prefix: string,
-  entry: { id: string; body?: unknown },
+  entry: { id: string; body?: unknown; filePath?: string },
 ): PageUrls {
   const route = entryRouteUrl(prefix, entry.id);
   const page = route === "/" ? "" : route;
   return {
     url: toDocumentHref(route),
     markdownUrl: `${page}/index.md`,
+    // A frontmatter-only Markdown file has no body but still has a source.
     sourceUrl:
-      typeof entry.body === "string" && entry.body.length > 0
+      (typeof entry.body === "string" && entry.body.length > 0) || /\.mdx?$/iu.test(entry.filePath ?? "")
         ? `${page}/index.mdx`
         : undefined,
     ogImageUrl: `${OG_IMAGE_ROUTE}${page.slice(1) || "index"}.png`,

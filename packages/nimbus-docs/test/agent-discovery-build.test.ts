@@ -7,6 +7,97 @@ import { build } from "astro";
 import { discoveryFixture as fixture } from "./fixtures/agent-discovery-site.js";
 import { agentSites, siteApp, srcModule } from "./fixtures/agent-site.js";
 
+function contentTypes(headers: string, pathname: string): string[] {
+  const values: string[] = [];
+  let matches = false;
+  for (const line of headers.split(/\r?\n/)) {
+    if (!line || line.startsWith("#")) continue;
+    if (!/^\s/.test(line)) {
+      const pattern = line
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join(".*");
+      matches = new RegExp(`^${pattern}$`).test(pathname);
+    } else if (matches && /^\s+Content-Type:/i.test(line)) {
+      values.push(line.replace(/^\s+Content-Type:\s*/i, ""));
+    }
+  }
+  return values;
+}
+
+test("prerendered agent text has a single UTF-8 Content-Type at root and under a base", async () => {
+  for (const base of ["/", "/docs"]) {
+    const site = await fixture();
+    try {
+      await site.write(
+        "src/content/docs/guide.mdx",
+        "---\ntitle: 中文測試\n---\n這是一段中文說明, café.",
+      );
+      await site.write(
+        "src/content/docs/setup/start.mdx",
+        "---\ntitle: 安裝\n---\n開始設定.",
+      );
+      await site.write(
+        "src/pages/llms-full.txt.ts",
+        `import { llmsFullRoute } from ${srcModule("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET } = llmsFullRoute();`,
+      );
+      await site.write(
+        "src/pages/[section]/llms.txt.ts",
+        `import { llmsSectionRoute } from ${srcModule("agent-endpoints.ts")};\nexport const prerender = true;\nexport const { GET, getStaticPaths } = llmsSectionRoute();`,
+      );
+      await site.write(
+        "src/pages/robots.txt.ts",
+        'export const prerender = true;\nexport const GET = () => new Response("User-agent: *\\nAllow: /", { headers: { "Content-Type": "text/plain; charset=utf-8" } });',
+      );
+      await site.write("public/download.txt", "Owner download.");
+      await site.write("public/download.md", "Owner Markdown.");
+      await build({ ...site.config, base });
+      const headers = await site.read("dist/_headers");
+      const prefix = base === "/" ? "" : base;
+      for (const [file, type] of [
+        ["llms.txt", "text/plain"],
+        ["llms-full.txt", "text/plain"],
+        ["setup/llms.txt", "text/plain"],
+        ["guide/index.md", "text/markdown"],
+        ["setup/start/index.md", "text/markdown"],
+        ["index.md", "text/markdown"],
+        ["robots.txt", "text/plain"],
+      ]) {
+        assert.ok((await site.read(`dist/${file}`)).length);
+        assert.deepEqual(
+          contentTypes(headers, `${prefix}/${file}`),
+          [`${type}; charset=utf-8`],
+          file,
+        );
+      }
+      assert.match(await site.read("dist/llms.txt"), /中文測試/);
+      assert.match(await site.read("dist/llms-full.txt"), /這是一段中文說明/);
+      assert.match(await site.read("dist/guide/index.md"), /café/);
+      for (const file of ["download.txt", "download.md", "index.html"])
+        assert.deepEqual(contentTypes(headers, `${prefix}/${file}`), [], file);
+      if (base === "/docs") {
+        const owner =
+          "/*.txt\r\n  Content-Type: text/plain; charset=utf-8\r\n\r\n/*.md\r\n  Content-Type: text/markdown; charset=utf-8\r\n";
+        await site.write("public/_headers", owner);
+        await build({ ...site.config, base });
+        const updated = await site.read("dist/_headers");
+        assert.ok(updated.startsWith(owner));
+        assert.deepEqual(contentTypes(updated, "/docs/llms.txt"), [
+          "text/plain; charset=utf-8",
+        ]);
+        assert.deepEqual(contentTypes(updated, "/docs/guide/index.md"), [
+          "text/markdown; charset=utf-8",
+        ]);
+        assert.deepEqual(contentTypes(updated, "/docs/index.md"), [
+          "text/markdown; charset=utf-8",
+        ]);
+      }
+    } finally {
+      await rm(site.root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("real Astro builds reuse llms bytes and preserve owner headers under a base", async () => {
   const site = await fixture();
   try {
@@ -38,8 +129,7 @@ test("real Astro builds reuse llms bytes and preserve owner headers under a base
     await build(site.config);
     assert.match(await site.read("dist/index.md"), /New title/);
     assert.equal(
-      (await site.read("dist/_headers")).match(/^\/docs\/$/gm)
-        ?.length,
+      (await site.read("dist/_headers")).match(/^\/docs\/$/gm)?.length,
       1,
     );
   } finally {
@@ -140,7 +230,8 @@ import { docsCollection } from ${srcModule("content.ts")};
 export const collections = { docs: defineCollection(docsCollection({ base: "docs" })) };`,
           "src/content/docs/guide.mdx": "---\ntitle: Guide\n---\nGuide body.",
           "src/content/docs/index.mdx": "---\ntitle: Root\n---\nRoot body.",
-          "src/pages/index.astro": "---\nexport const prerender = true;\n---\n<html><body>Home</body></html>",
+          "src/pages/index.astro":
+            "---\nexport const prerender = true;\n---\n<html><body>Home</body></html>",
           "src/pages/llms.txt.ts": `import { llmsRoute } from ${srcModule("agent-endpoints.ts")};
 export const prerender = true;
 export const { GET } = llmsRoute();`,
@@ -164,13 +255,12 @@ export const { GET, getStaticPaths } = markdownRoute();`,
         await readFile(path.join(site.root, "dist/llms.txt"), "utf8"),
         /Guide/,
       );
-      await assert.rejects(
-        readFile(path.join(site.root, "dist/index.md")),
-        { code: "ENOENT" },
-      );
-      const response = await (await siteApp(site)).render(
-        new Request("https://example.test/docs/index.md"),
-      );
+      await assert.rejects(readFile(path.join(site.root, "dist/index.md")), {
+        code: "ENOENT",
+      });
+      const response = await (
+        await siteApp(site)
+      ).render(new Request("https://example.test/docs/index.md"));
       assert.equal(response.status, 200);
       assert.equal(response.headers.get("Content-Type"), "text/markdown");
       assert.equal(await response.text(), "Owner request Markdown.");

@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/nimbus-docs",
-	"version": "0.17.0",
+	"version": "0.18.0",
 	"private": false,
 	"publishConfig": {
 		"access": "public"
@@ -98,11 +98,13 @@
 			"import": "./dist/lib/pkgm.js"
 		},
 		"./components/NimbusHead.astro": "./src/components/NimbusHead.astro",
-		"./components/Icon.astro": "./src/components/Icon.astro"
+		"./components/Icon.astro": "./src/components/Icon.astro",
+		"./styles/math.css": "./src/styles/math.css"
 	},
 	"files": [
 		"dist",
-		"src/components"
+		"src/components",
+		"src/styles"
 	],
 	"engines": {
 		"node": ">=22.12.0"
@@ -111,7 +113,7 @@
 		"build": "tsdown",
 		"dev": "tsdown --watch",
 		"typecheck": "tsc --noEmit",
-		"test": "node --import tsx --test --test-concurrency=1 \"test/**/*.test.ts\"",
+		"test": "node --import tsx --test --test-concurrency=4 \"test/**/*.test.ts\"",
 		"pull:api-fixtures": "node scripts/pull-api-fixtures.mjs",
 		"prepack": "tsdown"
 	},
@@ -141,14 +143,15 @@
 		}
 	},
 	"dependencies": {
-		"@astrojs/markdown-satteri": "^0.4.0",
+		"@astrojs/markdown-satteri": "^0.4.3",
 		"@astrojs/mdx": "~8.0.0",
 		"@astrojs/sitemap": "3.7.2",
 		"@clack/prompts": "^0.9.1",
-		"@scalar/json-magic": "0.12.20",
+		"@fontsource/stix-two-math": "^5.3.0",
 		"@iconify/tools": "^5.0.12",
 		"@iconify/types": "^2.0.0",
 		"@iconify/utils": "^3.1.4",
+		"@scalar/json-magic": "0.12.20",
 		"@shikijs/transformers": "^4.4.1",
 		"@shikijs/types": "^4.4.1",
 		"@vercel/detect-agent": "1.2.3",
@@ -161,6 +164,7 @@
 		"hast-util-to-html": "^9.0.5",
 		"jsonc-parser": "^3.3.1",
 		"mdast-util-gfm": "^3.1.0",
+		"mdast-util-math": "^3.0.0",
 		"mdast-util-mdx": "^3.0.0",
 		"mdast-util-to-markdown": "^2.1.2",
 		"mri": "^1.2.0",
@@ -174,10 +178,10 @@
 		"remark-lint-no-multiple-toplevel-headings": "^4.0.1",
 		"remark-lint-unordered-list-marker-style": "^4.0.1",
 		"satteri": "^0.10.5",
-		"satteri-source-parser": "npm:satteri@^0.9.1",
 		"semver": "^7.8.5",
 		"shiki": "^4.4.1",
 		"tailwind-merge": "^3.5.0",
+		"temml": "^0.14.0",
 		"typescript": "^5.8.3",
 		"unified": "^11.0.5",
 		"vfile": "^6.0.3",

@@ -442,6 +442,7 @@ function resolveConfigItems(
   currentPath: string,
   orderStart: number = 0,
   primaryPrefix: string = "",
+  knownRoots: ReadonlySet<string> = new Set(),
 ): SidebarItem[] {
   const primaryEntries = entriesByCollection[primaryCollection] ?? [];
   const { byId } = buildEntryIndex(primaryEntries);
@@ -498,7 +499,7 @@ function resolveConfigItems(
         // links (e.g. `/api/users`) intentionally bypass this check.
         const lookup = routeKey.slice(1);
         const looksLikePrimaryRoot = lookup !== "" && !lookup.includes("/");
-        if (looksLikePrimaryRoot && !byId.has(lookup)) {
+        if (looksLikePrimaryRoot && !byId.has(lookup) && !knownRoots.has(routeKey)) {
           runtimeWarn(
             `sidebar: Internal link "${item.link}" (label: "${item.label}") does not match any entry in primary collection "${primaryCollection}"`,
           );
@@ -604,6 +605,7 @@ function resolveConfigItems(
         currentPath,
         0,
         primaryPrefix,
+        knownRoots,
       );
       const group: SidebarGroupItem = {
         type: "group",
@@ -1083,6 +1085,12 @@ export function buildSidebarTree(
    * `/v0/getting-started`.
    */
   primaryPrefix = "",
+  /**
+   * Route keys other collections mount at (`/api`, a docs version's `/v1`).
+   * A link to one of them is valid even though the primary collection has
+   * no page there.
+   */
+  knownRoots: ReadonlySet<string> = new Set(),
 ): SidebarItem[] {
   const primaryEntries = entriesByCollection[primaryCollection] ?? [];
   let items: SidebarItem[];
@@ -1096,6 +1104,7 @@ export function buildSidebarTree(
       currentPath,
       0,
       primaryPrefix,
+      knownRoots,
     );
   } else {
     // Filesystem fallback — primary collection only. Cross-collection
@@ -1400,7 +1409,7 @@ function pinSectionOverviewFirst(
   return next;
 }
 
-function formatLabel(segment: string): string {
+export function formatLabel(segment: string): string {
   return segment.replace(/-/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 

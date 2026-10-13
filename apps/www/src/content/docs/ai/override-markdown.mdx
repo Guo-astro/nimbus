@@ -142,7 +142,7 @@ export const GET: APIRoute = async (context) => {
 };
 ```
 
-For section indexes, keep `llmsSectionRoute()`'s `getStaticPaths`, which lists every section, and wrap its `GET`. To build a body from scratch, call `getLlmsPayload()` with a `reference` such as `{ scope: "section", surface: "index", section: "writing" }`; it returns `null` for an unknown index.
+For section indexes, keep `llmsSectionRoute()`'s `getStaticPaths`, which lists every section, and wrap its `GET`. To build a body from scratch, call `getLlmsPayload()` with a `reference` such as `{ scope: "section", surface: "index", section: "writing" }` (or `"reference/functions"` for a nested section); it returns `null` for an unknown index.
 
 ## Customize OG cards
 

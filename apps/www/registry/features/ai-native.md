@@ -12,7 +12,7 @@
 
 You are helping the user add alternate Markdown/MDX versions and `llms.txt` indexes to an existing Nimbus docs site. Their generated content is deterministic on every deployment provider.
 
-Read this entire file before making changes. The target project should already depend on `nimbus-docs` and use the starter-style routes/layouts.
+Read this entire file before making changes. The target project should already depend on `@cloudflare/nimbus-docs` and use the starter-style routes/layouts.
 
 ## What to add
 
@@ -22,7 +22,7 @@ Add the same user-owned files the canonical starter ships:
 - `src/pages/[...slug]/index.mdx.ts`
 - `src/pages/llms.txt.ts`
 - `src/pages/llms-full.txt.ts`
-- `src/pages/[section]/llms.txt.ts`
+- `src/pages/[...section]/llms.txt.ts`
 - `src/pages/robots.txt.ts`
 - `src/components/AgentDirective.astro`
 
@@ -68,7 +68,7 @@ export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
-```ts title="src/pages/[section]/llms.txt.ts"
+```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
 export const prerender = true;

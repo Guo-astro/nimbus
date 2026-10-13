@@ -27,6 +27,18 @@ declare module "astro:config/client" {
 declare module "virtual:nimbus/config" {
   export const config: import("../types.js").NimbusConfig;
   export const indexedCollections: readonly string[];
+  export const emptyCollections: readonly string[];
+  /**
+   * The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice
+   * without the root collection keeps its site-wide files under `prefix`.
+   */
+  export const buildSlice: {
+    collections: readonly string[];
+    prefix: string;
+    search: { bundle: string; merge: readonly string[] };
+  } | null;
+  /** The Pagefind bundle to load (site-root-relative) and the bundles to merge into it. */
+  export const searchIndex: { bundle: string; merge: readonly string[] };
   export const requestRenderingCollections: readonly string[];
   export const versionAlternates: import("../_internal/version-alternates.js").VersionAlternatesTable;
   export const apiCollections: readonly string[];
@@ -36,6 +48,8 @@ declare module "virtual:nimbus/config" {
   export const headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
+    ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } };
+    imageSizes: Record<string, { width: number; height: number }>;
   };
 }
 

@@ -9,11 +9,11 @@ import fs, { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path, { dirname, join, posix } from "node:path";
 
 import * as p from "@clack/prompts";
-import { lt, minVersion, satisfies, valid, validRange } from "semver";
+import { gt, lt, minVersion, prerelease, satisfies, valid, validRange } from "semver";
 
 import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
-import { resolveUpgradeBaseline, selectUpgradeEntries, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
+import { resolveUpgradeBaseline, selectUpgradeEntries, siteScope, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
 import {
   latestTemplatesTag,
   listTreeFiles,
@@ -29,7 +29,7 @@ import {
   type InstalledComponent,
   type NimbusJson,
 } from "./nimbus-json.js";
-import { invocation, selfCommand, type SelfCommand, updateCommand } from "./pm.js";
+import { addCommand, CLI_PACKAGE, detectPackageManager, invocation, selfCommand, type SelfCommand, updateCommand } from "./pm.js";
 import { fetchComponent, type ComponentItem } from "./resolver.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 
@@ -198,7 +198,11 @@ export interface OutdatedResult {
     message: string;
     recoverable: boolean;
   }>;
-  warnings: Array<{ scope: "starter"; code: StarterCompatibility["code"]; message: string }>;
+  warnings: Array<{
+    scope: "starter" | "package-apis" | "registry";
+    code: StarterCompatibility["code"] | "preview-build" | "newer-release" | "reviewed-behind" | "registry-dependency-behind";
+    message: string;
+  }>;
 }
 
 interface StarterCompatibility {
@@ -344,7 +348,7 @@ export async function gatherOutdated(
 
   const baseline = resolveUpgradeBaseline({ projectRoot: cwd });
   const entries = baseline.fromVersion && !baseline.error
-    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion)
+    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, siteScope(cwd, flags.srcDir))
     : [];
   const discovery = discoverMigrations({
     projectRoot: cwd,
@@ -368,11 +372,17 @@ export async function gatherOutdated(
       action: { kind: "migrate", command: migrate, automatic, instructions: plan.instructions },
     });
   }
-  if (!baseline.fromVersion || baseline.error) {
+  if (baseline.source === "preview" && !baseline.error) {
+    warnings.push({
+      scope: "package-apis",
+      code: "preview-build",
+      message: "This site runs a preview build. Upgrade reviews start once it's on a released version.",
+    });
+  } else if (!baseline.fromVersion || baseline.error) {
     errors.push({
       scope: "package-apis",
       code: "upgrade-baseline-missing",
-      message: baseline.error ?? "Nimbus cannot determine the previously reviewed version. Run nimbus-docs migrate --from <version>.",
+      message: baseline.error ?? `Nimbus cannot determine the previously reviewed version. Run \`${invocation("migrate --from <version>")}\`.`,
       recoverable: true,
     });
   } else {
@@ -391,6 +401,29 @@ export async function gatherOutdated(
         },
       });
     }
+  }
+
+  if (
+    baseline.fromVersion &&
+    !baseline.error &&
+    lt(baseline.fromVersion, withoutPrerelease(baseline.targetVersion)) &&
+    !packageApis.some((item) => item.mode !== "optional") &&
+    !errors.some((error) => error.scope === "package-apis")
+  ) {
+    warnings.push({
+      scope: "package-apis",
+      code: "reviewed-behind",
+      message: `Reviewed through ${baseline.fromVersion}; this site runs ${baseline.targetVersion}. Nothing needs changing: run \`${invocation("migrate --yes")}\` to record the review.`,
+    });
+  }
+  const installed = installedNimbusVersion(cwd);
+  const latest = installed && !flags.templateDir ? await latestRelease() : null;
+  if (installed && latest && gt(latest, installed)) {
+    warnings.push({
+      scope: "package-apis",
+      code: "newer-release",
+      message: `Nimbus ${latest} is out (this site has ${installed}). Upgrade with \`${updateCommand(cwd)}\`, then run \`${invocation("outdated")}\` again.`,
+    });
   }
 
   let nimbus: NimbusJson | null = null;
@@ -418,6 +451,13 @@ export async function gatherOutdated(
       code: "no-provenance",
       message: "Starter and registry freshness are unavailable because nimbus.json is missing.",
       recoverable: true,
+    });
+  } else if (!fatal && nimbus && isPreviewScaffold(nimbus) && !nimbus.templatesTag) {
+    // Expected for a preview build, so it's a note, not a failure.
+    warnings.push({
+      scope: "starter",
+      code: "preview-build",
+      message: "Starter freshness is unavailable for a preview build, which has no published starter to compare against. Recorded registry items are still checked.",
     });
   } else if (!fatal && nimbus && (!nimbus.templatesTag || nimbus.reconstructed)) {
     errors.push({
@@ -447,8 +487,21 @@ export async function gatherOutdated(
 
   if (!fatal && nimbus) {
     let drift: Awaited<ReturnType<typeof registryDrift>> = [];
+    const fetched = new Map<string, Promise<ComponentItem | null>>();
+    const fetchOnce = (slug: string) => {
+      if (!fetched.has(slug)) fetched.set(slug, safeFetch(slug));
+      return fetched.get(slug)!;
+    };
     try {
-      drift = await registryDrift(nimbus, safeFetch);
+      drift = await registryDrift(nimbus, fetchOnce);
+      for (const behind of await dependenciesBehind(cwd, nimbus, fetchOnce)) {
+        const { bin, args } = addCommand(detectPackageManager(cwd), [behind.spec]);
+        warnings.push({
+          scope: "registry",
+          code: "registry-dependency-behind",
+          message: `${behind.name} ${behind.installed} is older than ${behind.range}, which ${behind.slug} needs. Update with \`${[bin, ...args].join(" ")}\`.`,
+        });
+      }
     } catch (error) {
       errors.push({ scope: "registry", code: "registry-unavailable", message: errorMessage(error), recoverable: true });
     }
@@ -570,11 +623,14 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
   const requiredPackageApis = result.packageApis.filter((item) => item.mode !== "optional");
   const optionalPackageApis = result.packageApis.filter((item) => item.mode === "optional");
   if (requiredPackageApis.length === 0 && unavailable("package-apis")) lines.push("Package APIs: unavailable");
-  else if (requiredPackageApis.length === 0) lines.push("Package APIs: up to date ✓");
+  else if (requiredPackageApis.length === 0 && result.warnings.some((item) => item.code === "reviewed-behind")) {
+    lines.push("Package APIs: nothing to change; review not recorded");
+  } else if (requiredPackageApis.length === 0) lines.push("Package APIs: up to date ✓");
   else {
     lines.push(`Package APIs: ${requiredPackageApis.length} required ${requiredPackageApis.length === 1 ? "migration or upgrade review" : "migrations or upgrade reviews"}`);
     for (const item of requiredPackageApis) lines.push(`  ${item.migrationId} → ${item.action.command?.display ?? "nimbus-docs migrate"}`);
   }
+  for (const warning of result.warnings.filter((item) => item.scope === "package-apis")) lines.push(`  ! ${warning.message}`);
   if (optionalPackageApis.length > 0) {
     lines.push(`  Optional upgrade entries: ${optionalPackageApis.length}`);
     for (const item of optionalPackageApis) lines.push(`  ${item.migrationId} → ${item.action.command?.display ?? "nimbus-docs migrate"}`);
@@ -589,7 +645,7 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
     lines.push(`  → \`${invocation("diff <file>")}\` to review; --apply is limited to clean/add/remove cases.`);
   }
   if (local.length > 0) lines.push(`  ${local.length} local-only starter edit${local.length === 1 ? "" : "s"} preserved.`);
-  for (const warning of result.warnings) lines.push(`  ! ${warning.message}`);
+  for (const warning of result.warnings.filter((item) => item.scope === "starter")) lines.push(`  ! ${warning.message}`);
   if (result.summary.hiddenContent > 0 && !flags.all) lines.push(`  (${result.summary.hiddenContent} content file${result.summary.hiddenContent === 1 ? "" : "s"} hidden — --all to include)`);
   const behind = result.registry.filter((item) => item.upstream === "behind");
   if (unavailable("registry") || result.status === "failed" || unavailable("project")) lines.push("", "Registry components: unavailable");
@@ -598,6 +654,7 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
     lines.push("", "Registry components behind (review only; overwrite is not automated):");
     for (const item of behind) lines.push(`  ${item.slug}: ${item.local} locally`);
   }
+  for (const warning of result.warnings.filter((item) => item.scope === "registry")) lines.push(`  ! ${warning.message}`);
   for (const error of result.errors) lines.push("", `${error.scope}: ${error.message}`);
   if (flags.templateDir) lines.push("", "Offline template mode compares against the recorded local tag only.");
   return lines.join("\n");
@@ -618,8 +675,11 @@ export async function diffCommand(
   const nimbus = requireRecord(cwd);
   if (!nimbus.templatesTag) {
     p.log.error(
-      "No recorded template tag (adopted via `init`) — starter diff needs one. " +
-        "Set `templatesTag` in nimbus.json if you know the version you scaffolded with.",
+      isPreviewScaffold(nimbus)
+        ? `This site was scaffolded from a preview build (${nimbus.version}), which has no published starter to compare against. ` +
+            "Starter diffs work once the site is on a released version."
+        : "No recorded template tag (adopted via `init`) — starter diff needs one. " +
+            "Set `templatesTag` in nimbus.json if you know the version you scaffolded with.",
     );
     process.exit(1);
   }
@@ -645,11 +705,12 @@ export async function diffCommand(
       const srcPrefix = `${g.srcRoot.replace(/\/+$/, "")}/`;
       const untracked =
         existsSync(join(cwd, file)) && !file.startsWith(srcPrefix) && !STARTER_ROOT_FILES.includes(posix.basename(file));
-      p.log.error(
-        !untracked
-          ? `No change for "${file}" vs the recorded tag. Run \`${invocation("outdated")}\` to list changes.`
-          : `"${file}" isn't a starter file \`diff\` tracks: it compares ${srcPrefix}, ${STARTER_ROOT_FILES.join(", ")}.`,
-      );
+      if (!untracked) {
+        if (!projectFileExists(cwd, g.srcRoot, file)) return missingFile(file);
+        p.log.step(`No change for "${file}" vs the recorded tag.`);
+        return;
+      }
+      p.log.error(`"${file}" isn't a starter file \`diff\` tracks: it compares ${srcPrefix}, ${STARTER_ROOT_FILES.join(", ")}.`);
       process.exitCode = 1;
       return;
     }
@@ -706,6 +767,16 @@ export async function diffCommand(
   }
 }
 
+/** An unchanged starter file still exists; a typo doesn't. */
+function projectFileExists(cwd: string, srcRoot: string, file: string): boolean {
+  return existsSync(join(cwd, file)) || existsSync(join(cwd, srcRoot, file));
+}
+
+function missingFile(file: string): void {
+  p.log.error(`"${file}" doesn't exist in this project. Run \`${invocation("outdated")}\` to list starter changes.`);
+  process.exitCode = 1;
+}
+
 function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: StarterFinding[]): void {
   if (!file) {
     p.log.error("`diff --apply` needs a specific <file> — it never applies in bulk.");
@@ -721,17 +792,19 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     return;
   }
   if (!target) {
-    p.log.error(`No upstream change for "${file}" to apply.`);
-    process.exitCode = 1;
+    if (!projectFileExists(cwd, g.srcRoot, file)) return missingFile(file);
+    p.log.step(`No upstream change for "${file}" to apply.`);
+    return;
+  }
+  if (target.status === "local") {
+    p.log.step(`No upstream change for ${target.file}; your edits are kept.`);
     return;
   }
   if (target.status !== "clean" && target.status !== "added" && target.status !== "removed") {
     const why =
       target.status === "hand-merge"
         ? "you've edited it, so applying upstream would discard your changes"
-        : target.status === "local"
-          ? "you've edited it and upstream hasn't changed — there's nothing to pull"
-          : "you removed it";
+        : "you removed it";
     p.log.error(
       `Refusing to --apply ${target.file}: ${why}. ` +
         `--apply only pulls clean upstream changes — run \`${invocation(`diff ${file}`)}\` and reconcile by hand.`,
@@ -907,5 +980,72 @@ function installedNimbusVersion(cwd: string): string | null {
     return version && valid(version) ? version : null;
   } catch {
     return null;
+  }
+}
+
+/** A site scaffolded from a preview build, which has no published starter tag. */
+function isPreviewScaffold(nimbus: NimbusJson): boolean {
+  return (
+    Boolean((nimbus as { preview?: unknown }).preview) ||
+    (typeof nimbus.version === "string" && prerelease(nimbus.version) !== null)
+  );
+}
+
+function withoutPrerelease(version: string): string {
+  return version.replace(/-.*$/, "");
+}
+
+/** The latest published Nimbus, or null offline or when the registry is slow. */
+async function latestRelease(): Promise<string | null> {
+  try {
+    const response = await fetch(`https://registry.npmjs.org/${CLI_PACKAGE}/latest`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return null;
+    const { version } = (await response.json()) as { version?: unknown };
+    return typeof version === "string" && valid(version) ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Registry dependencies installed below the version their item pins. */
+async function dependenciesBehind(
+  cwd: string,
+  nimbus: NimbusJson,
+  fetchItem: (slug: string) => Promise<ComponentItem | null>,
+): Promise<{ slug: string; name: string; range: string; installed: string; spec: string }[]> {
+  const behind = [];
+  const seen = new Set<string>();
+  for (const component of nimbus.components ?? []) {
+    const item = await fetchItem(component.slug);
+    for (const spec of item?.dependencies ?? []) {
+      const at = spec.lastIndexOf("@");
+      if (at <= 0) continue;
+      const name = spec.slice(0, at);
+      const range = spec.slice(at + 1);
+      if (seen.has(spec)) continue;
+      seen.add(spec);
+      const floor = validRange(range) ? minVersion(range)?.version : null;
+      const installed = installedVersion(cwd, name);
+      if (floor && installed && lt(installed, floor)) behind.push({ slug: component.slug, name, range, installed, spec });
+    }
+  }
+  return behind;
+}
+
+/** The version Node would load from `cwd`, walking up to hoisted installs. */
+function installedVersion(cwd: string, name: string): string | null {
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    const file = join(dir, "node_modules", name, "package.json");
+    if (existsSync(file)) {
+      try {
+        const version = (JSON.parse(readFileSync(file, "utf8")) as { version?: unknown }).version;
+        return typeof version === "string" && valid(version) ? version : null;
+      } catch {
+        return null;
+      }
+    }
+    if (path.dirname(dir) === dir) return null;
   }
 }

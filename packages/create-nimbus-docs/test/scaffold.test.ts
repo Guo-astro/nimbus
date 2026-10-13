@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 import {
@@ -326,7 +327,7 @@ test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarn
       // No lockfile up front: inside a Yarn workspace, the site stays a member.
       assert.equal(fs.existsSync(path.join(cwd, "my-docs", "yarn.lock")), false, packageManager);
       assert.equal(
-        /^\.yarn\/install-state\.gz$/m.test(fs.readFileSync(path.join(cwd, "my-docs", ".gitignore"), "utf8")),
+        /^\.yarn\/\*\n!\.yarn\/patches$/m.test(fs.readFileSync(path.join(cwd, "my-docs", ".gitignore"), "utf8")),
         packageManager === "yarn",
         packageManager,
       );
@@ -357,7 +358,7 @@ test("non-cloudflare target leaves the build-scripts config untouched", async ()
   }
 });
 
-test("aborts when the target directory already exists, leaving it untouched", async () => {
+test("refuses a folder that isn't empty, leaving it untouched", async () => {
   const cwd = makeCwd();
   const tmpl = makeTemplate();
   try {
@@ -368,7 +369,7 @@ test("aborts when the target directory already exists, leaving it untouched", as
     await assert.rejects(
       scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, tmpl)),
       (err: unknown) =>
-        err instanceof ScaffoldError && /already exists/.test(err.message),
+        err instanceof ScaffoldError && /"my-docs" isn't empty \(keep\.txt\)/.test(err.message),
     );
 
     // The pre-existing content must be untouched — no partial overwrite.
@@ -377,6 +378,108 @@ test("aborts when the target directory already exists, leaving it untouched", as
       "precious",
     );
   } finally {
+    cleanup(cwd, tmpl);
+  }
+});
+
+test("scaffolds into the current folder, named after it", async () => {
+  const cwd = path.join(makeCwd(), "team-docs");
+  fs.mkdirSync(cwd);
+  const tmpl = makeTemplate();
+  try {
+    await scaffold({ ...BASE_OPTIONS, dir: "." }, internals(cwd, tmpl));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8")).name, "team-docs");
+  } finally {
+    cleanup(path.dirname(cwd), tmpl);
+  }
+});
+
+test("scaffolds into a cloned repository, and a failure keeps its .git", async () => {
+  const cwd = makeCwd();
+  const good = makeTemplate();
+  const bad = makeTemplate(`{ not valid json`);
+  try {
+    const target = path.join(cwd, "my-docs");
+    fs.mkdirSync(path.join(target, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    await assert.rejects(scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, bad)), ScaffoldError);
+    assert.deepEqual(fs.readdirSync(target), [".git"]);
+
+    await scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, good));
+    assert.ok(fs.existsSync(path.join(target, "astro.config.ts")));
+    assert.equal(fs.readFileSync(path.join(target, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+  } finally {
+    cleanup(cwd, good, bad);
+  }
+});
+
+test("a template's own .git never reaches the site's repository", async () => {
+  const cwd = makeCwd();
+  const bad = makeTemplate(`{ not valid json`);
+  try {
+    fs.mkdirSync(path.join(bad, ".git"));
+    fs.writeFileSync(path.join(bad, ".git", "HEAD"), "ref: refs/heads/template\n");
+    const target = path.join(cwd, "my-docs");
+    fs.mkdirSync(path.join(target, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    await assert.rejects(
+      scaffold({ ...BASE_OPTIONS, dir: "my-docs", templateDir: bad }, { cwd }),
+      (err) => err instanceof ScaffoldError && /files it added were removed/.test(err.message),
+    );
+    assert.deepEqual(fs.readdirSync(target), [".git"]);
+    assert.deepEqual(fs.readdirSync(path.join(target, ".git")), ["HEAD"]);
+    assert.equal(fs.readFileSync(path.join(target, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+  } finally {
+    cleanup(cwd, bad);
+  }
+});
+
+test("a fresh repository gets a first commit; an existing one gets neither init nor commit", async () => {
+  const identity = {
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+  };
+  const saved = Object.fromEntries(Object.keys(identity).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, identity);
+  const cwd = makeCwd();
+  const tmpl = makeTemplate();
+  const git = (cwd: string, ...args: string[]) =>
+    spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
+  try {
+    await scaffold({ ...BASE_OPTIONS, git: true, dir: "fresh" }, internals(cwd, tmpl));
+    assert.equal(git(path.join(cwd, "fresh"), "rev-list", "--count", "HEAD"), "1");
+    assert.equal(git(path.join(cwd, "fresh"), "status", "--porcelain"), "");
+
+    git(cwd, "init");
+    await scaffold({ ...BASE_OPTIONS, git: true, dir: "nested" }, internals(cwd, tmpl));
+    assert.equal(fs.existsSync(path.join(cwd, "nested", ".git")), false);
+    assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd }).status, 128, "no commit in the outer repo");
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    cleanup(cwd, tmpl);
+  }
+});
+
+test("a missing package manager fails before anything is written", async () => {
+  const cwd = makeCwd();
+  const tmpl = makeTemplate();
+  const savedPath = process.env.PATH;
+  process.env.PATH = cwd;
+  try {
+    await assert.rejects(
+      scaffold({ ...BASE_OPTIONS, packageManager: "bun", skipInstall: false, dir: "my-docs" }, internals(cwd, tmpl)),
+      (err: unknown) => err instanceof ScaffoldError && /bun isn't installed or isn't on your PATH/.test(err.message),
+    );
+    assert.equal(fs.existsSync(path.join(cwd, "my-docs")), false);
+  } finally {
+    process.env.PATH = savedPath;
     cleanup(cwd, tmpl);
   }
 });

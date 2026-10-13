@@ -51,6 +51,23 @@ export interface VirtualConfigExtras {
    * content sync, so it waits for loads still in progress.
    */
   getIndexedCollections: () => Promise<readonly string[]>;
+  /**
+   * Page collections a partial build (`NIMBUS_BUILD_ONLY`) left empty on
+   * purpose. The indexed-entry path skips them instead of asking Astro,
+   * which would warn once per collection on every request-rendered
+   * request. Empty in a full build and in dev.
+   */
+  getEmptyCollections?: () => Promise<readonly string[]>;
+  /**
+   * The partial build this is, or null: its collections and the prefix its
+   * site-wide files live under (`""` for a root slice), with the Pagefind
+   * bundle the search client loads and the other slices' bundles it merges.
+   */
+  getBuildSlice?: () => Promise<{
+    collections: readonly string[];
+    prefix: string;
+    search: { bundle: string; merge: readonly string[] };
+  } | null>;
   requestRenderingCollections: string[];
   /**
    * Build-time alternates table for cross-version SEO links. Empty `{}`
@@ -67,6 +84,14 @@ export interface VirtualConfigExtras {
   headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
+    /** Generated OG cards: their paths and fixed size. */
+    ogCard: {
+      sitePath: string;
+      pagePrefix: string;
+      size: { width: number; height: number };
+    };
+    /** Sizes of social images measured in `public/`, by logical path. */
+    imageSizes: Record<string, { width: number; height: number }>;
   };
   /**
    * The file whose edits change the page-collection list. In dev an edit
@@ -107,11 +132,16 @@ export function virtualConfigPlugin(
     async load(id: string) {
       if (id === RESOLVED_ID) {
         const indexedCollections = await extras.getIndexedCollections();
+        const emptyCollections = (await extras.getEmptyCollections?.()) ?? [];
+        const buildSlice = (await extras.getBuildSlice?.()) ?? null;
         return (
           `export const config = ${JSON.stringify(runtimeConfig)};\n` +
           `export const pageAssets = ${JSON.stringify(extras.getPageAssets?.() ?? {})};\n` +
           `export const navLists = ${JSON.stringify(extras.getNavLists?.() ?? {})};\n` +
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
+          `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
+          `export const buildSlice = ${JSON.stringify(buildSlice)};\n` +
+          `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? { bundle: "/pagefind/", merge: [] })};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +
           `export const versionAlternates = ${JSON.stringify(extras.versionAlternates)};\n` +
           `export const apiCollections = ${JSON.stringify(extras.apiCollections)};\n` +

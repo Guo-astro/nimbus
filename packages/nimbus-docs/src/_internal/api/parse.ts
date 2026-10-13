@@ -18,6 +18,7 @@ import {
   CoordinateRegistry,
   apiCoordinate,
   sectionCoordinate,
+  policyTagRouteSegment,
   tagRouteSegment,
   type Diagnostic,
 } from "./coordinates.js";
@@ -120,7 +121,22 @@ async function loadParser(): Promise<ScalarParserModule> {
   }
 }
 
-export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
+// A build parses each spec in two module graphs (config setup, then content
+// sync), so the once-only record lives on globalThis.
+const surfaced: Set<string> = ((globalThis as Record<symbol, unknown>)[Symbol.for("nimbus.api.surfaced")] ??= new Set<string>()) as Set<string>;
+
+/**
+ * `onceKey` names an identical parse (same spec, collection and options);
+ * its warnings print only the first time it's parsed in this process.
+ */
+export async function parseOpenApi(source: SpecSource, onceKey?: string): Promise<ParseResult> {
+  const surface = (collection: string, diagnostics: readonly Diagnostic[]) => {
+    if (onceKey !== undefined) {
+      if (surfaced.has(onceKey)) return;
+      surfaced.add(onceKey);
+    }
+    surfaceWarnings(collection, diagnostics);
+  };
   const parser = await loadParser();
   const label = source.label ?? source.collection;
 
@@ -224,13 +240,13 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];
-    surfaceWarnings(source.collection, diagnostics);
+    surface(source.collection, diagnostics);
     return { model, diagnostics };
   } catch (err) {
     // Warnings gathered before the abort explain *why* it aborted — a lowercase
     // `4xx` key, an unresolved `$ref`. Never swallow them just because a later
     // stage threw; surface them alongside the failure.
-    surfaceWarnings(source.collection, [
+    surface(source.collection, [
       ...preDiagnostics,
       ...(walker?.registry.getDiagnostics() ?? []),
     ]);
@@ -316,14 +332,36 @@ function describeType(value: unknown): string {
  * Surface warnings to the build log — loud, but capped so a single deviant spec
  * cannot flood the console with thousands of lines.
  */
-function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
-  const warnings = diagnostics.filter((d) => d.level === "warning");
-  const CAP = 20;
-  for (const d of warnings.slice(0, CAP)) {
-    console.warn(`[nimbus:api:${collection}] ${d.message}${d.source ? ` (${d.source})` : ""}`);
+export function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
+  // Fallback routes get one summary line below, so they can't push the
+  // warnings that need attention past the cap.
+  const fallbacks = diagnostics.filter((d) => d.level === "warning" && d.code === "route-fallback");
+  const warnings = diagnostics.filter((d) => d.level === "warning" && d.code !== "route-fallback");
+  // The same message from many sources is one line: the first source and a count.
+  const groups = new Map<string, { first: Diagnostic; count: number }>();
+  for (const d of warnings) {
+    const group = groups.get(d.message);
+    if (group) group.count++;
+    else groups.set(d.message, { first: d, count: 1 });
   }
-  if (warnings.length > CAP) {
-    console.warn(`[nimbus:api:${collection}] …and ${warnings.length - CAP} more warning(s).`);
+  const CAP = 20;
+  const lines = [...groups.values()];
+  for (const { first, count } of lines.slice(0, CAP)) {
+    const where = [first.source, count > 1 ? `×${count.toLocaleString("en-US")}` : ""]
+      .filter(Boolean)
+      .join(", ");
+    console.warn(`[nimbus:api:${collection}] ${first.message}${where ? ` (${where})` : ""}`);
+  }
+  if (lines.length > CAP) {
+    console.warn(`[nimbus:api:${collection}] …and ${lines.length - CAP} more warning(s).`);
+  }
+  if (fallbacks.length > 0) {
+    const shown = fallbacks.slice(0, 5).map((d) => d.coordinate ?? d.source ?? "?");
+    console.warn(
+      `[nimbus:api:${collection}] ${fallbacks.length} operation(s) have no unambiguous route and use their ` +
+        `coordinate as the URL slug (${shown.join(", ")}${fallbacks.length > shown.length ? ", …" : ""}). ` +
+        `Name them in \`routes.operations\` to pin stable URLs.`,
+    );
   }
   // Per-op fallback warnings can be hidden entirely by the CAP on a large spec;
   // emit a guaranteed aggregate last so the author always sees the count and fix.
@@ -676,7 +714,15 @@ class Walker implements ParseContext {
     });
     // A nav-only category (page === false) is a grouping node with a model node
     // for ancestry but no page — so it is never routed and carries no href.
-    if (page) this.page(coord, `tags/${tagRouteSegment(tag)}`);
+    // `resource-action-v2` routes tag pages through the policy's lowercase
+    // projection; v1 and legacy keep the case-preserving segment, byte for byte.
+    if (page) {
+      const segment =
+        this.routePolicy?.convention === "resource-action-v2"
+          ? policyTagRouteSegment(tag)
+          : tagRouteSegment(tag);
+      this.page(coord, `tags/${segment}`);
+    }
     this.navByTag.set(tag, { coordinate: coord, label: label ?? tag, kind: "section", children: [] });
   }
 

@@ -97,8 +97,16 @@
   width: 12px;
   height: 12px;
 }
-.fl-item:hover > .fl-row > .fl-anchor {
-  opacity: 1;
+@media (hover: hover) {
+  .fl-item:hover > .fl-row > .fl-anchor {
+    opacity: 1;
+  }
+}
+/* On touch, a hidden anchor mustn't catch taps in the gutter. */
+@media (hover: none) {
+  .fl-anchor {
+    pointer-events: none;
+  }
 }
 .fl-anchor:hover {
   color: var(--color-foreground);
@@ -108,10 +116,11 @@
   outline: 2px solid var(--color-info);
   outline-offset: 1px;
 }
-@media (hover: none) {
-  .fl-anchor {
-    opacity: 1;
-  }
+/* The linked field shows its anchor; on touch, so does a tapped name. */
+.fl-item:target > .fl-row > .fl-anchor,
+.fl-item[data-anchor-shown] > .fl-row > .fl-anchor {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ---- Body (flex: 1) ---- */

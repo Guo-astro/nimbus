@@ -5,6 +5,8 @@ import { compare, eq, gt, lt, lte, major, minor, patch, prerelease, valid } from
 
 import { CLI_PACKAGE, declaresCli, detectPackageManager, installCommand, invocation } from "../cli/pm.js";
 import { getCommand } from "../lib/pkgm.js";
+import { resolveMigrationSrcDir } from "./migrations.js";
+import { stripComments, stripStrings } from "./parse-object-literal.js";
 import rawManifest from "./upgrade-manifest.json";
 
 declare const __APP_VERSION__: string;
@@ -36,6 +38,8 @@ export interface UpgradeBaseline {
 interface UpgradeManifest {
   schemaVersion: 1;
   oldestSupportedVersion: string;
+  /** Entry ids that can only matter to sites using a feature; other sites skip them. */
+  appliesTo?: { api?: string[] };
   entries: UpgradeEntry[];
 }
 
@@ -52,7 +56,42 @@ export function runningNimbusVersion(): string {
   return version;
 }
 
-export function selectUpgradeEntries(fromVersion: string, targetVersion: string): UpgradeEntry[] {
+/** What a site uses, for skipping upgrade entries that can't apply to it. */
+export interface SiteScope {
+  api: boolean;
+}
+
+// Packages a content config imports that can't define an API collection
+// unless it calls `apiCollection` itself.
+const NON_API_IMPORT = /^(?:astro(?::|\/|$)|@astrojs\/|zod$|@cloudflare\/nimbus-docs(?:\/|$))/;
+
+/**
+ * A site skips API-only reviews only when its content config provably has no
+ * API collection: it never calls or imports `apiCollection`, and every import
+ * comes from Astro, Zod or Nimbus, so no other file could define one.
+ * Anything unreadable or unclear shows every review.
+ */
+export function siteScope(projectRoot: string, srcDirOverride?: string): SiteScope {
+  const { srcDir } = resolveMigrationSrcDir(projectRoot, srcDirOverride);
+  if (!srcDir) return { api: true };
+  for (const name of ["content.config.ts", "content.config.mts", "content.config.js", "content.config.mjs"]) {
+    const file = path.join(srcDir, name);
+    if (!fs.existsSync(file)) continue;
+    try {
+      const source = stripComments(fs.readFileSync(file, "utf8"));
+      const specifiers = [...source.matchAll(/\b(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((m) => m[1]!);
+      const usesApi = /\bapiCollection\b/.test(stripStrings(source));
+      // A dynamic import whose specifier isn't a plain string can load anything.
+      const opaqueImport = /\bimport\s*\(\s*(?!["'][^"'`]+["']\s*\))/.test(source);
+      return { api: usesApi || opaqueImport || specifiers.some((specifier) => !NON_API_IMPORT.test(specifier)) };
+    } catch {
+      return { api: true };
+    }
+  }
+  return { api: true };
+}
+
+export function selectUpgradeEntries(fromVersion: string, targetVersion: string, scope?: SiteScope): UpgradeEntry[] {
   if (!valid(fromVersion)) throw new Error(`Invalid upgrade baseline version: ${fromVersion}.`);
   if (!valid(targetVersion)) throw new Error(`Invalid installed Nimbus version: ${targetVersion}.`);
   if (isAhead(fromVersion, targetVersion)) {
@@ -71,6 +110,7 @@ export function selectUpgradeEntries(fromVersion: string, targetVersion: string)
     : fromVersion;
   return UPGRADE_MANIFEST.entries
     .filter((entry) => gt(entry.introducedIn, fromBoundary) && lte(entry.introducedIn, withoutPrerelease(targetVersion)))
+    .filter((entry) => !scope || scope.api || !UPGRADE_MANIFEST.appliesTo?.api?.includes(entry.id))
     .sort((a, b) => compare(a.introducedIn, b.introducedIn) || a.id.localeCompare(b.id));
 }
 
@@ -242,7 +282,7 @@ function hasPreviewNimbusDependency(projectRoot: string): boolean {
     };
     const spec = manifest.dependencies?.["@cloudflare/nimbus-docs"] ??
       manifest.devDependencies?.["@cloudflare/nimbus-docs"];
-    return typeof spec === "string" && /^https:\/\/pkg\.pr\.new\/@cloudflare\/nimbus-docs@/.test(spec);
+    return typeof spec === "string" && /^https:\/\/pkg\.pr\.new\/(?:[\w.-]+\/[\w.-]+\/)?@cloudflare\/nimbus-docs@/.test(spec);
   } catch {
     return false;
   }

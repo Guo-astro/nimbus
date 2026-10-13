@@ -1,7 +1,112 @@
 {
   "schemaVersion": 1,
   "oldestSupportedVersion": "0.11.0",
+  "appliesTo": {
+    "api": [
+      "api-body-request-example",
+      "api-catalog-published-specs",
+      "api-code-sample-ids",
+      "api-collections-from-config",
+      "api-query-version-mode",
+      "api-reference-polish",
+      "api-request-path",
+      "api-schema-pages-off-by-default",
+      "api-sidebar-filter",
+      "api-version-id-format",
+      "api-version-picker",
+      "api-version-url",
+      "version-switcher-keeps-query"
+    ]
+  },
   "entries": [
+    {
+      "id": "math-rendering",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "math-rendering",
+      "summary": "Optionally typeset math with the new math() Markdown plugin.",
+      "affected": "Sites that want $…$ or $$…$$ math, or that render math with their own markdown.processor only to typeset it.",
+      "instructions": [
+        "No action is needed: sites that don't add math() are unchanged.",
+        "To typeset math, import math from @cloudflare/nimbus-docs/markdown, add math() to markdown.hastPlugins, and add math: true to markdown.features in the Nimbus integration.",
+        "A heading that contains math gets a new anchor once math() is on (the slug comes from the typeset text). Update links to those headings, or give them a fixed id with {#id}.",
+        "If prose uses $ for prices or shell variables ($5, $HOME), set features.math to { singleDollarTextMath: false } and write inline math as $$x^2$$.",
+        "If the site already renders math another way (KaTeX, MathJax, a custom processor), keep that and don't add math()."
+      ],
+      "verify": [
+        "Build and open a page with inline and display math: formulas render as MathML.",
+        "Check the build output for 'Math error in' warnings and fix any formula they name."
+      ]
+    },
+    {
+      "id": "markdown-features",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "markdown-features",
+      "summary": "Turn on heading ids or math with markdown.features, and drop Markdown processor workarounds.",
+      "affected": "Projects that override the satteri version under @cloudflare/nimbus-docs, patch @cloudflare/nimbus-docs to parse heading ids or math, or replace markdown.processor only to turn on Sätteri features.",
+      "instructions": [
+        "No action is needed: pages render exactly as before, and generated Markdown changes only by dropping {/* comments */}.",
+        "To give headings fixed ids (## Install {#install}), add features: { headingAttributes: true } to the markdown option of the Nimbus integration, as new sites have. In .md files a heading that ends in other {…} text, such as {account_id}, is then read as attributes and loses that text, so leave it off for those sites. Add math: true for $…$ math.",
+        "Remove any package-manager override that pins satteri for @cloudflare/nimbus-docs (for example '@cloudflare/nimbus-docs>satteri' in pnpm overrides), and any patch to @cloudflare/nimbus-docs that adds heading attributes or math to its internal parsing.",
+        "If markdown.processor is a satteri() call that exists only to set features, replace it with markdown.features, and move its hastPlugins and mdastPlugins to markdown.hastPlugins and markdown.mdastPlugins. Keep a satteri() processor that does more than that: Nimbus reads its features for its own passes, though not its plugins. With a processor other than satteri(), Nimbus's own passes use only Astro's gfm and smartypants settings."
+      ],
+      "verify": [
+        "Run the production build and confirm pages with {#id} headings or math render as before.",
+        "Open a page's generated .md version and confirm it has no raw MDX comments or imports.",
+        "Run nimbus-docs lint and confirm no parse errors are reported for pages with heading ids or math."
+      ]
+    },
+    {
+      "id": "starter-component-fixes",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "starter-component-fixes",
+      "summary": "Pick up accessibility and behaviour fixes in starter components.",
+      "affected": "Sites created from the starter that still have any of these files: src/layouts/BaseLayout.astro, src/components/ui/theme-toggle/ThemeToggle.astro, src/components/ui/theme-toggle/theme-toggle.client.ts, src/components/ui/dialog/dialog.client.ts, src/components/ui/page-actions/page-actions.client.ts, src/components/ui/package-managers/PackageManagers.astro, src/components/ui/package-managers/package-managers.client.ts, src/components/ui/search/SearchDialog.astro, src/components/ui/search/search.client.ts, src/components/Render.astro, src/components/ui/breadcrumbs/Breadcrumbs.astro, src/components/ui/toc/MobileTOC.astro, src/components/ui/banner/Banner.astro.",
+      "instructions": [
+        "Run nimbus-docs outdated to see which of these files differ from the new starter.",
+        "For a file you haven't edited, apply the update with nimbus-docs diff <file> --apply.",
+        "For a file you have edited, read its diff and carry over the fix by hand: theme-toggle files go together with BaseLayout.astro, but each works with the old version of the other.",
+        "Banner.astro no longer strips scripts or event handlers from banner content. Keep the old file if banner HTML comes from anywhere other than the site's authors."
+      ],
+      "verify": [
+        "Toggle the theme inside a form and confirm the form isn't submitted.",
+        "Use Copy page in Safari and confirm the page's Markdown is on the clipboard.",
+        "Open and close search with the keyboard, pressing Enter on the close button, and confirm it closes."
+      ]
+    },
+    {
+      "id": "page-actions-out-of-search",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "agent-output-fixes",
+      "summary": "Optionally keep page actions out of search excerpts.",
+      "affected": "Sites with src/components/ui/page-actions/PageActions.astro from the starter or the registry.",
+      "instructions": [
+        "No action is needed: search keeps working, but excerpts can include \"Copy page\" and \"View as Markdown\".",
+        "If PageActions.astro is unmodified, update it with nimbus-docs diff src/components/ui/page-actions/PageActions.astro --apply.",
+        "Otherwise add data-pagefind-ignore to its root element (the one with data-nb-page-actions)."
+      ],
+      "verify": [
+        "Search for a page and confirm its excerpt doesn't start with \"Copy page\"."
+      ]
+    },
+    {
+      "id": "image-zoom",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "image-zoom",
+      "summary": "Optionally let readers open content images at full size.",
+      "affected": "Sites scaffolded before 0.18.0.",
+      "instructions": [
+        "No action is needed: images keep working as they do.",
+        "To add it, run nimbus-docs add image-zoom, then import { ImageZoom } from \"@/components/ui/image-zoom\" in src/layouts/DocsLayout.astro and render <ImageZoom /> once, next to the other dialogs."
+      ],
+      "verify": [
+        "On a page with a large screenshot, click it and confirm it opens at full size and Esc closes it."
+      ]
+    },
     {
       "id": "compact-coordinate-manifest",
       "introducedIn": "0.14.0",
@@ -634,6 +739,56 @@
       "verify": [
         "On an API reference page of a site with versioned docs, confirm the header shows no docs version picker.",
         "On a docs page, confirm the header picker still lists every version and switches to the same page."
+      ]
+    },
+    {
+      "id": "api-reference-polish",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "api-reference-polish",
+      "summary": "Optionally update the API reference components: previous and next links, error responses that start collapsed, readable response toggles in light mode, field anchors on touch screens, and server URLs with a query.",
+      "affected": "Sites with the api-layout registry components installed before 0.18.0.",
+      "instructions": [
+        "No action is needed: API pages keep working.",
+        "Update @cloudflare/nimbus-docs first: the previous and next links read nav.prevNext.",
+        "If the api-layout, api-code-rail and api-field-row folders are unmodified registry copies, update them with nimbus-docs add api-layout --overwrite. It also installs the pagination component.",
+        "If they're customized: render <Pagination prevNext={nav.prevNext} /> after ApiBody in ApiLayout.astro; in ApiBody.astro, wrap each 4xx and 5xx response in <details> with its heading in <summary>, mark the Returns section data-api-responses and import responses.client.ts from the current registry version; in ApiEndpointCard.astro, put the path before a query in the server URL; take field-list.css and api-field-row.client.ts for touch anchors and code-rail.css for the toggle contrast."
+      ],
+      "verify": [
+        "On an operation page, confirm previous and next links lead to the neighboring pages in the sidebar.",
+        "Confirm 4xx and 5xx responses start closed, and that a link to a field inside one opens it."
+      ]
+    },
+    {
+      "id": "nested-llms-scopes",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "nested-llms-scopes",
+      "summary": "Optionally give each sub-folder its own llms.txt, linked from its parent section's index.",
+      "affected": "Sites created from the starter that have src/pages/[section]/llms.txt.ts.",
+      "instructions": [
+        "No action is needed: a [section] route keeps serving one index per top-level section.",
+        "If src/pages/[section]/llms.txt.ts is unmodified, run nimbus-docs diff \"src/pages/[...section]/llms.txt.ts\" --apply to add the new route, then nimbus-docs diff \"src/pages/[section]/llms.txt.ts\" --apply to remove the old one.",
+        "If you've edited it, move the file to src/pages/[...section]/llms.txt.ts and keep your edits. Keep only one of the two files: the build fails when both exist."
+      ],
+      "verify": [
+        "Build, open /<section>/llms.txt for a section with sub-folders, and confirm it ends with a Sections list whose links return each sub-folder's llms.txt."
+      ]
+    },
+    {
+      "id": "page-not-found-head",
+      "introducedIn": "0.18.0",
+      "mode": "optional",
+      "changeset": "head-seo-fixes",
+      "summary": "Optionally give the 404 page a plain title and keep it out of search engines.",
+      "affected": "Sites created from the starter that still have src/pages/404.astro.",
+      "instructions": [
+        "No action is needed: the 404 page keeps working, with the site name repeated in its title and no noindex.",
+        "If src/pages/404.astro is unmodified, run nimbus-docs diff src/pages/404.astro --apply.",
+        "If you've edited it, pass title=\"Page not found\" and noindex to BaseLayout, and drop the config import if nothing else uses it."
+      ],
+      "verify": [
+        "Open a URL that doesn't exist and confirm the tab reads \"Page not found | <site>\" and the page source has <meta name=\"robots\" content=\"noindex\">."
       ]
     }
   ]

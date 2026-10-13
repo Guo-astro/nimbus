@@ -12,6 +12,7 @@ import ApiMethodChip from "@/components/ui/api-sidebar/ApiMethodChip.astro";
 import { SidebarFilter, SidebarLink } from "@/components/ui/sidebar";
 import { ApiCodeRail } from "@/components/ui/api-code-rail";
 import { Banner } from "@/components/ui/banner";
+import { Pagination } from "@/components/ui/pagination";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import ApiBody from "./ApiBody.astro";
 import { cn } from "@/lib/cn";
@@ -163,6 +164,7 @@ if (versionStatus?.isHidden) {
           </div>
         )}
         <ApiBody page={page} />
+        {nav.prevNext && <Pagination prevNext={nav.prevNext} data-pagefind-ignore />}
       </div>
     </main>
 

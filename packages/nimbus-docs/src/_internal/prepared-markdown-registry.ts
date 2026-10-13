@@ -120,9 +120,8 @@ export function preparedMarkdownCollectionCapability(
   const identities = [...entries]
     .map((entry) => [
       entry.id,
-      typeof entry.body === "string"
-        ? createHash("sha256").update(entry.body).digest("hex")
-        : null,
+      // A missing body is an empty page (see the loader's commit).
+      createHash("sha256").update(entry.body ?? "").digest("hex"),
       /\.md$/iu.test(entry.filePath ?? "") ? "markdown" : "mdx",
     ])
     .sort(([a], [b]) =>

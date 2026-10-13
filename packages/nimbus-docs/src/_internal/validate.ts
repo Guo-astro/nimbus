@@ -218,14 +218,14 @@ const RESERVED_VERSION_IDS = new Set([
   "index",
 ]);
 
-// Route convention policy. `convention` is the only enumerated value in v1;
+// Route convention policy. `convention` names a frozen rule set;
 // `stripPathPrefixes` entries and `operations` override targets are validated
 // against the same syntactic grammars the engine enforces at mint time
 // (single source of truth in `api/route-policy.ts`), so config-time and
 // build-time can never disagree.
 const routePolicyShape = {
-  convention: z.enum(["resource-action-v1"], {
-    error: '"api[].routes.convention" must be "resource-action-v1"',
+  convention: z.enum(["resource-action-v1", "resource-action-v2"], {
+    error: '"api[].routes.convention" must be "resource-action-v1" or "resource-action-v2"',
   }),
   stripPathPrefixes: z.array(z.string()).optional(),
   operations: z.record(z.string(), z.string()).optional(),

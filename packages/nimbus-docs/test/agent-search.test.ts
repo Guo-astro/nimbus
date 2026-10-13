@@ -125,7 +125,7 @@ test("section results decode text, cap Unicode excerpts, deduplicate URLs and st
   assert.equal(loaded, 0);
 });
 
-test("errors hide exceptions; page-top results keep a valid top fragment", async () => {
+test("errors hide exceptions; page-top results link to the page itself", async () => {
   const options = { site: "https://example.com" };
   const unavailable = createDocumentationSearch(async () => {
     throw new Error("SECRET");
@@ -174,7 +174,7 @@ test("errors hide exceptions; page-top results keep a valid top fragment", async
   assert.equal(
     ((await search({ query: "x" })) as { results: { url: string }[] })
       .results[0]?.url,
-    "https://example.com/guide/#",
+    "https://example.com/guide/",
   );
 });
 

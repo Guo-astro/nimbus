@@ -41,7 +41,7 @@ Before prompting the user or writing anything, inspect the project:
   into another file.
 - `src/pages/[...slug].astro`, `src/pages/[...slug]/index.md.ts`,
   `src/pages/llms.txt.ts`, `src/pages/llms-full.txt.ts`, and
-  `src/pages/[section]/llms.txt.ts` — the primary docs page, Markdown version,
+  `src/pages/[...section]/llms.txt.ts` — the primary docs page, Markdown version,
   and index routes. The API page route is a sibling of the primary docs page,
   so match its style.
   If any are missing, stop and install `nimbus-docs add ai-native` first.
@@ -55,6 +55,9 @@ Before prompting the user or writing anything, inspect the project:
   wrapping it to keep any customizations.
 - Locate the OpenAPI spec. Ask the user for its path if it isn't obvious
   (common: `src/api/openapi.yaml`, `openapi.json`, `api/spec.yaml`).
+- Read the spec's `paths`. If every path starts with the same version segment
+  (`/v1`, `/api/v1`), note it: it becomes `stripPathPrefixes` in 4b. Don't
+  work out routes yourself; the build derives and checks them in step 6.
 
 ## 2. Prompt the user
 
@@ -93,6 +96,10 @@ Print a short, exact plan to the user **before** writing anything:
   so the spec is never declared twice.
 - Create `src/pages/api/[...slug].astro`. The shared
   `src/pages/[...slug]/index.md.ts` route serves the Markdown versions.
+- Routes follow the `resource-action-v2` convention: `/api/<resource>/<action>`
+  for operations (`/api/events/retrieve`), lowercase `/api/tags/<tag>` pages
+  (`/api/tags/user-management`), with the shared path prefix from step 1
+  stripped. The first build checks them (step 6).
 - Resulting URLs: `/api` (overview), `/api/<slug>` (each page), the matching
   `/api/<slug>/index.md` versions, and `/api/llms.txt`.
 
@@ -141,7 +148,16 @@ existing fields. Edit the config where it already is:
 ```ts
 const nimbusConfig = defineNimbusConfig({
   // …your existing site / title / etc…
-  api: [{ collection: "api", spec: "./src/api/openapi.yaml" }],
+  api: [
+    {
+      collection: "api",
+      spec: "./src/api/openapi.yaml",
+      routes: {
+        convention: "resource-action-v2",
+        stripPathPrefixes: ["/v1"], // only when step 1 found a shared prefix
+      },
+    },
+  ],
 });
 ```
 
@@ -150,6 +166,13 @@ project root (not the current working directory — builds from a monorepo root 
 `--root` resolve correctly). `spec` may also be an inline OpenAPI object. Add a
 `label` for a friendlier name in build diagnostics; it defaults to the
 collection name. To mount more than one spec, add one entry per spec.
+
+`routes` gives new sites readable URLs derived from methods and paths. Write
+`stripPathPrefixes` only when step 1 found a prefix shared by every path, and
+no `operations` yet: step 6 adds overrides only for collisions the build
+reports. Without `routes`, pages use the spec's `operationId`s as URLs
+(`/api/Events/retrieveEvent`); that is what sites set up before this recipe
+wrote `routes` have, and the build keeps them as they are.
 
 ### 4c. Register the collection
 
@@ -277,6 +300,32 @@ After writing all files, run the user's build command and confirm:
 4. `dist/api/llms.txt` lists every API page, and the root `dist/llms.txt`
    includes `api` as a top-level section.
 5. `dist/llms-full.txt` embeds the generated API Markdown.
+
+If the build fails on a route, read its message and fix the config, then
+build again until it passes. The engine is the only route calculator; never
+predict a slug yourself.
+
+- **Two operations resolve to one slug** and both have `operationId`s (a `PUT`
+  and a `PATCH` on the same member both derive `<resource>/update`): add
+  `routes.operations` with one override. Use `<resource>/replace` for the
+  `PUT` of a `PUT`/`PATCH` pair; otherwise `<resource>/<operationId in
+  kebab-case>`. Override targets must be lowercase kebab-case segments.
+- **A reserved first segment** (the message says the slug's top-level segment
+  is a reserved route, as for `GET /schemas` deriving `schemas/list`) and the
+  operation has an `operationId`: override it with a slug whose first segment
+  isn't reserved, the `operationId` in kebab-case as one segment
+  (`listSchemas` → `list-schemas`).
+- **Anything else** (an operation without an `operationId`, or two tags that
+  map to one lowercase slug, such as `Accounts` and `accounts`): remove
+  `routes` from the entry, build again on the `operationId` URLs, and tell the
+  user what to change in the spec to switch to `resource-action-v2` later: add
+  `operationId`s, or rename one of the tags.
+- **The build fails without `routes` too** (two tags that collide under both
+  projections, such as `User Management` and `User-Management`): stop, name
+  both tags, and ask the user to rename one in the spec.
+
+List any route-fallback warnings the build printed, each with the
+`routes.operations` override that pins it.
 
 Then tell the user the URLs to visit: `/api`, `/api/<slug>`,
 `/api/<slug>/index.md`, `/api/llms.txt`.

@@ -18,6 +18,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Features } from "satteri";
+
+import { setMarkdownFeatures } from "../_internal/markdown-features.js";
+import { materializedFeatures } from "../check/authoring.js";
+import { isBuildValidator } from "../lint/diagnostic.js";
+import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import {
   findMdxFiles,
   fixPaths,
@@ -79,10 +85,16 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     // Build validators run inside `astro build`; this command accepts only
     // authoring rules with an available rule module.
     if (!IMPLEMENTED_CODES.has(flags.rule)) {
+      // Build validators can't be picked or turned off: they always run.
+      const always =
+        flags.rule === "nimbus/mdx-syntax"
+          ? "always runs: `lint` reports any file that fails to parse, and so does `astro build`. "
+          : "always runs inside `astro build`, not here. ";
       process.stderr.write(
-        `Rule \`${flags.rule}\` is not an implemented lint rule. ` +
-          `Build validators run inside \`astro build\`, not here. ` +
-          `Implemented authoring rules: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
+        (isBuildValidator(flags.rule)
+          ? `Rule \`${flags.rule}\` ${always}`
+          : `Rule \`${flags.rule}\` is not an implemented lint rule. `) +
+          `Rules \`--rule\` can run: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
       );
       process.exit(1);
     }
@@ -100,7 +112,17 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     process.exit(1);
   }
 
-  const { rules, collections, site, found } = loadMaterializedConfig(cwd);
+  const { rules, collections, site, markdownFeatures, found } = loadMaterializedConfig(cwd);
+  if (markdownFeatures) setMarkdownFeatures(markdownFeatures);
+  else if (found) {
+    process.stderr.write(
+      "nimbus-docs: `.nimbus/lint.json` is from an older build, so lint reads Markdown with the default features. " +
+        "Run `astro build` to use the site's `markdown.features`.\n",
+    );
+  }
+  if (found && lintConfigIsStale(cwd, { rules, collections })) {
+    process.stderr.write(`nimbus-docs: ${STALE_LINT_CONFIG_MESSAGE}\n`);
+  }
   if (!found && !flags.rule) {
     // Exit nonzero for the same reason as no `.mdx` files: with no
     // materialized config every authoring rule is off, so a "clean" result
@@ -214,6 +236,7 @@ interface MaterializedConfig {
   rules: RulesConfig;
   collections: CollectionsConfig;
   site?: string;
+  markdownFeatures?: Features;
   /** False when `.nimbus/lint.json` doesn't exist. */
   found: boolean;
 }
@@ -239,7 +262,7 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
     return { rules: {}, collections: {}, found: false };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown };
+  let parsed: { rules?: unknown; collections?: unknown; site?: unknown; markdownFeatures?: unknown };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -268,5 +291,11 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
   }
 
   const site = typeof parsed.site === "string" ? parsed.site : undefined;
-  return { rules: validated.rules, collections: validated.collections, site, found: true };
+  return {
+    rules: validated.rules,
+    collections: validated.collections,
+    site,
+    markdownFeatures: materializedFeatures(parsed.markdownFeatures),
+    found: true,
+  };
 }

@@ -235,9 +235,20 @@ function verifyCliArtifact(tarball, cli, nimbus) {
   if (packed.name !== cli.name || packed.version !== cli.version) {
     throw new Error(`CLI tarball contains ${packed.name}@${packed.version}, expected ${cli.name}@${cli.version}`);
   }
-  const dependency = packed.dependencies?.[nimbus.name];
-  if (dependency !== nimbus.version) {
-    throw new Error(`CLI tarball pins ${nimbus.name}@${dependency ?? "none"}, expected ${nimbus.version}`);
+  // The CLI bundles the framework code it uses, so a scaffold run never
+  // installs the framework and its build tools.
+  if (packed.dependencies?.[nimbus.name]) {
+    throw new Error(`CLI tarball depends on ${nimbus.name}; it should bundle it`);
+  }
+  const listing = spawnSync("tar", ["-tf", tarball], { cwd: ROOT, encoding: "utf8" });
+  const scripts = listing.stdout.split("\n").filter((file) => /^package\/dist\/.*\.m?js$/.test(file));
+  if (listing.status !== 0 || scripts.length === 0) throw new Error(`could not list the CLI tarball's dist`);
+  const imports = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(?\\s*)["']${nimbus.name}`);
+  for (const file of scripts) {
+    const body = spawnSync("tar", ["-xOf", tarball, file], { cwd: ROOT, encoding: "utf8" });
+    if (body.status !== 0 || imports.test(body.stdout)) {
+      throw new Error(`CLI tarball's ${file.slice("package/".length)} imports ${nimbus.name} at runtime`);
+    }
   }
 }
 

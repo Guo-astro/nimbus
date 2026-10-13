@@ -5,7 +5,6 @@
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -14,6 +13,7 @@ import { build } from "astro";
 
 import nimbus from "../src/index.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -27,7 +27,7 @@ const moduleUrl = (relative: string) =>
 const SPEC = path.resolve(import.meta.dirname, "fixtures/api/smallco.yaml");
 
 async function buildSite(collections: string): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-api-build-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-api-build-"));
   roots.push(root);
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });

@@ -28,6 +28,8 @@ test("runtime config strips inline API specs", async () => {
     headDefaults: {
       favicon: { file: "/favicon.ico", type: "image/x-icon" },
       socialImage: "/opengraph.png",
+      ogCard: { sitePath: "/og.png", pagePrefix: "/og/", size: { width: 1200, height: 630 } },
+      imageSizes: {},
     },
   });
   const source = await plugin.load("\0virtual:nimbus/config");
@@ -79,6 +81,8 @@ test("a content.config.ts edit invalidates the virtual config in dev", async () 
     headDefaults: {
       favicon: { file: "/favicon.ico", type: "image/x-icon" },
       socialImage: "/opengraph.png",
+      ogCard: { sitePath: "/og.png", pagePrefix: "/og/", size: { width: 1200, height: 630 } },
+      imageSizes: {},
     },
     contentConfigPath: "/project/src/content.config.ts",
   });

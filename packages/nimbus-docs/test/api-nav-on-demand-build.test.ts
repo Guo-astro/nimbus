@@ -5,7 +5,6 @@
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -23,6 +22,7 @@ import {
   type ApiNavItem,
 } from "../src/api/index.js";
 import { setLinkPolicy, toDocumentHref } from "../src/_internal/url.js";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const roots: string[] = [];
 after(async () => {
@@ -87,7 +87,7 @@ interface Site {
 }
 
 async function buildSite(request: boolean): Promise<Site> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-nav-on-demand-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-nav-on-demand-"));
   roots.push(root);
   const write = async (relative: string, contents: string) => {
     await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
@@ -193,7 +193,7 @@ const find = (items: ApiNavItem[], coordinate: string) =>
 let versions: { mountPath: string; full: ApiNav; pages: string[] }[];
 before(async () => {
   setLinkPolicy({ trailingSlash: "ignore", format: "directory" });
-  const dir = await mkdtemp(path.join(os.tmpdir(), "nimbus-nav-grouped-"));
+  const dir = await mkdtemp(path.join(TEST_TMP, "nimbus-nav-grouped-"));
   roots.push(dir);
   groupedSpec = path.join(dir, "grouped.json");
   await writeFile(groupedSpec, JSON.stringify(GROUPED));
@@ -262,7 +262,7 @@ for (const request of [false, true]) {
 
 describe("outdated starter components", () => {
   const site = async (files: Record<string, string>) => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), "nimbus-nav-components-"));
+    const dir = await mkdtemp(path.join(TEST_TMP, "nimbus-nav-components-"));
     roots.push(dir);
     for (const [file, contents] of Object.entries(files)) {
       await mkdir(path.dirname(path.join(dir, file)), { recursive: true });
@@ -289,7 +289,7 @@ describe("outdated starter components", () => {
   test("stay quiet when current, replaced, or not on-demand", async () => {
     const current = await site({ [item]: "item.childrenHref", [layout]: "data-nb-nav-build" });
     assert.equal(outdatedApiSidebarError(onDemand, current, current), undefined);
-    assert.equal(outdatedApiSidebarError(onDemand, await site({}), os.tmpdir()), undefined);
+    assert.equal(outdatedApiSidebarError(onDemand, await site({}), TEST_TMP), undefined);
     const old = await site({ [item]: "old", [layout]: "old" });
     assert.equal(outdatedApiSidebarError([{ collection: "api" }], old, old), undefined);
     assert.match(outdatedApiSidebarError(onDemand, old, old) ?? "", /ApiSidebarItem\.astro and src\/.*ApiLayout\.astro predate it/);
@@ -297,7 +297,7 @@ describe("outdated starter components", () => {
 });
 
 test("the build id changes with what rows are made from, and only then", async () => {
-  const dir = await mkdtemp(path.join(os.tmpdir(), "nimbus-nav-build-id-"));
+  const dir = await mkdtemp(path.join(TEST_TMP, "nimbus-nav-build-id-"));
   roots.push(dir);
   const src = path.join(dir, "src");
   await mkdir(path.join(src, "components/ui"), { recursive: true });

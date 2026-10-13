@@ -1,0 +1,49 @@
+/* Math typeset by `math()` from `@cloudflare/nimbus-docs/markdown`, on top of
+   Temml's stylesheet. A system math font is used where one is installed; the
+   STIX Two Math webfont is downloaded only where none is. A site's own rules
+   override these. */
+@import "temml/dist/Temml-Local.css";
+
+@font-face {
+  font-family: "Nimbus Math";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src:
+    local("STIX Two Math"),
+    local("STIXTwoMath-Regular"),
+    local("Cambria Math"),
+    local("Latin Modern Math"),
+    local("LatinModernMath-Regular"),
+    url("@fontsource/stix-two-math/files/stix-two-math-latin-400-normal.woff2") format("woff2");
+}
+
+/* Same specificity as Temml's `math` rule, and later, so this font stack wins. */
+math {
+  font-family: "Nimbus Math", math;
+  font-size: 1.1em;
+}
+
+/* An equation reference inside a formula is a <math> of its own. */
+math math {
+  font-size: inherit;
+}
+
+/* The TeX annotation wraps a formula in <semantics>, which would shrink a
+   numbered equation's full-width table and pull its number off the margin. */
+math.tml-display > semantics {
+  display: block math;
+  width: 100%;
+}
+
+:where(.nb-math) {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-block: 1em;
+}
+
+:where(.nb-math-error) {
+  color: light-dark(#b42318, #fda29b);
+  text-decoration: underline wavy;
+  text-underline-offset: 0.2em;
+}

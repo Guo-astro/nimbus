@@ -15,7 +15,8 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
 
-import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
+import { cloudflareTrailingSlashWarning } from "../_internal/cloudflare-trailing-slash.js";
+import { parseAstroConfigFields, type ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
   parseContentCollections,
@@ -58,8 +59,29 @@ export async function checkStructure(
   await checkRequestRendering(cwd, findings, notes, parsed, config);
   await checkDuplicateRoutes(cwd, findings, parsed);
   await checkMdxComponents(cwd, findings, notes, parsed);
+  checkCloudflareTrailingSlash(cwd, findings);
 
   return { scope: "structure", findings, notes, evaluated: true };
+}
+
+/** The build warns about this too; `check` says it before a deploy. */
+function checkCloudflareTrailingSlash(cwd: string, findings: CheckFinding[]): void {
+  const fields = parseAstroConfigFields(cwd);
+  if (!fields || fields.unresolved.length > 0) return;
+  const message = cloudflareTrailingSlashWarning(cwd, {
+    // Astro's defaults.
+    output: fields.output ?? "static",
+    trailingSlash: fields.trailingSlash ?? "ignore",
+    format: fields.buildFormat ?? "directory",
+  });
+  if (!message) return;
+  findings.push({
+    scope: "structure",
+    code: "nimbus/cloudflare-trailing-slash",
+    severity: "warn",
+    message,
+    fixable: false,
+  });
 }
 
 /**

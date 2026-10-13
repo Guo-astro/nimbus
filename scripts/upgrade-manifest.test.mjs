@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -323,4 +327,62 @@ test("a missed entry for a shipped release can be backfilled narrowly", () => {
       }),
     /not a shipped @cloudflare\/nimbus-docs release/,
   );
+});
+
+
+// --- merge base ------------------------------------------------------------
+
+const MANIFEST_PATH = "packages/nimbus-docs/src/_internal/upgrade-manifest.json";
+
+function manifestWith(...ids) {
+  return JSON.stringify({ schemaVersion: 1, oldestSupportedVersion: "0.11.0", entries: ids.map((id) => entry(id)) });
+}
+
+/** A repo whose main gained an entry after the PR branched, as a stale CI merge commit sees it. */
+function repoBehindMain() {
+  const repo = mkdtempSync(path.join(tmpdir(), "nimbus-manifest-base-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, stdio: "pipe", encoding: "utf8" }).trim();
+  const commitManifest = (body, message) => {
+    mkdirSync(path.join(repo, path.dirname(MANIFEST_PATH)), { recursive: true });
+    writeFileSync(path.join(repo, MANIFEST_PATH), body);
+    git("add", MANIFEST_PATH);
+    git("commit", "-q", "-m", message);
+  };
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t.dev");
+  git("config", "user.name", "T");
+  commitManifest(manifestWith("first"), "first");
+  git("checkout", "-q", "-b", "feature");
+  commitManifest(manifestWith("first", "mine"), "mine");
+  git("checkout", "-q", "main");
+  commitManifest(manifestWith("first", "theirs"), "theirs");
+  git("checkout", "-q", "feature");
+  return { repo, git };
+}
+
+test("the previous manifest is read at the merge base, not the base tip", () => {
+  const { repo } = repoBehindMain();
+  try {
+    const previous = loadPreviousManifest("main", repo);
+    assert.deepEqual(previous.entries.map((e) => e.id), ["first"]);
+    // So the PR's own manifest, which never saw "theirs", passes continuity.
+    assert.doesNotThrow(() =>
+      validateManifestContinuity(previous, JSON.parse(manifestWith("first", "mine")), "0.14.0"),
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a base with no shared history reads the base tip; an unknown base still fails", () => {
+  const { repo, git } = repoBehindMain();
+  try {
+    git("checkout", "-q", "--orphan", "island");
+    git("commit", "-q", "--allow-empty", "-m", "island");
+    const previous = loadPreviousManifest("main", repo);
+    assert.deepEqual(previous.entries.map((e) => e.id), ["first", "theirs"]);
+    assert.throws(() => loadPreviousManifest("no-such-branch", repo), /Could not resolve base ref/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

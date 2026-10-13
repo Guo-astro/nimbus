@@ -5,7 +5,7 @@ import { formatCheckPretty } from "../../src/check/format.js";
 import type { CheckResult, ScopeResult } from "../../src/check/run.js";
 import type { CheckFinding } from "../../src/check/finding.js";
 
-const OPTS = { color: false, invocation: "nimbus-docs check --fix" };
+const OPTS = { color: false, invocation: "nimbus-docs check --fix", rerun: "nimbus-docs check" };
 
 function scope(over: Partial<ScopeResult>): ScopeResult {
   return { scope: "env", findings: [], notes: [], evaluated: true, status: "passed", ...over };
@@ -375,4 +375,27 @@ test("partial + buildable with a gap that needs input → names what it needs, n
 
   const unbuilt = render(false);
   assert.match(unbuilt, /→ run a build, then `nimbus-docs check` again/);
+});
+
+test("a scope that skipped some checks is partly checked; a fully run one is ✓; types names .astro", () => {
+  const out = formatCheckPretty(
+    result({
+      status: "partial",
+      scopes: [
+        scope({
+          scope: "structure",
+          notes: [{ code: "nimbus/page-collections-skipped", reason: "page-collection checks skipped", requiresBuild: true }],
+        }),
+        scope({ scope: "env" }),
+        scope({ scope: "types" }),
+        scope({ scope: "migrations", evaluated: false, status: "not_evaluated", reason: "no nimbus.json" }),
+      ],
+    }),
+    OPTS,
+  );
+  assert.match(out, /Structure\s+◐ ok, partly checked · page-collection checks skipped \(needs a build\)/);
+  assert.match(out, /Environment\s+✓ ok\n/);
+  assert.match(out, /Types\s+✓ ok \(\.ts and \.tsx files\)\. \.astro files aren't type-checked here: run `astro check`\./);
+  assert.match(out, /Migrations\s+○ not evaluated — no nimbus\.json/);
+  assert.doesNotMatch(out, /✓ ok ·/);
 });

@@ -25,3 +25,4 @@ apps/www/public/registry/
 # copy-template.mjs. Generated on demand for local dev (`pnpm local`), release
 # verify, and the templates-repo sync. Regenerate via `pnpm build:templates`.
 .generated/
+.tmp/

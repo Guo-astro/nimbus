@@ -233,12 +233,14 @@ export interface ApiReference {
  * An opt-in, explicitly versioned route convention for a collection's generated
  * pages. `resource-action-v1` derives concise `<resource>/<action>` slugs from the OpenAPI
  * path (see the API route convention docs); the `operationId` stays the
- * permanent coordinate. Existing collections omit `routes` and keep today's
- * `operationId`-based URLs unchanged.
+ * permanent coordinate. `resource-action-v2` derives the same operation slugs
+ * and also routes tag pages at lowercase kebab-case URLs (`tags/user-management`).
+ * Existing collections omit `routes` and keep today's `operationId`-based URLs
+ * unchanged.
  */
 export interface ApiRoutePolicy {
   /** The convention name. Its rules are frozen; a change ships as a new name. */
-  convention: "resource-action-v1";
+  convention: "resource-action-v1" | "resource-action-v2";
   /**
    * Base path prefixes stripped (whole-segment, longest-match, case-sensitive)
    * before classification, e.g. `["/v1"]` so `/v1/charges` derives `charges/…`.
@@ -950,6 +952,12 @@ export interface BasePageProps {
    * when absent.
    */
   socialImage?: string;
+  /**
+   * Pixel size of `socialImage`, for `og:image:width`/`height`, when it's an
+   * image Nimbus can't measure (a remote URL, a per-page file). Generated
+   * cards and files in `public/` referenced by the config are sized already.
+   */
+  socialImageSize?: { width: number; height: number };
   /**
    * ISO date for `article:modified_time`. Today this is sourced from
    * frontmatter `lastUpdated`; a future git-based source can populate the

@@ -15,13 +15,13 @@ import {
 } from "node:fs/promises";
 import { rmSync } from "node:fs";
 import { createServer } from "node:http";
-import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { build, dev } from "astro";
 import nimbus from "../src/index.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const adapterRoot = process.env.NIMBUS_TEST_ADAPTER_ROOT;
 const SRC = path.resolve(import.meta.dirname, "../src");
@@ -125,7 +125,7 @@ async function fixture(
   // Astro recognises src/live.config.ts by path; macOS's temp folder sits
   // behind a symlink (/var → /private/var), so use the real path.
   const root = await realpath(
-    await mkdtemp(path.join(os.tmpdir(), "nimbus-assets-adapter-")),
+    await mkdtemp(path.join(TEST_TMP, "nimbus-assets-adapter-")),
   );
   t.diagnostic(`fixture: ${root}`);
   if (!process.env.NIMBUS_TEST_KEEP && removeAtExit)
@@ -412,7 +412,7 @@ test(
       /Static Ping/,
     );
     const relocated = await mkdtemp(
-      path.join(os.tmpdir(), "nimbus-assets-relocated-"),
+      path.join(TEST_TMP, "nimbus-assets-relocated-"),
     );
     t.diagnostic(`relocated: ${relocated}`);
     t.after(() =>

@@ -21,8 +21,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { AstroError } from "astro/errors";
 import { glob } from "astro/loaders";
+import { ApiBuildError } from "./_internal/api/coordinates.js";
 import { unusedExtensions, warnUnusedExtensions } from "./_internal/api/extensions.js";
+import { authorError } from "./_internal/author-error.js";
 import type { Loader } from "astro/loaders";
 import { z } from "astro/zod";
 
@@ -44,6 +47,7 @@ import {
   getRegisteredApiCollections,
   resolveRegisteredApiCollection,
 } from "./_internal/api-collection-registry.js";
+import { isCollectionInBuildSlice } from "./_internal/build-slice.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import { prepareMarkdownLoader } from "./_internal/markdown-loader.js";
 import {
@@ -175,6 +179,10 @@ function wrapNimbusMarkdown<T extends Loader>(
       generation: NIMBUS_MARKDOWN_GENERATION,
       base,
       role,
+      // Partials always load: a page in the slice may render one.
+      empty:
+        role === "page" &&
+        !isCollectionInBuildSlice(context.config.root, context.collection),
       transformRenderMarkdown: false,
       transform: (source, sourceId) =>
         normalizeAuthoredLinks(source, {
@@ -182,6 +190,9 @@ function wrapNimbusMarkdown<T extends Loader>(
           sourceId: sourceId
             ? `${context.collection}:${sourceId}`
             : context.collection,
+          filePath: sourceId
+            ? fileURLToPath(new URL(sourceId, context.config.root))
+            : undefined,
         }),
     });
     await Reflect.apply(
@@ -459,6 +470,29 @@ export function apiCollection(options?: ApiCollectionOptions): {
         (registeredOutput(astroConfig.root) ?? astroConfig.output) !== "static";
       const preparedRoot = preparedMarkdownRootKey(astroConfig.root);
       const preparedSession = getPreparedMarkdownSession(preparedRoot);
+      if (!isCollectionInBuildSlice(astroConfig.root, collection)) {
+        // A partial build that leaves this reference out: no spec is parsed,
+        // and the collection is committed empty so it stays a known page
+        // collection whose routes emit nothing. The store is cleared
+        // unconditionally so no previous build's pages survive.
+        await runPreparedMarkdownTransaction(
+          preparedRoot,
+          `api:${collection}`,
+          async () => {
+            if (getPreparedMarkdownSession(preparedRoot) !== preparedSession) {
+              return;
+            }
+            store.clear();
+            const epoch = beginPreparedMarkdownLoad(
+              preparedRoot,
+              collection,
+              false,
+            );
+            commitPreparedDataCollection(preparedRoot, collection, epoch, []);
+          },
+        );
+        return;
+      }
       const reportedErrors = new WeakSet<Error>();
       const targets = resolveApiFamily({
         collection,
@@ -565,11 +599,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 model,
               );
           } catch (err) {
-            // `ApiBuildError` already formats a pointed diagnostic list; surface
-            // it (plus which spec failed) and fail the build cleanly.
-            logger.error(
-              `Failed to build the API reference for "${target.label}":\n${(err as Error).message}`,
-            );
+            // `ApiBuildError` already formats a pointed diagnostic list; fail
+            // with it (plus which spec failed) as the author's error, no stack.
+            const message = `Failed to build the API reference for "${target.label}":\n${(err as Error).message}`;
+            if (err instanceof ApiBuildError) throw authorError(message);
+            logger.error(message);
             if (err instanceof Error) reportedErrors.add(err);
             throw err;
           }
@@ -644,7 +678,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
               ? `Rename the version, or adjust the \`routes.operations\` override target for the colliding page, `
               : kinds.has("derived")
                 ? `Rename the version, or pin a \`routes.operations\` override for the colliding operation ` +
-                  `(a resource-action-v1 slug is derived from method and path, so renaming the operationId will not change it), `
+                  `(a derived slug comes from method and path, so renaming the operationId will not change it), `
                 : `Rename the version, or the colliding operation/tag, `;
             const message =
               `nimbus-docs api: version "${versionId}" of collection "${collection}" collides with a ` +
@@ -653,10 +687,10 @@ export function apiCollection(options?: ApiCollectionOptions): {
             throw new Error(message);
           }
         }
-        // Cross-version drift (non-gating): one coordinate whose resource-action-v1-derived
-        // slug differs across two or more versions. Divergent wire paths across
-        // versions are legitimate, so this warns and recommends pinning an
-        // override; it never fails the build.
+        // Cross-version drift (non-gating): one coordinate whose derived slug
+        // differs across two or more versions, which may use different
+        // conventions. Divergent wire paths across versions are legitimate, so
+        // this warns and recommends pinning an override; it never fails the build.
         for (const [coordinate, byVersion] of derivedByCoordinate) {
           if (byVersion.size < 2) continue;
           const distinct = new Set(byVersion.values());
@@ -665,7 +699,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
             .map(([version, slug]) => `${version}→"${slug}"`)
             .join(", ");
           logger.warn(
-            `nimbus-docs api: coordinate "${coordinate}" derives different resource-action-v1 slugs across ` +
+            `nimbus-docs api: coordinate "${coordinate}" derives different route slugs across ` +
               `versions of "${collection}" (${detail}). Pin an explicit \`routes.operations\` ` +
               `override in each version to keep the URL stable across versions.`,
           );
@@ -746,8 +780,11 @@ export function apiCollection(options?: ApiCollectionOptions): {
             clearApiModelCache(collection);
             void updateIndex().catch((error: unknown) => {
               if (error instanceof Error && reportedErrors.has(error)) return;
+              // An author error already names the spec that failed.
               logger.error(
-                `Failed to update the API reference for "${collection}":\n${error instanceof Error ? error.message : String(error)}`,
+                error instanceof AstroError
+                  ? error.message
+                  : `Failed to update the API reference for "${collection}":\n${error instanceof Error ? error.message : String(error)}`,
               );
             });
           };

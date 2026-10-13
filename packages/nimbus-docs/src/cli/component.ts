@@ -17,13 +17,18 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
 import * as p from "@clack/prompts";
 
+import { componentsMapBody } from "../_internal/parse-components-registry.js";
+import { stripComments, stripStrings } from "../_internal/parse-object-literal.js";
+import { readTreeFile, resolveTemplateTree, type FetchedTree } from "./_templates.js";
+import { bytesHash, type NimbusJson } from "./nimbus-json.js";
 import { addCommand, detectPackageManager } from "./pm.js";
 import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
+import { starterProjectPath } from "./upgrade.js";
 
 export interface InstallOptions {
   /** User's project root. */
@@ -35,13 +40,23 @@ export interface InstallOptions {
   yes: boolean;
   /** Src dir to write against, relative to `cwd` (default `"src"`; monorepo root from nimbus.json). */
   srcRoot?: string;
+  /** Each installed slug's record in nimbus.json, to tell local edits from upstream changes. */
+  recorded?: ReadonlyMap<string, { hash: string | null; files: readonly string[] }>;
+  /** The starter release the site came from, to tell edits on components it shipped. */
+  starter?: StarterBaseline | null;
 }
 
 export interface InstallReport {
-  /** Individual files actually written. */
+  /** Individual files actually written (new or replaced). */
   written: string[];
-  /** Registry slugs skipped wholesale by the user. */
+  /** Existing files whose content was replaced. */
+  replaced: string[];
+  /** Registry slugs already identical to the registry: nothing written. */
+  upToDate: string[];
+  /** Registry slugs whose differing files were kept. */
   skipped: string[];
+  /** The kept files that differ from the registry. */
+  kept: string[];
   npmDepsInstalled: string[];
 }
 
@@ -51,7 +66,10 @@ export async function installComponents(
 ): Promise<InstallReport> {
   const report: InstallReport = {
     written: [],
+    replaced: [],
+    upToDate: [],
     skipped: [],
+    kept: [],
     npmDepsInstalled: [],
   };
 
@@ -80,36 +98,60 @@ export async function installComponents(
         targetRel: relative(options.cwd, targetAbs),
         content: file.content,
         exists: existsSync(targetAbs),
+        path: file.path,
       };
     });
+    const onDisk = new Map(
+      filePlans.filter((f) => f.exists).map((f) => [f.targetAbs, readFileSync(f.targetAbs, "utf8")] as const),
+    );
 
-    const conflicts = filePlans.filter((f) => f.exists);
+    // Only files that differ from the registry are conflicts; identical ones
+    // are already installed.
+    const conflicts = filePlans.filter((f) => f.exists && onDisk.get(f.targetAbs) !== f.content);
+    const missing = filePlans.filter((f) => !f.exists);
+    if (conflicts.length === 0 && missing.length === 0) {
+      report.upToDate.push(item.name);
+      continue;
+    }
 
     // `--overwrite` replaces every conflicting file across the tree — the
     // explicit upgrade path. Without it we never clobber an owned file.
-    if (item.type === "registry:lib") {
+    // Missing files are always written; declining only keeps existing ones.
+    let keep = false;
+    const edits =
+      conflicts.length > 0 && options.overwrite && !options.yes && process.stdin.isTTY
+        ? await localEdits(options.recorded?.get(item.name), options.cwd, options.srcRoot ?? "src", {
+            files: conflicts.map((f) => posix.join(options.srcRoot ?? "src", f.path)),
+            baseline: options.starter ?? null,
+          })
+        : "none";
+    if (edits !== "none") {
+      // `--overwrite` replaces upstream changes freely, but asks before
+      // discarding edits made since the item was installed.
+      const replace = await p.confirm({
+        message:
+          `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
+          `Replace these files?\n${conflicts.map((f) => `  ${f.targetRel}`).join("\n")}`,
+        initialValue: false,
+      });
+      if (p.isCancel(replace)) {
+        p.cancel("Cancelled.");
+        process.exit(0);
+      }
+      if (!replace) keep = true;
+    } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
       // their copy when present unless an explicit upgrade asks to replace it.
-      if (conflicts.length > 0 && !options.overwrite) {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (conflicts.length > 0 && !options.overwrite) keep = true;
     } else if (conflicts.length > 0 && !options.overwrite) {
-      const total = filePlans.length;
-
       // Non-interactive (or `--yes`): keep the user's files. `--yes` is assent
       // to prompts, not permission to clobber — `--overwrite` does that.
-      if (options.yes || !process.stdin.isTTY) {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (options.yes || !process.stdin.isTTY) keep = true;
 
-      const message =
-        conflicts.length === total
-          ? `${item.name} is already installed (${total} file${total === 1 ? "" : "s"}). Overwrite?`
-          : `${item.name} is partially installed (${conflicts.length} of ${total} file${total === 1 ? "" : "s"} present). Overwrite all?`;
+      const n = conflicts.length;
+      const message = `${item.name}: ${n} file${n === 1 ? " differs" : "s differ"} from the registry. Overwrite ${n === 1 ? "it" : "them"}?`;
 
-      const choice = await p.select({
+      const choice = keep ? "skip" : await p.select({
         message,
         options: [
           { value: "overwrite", label: "Overwrite — replace existing files" },
@@ -123,17 +165,19 @@ export async function installComponents(
         p.cancel("Cancelled.");
         process.exit(0);
       }
-      if (choice === "skip") {
-        report.skipped.push(item.name);
-        continue;
-      }
+      if (choice === "skip") keep = true;
     }
 
-    // Either no conflicts, --yes, or user chose overwrite. Write every file.
-    for (const plan of filePlans) {
+    // Write what's new or different; identical files stay untouched.
+    if (keep) {
+      report.skipped.push(item.name);
+      report.kept.push(...conflicts.map((f) => f.targetRel));
+    }
+    for (const plan of keep ? missing : [...missing, ...conflicts]) {
       mkdirSync(dirname(plan.targetAbs), { recursive: true });
       writeFileSync(plan.targetAbs, plan.content);
       report.written.push(plan.targetRel);
+      if (plan.exists) report.replaced.push(plan.targetRel);
     }
   }
 
@@ -231,6 +275,95 @@ function assertResolvedInsideSrc(
 }
 
 /**
+ * Whether a component was edited since it was installed. With an install
+ * record, whether its files still hash to the recorded source; it compares the
+ * installed set, not the registry's current one, so an upstream file added or
+ * removed isn't mistaken for an edit. Without one, whether `starter.files`
+ * match the starter release the site came from; a file the starter never
+ * shipped doesn't count.
+ */
+export async function localEdits(
+  record: { hash: string | null; files: readonly string[] } | undefined,
+  cwd: string,
+  srcRoot: string,
+  starter?: { files: readonly string[]; baseline: StarterBaseline | null },
+): Promise<"none" | "edited" | "unknown"> {
+  if (record?.hash && record.files.length > 0) {
+    const prefix = `${srcRoot.replace(/\/+$/, "")}/`;
+    const files: { path: string; content: string }[] = [];
+    for (const file of record.files) {
+      if (!file.startsWith(prefix)) return "unknown";
+      const abs = resolve(cwd, file);
+      if (!existsSync(abs)) return "edited";
+      files.push({ path: file.slice(prefix.length), content: readFileSync(abs, "utf8") });
+    }
+    return bytesHash(files) === record.hash ? "none" : "edited";
+  }
+
+  if (!starter?.baseline) return "unknown";
+  let compared = 0;
+  for (const file of starter.files) {
+    let shipped: string | null;
+    try {
+      shipped = await starter.baseline.read(file);
+    } catch {
+      return "unknown"; // offline, or the release can't be fetched
+    }
+    if (shipped === null) continue;
+    if (readFileSync(resolve(cwd, file), "utf8") !== shipped) return "edited";
+    compared++;
+  }
+  return compared > 0 ? "none" : "unknown";
+}
+
+export interface StarterBaseline {
+  /** A project file as the site's starter release shipped it, or null when it
+   * shipped no such file. Rejects when the release can't be fetched. */
+  read: (file: string) => Promise<string | null>;
+  cleanup: () => void;
+}
+
+/**
+ * The starter release a site was scaffolded from: each file at its
+ * `templatesTagByFile` tag (taken with `diff --apply`), else `templatesTag`.
+ * Null without a recorded tag (adopted with `init`, or a preview build). Each
+ * tag is fetched once, on first read; `templateDir` reads a local tree instead.
+ */
+export function starterBaseline(
+  nimbus: NimbusJson | null,
+  srcRoot: string,
+  templateDir?: string,
+  resolveTree = (tag: string) => resolveTemplateTree({ variant: nimbus?.variant, tag, templateDir }),
+): StarterBaseline | null {
+  const recorded = nimbus?.templatesTag;
+  if (!nimbus || !recorded) return null;
+  const trees = new Map<string, Promise<FetchedTree>>();
+  const fetched: FetchedTree[] = [];
+  const tree = (tag: string) => {
+    let pending = trees.get(tag);
+    if (!pending) {
+      pending = resolveTree(tag).then((t) => {
+        fetched.push(t);
+        return t;
+      });
+      trees.set(tag, pending);
+    }
+    return pending;
+  };
+  return {
+    async read(file) {
+      const treeFile = posix.join("src", posix.relative(srcRoot, file));
+      if (treeFile.startsWith("src/..") || starterProjectPath(srcRoot, treeFile) !== file) return null;
+      const { dir } = await tree(nimbus.templatesTagByFile?.[treeFile] ?? recorded);
+      return readTreeFile(dir, treeFile);
+    },
+    cleanup() {
+      for (const t of fetched.splice(0)) t.cleanup();
+    },
+  };
+}
+
+/**
  * Filter out deps already present in `dependencies` or `devDependencies`
  * of the user's package.json. If package.json is missing, returns all.
  */
@@ -294,9 +427,35 @@ function barrelExports(item: ComponentItem): string[] {
  * "register in components.ts" hint. Its registry dependencies are installed
  * too but aren't meant to be registered, so they get no hint.
  */
-export function registerHint(installed: ComponentItem[], slug: string, srcRoot: string): string | null {
+/** components.ts imports the component and puts one of its imports in the `components` map as a value (not only a key). */
+function isRegistered(registry: string, slug: string): boolean {
+  const source = stripComments(registry);
+  const path = `(?:\\./|@/)components/ui/${slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/index(?:\\.ts)?)?`;
+  const clause = source.match(new RegExp(`import\\s+([^;'"]*?)\\s+from\\s*["']${path}["']`))?.[1];
+  if (!clause) return false;
+  const named = clause.match(/\{([^}]*)\}/)?.[1] ?? "";
+  const locals = [
+    ...named.split(",").map((part) => part.trim().split(/\s+as\s+/).pop()!.trim()),
+    clause.replace(/\{[^}]*\}/, "").replace(/,/g, " ").trim().split(/\s+/)[0] ?? "",
+  ].filter((name) => /^[A-Za-z_$][\w$]*$/.test(name));
+  const body = componentsMapBody(registry);
+  const map = body === null ? null : stripStrings(body);
+  // An unreadable map can't prove the import is unused; trust the import.
+  if (map === null) return locals.length > 0;
+  // Identifiers used as values: shorthand entries and the right side of `Key: Value`.
+  const values = new Set(map.match(/(?<![\w$.])[A-Za-z_$][\w$]*(?![\w$])(?!\s*:)/g) ?? []);
+  return locals.some((name) => values.has(name));
+}
+
+export function registerHint(
+  installed: ComponentItem[],
+  slug: string,
+  srcRoot: string,
+  registry = "",
+): string | null {
   const item = installed.find((i) => i.type === "registry:ui" && i.name === slug);
   if (!item) return null;
+  if (isRegistered(registry, item.name)) return null;
   if (item.docs) return item.docs;
   const names = barrelExports(item);
   const snippet = names.length > 0

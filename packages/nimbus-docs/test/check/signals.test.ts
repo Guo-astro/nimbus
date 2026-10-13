@@ -289,6 +289,7 @@ test("pretty headline: Buildable when partial, Couldn't fully verify when unknow
     const out = formatCheckPretty(rb, {
       color: false,
       invocation: "nimbus-docs check --fix",
+      rerun: "nimbus-docs check",
     });
     assert.match(out, /✓ Buildable/);
     assert.doesNotMatch(out, /✓ Ready/);
@@ -297,6 +298,7 @@ test("pretty headline: Buildable when partial, Couldn't fully verify when unknow
     const outU = formatCheckPretty(ru, {
       color: false,
       invocation: "nimbus-docs check --fix",
+      rerun: "nimbus-docs check",
     });
     assert.match(outU, /○ Couldn't fully verify/);
   } finally {
@@ -329,7 +331,7 @@ test("before the first install, check says to install instead of listing each pa
     // Not "typescript isn't installed" or a tsconfig error: it's all one cause.
     const types = r.scopes.find((s) => s.scope === "types");
     assert.match(types?.notes[0]?.reason ?? "", /dependencies aren't installed/);
-    const pretty = formatCheckPretty(r, { color: false, invocation: "pnpm nimbus-docs check --fix" });
+    const pretty = formatCheckPretty(r, { color: false, invocation: "pnpm nimbus-docs check --fix", rerun: "pnpm nimbus-docs check" });
     assert.match(pretty, /Dependencies aren't installed\. Run `pnpm install`, then rerun check\./);
     assert.doesNotMatch(pretty, /→ run `pnpm nimbus-docs check --fix`/);
   } finally {

@@ -6,14 +6,20 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { runningNimbusVersion, selectUpgradeEntries } from "../src/_internal/upgrades.js";
+import { runningNimbusVersion, selectUpgradeEntries, siteScope } from "../src/_internal/upgrades.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = path.join(packageRoot, "test", "fixtures", "partial-resolver-migration");
 
-test("published failure becomes a packed migration and preserves partial-heading behavior", { timeout: 240_000 }, () => {
+// Installs a published release from npm and packs this one: half a minute
+// that only pays off where a packed tarball can regress, so CI runs it on
+// `main` and the release PR. Locally: RUN_PACKED_MIGRATION=true pnpm test.
+const runPackedMigration = process.env.RUN_PACKED_MIGRATION === "true";
+
+test("published failure becomes a packed migration and preserves partial-heading behavior", { skip: !runPackedMigration && "set RUN_PACKED_MIGRATION=true", timeout: 240_000 }, () => {
   const targetVersion = runningNimbusVersion();
-  const expectedReviewIds = selectUpgradeEntries("0.11.0", targetVersion).map(entry => entry.id);
+  // The fixture has no API collection, so API-only reviews are skipped, as in migrate.
+  const expectedReviewIds = selectUpgradeEntries("0.11.0", targetVersion, siteScope(fixture)).map(entry => entry.id);
   assert.ok(expectedReviewIds.includes("partial-resolver-to-markdown"));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-packed-migration-"));
   const previousNpmrc = process.env.NPM_CONFIG_USERCONFIG;

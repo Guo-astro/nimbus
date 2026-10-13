@@ -54,18 +54,28 @@ export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
-This file is optional. Without it, Nimbus doesn't build `llms-full.txt` and `llms.txt` doesn't link to it. On a very large site, consider leaving it out: on the Cloudflare adapter the build warns when the file passes Cloudflare's 25 MiB per-file limit.
+This file is optional. Without it, Nimbus doesn't build `llms-full.txt` and `llms.txt` doesn't link to it.
+
+When the document would be over 25 MiB (Cloudflare's per-file limit), `/llms-full.txt` becomes an index of one `llms-full.txt` per section, such as `/reference/llms-full.txt`. Nimbus serves those files from a route of its own, beside this one, so there's nothing to add. Wrapping this route's `GET` doesn't change the section files.
+
+- A section under the limit holds its pages in full, as `llms-full.txt` does. The index gives its size.
+- A section over the limit is itself an index: it links its sub-folders' files, marked "split further" where they're split again, and links each of its own pages' Markdown. A folder over the limit with no sub-folders is a list of links to its pages, marked "links to its pages".
+- Pages at the top of the site are linked from `/llms-full.txt`, not included in it.
+
+The build log lists the files it wrote. On Cloudflare (the adapter, or a `wrangler` file), the build warns about any agent file over 25 MiB, including a single page's Markdown, because that file would fail the deploy.
 
 ## 4. Add section indexes
 
-Create the route for paths such as `/writing/llms.txt`:
+Create the route for paths such as `/writing/llms.txt` and `/reference/functions/llms.txt`:
 
-```ts title="src/pages/[section]/llms.txt.ts"
+```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
 export const prerender = true;
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
+
+Each section index lists the pages directly in its folder, then links each sub-folder's own `llms.txt` under "Sections", so an agent descends one level at a time. A folder with even one page gets its own index; a folder holding only an `index.mdx` is a page of its parent. A section is named by its index page's `sidebar.group.label`, then its title, then the folder name. A route in a `[section]` folder (from an older starter) still works: it serves one index per top-level section listing every page under it. Rename the folder to `[...section]` to get the nested indexes.
 
 Each `GET` returns `404` for an unknown section. Rendered on request, it returns a `500` without details when an index can't be read, and logs the error. To change what a route serves, see [Override a default](/ai/override-markdown#override-an-llmstxt-index).
 

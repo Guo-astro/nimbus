@@ -255,13 +255,18 @@ function checkAdapterVersions(cwd: string, findings: CheckFinding[]): void {
     const range = installSpec.slice(pkg.length + 1);
     if (!installed || satisfies(installed, range)) continue;
     const { bin, args } = addCommand(detectPackageManager(cwd), [installSpec]);
+    // On Cloudflare 14.2.x only a cold `astro dev` is affected (see
+    // `ADAPTER_RECIPES.cloudflare`); builds work.
+    const risk = pkg === "@astrojs/cloudflare" && satisfies(installed, "~14.2.0")
+      ? "a cold `astro dev` can fail to start. Builds aren't affected"
+      : "`astro dev` and server builds can fail";
     findings.push({
       scope: "env",
       code: "nimbus/adapter-version",
       severity: "warn",
       file: "package.json",
       message:
-        `${pkg}@${installed} is installed, but Nimbus supports ${range}; \`astro dev\` and server builds can fail. ` +
+        `${pkg}@${installed} is installed, but Nimbus supports ${range}; ${risk}. ` +
         `Install a supported version: \`${[bin, ...args].map(quoteForDisplay).join(" ")}\`.`,
       fixable: false,
     });

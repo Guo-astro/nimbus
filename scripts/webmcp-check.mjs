@@ -245,7 +245,8 @@ try {
         section.url.startsWith("https://example.com/docs/"),
         section.url,
       );
-      assert.ok(section.url.includes("#"));
+      assert.ok(!section.url.endsWith("#"), section.url);
+      assert.ok(!/Copy page|View as Markdown/.test(section.excerpt), section.excerpt);
       assert.ok(section.excerpt.length <= 2000);
       assert.ok(!section.excerpt.includes("<mark>"));
     }
@@ -499,7 +500,7 @@ try {
       await page.keyboard.press("Control+k");
       await page.locator("[data-search-input]").fill("Nimbus");
       await page.waitForFunction(() =>
-        document.querySelector("[data-search-results]")?.textContent?.includes("Check your connection and reload"),
+        document.querySelector("[data-search-empty]")?.textContent?.includes("Check your connection and reload"),
       );
       await page.keyboard.press("Escape");
       await page.reload();

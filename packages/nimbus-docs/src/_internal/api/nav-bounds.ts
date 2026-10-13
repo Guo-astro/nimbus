@@ -20,7 +20,7 @@
  * the static projection, request rendering from the prepared nav, and tests.
  */
 
-import type { ApiSidebarMode } from "../../types.js";
+import type { ApiSidebarMode, PrevNext } from "../../types.js";
 import { toDocumentHref } from "../url.js";
 import type { ApiNav, ApiNavItem } from "./api-view-types.js";
 
@@ -54,6 +54,32 @@ export function applyApiSidebarMode(nav: ApiNav, options: BoundApiNavOptions): A
     return { ...rest, deferred: true, children: [], childrenHref: item.href ?? overviewHref };
   };
   return { ...nav, items: bound(nav.items) };
+}
+
+// Every page in sidebar order, computed once per nav tree.
+const pageOrders = new WeakMap<readonly ApiNavItem[], { links: ApiNavItem[]; index: Map<string, number> }>();
+
+/** The pages before and after `coordinate` in sidebar order, whether or not a
+ *  bounded sidebar shows them; undefined when it isn't a page in `items`. One
+ *  nav is one version, so links stay in it. */
+export function apiPrevNext(items: readonly ApiNavItem[], coordinate: string): PrevNext | undefined {
+  let order = pageOrders.get(items);
+  if (!order) {
+    const links: ApiNavItem[] = [];
+    const visit = (item: ApiNavItem) => {
+      if (item.href !== undefined) links.push(item);
+      item.children.forEach(visit);
+    };
+    items.forEach(visit);
+    order = { links, index: new Map(links.map((item, i) => [item.coordinate, i])) };
+    pageOrders.set(items, order);
+  }
+  const at = order.index.get(coordinate);
+  if (at === undefined) return undefined;
+  const link = (item: ApiNavItem | undefined) => (item ? { label: item.label, href: item.href! } : undefined);
+  const prev = link(order.links[at - 1]);
+  const next = link(order.links[at + 1]);
+  return { ...(prev && { prev }), ...(next && { next }) };
 }
 
 /** Every group (an item with children) in `nav`, in tree order. */

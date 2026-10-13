@@ -4,7 +4,8 @@
  * `notes`, a per-scope `scopes[]` (derived status + notes + optional reason),
  * and the flat `findings[]`. The pretty form is a *lookup* from those signals,
  * never a guess from an error count: the scope glyph is `✗ / ○ / ✓` off
- * `status`, notes render as dim trailing text on a `✓` line, and the headline
+ * `status` (`◐` for an evaluated scope with notes, which render as dim
+ * trailing text), and the headline
  * says "Ready" / "Buildable" / "Couldn't fully verify" / "Not buildable"
  * strictly per the glyph rule.
  */
@@ -24,6 +25,8 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
+  /** The plain `check` command, in the site's package manager. */
+  rerun: string;
   /**
    * Fixes `--fix` skipped: prompts for a value need a terminal, installs need
    * `--yes`. `invocation` is then the `check --fix` command to build on.
@@ -37,6 +40,11 @@ const SCOPE_LABELS: Record<CheckScope, string> = {
   migrations: "Migrations",
   authoring: "Authoring",
   types: "Types",
+};
+
+/** What an evaluated scope covers, when that's less than its name suggests. */
+const SCOPE_COVERAGE: Partial<Record<CheckScope, string>> = {
+  types: "(.ts and .tsx files). .astro files aren't type-checked here: run `astro check`.",
 };
 
 export function formatCheckJson(result: CheckResult): string {
@@ -134,11 +142,14 @@ function renderScope(
     return [`  ${label}${paint(COLORS.yellow, "○")} not evaluated — ${paint(COLORS.dim, reason)}`];
   }
 
+  // A scope that ran but skipped some of its checks is only partly checked.
   const trailing = scope.notes.map((n) => noteTrail(n)).join(" · ");
-  const summary = trailing
-    ? `ok · ${paint(COLORS.dim, trailing)}`
-    : "ok";
-  const out = [`  ${label}${paint(COLORS.green, "✓")} ${summary}`];
+  const coverage = SCOPE_COVERAGE[scope.scope];
+  const out = [
+    trailing
+      ? `  ${label}${paint(COLORS.yellow, "◐")} ok, partly checked · ${paint(COLORS.dim, trailing)}`
+      : `  ${label}${paint(COLORS.green, "✓")} ok${coverage ? ` ${paint(COLORS.dim, coverage)}` : ""}`,
+  ];
   for (const f of [...warns, ...infos]) out.push(...renderFinding(f, paint));
   return out;
 }
@@ -196,7 +207,7 @@ function renderHeadline(
   }
 
   if (result.status === "passed") return passedHeadline(result, opts, secs, paint);
-  return partialHeadline(result, secs, paint);
+  return partialHeadline(result, opts, secs, paint);
 }
 
 /**
@@ -207,6 +218,7 @@ function renderHeadline(
  */
 function partialHeadline(
   result: CheckResult,
+  opts: PrettyOptions,
   secs: string,
   paint: (code: string, text: string) => string,
 ): string[] {
@@ -229,7 +241,7 @@ function partialHeadline(
         (s) => s.status === "not_evaluated" || s.notes.some((n) => !n.requiresInput),
       );
       if (buildHelps) {
-        out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
+        out.push(paint(COLORS.dim, `    → run a build, then \`${opts.rerun}\` again`));
       }
     }
     return out;
@@ -244,7 +256,7 @@ function partialHeadline(
   const out =
     passed.length > 0
       ? [paint(COLORS.green, `  ✓ ${passed.join(" + ")} checked in ${secs}s`)]
-      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`nimbus-docs check\` again`)];
+      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`${opts.rerun}\` again`)];
   if (gapLine) out.push(gapLine);
   return out;
 }

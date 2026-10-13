@@ -19,6 +19,7 @@
  */
 
 import type { Coordinate, NodeKind, ParameterLocation } from "./model.js";
+import { normalizeResourceActionSegment } from "./route-policy.js";
 
 /** Reserved top-level namespaces, enforced where collisions are real. */
 export const RESERVED_NAMESPACES = ["errors", "tags", "changelog"] as const;
@@ -296,6 +297,19 @@ export function tagRouteSegment(tag: string): string {
   return cleaned === "" ? `tag-${fnv1a36(tag)}` : cleaned;
 }
 
+/**
+ * The `resource-action-v2` routing segment for a tag: the same lowercase
+ * kebab-case projection operation slugs use, so `User Management` routes at
+ * `tags/user-management` beside `users/list`. A projection that empties out
+ * falls back to the same deterministic hash as `tagRouteSegment`. The result
+ * always passes the route-policy segment grammar; two tags that collapse to one
+ * segment are caught by `registerSlug` as a pointed build error.
+ */
+export function policyTagRouteSegment(tag: string): string {
+  const cleaned = normalizeResourceActionSegment(tag);
+  return cleaned === "" ? `tag-${fnv1a36(tag)}` : cleaned;
+}
+
 /** True when a top-level body property name reads like a coordinate prefix. */
 export function isShadowingBodyProperty(name: string): boolean {
   return SHADOWING_NAMES.has(name);
@@ -531,7 +545,7 @@ export class CoordinateRegistry {
         ? `Adjust the \`routes.operations\` override target for one of them so their URLs stay distinct.`
         : kinds.includes("derived")
           ? `Pin an explicit \`routes.operations\` override for one of them so their URLs stay distinct — ` +
-            `a resource-action-v1 slug is derived from the operation's method and path, so renaming the operationId will not change it.`
+            `a derived slug comes from the operation's method and path, so renaming the operationId will not change it.`
           : `Rename one operation, schema, tag, or webhook so their URLs stay distinct.`;
       this.error(
         `pages "${prior}"${at(priorReg)}${via(prior)} and "${coordinate}"${at(currReg)}${via(coordinate)} both map to the ` +

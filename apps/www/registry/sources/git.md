@@ -99,13 +99,15 @@ copy: `api: [{ collection: "api", spec: { source: "sdk", path: "docs/openapi.jso
 
 | Host | `editPattern` | Private repository in CI |
 |---|---|---|
-| GitHub | `https://github.com/<owner>/<repo>/edit/{ref}/{path}` | An Actions token through git's `extraHeader` (below), with a `contents: read` token for the source repository |
-| GitLab | `https://gitlab.com/<group>/<project>/-/edit/{ref}/{path}` | `CI_JOB_TOKEN` through `extraHeader`, after allowing the docs project in the source project's job token allowlist |
-| Bitbucket | `https://bitbucket.org/<workspace>/<repo>/src/{ref}/{path}?mode=edit` | An app password (or access token) with repository read, through `extraHeader` |
-| Any other host | the host's own edit URL with `{path}` and `{ref}`, or leave `editPattern` out | git's credential helper, or `extraHeader` |
+| GitHub | `https://github.com/<owner>/<repo>/edit/main/{path}` | An Actions token through git's `extraHeader` (below), with a `contents: read` token for the source repository |
+| GitLab | `https://gitlab.com/<group>/<project>/-/edit/main/{path}` | `CI_JOB_TOKEN` through `extraHeader`, after allowing the docs project in the source project's job token allowlist |
+| Bitbucket | `https://bitbucket.org/<workspace>/<repo>/src/main/{path}?mode=edit` | An app password (or access token) with repository read, through `extraHeader` |
+| Any other host | the host's own edit URL with `{path}`, or leave `editPattern` out | git's credential helper, or `extraHeader` |
 
-`{path}` is the file's path inside the repository and `{ref}` the configured
-ref. Without `editPattern`, pages from the source have no edit link. Pages
+`{path}` is the file's path inside the repository. Use the branch the pages
+are edited on (`main` above): an edit URL with a pinned commit opens a
+read-only view. `{ref}` is the configured ref, for a source that follows a
+branch. Without `editPattern`, pages from the source have no edit link. Pages
 from a source have no last-updated date unless their frontmatter sets
 `lastUpdated`.
 

@@ -1,0 +1,68 @@
+---
+title: Content from Notion
+description: Build a collection from a Notion database, with drafts, slugs and ordering from its properties.
+sidebar:
+  order: 9
+---
+
+A Notion database can be a page collection: each row is a page, its blocks the page body. Notion pages are Markdown: they get routes, the sidebar, search, Markdown versions, `llms.txt`, citations and links like any page, but no MDX components, no callouts, no edit link and no last-updated date.
+
+## Add it
+
+```sh
+npx nimbus-docs add source notion --print | claude
+```
+
+This installs `src/loaders/notion.ts`, which is yours to edit, and `@notionhq/client`, then hands your agent the guide. By hand, the result is:
+
+```ts title="src/content.config.ts"
+import { defineCollection } from "astro:content";
+import { docsCollection, withNimbusMarkdown } from "@cloudflare/nimbus-docs/content";
+import { notionLoader } from "./loaders/notion";
+
+export const collections = {
+  docs: defineCollection(docsCollection()),
+  handbook: defineCollection({
+    loader: withNimbusMarkdown(notionLoader({ database: "8f2c1e0a9b3d4e5f6a7b8c9d0e1f2a3b" })),
+    schema: docsCollection().schema,
+  }),
+};
+```
+
+plus a route file and a sidebar entry, as for any collection (`nimbus-docs add new-collection` writes both).
+
+## Token and database
+
+Create an internal connection at [notion.so/profile/integrations](https://www.notion.so/profile/integrations) with read access, share the database with it from the database's "Connections" menu, and put the token in `NOTION_TOKEN`: `.env` locally, the build's environment in CI. A build without it fails naming the variable.
+
+The database id is the 32-character hex string in the database's URL. A database holds one or more data sources; the loader uses the only one, and a database with several fails listing them, so pick one with `notionLoader({ dataSource: "<id>" })`.
+
+## Properties
+
+| Property (default name) | Type | Becomes |
+| --- | --- | --- |
+| the title | title | `title` |
+| `Description` | rich text | `description` |
+| `Slug` | rich text | the page's URL; without it, the slugified title |
+| `Order` | number | `sidebar.order` |
+| `Status` | status, select or checkbox | whether the row publishes |
+
+Rename them with `notionLoader({ database, properties: { slug: "URL", status: "State" } })`. A property you named that is missing or of the wrong type fails the build, listing the data source's properties.
+
+**Publishing fails closed.** With no `Status` property and nothing configured, every row publishes, and one log line says so. With one, a row publishes only when its value is `Published` (change it with `publishedValue`), or when its checkbox is checked. Every other row is a draft, exactly like a local draft: shown in `astro dev` with the Draft badge, absent from `astro build`.
+
+Two rows with one slug fail the build naming both Notion page ids, drafts included, before anything is written. A row with no slug and an empty title fails naming its page id. Without a `Slug`, renaming a page changes its URL.
+
+## What renders
+
+Headings, paragraphs, lists, to-dos, quotes, code with its language, dividers, tables, images and links become their Markdown. A Notion heading 1 is a `##`, since the page title is the page's `#`. A callout becomes a quote with a bold label. Any other block keeps its plain text, and the build log names its type. Text is escaped, so a `{`, `<` or `*` an editor typed renders as typed.
+
+Images keep Notion's URL. Files uploaded to Notion get URLs that expire after an hour, so images that must last belong on a host of their own.
+
+## Syncing
+
+Each build reads the whole database and writes nothing until it has every row and block: a failed request after retries fails the build, and a dev server keeps its last good content. The loader retries rate limits and server errors; a build that still fails can be rerun.
+
+The site doesn't change when Notion does. Rebuild on a schedule, or point a Notion webhook, through an automation, at your deploy hook.
+
+`nimbus-docs lint` and `check` read files on disk, so they name a Notion collection as not inspected.

@@ -4,7 +4,6 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -148,7 +147,6 @@ test("MDX from a git source renders like a local glob, fails component validatio
       build({ ...site.configure({ sources: { sdk } }), image: { service: { entrypoint: "astro/assets/services/noop" } } }),
       /Nope/,
     );
-    void readFileSync;
   } finally {
     await site.remove();
   }

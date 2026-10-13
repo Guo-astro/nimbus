@@ -32,7 +32,7 @@ export interface RegistryFile {
 
 export interface ComponentItem {
   name: string;
-  type: "registry:ui" | "registry:lib";
+  type: "registry:ui" | "registry:lib" | "registry:source";
   title: string;
   description: string;
   /** Registry release this item shipped in (provenance; drift is decided by hash). Optional. */
@@ -70,7 +70,7 @@ const registryFileSchema = z.object({
 
 const componentItemSchema = z.object({
   name: z.string().min(1),
-  type: z.enum(["registry:ui", "registry:lib"]),
+  type: z.enum(["registry:ui", "registry:lib", "registry:source"]),
   title: z.string(),
   description: z.string(),
   version: z.string().optional(),
@@ -262,7 +262,20 @@ export async function fetchComponent(slug: string): Promise<ComponentItem> {
 }
 
 export async function fetchFeatureMarkdown(slug: string): Promise<string> {
-  const url = `${getBaseUrl()}/features/${slug}.md`;
+  return fetchGuideMarkdown(`features/${slug}.md`, slug);
+}
+
+/**
+ * A content source's guide (`add source <name>`). The name is a listed
+ * registry name, never a URL: the URL form fetches the fixed `from-url` guide.
+ */
+export async function fetchSourceMarkdown(name: string): Promise<string> {
+  if (!SLUG_RE.test(name)) throw new Error(`"${name}" is not a valid source name.`);
+  return fetchGuideMarkdown(`sources/${name}.md`, name);
+}
+
+async function fetchGuideMarkdown(relative: string, slug: string): Promise<string> {
+  const url = `${getBaseUrl()}/${relative}`;
   const res = await httpGet(url, "text/markdown");
 
   // Features pipe straight into a coding agent; markdown can't be schema-

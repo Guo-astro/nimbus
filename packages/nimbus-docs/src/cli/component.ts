@@ -139,9 +139,11 @@ export async function installComponents(
         process.exit(0);
       }
       if (!replace) keep = true;
-    } else if (item.type === "registry:lib") {
-      // Utilities (e.g. cn) are transitive deps users often customize — keep
-      // their copy when present unless an explicit upgrade asks to replace it.
+    } else if (item.type === "registry:lib" || item.type === "registry:source") {
+      // Utilities (e.g. cn) and source loaders are files users customize —
+      // keep their copy when present unless an explicit upgrade asks to
+      // replace it. Never a prompt: `add source <name> --print | <agent>`
+      // must not stall on one.
       if (conflicts.length > 0 && !options.overwrite) keep = true;
     } else if (conflicts.length > 0 && !options.overwrite) {
       // Non-interactive (or `--yes`): keep the user's files. `--yes` is assent

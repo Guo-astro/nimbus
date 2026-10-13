@@ -30,6 +30,8 @@ export interface ParitySiteOptions {
   memory?: MemoryPage[];
   /** Extra collections, as `name: expression` lines of the collections object. */
   extraCollections?: string[];
+  /** Extra import lines for `content.config.ts`. */
+  contentImports?: string[];
   /** Nimbus integration options (callouts, MDX validation). */
   integration?: Record<string, unknown>;
   /** Nimbus config `sources`. */
@@ -91,6 +93,7 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
     [
       `import { defineCollection } from "astro:content";`,
       `import { glob } from "astro/loaders";`,
+      ...(options.contentImports ?? []),
       `import { apiCollection, docsCollection, withNimbusMarkdown } from ${src("content.ts")};`,
       `const MEMORY = ${JSON.stringify(options.memory ?? [])};`,
       `const memoryLoader = {`,

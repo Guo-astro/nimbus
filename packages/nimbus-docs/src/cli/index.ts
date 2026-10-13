@@ -33,11 +33,18 @@ import {
   cloudflareRequestRenderingAgentRecipe,
   installAdapter,
 } from "./adapter.js";
-import { BUNDLED_INDEX } from "./_registry.generated.js";
+import { BUNDLED_INDEX, type RegistryEntryType } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
 import { installComponents, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
-import { installFeature, shouldUseAgentHandoff } from "./feature.js";
+import { humanInstructions, installFeature, shouldUseAgentHandoff } from "./feature.js";
+import {
+  formatSources,
+  isSourceUrl,
+  resolveSource,
+  sourceGuide,
+  unknownSourceMessage,
+} from "./source.js";
 import { initCommand } from "./init.js";
 import { lintCommand, lintHelp } from "./lint.js";
 import { migrateCommand } from "./migrate.js";
@@ -60,6 +67,7 @@ import {
   registrySource,
   registryVersionWarning,
   resolveComponentTree,
+  fetchSourceMarkdown,
 } from "./resolver.js";
 import { unknownFlagError } from "./flags.js";
 import { progress } from "./progress.js";
@@ -108,9 +116,12 @@ interface CliArgs {
 
 const HELP = `
   Commands:
-    list [--type ui|lib|feature]   List available registry items
+    list [--type ui|lib|feature|source]
+                                   List available registry items
     add                            Same as \`list\`
     add <slug>                     Install a component or hand off a feature
+    add source <name|url>          Add a content source: git (github, gitlab, bitbucket), notion,
+                                   or a provider's docs URL; \`add source\` alone lists them
     add server-output --adapter <vercel|node|netlify|cloudflare>
                                    Opt into server output: flip \`output\` to "server" + wire the adapter
     add adapter-<vercel|node|netlify|cloudflare>
@@ -132,11 +143,12 @@ const HELP = `
     --to <templates-vX.Y.Z>        \`outdated\`/\`diff\`: compare against a specific tag (default latest)
     --template-dir <path>          \`outdated\`/\`diff\`/\`add\`: compare against a local checkout (offline)
     --print                        \`add\`/\`migrate\`: print an agent task without writing
+                                   (\`add source\`: install its files, then print the guide)
     --force                        \`init\`: rebuild an existing nimbus.json
     --root <dir>                   \`init\`: src dir to scan (monorepo; default src)
     --env, --structure, --lint, --types, --migrations
                                    \`check\`: run only the named categories (default: all)
-    --type <ui|lib|feature>        \`list\`: filter by type
+    --type <ui|lib|feature|source> \`list\`: filter by type
     --format <json>                \`lint\`/\`check\`: machine-readable output
     --json                         \`check\`/\`migrate\`/\`outdated\`: machine-readable output
     --cwd <dir>                    \`migrate\`: target a nested Astro project
@@ -163,6 +175,7 @@ const HELP = `
     nimbus-docs init                                    # adopt an existing repo — writes nimbus.json
     nimbus-docs add 404-page --print | claude           # explicit pipe to claude
     nimbus-docs add adapter-cloudflare --print | claude # finish project-specific rendering config
+    nimbus-docs add source github --print | claude      # pages from another GitHub repository
     nimbus-docs lint                                    # pretty output, exit non-zero on error
     nimbus-docs lint --format=json                      # agent-readable diagnostics
 
@@ -233,7 +246,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const [command, slug] = args._;
+  const [command, slug, ...rest] = args._;
 
   const flagError = unknownFlagError(command, process.argv.slice(2));
   if (flagError) {
@@ -313,6 +326,22 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (command === "add" && slug === "source") {
+    await addSourceCommand(rest, {
+      yes: args.yes,
+      print: args.print,
+      overwrite: args.overwrite,
+      adapter: args.adapter,
+      templateDir: args["template-dir"],
+    });
+    return;
+  }
+
+  if (command === "add" && rest.length > 0) {
+    p.log.error(`\`add\` takes one name; got ${[slug, ...rest].map((name) => `\`${name}\``).join(", ")}.`);
+    process.exit(1);
+  }
+
   if (command === "add") {
     await addCommand(slug!, {
       yes: args.yes,
@@ -333,10 +362,11 @@ async function main(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function listCommand(typeFilter: string | undefined): void {
-  const typeMap: Record<string, "registry:ui" | "registry:lib" | "registry:feature"> = {
+  const typeMap: Record<string, RegistryEntryType> = {
     ui: "registry:ui",
     lib: "registry:lib",
     feature: "registry:feature",
+    source: "registry:source",
   };
 
   const filter =
@@ -346,7 +376,7 @@ function listCommand(typeFilter: string | undefined): void {
 
   if (typeFilter && !(typeFilter in typeMap)) {
     p.log.error(
-      `Unknown --type "${typeFilter}". Valid: ui, lib, feature.`,
+      `Unknown --type "${typeFilter}". Valid: ui, lib, feature, source.`,
     );
     process.exit(1);
   }
@@ -362,6 +392,7 @@ function listCommand(typeFilter: string | undefined): void {
     "registry:ui": [],
     "registry:lib": [],
     "registry:feature": [],
+    "registry:source": [],
   };
   for (const item of items) grouped[item.type]!.push(item);
 
@@ -369,6 +400,7 @@ function listCommand(typeFilter: string | undefined): void {
     "registry:ui": "Components",
     "registry:lib": "Utilities",
     "registry:feature": "Features",
+    "registry:source": "Sources",
   };
   const widths = items.reduce(
     (m, i) => Math.max(m, i.name.length),
@@ -380,6 +412,11 @@ function listCommand(typeFilter: string | undefined): void {
     const group = grouped[type];
     if (!group || group.length === 0) continue;
     process.stdout.write(`  ${label}\n`);
+    if (type === "registry:source") {
+      for (const line of formatSources(widths)) process.stdout.write(`${line}\n`);
+      process.stdout.write("\n");
+      continue;
+    }
     for (const item of group) {
       process.stdout.write(
         `    ${item.name.padEnd(widths + 2)}${item.description}\n`,
@@ -387,10 +424,17 @@ function listCommand(typeFilter: string | undefined): void {
     }
     process.stdout.write("\n");
   }
-  process.stdout.write(
-    `  Install:  ${invocation("add <name>")}     ·  ${items.length} item${items.length === 1 ? "" : "s"}` +
-      `  ·  registry ${BUNDLED_INDEX.registryVersion}\n\n`,
-  );
+  const onlySources = items.every((item) => item.type === "registry:source");
+  if (!onlySources) {
+    process.stdout.write(
+      `  Install:  ${invocation("add <name>")}     ·  ${items.length} item${items.length === 1 ? "" : "s"}` +
+        `  ·  registry ${BUNDLED_INDEX.registryVersion}\n`,
+    );
+  }
+  if (grouped["registry:source"]!.length > 0) {
+    process.stdout.write(`  Sources:  ${invocation("add source <name|url>")}\n`);
+  }
+  process.stdout.write("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -431,6 +475,12 @@ async function addCommand(
     return;
   }
 
+  // A source reached without its kind: the grammar is `add source <name>`.
+  if (resolveSource(slug)) {
+    p.log.error(`\`${slug}\` is a content source. Did you mean \`${invocation(`add source ${slug}`)}\`?`);
+    process.exit(1);
+  }
+
   const entry = getIndexEntry(slug);
   if (!entry) {
     p.log.error(
@@ -449,6 +499,87 @@ async function addCommand(
     process.exit(1);
   }
 
+  await installComponentSlug(slug, entry, flags);
+}
+
+// ---------------------------------------------------------------------------
+// `nimbus-docs add source <name|url>`
+// ---------------------------------------------------------------------------
+
+async function addSourceCommand(
+  positionals: string[],
+  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
+): Promise<void> {
+  const [target, ...extra] = positionals.map(String);
+  if (!target) {
+    listCommand("source");
+    return;
+  }
+  if (extra.length > 0) {
+    p.log.error(`\`add source\` takes one name or URL; got ${positionals.map((name) => `\`${name}\``).join(", ")}.`);
+    process.exit(1);
+  }
+  if (flags.adapter !== undefined) {
+    p.log.error("`--adapter` doesn't apply to `add source`.");
+    process.exit(1);
+  }
+
+  let guide: string;
+  const label = `source ${target}`;
+  if (isSourceUrl(target)) {
+    if (flags.overwrite) {
+      p.log.error("`--overwrite` applies only to a source that installs files; a URL installs nothing.");
+      process.exit(1);
+    }
+    // The URL is the agent's research starting point. It is never part of a
+    // registry request: the generic guide is a fixed file.
+    guide = sourceGuide(await fetchSourceMarkdown("from-url"), `Research start: ${target}`);
+  } else {
+    const source = resolveSource(target);
+    if (!source) {
+      p.log.error(unknownSourceMessage(target));
+      process.exit(1);
+    }
+    if (flags.overwrite && !source.entry.installs) {
+      p.log.error(`\`--overwrite\` applies only to a source that installs files; \`${target}\` installs nothing.`);
+      process.exit(1);
+    }
+    if (source.entry.installs) {
+      // Every install line goes to stderr: stdout carries the guide alone, so
+      // \`add source ${target} --print | <agent>\` pipes nothing else.
+      const write = process.stdout.write;
+      process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write;
+      try {
+        await installComponentSlug(source.entry.name, source.entry, {
+          yes: flags.yes,
+          overwrite: flags.overwrite,
+          templateDir: flags.templateDir,
+          banner: label,
+        });
+      } finally {
+        process.stdout.write = write;
+      }
+    }
+    guide = sourceGuide(await fetchSourceMarkdown(source.entry.name), source.host ? `Host: ${source.host}` : undefined);
+  }
+
+  if (await shouldUseAgentHandoff(flags.print)) {
+    process.stdout.write(guide);
+    return;
+  }
+  process.stderr.write(humanInstructions(invocation(`add ${label}`)));
+}
+
+/**
+ * Install a component, utility, or a source's files: resolve the tree,
+ * write files (keeping changed ones unless `--overwrite`), install npm
+ * dependencies, record the install in nimbus.json.
+ */
+async function installComponentSlug(
+  slug: string,
+  entry: { title: string; description: string },
+  flags: { yes: boolean; overwrite: boolean; templateDir?: string; banner?: string },
+): Promise<void> {
   // Component / utility path. Read the record up front so a corrupt one (or a
   // bad install.root) fails before any network or writes.
   const cwd = process.cwd();
@@ -457,7 +588,7 @@ async function addCommand(
 
   // Banner label echoing the action, not a runnable hint — the bare command
   // name reads cleaner here than a full `pnpm dlx …` invocation.
-  p.intro(`nimbus-docs add ${slug}`);
+  p.intro(`nimbus-docs add ${flags.banner ?? slug}`);
   p.log.info(`${entry.title} — ${entry.description}`);
 
   const spinner = progress();

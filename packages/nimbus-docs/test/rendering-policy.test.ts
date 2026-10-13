@@ -1041,7 +1041,7 @@ test("production request rendering requires an adapter", async (t) => {
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /rendering mode "request" needs a server adapter.*add adapter-cloudflare/,
+    /rendering mode "request" needs a server adapter.*add adapter-<host>`, where <host> is cloudflare, netlify, node or vercel/,
   );
 
   const adapterlessBuild = await setupIntegration(
@@ -1135,9 +1135,9 @@ test("unbundled API adapter errors recommend only supported adapters", async (t)
         assert.match(error.message, /api bundle: false/);
         assert.match(
           error.message,
-          /add adapter-cloudflare.*or add adapter-node/,
+          /add adapter-<host>`, where <host> is cloudflare or node\./,
         );
-        assert.doesNotMatch(error.message, /adapter-vercel|adapter-netlify/);
+        assert.doesNotMatch(error.message, /vercel|netlify/);
         return true;
       },
     );

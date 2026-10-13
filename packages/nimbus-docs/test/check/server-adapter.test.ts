@@ -41,7 +41,7 @@ test("server features fail preflight without a configured adapter", async () => 
   ]) {
     const [finding] = missing(await check(config));
     assert.equal(finding?.severity, "error", config);
-    assert.match(finding!.message, /pnpm dlx @cloudflare\/nimbus-docs add adapter-cloudflare/);
+    assert.match(finding!.message, /pnpm dlx @cloudflare\/nimbus-docs add adapter-<host>`, where <host> is /);
   }
 });
 
@@ -51,7 +51,7 @@ test("several server features report the missing adapter once, with the strictes
   );
   assert.equal(missing(report).length, 1);
   assert.match(missing(report)[0]!.message, /api bundle: false needs the Cloudflare or Node adapter/);
-  assert.doesNotMatch(missing(report)[0]!.message, /adapter-vercel|adapter-netlify/);
+  assert.doesNotMatch(missing(report)[0]!.message, /vercel|netlify/);
 });
 
 test("MCP with request rendering names request rendering, without offering to turn MCP off", async () => {
@@ -59,7 +59,7 @@ test("MCP with request rendering names request rendering, without offering to tu
   assert.deepEqual(rest, []);
   assert.match(finding!.message, /rendering mode "request" needs a server adapter/);
   assert.doesNotMatch(finding!.message, /agents\.mcp/);
-  assert.match(missing(await check("agents: { mcp: true }"))[0]!.message, /or set agents\.mcp to false/);
+  assert.match(missing(await check("agents: { mcp: true }"))[0]!.message, /Or set agents\.mcp to false\./);
 });
 
 test("an adapter is enough: Astro builds server output for on-demand routes", async () => {

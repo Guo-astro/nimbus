@@ -21,13 +21,13 @@ export function serverAdapterFeature(features: {
 
 /** Shared by the build gate and `check`. */
 export function serverAdapterMessage(feature: ServerFeature, root: string): string {
-  const add = `Run \`${invocation("add adapter-cloudflare", root)}\``;
+  const add = (hosts: string) => `Add the one for your host: run \`${invocation("add adapter-<host>", root)}\`, where <host> is ${hosts}.`;
   switch (feature) {
     case "MCP":
-      return `nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. ${add} (or add adapter-node, adapter-vercel or adapter-netlify), or set agents.mcp to false.`;
+      return `nimbus-docs: agents.mcp serves /mcp from the site's own server, which needs a server adapter. ${add("cloudflare, netlify, node or vercel")} Or set agents.mcp to false.`;
     case "request rendering":
-      return `nimbus-docs: rendering mode "request" needs a server adapter for production builds. ${add} (or add adapter-node, adapter-vercel or adapter-netlify).`;
+      return `nimbus-docs: rendering mode "request" needs a server adapter for production builds. ${add("cloudflare, netlify, node or vercel")}`;
     case "api bundle: false":
-      return `nimbus-docs: api bundle: false needs the Cloudflare or Node adapter. ${add} (or add adapter-node).`;
+      return `nimbus-docs: api bundle: false needs the Cloudflare or Node adapter. ${add("cloudflare or node")}`;
   }
 }

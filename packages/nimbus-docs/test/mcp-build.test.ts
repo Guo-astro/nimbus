@@ -348,7 +348,7 @@ test("a site without agents.mcp has no server, no card, no llms.txt line and no 
 test("a static build with agents.mcp is an author error that names the adapter", async () => {
   await assert.rejects(
     () => buildSite({ host: "static.test", adapter: false }),
-    /rendering mode "request" needs a server adapter[\s\S]*add adapter-cloudflare/,
+    /rendering mode "request" needs a server adapter[\s\S]*add adapter-<host>/,
   );
 });
 

@@ -14,11 +14,11 @@ The server reads what the build already publishes: the pages and Markdown versio
 
 ## Turn it on
 
-The server needs a server adapter, because `/mcp` answers requests at run time. If the site is static, install one first; the Cloudflare adapter is the one Nimbus verifies:
+The server needs a server adapter, because `/mcp` answers requests at run time. If the site is static, add the adapter for the host you deploy to: `cloudflare`, `netlify`, `node` or `vercel`. For a Node server:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-node" />
 
-On a site with no `rendering` policy, this installer also sets `rendering: { default: "request" }`, so docs and API pages render on request. The server doesn't need that: to keep them prerendered, set `rendering: { default: "build" }`. The server itself only needs `/mcp` and its card on request.
+On a site with no `rendering` policy, `add adapter-cloudflare` also sets `rendering: { default: "request" }`, so docs and API pages render on request. The server doesn't need that: to keep them prerendered, set `rendering: { default: "build" }`. The server itself only needs `/mcp` and its card on request.
 
 Install the MCP server SDK in the project. It is an optional dependency of Nimbus: sites without the server never install it.
 
@@ -42,7 +42,7 @@ A build with `agents.mcp` and no server adapter, or without the SDK installed, s
 
 <PackageManagers pkg="@modelcontextprotocol/inspector" type="dlx" args="--cli http://localhost:4321/mcp --transport http --method tools/list" />
 
-To try the production build, run it with the adapter's own preview, such as `wrangler dev` on Cloudflare. The URLs the server returns, and the one the Copy MCP URL action copies, are built from `site`, not from the address you requested; point the client at the local address yourself.
+To try the production build, run it with the adapter's own preview, such as `astro preview` with the Node adapter or `wrangler dev` with the Cloudflare adapter. The URLs the server returns, and the one the Copy MCP URL action copies, are built from `site`, not from the address you requested; point the client at the local address yourself.
 
 ## What the site serves
 
@@ -120,10 +120,10 @@ The guard keeps the action's script off sites without the server.
 
 The server is read-only and public: it serves what the site already publishes, with `Access-Control-Allow-Origin: *` so browser-based clients can connect. A request with a malformed or `null` `Origin` header is refused with `403`, and a body over 64 KB with `413`. There is no authentication; private documentation stays behind your own access control, as with the rest of the site.
 
-Rate limiting is the host's job. On Cloudflare, add a rate limiting rule for the `/mcp` path in the zone's WAF; the server itself does none.
+Rate limiting is the host's job: add a rule for the `/mcp` path in its firewall, or in a proxy in front of the site. The server itself does none.
 
 ## Adapters
 
-Nimbus tests the server on the Cloudflare adapter, where it reads the published Markdown through the site's asset binding. The Node adapter reads the same files from the deployed `dist/client` directory. Other adapters work when the server can read `dist/client`, or fetch it from the site's own URL; verify a `tools/call` on the deployed site. A preview deployment behind access protection, such as Vercel's, answers that fetch with `401`, and the tools report `unavailable`.
+Nimbus tests the server on the Node and Cloudflare adapters. On Node it reads the published Markdown from the deployed `dist/client` directory; on Cloudflare, through the site's asset binding. Other adapters work when the server can read `dist/client`, or fetch it from the site's own URL; verify a `tools/call` on the deployed site. A preview deployment behind access protection, such as Vercel's, answers that fetch with `401`, and the tools report `unavailable`.
 
-With the server on, the Worker or function carries the MCP SDK, about 140 KB gzipped, loaded the first time `/mcp` is called.
+With the server on, the server bundle carries the MCP SDK, about 140 KB gzipped, loaded the first time `/mcp` is called.

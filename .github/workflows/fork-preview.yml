@@ -1,0 +1,177 @@
+name: Fork preview
+
+# A maintainer's `pr preview` label on a fork PR deploys that PR's www to a
+# Worker Preview named `fork-<PR#>`, the fork equivalent of the Workers Builds
+# Preview a same-repo branch gets. The Preview release workflow then publishes
+# packages against it.
+#
+# `pull_request_target` runs this file from main, so a fork can't change it.
+# Fork code is built in `build`, which holds nothing worth taking. Only the
+# built files reach `deploy`, which holds the Cloudflare token, runs no PR code,
+# and writes the SHA marker and `noindex` itself.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  unlabel:
+    name: Remove the trigger label
+    if: >-
+      github.repository == 'cloudflare/nimbus' &&
+      github.event.label.name == 'pr preview' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - run: gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+
+  build:
+    name: Build fork www
+    if: >-
+      github.repository == 'cloudflare/nimbus' &&
+      github.event.label.name == 'pr preview' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: fork-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      # The one deliberate checkout of fork code under pull_request_target.
+      # GitHub advises against running it; this job may because it has no
+      # secrets or environment, a read-only token that isn't persisted, and
+      # read-only caches, and `deploy` treats its output as untrusted data.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @nimbus/www run predeploy
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fork-www-dist
+          path: apps/www/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 1
+
+  deploy:
+    name: Deploy fork www Preview
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: fork-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    environment: cloudflare
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install Wrangler
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: fork-www-dist
+          path: ${{ runner.temp }}/fork-www-dist
+
+      - name: Stage the fork's files
+        run: |
+          if find "$SRC" -name '_worker.js' -print -quit | grep -q .; then
+            echo '::error::The fork build emitted _worker.js. Fork Previews serve static assets only.'
+            exit 1
+          fi
+          rm -rf apps/www/dist
+          cp -R "$SRC" apps/www/dist
+          # Redirects run before headers and assets, so a fork's rules could
+          # serve other content at the SHA marker; main's rules replace them.
+          rm -f apps/www/dist/_redirects
+          if [ -f apps/www/public/_redirects ]; then
+            cp apps/www/public/_redirects apps/www/dist/_redirects
+          fi
+          find apps/www/dist -name '.assetsignore' -delete
+          printf '%s\n' "$SHA" > apps/www/dist/_nimbus-preview-sha.txt
+          printf '/*\n  X-Robots-Tag: noindex\n' > apps/www/dist/_headers
+        env:
+          SRC: ${{ runner.temp }}/fork-www-dist
+          SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Deploy the Preview
+        id: preview
+        working-directory: apps/www
+        run: |
+          set -o pipefail
+          if [ -z "$WWW_PREVIEW_HOST" ]; then
+            echo '::error::Set the WWW_PREVIEW_HOST repository variable (nimbus-docs.<subdomain>.workers.dev).'
+            exit 1
+          fi
+          out=$(env -u GITHUB_SHA COMMIT_SHA="$SHA" pnpm exec wrangler preview \
+            --name "fork-$PR" --tag "${SHA:0:7}" --message "Fork PR #$PR at $SHA" \
+            --ignore-base-config --json)
+          url=$(sed -n '/^{/,$p' <<< "$out" | jq -er '.preview.urls[0]')
+          expected="https://fork-$PR-$WWW_PREVIEW_HOST"
+          if [ "$url" != "$expected" ]; then
+            echo "::error::Wrangler reported $url, expected $expected. Check WWW_PREVIEW_HOST."
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WWW_PREVIEW_HOST: ${{ vars.WWW_PREVIEW_HOST }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+
+      # One comment per PR, updated on each run. The Preview release workflow
+      # reads the URL from it, trusting only github-actions[bot].
+      - name: Comment the Preview URL
+        run: |
+          body=$(printf '%s\n\nPreview URL: %s\nCommit: %s\n\nThis Preview serves unreviewed contributor code from a fork. Its own _headers and _redirects files are not deployed.\n' \
+            "$MARKER" "$URL" "$SHA")
+          id=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER\"))) | .id" | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          URL: ${{ steps.preview.outputs.url }}
+          MARKER: "<!-- nimbus-fork-preview -->"

@@ -1244,24 +1244,27 @@ test("configured request routes are explained to the build invariant", async (t)
   assert.ok(
     infos.some((message) => /docs prerendered=1\/2 \(1 moved\)/.test(message)),
   );
-  // Every build dates its route truth; the rest is exact.
-  const { builtAt, ...truth } = JSON.parse(
-    await readFile(path.join(integration.root, ".nimbus/routes.json"), "utf8"),
-  ) as { builtAt: string };
-  assert.ok(!Number.isNaN(Date.parse(builtAt)));
-  assert.deepEqual(truth, {
-    version: 3,
-    base: "",
-    knownRoutes: [
-      "/built",
-      "/foo/_nimbus/request-route-inventory.json",
-      "/guide",
-    ],
-    redirects: [],
-    redirectPages: [],
-    redirectRules: "cloudflare",
-    opaqueNamespaces: [],
-  });
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        path.join(integration.root, ".nimbus/routes.json"),
+        "utf8",
+      ),
+    ),
+    {
+      version: 3,
+      base: "",
+      knownRoutes: [
+        "/built",
+        "/foo/_nimbus/request-route-inventory.json",
+        "/guide",
+      ],
+      redirects: [],
+      redirectPages: [],
+      redirectRules: "cloudflare",
+      opaqueNamespaces: [],
+    },
+  );
   assert.equal(
     integration.injectedRoutes.some(
       (candidate) =>

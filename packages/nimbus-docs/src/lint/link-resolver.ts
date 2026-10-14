@@ -9,10 +9,9 @@
  * are served paths, so `base` is stripped from them.
  */
 
-import { routeOwner } from "../_internal/build-slice.js";
 import { matchesAnyIgnore } from "../_internal/ignore-glob.js";
 import { linkRouteKey } from "../_internal/route-key.js";
-import type { RouteTruth, RouteTruthSlice } from "./site-model.js";
+import type { RouteTruth } from "./site-model.js";
 
 const MAX_REDIRECT_HOPS = 20;
 const PERMANENT = new Set([301, 308]);
@@ -40,8 +39,6 @@ export interface LinkEnv {
   patterns: PatternRule[];
   /** Astro's meta-refresh pages, by route key of their source. */
   pages: Map<string, { to: string; status: number }>;
-  /** Set when the truth is from a partial build. See `RouteTruth.slice`. */
-  slice?: RouteTruthSlice;
 }
 
 export interface RedirectedTo {
@@ -105,21 +102,7 @@ export function createLinkEnv(truth: Omit<RouteTruth, "version">): LinkEnv {
     exact,
     patterns,
     pages,
-    ...(truth.slice ? { slice: truth.slice } : {}),
   };
-}
-
-/**
- * How a link should be reported when the truth is from a partial build:
- * `error` for a target the slice itself serves (or a full build), `warn` for
- * one in another collection the file still covers, and `skip` for one the
- * file knows nothing about.
- */
-export function sliceDisposition(env: LinkEnv, key: string): "error" | "warn" | "skip" {
-  if (!env.slice) return "error";
-  const owner = routeOwner(key, env.slice.mounts);
-  if (owner === undefined || env.slice.collections.includes(owner)) return "error";
-  return env.slice.covered.includes(owner) ? "warn" : "skip";
 }
 
 export function isExternalUrl(url: string): boolean {

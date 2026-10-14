@@ -27,7 +27,7 @@
  */
 
 import { build, trailingSlash } from "astro:config/client";
-import { buildSlice, config, headDefaults } from "virtual:nimbus/config";
+import { config, headDefaults } from "virtual:nimbus/config";
 import {
   getApiVersionHead,
   getApiVersions,
@@ -255,10 +255,8 @@ const structuredData = canonical
 // Per-HTML last-element-wins semantics: page extras come after config
 // extras so per-page overrides win for any duplicated single-value tag.
 const mergedHead = [...(config.head ?? []), ...pageHead];
-// A partial build without the root collection writes the stylesheet under
-// its prefix, where its own Worker serves it.
 const shikiCssHref = withBase(
-  `${buildSlice?.prefix ?? ""}/_nimbus/shiki.css${import.meta.env.DEV ? `?v=${Date.now()}` : ""}`,
+  `/_nimbus/shiki.css${import.meta.env.DEV ? `?v=${Date.now()}` : ""}`,
   baseUrl,
 );
 ---

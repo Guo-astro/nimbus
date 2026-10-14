@@ -4,7 +4,6 @@ import path from "node:path";
 
 import { createLinkEnv, type LinkEnv } from "./link-resolver.js";
 import { readRouteTruth } from "./route-truth.js";
-import type { RouteTruthSlice } from "./site-model.js";
 
 let cached: { root: string; env: LinkEnv | null } | null = null;
 
@@ -16,27 +15,8 @@ export function loadLinkEnv(projectRoot: string): LinkEnv | null {
     process.stderr.write(`nimbus/internal-link: skipped — ${problem}\n`);
   }
   const env = truth ? createLinkEnv(truth) : null;
-  if (truth?.slice) process.stderr.write(`nimbus/internal-link: ${sliceNotice(truth.slice)}\n`);
   cached = { root: projectRoot, env };
   return env;
-}
-
-/**
- * The one notice for a route truth written by a partial build: it is never
- * full truth, so links into the other slices are checked against the previous
- * build's routes and reported as warnings, or skipped when no previous build
- * covered them.
- */
-export function sliceNotice(slice: RouteTruthSlice): string {
-  const uncovered = Object.keys(slice.mounts).filter((name) => !slice.covered.includes(name));
-  const built = slice.collections.join(", ");
-  if (uncovered.length === 0) {
-    return `this route truth is from a partial build (${built}); links into other slices are checked against the previous build's routes and reported as warnings.`;
-  }
-  const where = uncovered
-    .map((name) => (slice.mounts[name] === "" ? "the site root" : slice.mounts[name]))
-    .join(", ");
-  return `this route truth is from a partial build (${built}) with no previous build covering ${uncovered.join(", ")}, so links into ${where} are not checked.`;
 }
 
 /** Find the project root from a content file by walking up to the parent of `src`. */

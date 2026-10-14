@@ -33,14 +33,21 @@ const ROOT_EXCLUDES = new Set([
  * the route key of every file in it, minus the exclusions above. Read
  * errors throw: a partial list would report real files as broken links.
  */
-export function emittedFileRoutes(outDir: string, assetsDir: string): string[] {
+export function emittedFileRoutes(
+  outDir: string,
+  assetsDir: string,
+  /** More directories to leave out, relative to `outDir` (a slice's `<prefix>/pagefind`). */
+  excludeDirs: readonly string[] = [],
+): string[] {
   const assets = assetsDir.replace(/^\/+|\/+$/g, "");
+  const excluded = new Set(excludeDirs.map((dir) => dir.replace(/^\/+|\/+$/g, "")));
   const out: string[] = [];
   const walk = (dir: string, rel: string): void => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
       if (rel === "" && ROOT_EXCLUDES.has(entry.name)) continue;
       if (assets && childRel === assets) continue;
+      if (excluded.has(childRel)) continue;
       if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
       else if (entry.isFile()) out.push(routeKey(childRel));
     }

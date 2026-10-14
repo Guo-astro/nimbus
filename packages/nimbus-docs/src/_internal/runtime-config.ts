@@ -23,6 +23,7 @@ import { setLinkPolicy } from "./url.js";
 
 let _cached: NimbusConfig | null = null;
 let _cachedCollections: readonly string[] | null = null;
+let _cachedEmptyCollections: readonly string[] | null = null;
 let _cachedRequestRenderingCollections: readonly string[] | null = null;
 let _cachedAlternates: VersionAlternatesTable | null = null;
 let _cachedApiCollections: readonly string[] | null = null;
@@ -60,6 +61,18 @@ export async function loadIndexedCollections(): Promise<readonly string[]> {
   const mod = await virtualConfig();
   const value = mod.indexedCollections;
   _cachedCollections = value;
+  return value;
+}
+
+/**
+ * Page collections a partial build left empty on purpose. Empty in a full
+ * build, in dev, and when the virtual module predates the field.
+ */
+export async function loadEmptyCollections(): Promise<readonly string[]> {
+  if (_cachedEmptyCollections) return _cachedEmptyCollections;
+  const mod = await virtualConfig();
+  const value = mod.emptyCollections ?? [];
+  _cachedEmptyCollections = value;
   return value;
 }
 

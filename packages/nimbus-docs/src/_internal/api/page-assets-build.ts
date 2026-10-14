@@ -46,6 +46,7 @@ import {
   apiNavList,
   apiNavListFiles,
   clearApiNavLists,
+  getApiNavListManifest,
   recordApiNavList,
 } from "./nav-list.js";
 import { prepareApiNav, type PreparedApiNav } from "./prepared.js";
@@ -833,12 +834,18 @@ async function prepareApiAssetFamilyNow(
 /** Only current pointers are deployment assets; the persistent cache may retain more. */
 export async function apiPageAssetDeploymentFiles(
   root: URL | string,
+  /** The families to deploy; every prepared family when omitted. */
+  only?: readonly string[],
 ): Promise<string[]> {
   const families = deploymentFiles.get(preparedMarkdownRootKey(root)) ?? {};
   return [
     ...new Set([
-      ...Object.values(families).flatMap((files) => [...files]),
-      ...apiNavListFiles(root),
+      ...Object.entries(families)
+        .filter(([family]) => !only || only.includes(family))
+        .flatMap(([, files]) => [...files]),
+      ...Object.entries(getApiNavListManifest(root))
+        .filter(([collection]) => !only || only.includes(collection))
+        .flatMap(([, versions]) => Object.values(versions)),
     ]),
   ].sort();
 }
@@ -867,13 +874,15 @@ async function previousDeploymentFiles(rootPath: string): Promise<string[]> {
 export async function stagePageAssetDeployment(
   root: URL | string,
   outputRoot: URL | string,
+  /** The families to deploy; every prepared family when omitted. */
+  only?: readonly string[],
 ): Promise<void> {
   const rootPath = root instanceof URL ? fileURLToPath(root) : root;
   const outputPath =
     outputRoot instanceof URL ? fileURLToPath(outputRoot) : outputRoot;
   const directory = path.join(outputPath, "_nimbus/pages");
   await mkdir(directory, { recursive: true });
-  const files = new Set(await apiPageAssetDeploymentFiles(root));
+  const files = new Set(await apiPageAssetDeploymentFiles(root, only));
   for (const filename of files)
     await copyFile(
       path.join(rootPath, ".astro/nimbus/pages", filename),

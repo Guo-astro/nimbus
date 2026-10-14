@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import type { AstroIntegration } from "astro";
 
+import { relocateSitemap } from "./slice-output.js";
+
 export const SITEMAP_INDEX_FILE = "sitemap-index.xml";
 export const SITEMAP_ALIAS_FILE = "sitemap.xml";
 
@@ -28,15 +30,27 @@ export function isSitemapRoutePattern(pattern: string): boolean {
   return trimmed === `/${SITEMAP_ALIAS_FILE}` || /^\/\[[^/\]]+\]\.xml$/u.test(trimmed);
 }
 
-/** Runs after `@astrojs/sitemap` (added right behind it), so the index exists. */
+/**
+ * Runs after `@astrojs/sitemap` (added right behind it), so the index
+ * exists. A partial build without the root collection first moves the
+ * sitemap files under its prefix, where its Worker serves them; the alias
+ * then goes beside them.
+ */
 export function sitemapAliasIntegration(options: {
   hasOwnSitemapRoute: () => boolean;
+  /** The slice's prefix (`/docs-es`), or null for a full build or a root slice. */
+  slicePrefix?: () => string | null;
 }): AstroIntegration {
   return {
     name: "nimbus-docs:sitemap-alias",
     hooks: {
       "astro:build:done": async ({ dir }) => {
-        const outDir = fileURLToPath(dir);
+        let outDir = fileURLToPath(dir);
+        const prefix = options.slicePrefix?.() ?? null;
+        if (prefix) {
+          relocateSitemap(outDir, prefix);
+          outDir = path.join(outDir, ...prefix.split("/").filter(Boolean));
+        }
         if (
           !shouldCopySitemapAlias({
             outDir,

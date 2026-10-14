@@ -12,9 +12,11 @@ import { test } from "node:test";
 import { build, dev, sync } from "astro";
 
 import {
+  buildSliceLayout,
   buildSliceProblem,
   parseBuildOnly,
   routeOwner,
+  searchIndexLayout,
 } from "../src/_internal/build-slice.ts";
 import {
   builtSearchConfig,
@@ -77,6 +79,31 @@ test("the variable parses as a list and the slice checks name the site's collect
   assert.equal(routeOwner("/docs-estate", mounts), "docs");
   assert.equal(routeOwner("/api/charges/create", mounts), "api");
   assert.equal(routeOwner("/x", { api: "/api" }), undefined);
+
+  // The search bundles are served URLs: the base goes in front of each, even
+  // when it repeats a collection's mount.
+  const collections = ["docs", "docs-es", "api"];
+  const es = buildSliceLayout(["docs-es"], null);
+  assert.deepEqual(searchIndexLayout(null, collections, null, "/"), {
+    bundle: "/pagefind/",
+    merge: [],
+  });
+  assert.deepEqual(searchIndexLayout(es, collections, null, "/"), {
+    bundle: "/docs-es/pagefind/",
+    merge: ["/pagefind/", "/api/pagefind/"],
+  });
+  assert.deepEqual(searchIndexLayout(null, collections, null, "/docs/"), {
+    bundle: "/docs/pagefind/",
+    merge: [],
+  });
+  assert.deepEqual(searchIndexLayout(es, collections, null, "/docs"), {
+    bundle: "/docs/docs-es/pagefind/",
+    merge: ["/docs/pagefind/", "/docs/api/pagefind/"],
+  });
+  assert.deepEqual(searchIndexLayout(buildSliceLayout(["api"], null), collections, null, "/api"), {
+    bundle: "/api/api/pagefind/",
+    merge: ["/api/pagefind/", "/api/docs-es/pagefind/"],
+  });
 });
 
 test("an unknown collection fails the build naming the site's page collections", async () => {
@@ -89,23 +116,6 @@ test("an unknown collection fails the build naming the site's page collections",
     // A failed build leaves no route truth or page-collection list behind.
     assert.ok(!existsSync(path.join(site.root, ".nimbus/routes.json")));
     assert.ok(!existsSync(path.join(site.root, ".nimbus/page-collections.json")));
-  } finally {
-    await site.remove();
-  }
-});
-
-test("a slice build fails when the site is deployed under a base", async () => {
-  const site = await sliceSite({ pages: PAGES });
-  try {
-    await assert.rejects(
-      withBuildOnly("docs-es", () => build({ ...site.config, base: "/docs" })),
-      /NIMBUS_BUILD_ONLY builds a site deployed at "\/", but astro\.config sets base to "\/docs"\./,
-    );
-    // The same site builds whole under the base, and in a slice at the root.
-    await withBuildOnly(null, () => build({ ...site.config, base: "/docs" }));
-    assert.ok(existsSync(path.join(site.root, `dist/docs-es/${site.corpus.es[0]!.slug}/index.html`)));
-    await withBuildOnly("docs-es", () => build(site.config));
-    assert.equal((await htmlPaths(site)).length, PAGES);
   } finally {
     await site.remove();
   }
@@ -575,6 +585,173 @@ test("a slice writes its site-wide files under its prefix, and the root slice kn
     assert.ok(!existsSync(path.join(site.root, "dist/docs-es/pagefind")));
     assert.ok(existsSync(path.join(site.root, "dist/docs-es/llms.txt")));
     assert.ok(!existsSync(path.join(site.root, "dist/docs-es/sitemap-index.xml")));
+  } finally {
+    await site.remove();
+  }
+});
+
+test("under a base, a slice writes the same files and serves them under the base", async (t) => {
+  const site = await sliceSite({
+    pages: PAGES,
+    starterRoutes: true,
+    search: true,
+    sitemap: true,
+  });
+  const sitemapUrls = async (file: string) =>
+    [...(await site.read(file)).matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]!);
+  const esPage = `dist/docs-es/${site.corpus.es[0]!.slug}/index.html`;
+  const assertSlice = async (label: string) => {
+    // Astro keeps the base out of the output, so the files are where they
+    // are at base `/`.
+    assert.deepEqual((await readdir(path.join(site.root, "dist"))).sort(), [
+      "404.html",
+      "_headers",
+      "docs-es",
+    ], label);
+    assert.deepEqual(await sitemapUrls("dist/docs-es/sitemap-index.xml"), [
+      "https://docs.example.test/docs/docs-es/sitemap-0.xml",
+    ], label);
+    // Its sitemap lists its own pages, and not the site root in either form.
+    const urls = await sitemapUrls("dist/docs-es/sitemap-0.xml");
+    assert.ok(urls.length >= PAGES, label);
+    assert.ok(
+      urls.every((url) => url.startsWith("https://docs.example.test/docs/docs-es/")),
+      `${label}: ${urls.join(" ")}`,
+    );
+    const html = await site.read(esPage);
+    assert.match(html, /"\/docs\/docs-es\/_astro\//, label);
+    assert.doesNotMatch(html, /"\/(docs\/)?_astro\//, label);
+    assert.deepEqual(await builtSearchConfig(site, esPage, "/docs"), {
+      bundle: "/docs/docs-es/pagefind/",
+      merge: ["/docs/pagefind/", "/docs/api/pagefind/"],
+    }, label);
+    // `_headers` rules are served paths, with none for the site root.
+    const headers = await site.read("dist/_headers");
+    assert.doesNotMatch(headers, /^\/(docs\/?)?$/m, label);
+    assert.match(headers, /^\/docs\/\*\/llms\.txt$/m, label);
+  };
+  try {
+    const es = await withPagefind(() =>
+      withBuildOnly("docs-es", () => build({ ...site.config, base: "/docs" })),
+    );
+    if (es === null) {
+      assert.ok(!process.env.CI, "pagefind is not installed in the workspace");
+      return t.skip("pagefind is not installed in the workspace");
+    }
+    await assertSlice("base /docs");
+    // `trailingSlash: "always"` makes the base `/docs/`.
+    await withPagefind(() =>
+      withBuildOnly("docs-es", () =>
+        build({ ...site.config, base: "/docs", trailingSlash: "always" }),
+      ),
+    );
+    await assertSlice("base /docs/");
+    // `build.format: "file"`: pages are `.html` files, and the sitemap still
+    // leaves the site root out.
+    await withPagefind(() =>
+      withBuildOnly("docs-es", () =>
+        build({ ...site.config, base: "/docs", build: { format: "file" } }),
+      ),
+    );
+    const fileUrls = await sitemapUrls("dist/docs-es/sitemap-0.xml");
+    assert.ok(fileUrls.length >= PAGES);
+    assert.ok(
+      fileUrls.every((url) => url.startsWith("https://docs.example.test/docs/docs-es/")),
+      fileUrls.join(" "),
+    );
+
+    // The root slice lists the absent slice's `llms.txt` under the base, and
+    // its sitemap index lists only its own file.
+    await withPagefind(() =>
+      withBuildOnly("docs,api", () => build({ ...site.config, base: "/docs" })),
+    );
+    assert.match(
+      await site.read("dist/llms.txt"),
+      /^- \[Docs Es\]\(https:\/\/docs\.example\.test\/docs\/docs-es\/llms\.txt\)$/m,
+    );
+    assert.deepEqual(await sitemapUrls("dist/sitemap-index.xml"), [
+      "https://docs.example.test/docs/sitemap-0.xml",
+    ]);
+    const rootUrls = await sitemapUrls("dist/sitemap-0.xml");
+    assert.ok(rootUrls.length >= PAGES);
+    assert.ok(!rootUrls.some((url) => url.startsWith("https://docs.example.test/docs/docs-es/")));
+    assert.deepEqual(
+      await builtSearchConfig(site, `dist/${site.corpus.en[0]!.slug}/index.html`, "/docs"),
+      { bundle: "/docs/pagefind/", merge: ["/docs/docs-es/pagefind/"] },
+    );
+  } finally {
+    await site.remove();
+  }
+});
+
+test("under a base with the Cloudflare adapter, control files and redirects are read at the asset root", async () => {
+  const site = await sliceSite({ pages: PAGES, staticAdapter: true, starterRoutes: true });
+  try {
+    await site.write("public/_redirects", "/docs/docs-es/old /docs/docs-es/ 301\n");
+    await withBuildOnly("docs-es", () => build({ ...site.config, base: "/docs" }));
+    // The adapter nests the output under the base and moves the control
+    // files up to the asset root.
+    assert.deepEqual((await readdir(path.join(site.root, "dist"))).sort(), [
+      "_headers",
+      "_redirects",
+      "docs",
+    ]);
+    assert.ok(existsSync(path.join(site.root, `dist/docs/docs-es/${site.corpus.es[0]!.slug}/index.html`)));
+    assert.ok(!existsSync(path.join(site.root, "dist/docs/_headers")));
+    assert.ok(!existsSync(path.join(site.root, "dist/docs/_redirects")));
+    // Nimbus's rules at the asset root are served paths, and none is for the
+    // site root, which the root slice serves.
+    const headers = await site.read("dist/_headers");
+    assert.match(headers, /^\/docs\/\*\/llms\.txt$/m);
+    assert.doesNotMatch(headers, /^\/(docs\/?)?$/m);
+    assert.doesNotMatch(headers, /^\/(?!docs\/)/m, "every rule is under the base");
+    // Lint still sees the redirects the host will serve.
+    const truth = JSON.parse(await site.read(".nimbus/routes.json")) as {
+      redirects: Array<{ from: string }>;
+    };
+    assert.ok(truth.redirects.some((r) => r.from === "/docs/docs-es/old"), JSON.stringify(truth.redirects));
+  } finally {
+    await site.remove();
+  }
+});
+
+test("under a base, a slice build keeps only the other slices' redirects from the previous build", async () => {
+  const site = await sliceSite({ pages: PAGES, logLevel: "info" });
+  const enSlug = site.corpus.en[0]!.slug;
+  const esSlug = site.corpus.es[0]!.slug;
+  const truth = async () =>
+    JSON.parse(await site.read(".nimbus/routes.json")) as {
+      redirects: Array<{ from: string }>;
+      redirectPages: Array<{ from: string }>;
+    };
+  const froms = (list: Array<{ from: string }>) => list.map((r) => r.from).sort();
+  const underBase = (extra: object = {}) => ({ ...site.config, base: "/docs", ...extra });
+  try {
+    // The full build: a redirect each for the root collection and the
+    // Spanish slice, in `_redirects` and in Astro's config.
+    await site.write(
+      "public/_redirects",
+      `/docs/old-root /docs/${enSlug}/ 301\n/docs/docs-es/gone /docs/docs-es/${esSlug}/ 301\n`,
+    );
+    await withBuildOnly(null, () =>
+      build(
+        underBase({
+          redirects: { "/old-page": `/${enSlug}/`, "/docs-es/gone-page": `/docs-es/${esSlug}/` },
+        }),
+      ),
+    );
+    assert.deepEqual(froms((await truth()).redirects), ["/docs/docs-es/gone", "/docs/old-root"]);
+    assert.deepEqual(froms((await truth()).redirectPages), ["/docs/docs-es/gone-page", "/docs/old-page"]);
+
+    // Both redirects removed; the Spanish slice keeps the root collection's
+    // from the previous build and drops its own.
+    await rm(path.join(site.root, "public/_redirects"));
+    const es = await captureOutput(() =>
+      withBuildOnly("docs-es", () => build(underBase({ redirects: { "/old-page": `/${enSlug}/` } }))),
+    );
+    assert.deepEqual(froms((await truth()).redirects), ["/docs/old-root"]);
+    assert.deepEqual(froms((await truth()).redirectPages), ["/docs/old-page"]);
+    assert.match(es.output, /from the previous build/);
   } finally {
     await site.remove();
   }

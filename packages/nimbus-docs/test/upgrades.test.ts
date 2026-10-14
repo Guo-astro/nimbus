@@ -56,6 +56,7 @@ test("only universally skippable entries are optional", () => {
       "page-urls-and-llms-routes",
       "pnpm-sharp",
       "publish-agent-skills",
+      "search-provider-slices",
       "shared-markdown-routes",
       "starter-component-fixes",
       "version-switcher-collections",

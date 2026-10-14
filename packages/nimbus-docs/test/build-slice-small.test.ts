@@ -728,10 +728,16 @@ test("under a base, a slice build keeps only the other slices' redirects from th
   const underBase = (extra: object = {}) => ({ ...site.config, base: "/docs", ...extra });
   try {
     // The full build: a redirect each for the root collection and the
-    // Spanish slice, in `_redirects` and in Astro's config.
+    // Spanish slice, in `_redirects` and in Astro's config, and one from
+    // outside the base that only looks like the Spanish slice's.
     await site.write(
       "public/_redirects",
-      `/docs/old-root /docs/${enSlug}/ 301\n/docs/docs-es/gone /docs/docs-es/${esSlug}/ 301\n`,
+      [
+        `/docs/old-root /docs/${enSlug}/ 301`,
+        `/docs/docs-es/gone /docs/docs-es/${esSlug}/ 301`,
+        `/docs-es/outside /docs/docs-es/ 301`,
+        "",
+      ].join("\n"),
     );
     await withBuildOnly(null, () =>
       build(
@@ -740,16 +746,20 @@ test("under a base, a slice build keeps only the other slices' redirects from th
         }),
       ),
     );
-    assert.deepEqual(froms((await truth()).redirects), ["/docs/docs-es/gone", "/docs/old-root"]);
+    assert.deepEqual(froms((await truth()).redirects), [
+      "/docs-es/outside",
+      "/docs/docs-es/gone",
+      "/docs/old-root",
+    ]);
     assert.deepEqual(froms((await truth()).redirectPages), ["/docs/docs-es/gone-page", "/docs/old-page"]);
 
-    // Both redirects removed; the Spanish slice keeps the root collection's
-    // from the previous build and drops its own.
+    // All removed; the Spanish slice keeps the root collection's from the
+    // previous build, the outside one included, and drops its own.
     await rm(path.join(site.root, "public/_redirects"));
     const es = await captureOutput(() =>
       withBuildOnly("docs-es", () => build(underBase({ redirects: { "/old-page": `/${enSlug}/` } }))),
     );
-    assert.deepEqual(froms((await truth()).redirects), ["/docs/old-root"]);
+    assert.deepEqual(froms((await truth()).redirects), ["/docs-es/outside", "/docs/old-root"]);
     assert.deepEqual(froms((await truth()).redirectPages), ["/docs/old-page"]);
     assert.match(es.output, /from the previous build/);
   } finally {

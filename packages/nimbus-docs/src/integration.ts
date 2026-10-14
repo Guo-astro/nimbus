@@ -3797,18 +3797,21 @@ function materializeRouteTruth(input: {
           routes.add(route);
           fromPrior++;
         }
+        // Redirect sources are served paths; one outside the base belongs to the root collection.
+        const hasBase = withBase("/", input.base) !== "/";
+        const redirectKey = (from: string) => {
+          const inside = stripBase(from, input.base);
+          return hasBase && inside === from ? "/" : routeKey(inside);
+        };
         const seen = new Set(redirects.map((r) => r.from));
         for (const r of prior.redirects) {
-          // Redirect sources are served paths; ownership goes by route key.
-          if (seen.has(r.from) || !fromOutside(routeKey(stripBase(r.from, input.base)))) continue;
+          if (seen.has(r.from) || !fromOutside(redirectKey(r.from))) continue;
           redirects.push(r);
           seen.add(r.from);
         }
         const seenPages = new Set(redirectPages.map((r) => r.from));
         for (const r of prior.redirectPages) {
-          if (seenPages.has(r.from) || !fromOutside(routeKey(stripBase(r.from, input.base)))) {
-            continue;
-          }
+          if (seenPages.has(r.from) || !fromOutside(redirectKey(r.from))) continue;
           redirectPages.push(r);
           seenPages.add(r.from);
         }

@@ -20,3 +20,4 @@
 - `nimbus-docs add source <name|url>` adds a content source: `git` (`github`, `gitlab`, `bitbucket`), `notion`, or a guide for any provider from its docs URL.
 - `add source notion` installs a Notion loader with drafts, slugs and ordering from the database's properties. It warns when no row publishes, naming the status values the database uses.
 - `list --type source` lists the sources.
+- Each source guide carries its own route, rendering and sidebar steps, ends with what to report to the user, and prints from its first heading.

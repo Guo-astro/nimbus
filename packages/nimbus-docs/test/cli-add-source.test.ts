@@ -17,6 +17,8 @@ const CLI = fileURLToPath(new URL("../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
 const REGISTRY = sourceRegistry();
 const served = (file: string) => readFileSync(path.join(REGISTRY, file), "utf8");
+// What the CLI prints of a guide: everything from its first heading, no JSON frontmatter.
+const guide = (file: string) => served(file).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, "");
 
 let server: http.Server;
 let origin = "";
@@ -95,10 +97,10 @@ test("git prints its guide; an alias prints the same guide under its Host line",
   try {
     const git = await run(dir, "add", "source", "git", "--print");
     assert.equal(git.code, 0, git.stderr);
-    assert.equal(git.stdout, served("sources/git.md"));
+    assert.equal(git.stdout, guide("sources/git.md"));
     for (const [alias, host] of [["github", "GitHub"], ["gitlab", "GitLab"], ["bitbucket", "Bitbucket"]]) {
       const result = await run(dir, "add", "source", alias!, "--print");
-      assert.equal(result.stdout, `Host: ${host}\n\n${served("sources/git.md")}`, alias);
+      assert.equal(result.stdout, `Host: ${host}\n\n${guide("sources/git.md")}`, alias);
     }
     // Without --print or an agent, the human gets the pipe commands on stderr.
     const human = await run(dir, "add", "source", "github");
@@ -116,7 +118,7 @@ test("a URL gets the generic guide under a Research start line and is never requ
     requests.length = 0;
     const result = await run(dir, "add", "source", url, "--print");
     assert.equal(result.code, 0, result.stderr);
-    assert.equal(result.stdout, `Research start: ${url}\n\n${served("sources/from-url.md")}`);
+    assert.equal(result.stdout, `Research start: ${url}\n\n${guide("sources/from-url.md")}`);
     assert.deepEqual(requests, ["/sources/from-url.md"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -128,7 +130,8 @@ test("notion installs its loader on stderr's side and pipes only the guide; a re
   try {
     const first = await run(dir, "add", "source", "notion", "--print");
     assert.equal(first.code, 0, first.stderr);
-    assert.equal(first.stdout, served("sources/notion.md"), "stdout is the guide, byte for byte");
+    assert.equal(first.stdout, guide("sources/notion.md"), "stdout is the guide, byte for byte");
+    assert.match(first.stdout, /^# Add a Notion database/, "no frontmatter");
     assert.match(first.stderr, /nimbus-docs add source notion/);
     assert.match(first.stderr, /src\/loaders\/notion\.ts/);
     const loader = path.join(dir, "src/loaders/notion.ts");
@@ -139,7 +142,7 @@ test("notion installs its loader on stderr's side and pipes only the guide; a re
     writeFileSync(loader, `${readFileSync(loader, "utf8")}\n// my edit\n`);
     const rerun = await run(dir, "add", "source", "notion", "--print");
     assert.equal(rerun.code, 0, rerun.stderr);
-    assert.equal(rerun.stdout, served("sources/notion.md"));
+    assert.equal(rerun.stdout, guide("sources/notion.md"));
     assert.match(readFileSync(loader, "utf8"), /\/\/ my edit/);
     assert.match(rerun.stderr, /Kept 1 file/);
   } finally {

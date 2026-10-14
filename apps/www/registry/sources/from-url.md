@@ -69,9 +69,93 @@ handbook: defineCollection({
 }),
 ```
 
-Then run `nimbus-docs add new-collection --print` and follow only its steps
-**"4c. Scaffold the page route"**, **"4d. Add the collection to the rendering
-policy (if one is set)"** and **"6. Optional — add to the sidebar"**.
+### Route, rendering and sidebar
+
+Do these for each new collection (`<collection>` is its name, and its URL prefix).
+
+**Route.** Write `src/pages/<collection>/[...slug].astro`. If `src/pages/[...slug].astro`
+renders a different layout than this, mirror its imports and props instead:
+
+```astro
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import {
+  getCollectionStaticPaths,
+  getCollectionPage,
+  getSidebar,
+  getPrevNext,
+  getBreadcrumbs,
+  getEditUrl,
+  getLastUpdated,
+  getRouteFlags,
+  getTOC,
+  stripBase,
+} from "@cloudflare/nimbus-docs/runtime";
+import { components } from "../../components";
+
+export const prerender = true;
+export const getStaticPaths = getCollectionStaticPaths("<collection>");
+
+const page = await getCollectionPage<"<collection>">(Astro);
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
+
+const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
+const { tableOfContents: tocOn } = await getRouteFlags(entry);
+// Pass collection so the sidebar/prev-next resolve against the current
+// collection's tree. Critical for version pages — without this, version
+// pages render the current docs sidebar with wrong prev/next.
+const sidebar = await getSidebar(currentSlug, { collection: entry.collection });
+const prevNext = await getPrevNext(currentSlug, {
+  sidebarTree: sidebar,
+  overrides: { prev: entry.data.prev, next: entry.data.next },
+});
+const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collection });
+const editUrl = await getEditUrl(entry);
+const lastUpdated = entry.data.lastUpdated ??
+  await getLastUpdated(entry);
+const tocConfig = entry.data.tableOfContents;
+const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
+const socialImage = entry.data.socialImage ?? ogImageUrl;
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  sidebar={sidebar}
+  headings={toc}
+  breadcrumbs={breadcrumbs}
+  prevNext={prevNext}
+  mode={entry.data.mode}
+  banner={entry.data.banner}
+  head={entry.data.head}
+  searchable={entry.data.searchable}
+  noindex={entry.data.noindex}
+  markdownUrl={markdownUrl}
+  socialImage={socialImage}
+  lastUpdated={lastUpdated}
+  editUrl={editUrl}
+  draft={entry.data.draft}
+  collection={entry.collection}
+  entryId={entry.id}
+>
+  <Content components={components} />
+</DocsLayout>
+```
+
+**Rendering.** If the Nimbus config sets `rendering` (Cloudflare scaffolds set
+`rendering: { default: "request" }`), add the collection to `rendering.collections`, or the
+build fails: `collections: { <collection>: "request" }` (or `"build"` to prerender it). Without
+a `rendering` option, skip this.
+
+**Sidebar.** Ask the user whether the collection goes in the sidebar, and where. If the Nimbus
+config has `sidebar.items`, add `{ label: "<Display Name>", autogenerate: { collection: "<collection>" } }`.
+If it has none, the sidebar shows only `docs` today, and adding `sidebar.items` replaces that
+default: add both, `{ label: "Docs", autogenerate: { collection: "docs" } }` first.
+
+**Section tab.** The collection's own URL (`/<collection>/`) is its `index.md`. If it has none,
+tell the user the starter's section tab for it will 404, and suggest adding an index page.
+
 
 ## 3. Verify against a local collection
 
@@ -84,6 +168,10 @@ policy (if one is set)"** and **"6. Optional — add to the sidebar"**.
    absent from `astro build`.
 5. Remove the token: the build fails naming the environment variable.
 6. Delete the parity page afterwards.
+
+**Report to the user:** what the loader reads and how it authenticates, the collection and its
+URL, which checks above passed, and what doesn't carry over (no MDX components, no edit link,
+not linted).
 
 ## Notes for the agent
 

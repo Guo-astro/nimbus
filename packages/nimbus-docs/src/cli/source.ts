@@ -47,7 +47,10 @@ export function unknownSourceMessage(name: string): string {
 
 /** The guide with the lines the CLI prepends: an alias's host, or the URL to research. */
 export function sourceGuide(markdown: string, prefix: string | undefined): string {
-  const body = markdown.endsWith("\n") ? markdown : `${markdown}\n`;
+  // The registry's JSON frontmatter is metadata for `list`, not instructions:
+  // the agent gets the guide from its first heading.
+  const withoutMeta = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n+/, "");
+  const body = withoutMeta.endsWith("\n") ? withoutMeta : `${withoutMeta}\n`;
   return prefix ? `${prefix}\n\n${body}` : body;
 }
 

@@ -85,11 +85,93 @@ inside the source's `path` (default: all of it):
 "sdk-reference": defineCollection(docsCollection({ source: "sdk", base: "reference" })),
 ```
 
-Then run `nimbus-docs add new-collection --print` and follow only these steps
-of it, for each new collection: **"4c. Scaffold the page route"**, **"4d. Add
-the collection to the rendering policy (if one is set)"** and **"6. Optional —
-add to the sidebar"**. Skip its steps that create a content folder or register
-the collection; that's done above.
+### Route, rendering and sidebar
+
+Do these for each new collection (`<collection>` is its name, and its URL prefix).
+
+**Route.** Write `src/pages/<collection>/[...slug].astro`. If `src/pages/[...slug].astro`
+renders a different layout than this, mirror its imports and props instead:
+
+```astro
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import {
+  getCollectionStaticPaths,
+  getCollectionPage,
+  getSidebar,
+  getPrevNext,
+  getBreadcrumbs,
+  getEditUrl,
+  getLastUpdated,
+  getRouteFlags,
+  getTOC,
+  stripBase,
+} from "@cloudflare/nimbus-docs/runtime";
+import { components } from "../../components";
+
+export const prerender = true;
+export const getStaticPaths = getCollectionStaticPaths("<collection>");
+
+const page = await getCollectionPage<"<collection>">(Astro);
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
+
+const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
+const { tableOfContents: tocOn } = await getRouteFlags(entry);
+// Pass collection so the sidebar/prev-next resolve against the current
+// collection's tree. Critical for version pages — without this, version
+// pages render the current docs sidebar with wrong prev/next.
+const sidebar = await getSidebar(currentSlug, { collection: entry.collection });
+const prevNext = await getPrevNext(currentSlug, {
+  sidebarTree: sidebar,
+  overrides: { prev: entry.data.prev, next: entry.data.next },
+});
+const breadcrumbs = await getBreadcrumbs(currentSlug, { collection: entry.collection });
+const editUrl = await getEditUrl(entry);
+const lastUpdated = entry.data.lastUpdated ??
+  await getLastUpdated(entry);
+const tocConfig = entry.data.tableOfContents;
+const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
+const socialImage = entry.data.socialImage ?? ogImageUrl;
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  sidebar={sidebar}
+  headings={toc}
+  breadcrumbs={breadcrumbs}
+  prevNext={prevNext}
+  mode={entry.data.mode}
+  banner={entry.data.banner}
+  head={entry.data.head}
+  searchable={entry.data.searchable}
+  noindex={entry.data.noindex}
+  markdownUrl={markdownUrl}
+  socialImage={socialImage}
+  lastUpdated={lastUpdated}
+  editUrl={editUrl}
+  draft={entry.data.draft}
+  collection={entry.collection}
+  entryId={entry.id}
+>
+  <Content components={components} />
+</DocsLayout>
+```
+
+**Rendering.** If the Nimbus config sets `rendering` (Cloudflare scaffolds set
+`rendering: { default: "request" }`), add the collection to `rendering.collections`, or the
+build fails: `collections: { <collection>: "request" }` (or `"build"` to prerender it). Without
+a `rendering` option, skip this.
+
+**Sidebar.** Ask the user whether the collection goes in the sidebar, and where. If the Nimbus
+config has `sidebar.items`, add `{ label: "<Display Name>", autogenerate: { collection: "<collection>" } }`.
+If it has none, the sidebar shows only `docs` today, and adding `sidebar.items` replaces that
+default: add both, `{ label: "Docs", autogenerate: { collection: "docs" } }` first.
+
+**Section tab.** The collection's own URL (`/<collection>/`) is its `index.md`. If it has none,
+tell the user the starter's section tab for it will 404, and suggest adding an index page.
+
 
 An OpenAPI spec in the same repository can feed an API reference without a
 copy: `api: [{ collection: "api", spec: { source: "sdk", path: "docs/openapi.json" } }]`
@@ -148,6 +230,11 @@ credential as production.
    means `ref` is a branch; pin a commit for production.
 4. Run `nimbus-docs lint`: problems in the source's pages are reported as
    `sdk: docs/guides/intro.mdx:12`, to be fixed in the source repository.
+   It reads `.mdx`, and says how many `.md` pages that leaves out.
+
+**Report to the user:** the source, the pinned commit and how to move it, the collections and
+their URLs, any build warning about links that stay as written (they point at files the site
+doesn't publish), a missing index page, and whether CI needs a credential.
 
 ## Notes for the agent
 
@@ -156,11 +243,6 @@ credential as production.
   (`2-options.md#signal`) become page URLs; a relative link to a file the
   collection doesn't publish (`../readme.md`) stays as written and the build
   warns. Tell the user about those warnings rather than rewriting their docs.
-- A collection's own URL (`/sdk/`) is its `index.md`. If the source has none,
-  say the starter's section tab for it will 404, and suggest adding one in the
-  source repository or pointing the sidebar at the first page.
-- If the site has no `sidebar.items`, adding one replaces the default sidebar:
-  include `{ label: "Docs", autogenerate: { collection: "docs" } }` first.
 - Caching `.nimbus/sources` in CI: key the cache on the ref, so preview builds
   don't prune production's snapshot.
 

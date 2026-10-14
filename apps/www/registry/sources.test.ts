@@ -68,3 +68,17 @@ test("the URL guide exists and isn't a name; installed files stay out of templat
     for (const dep of fm.dependencies ?? []) assert.ok(deps.includes(dep), `${fm.name}: ${dep} ships in templates`);
   }
 });
+
+test("every source guide carries the route from new-collection, word for word, and no step of another recipe", () => {
+  const route = readFileSync(resolve(FEATURES, "new-collection.md"), "utf8").match(
+    /### 4c\. Scaffold the page route\n\nWrite `src\/pages\/<prefix>\/\[\.\.\.slug\]\.astro`:\n\n(```astro\n[\s\S]*?\n```)\n/,
+  )![1]!;
+  for (const { file } of sources) {
+    const body = readFileSync(resolve(SOURCES, file), "utf8");
+    if (file === "from-url.md" || file === "git.md" || file === "notion.md") {
+      assert.ok(body.includes(route), `${file}: the route differs from new-collection's 4c; copy it again`);
+      assert.match(body, /\*\*Report to the user:\*\*/, `${file}: no report step`);
+    }
+    assert.doesNotMatch(body, /add new-collection --print/, `${file}: points at another recipe's steps`);
+  }
+});

@@ -365,6 +365,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      sharp:
+        specifier: ^0.35.4
+        version: 0.35.4(@types/node@20.19.41)
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.6.0
@@ -9910,7 +9913,6 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 20.19.41
-    optional: true
 
   sharp@0.35.5(@types/node@20.19.41):
     dependencies:

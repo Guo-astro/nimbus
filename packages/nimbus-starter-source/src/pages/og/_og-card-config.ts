@@ -18,7 +18,9 @@ export const ogCardConfig = {
   ],
   border: { color: [39, 39, 42], width: 2, side: "inline-start" },
   padding: 96,
-  fonts: ["./public/fonts/Inter-Bold.ttf"],
+  // `fonts` and `cacheDir` are set by the two routes from the project's own
+  // paths, so a build started elsewhere (`astro build --root <site>`) finds
+  // the font and keeps its cache under the site.
   font: {
     title: {
       color: [250, 250, 250],

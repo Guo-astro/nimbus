@@ -125,6 +125,18 @@ export interface BakeAgentEndpointAssetsOptions {
   /** Whether a route serves `/llms-full.txt`. Default true. */
   fullDocument?: boolean;
   /**
+   * A partial build without the root collection: write one `llms-full.txt`
+   * per named top-level section (the slice's collections, by label) instead
+   * of the site document, which that build's Worker can't serve. A section
+   * over the limit splits as usual.
+   */
+  sectionDocuments?: readonly string[];
+  /**
+   * Page collections a partial build left empty: the site index lists each
+   * one's `llms.txt`, which the slice holding it serves.
+   */
+  absentSections?: ReadonlyArray<{ slug: string; label: string }>;
+  /**
    * Whether the section route serves nested paths (`[...section]/llms.txt`).
    * Then each sub-folder gets its own `llms.txt`. Default false.
    */
@@ -825,6 +837,10 @@ function siteIndexAsset(
         key: `/${group.slug}`,
         line: `- [${group.label}](${absoluteUrl(options.site, options.base, `/${group.slug}/llms.txt`)})`,
       })),
+    ...(options.absentSections ?? []).map((section) => ({
+      key: `/${section.slug}`,
+      line: `- [${section.label}](${absoluteUrl(options.site, options.base, `/${section.slug}/llms.txt`)})`,
+    })),
   ].sort((a, b) => compare(a.key, b.key));
   return [
     `# ${options.title}`,
@@ -834,7 +850,14 @@ function siteIndexAsset(
     ...(options.fullDocument === false
       ? []
       : [
-          `Full documentation (discoverable current pages, ${fullSplit ? "split by section" : "one document"}): ${absoluteUrl(options.site, options.base, "/llms-full.txt")}`,
+          `Full documentation${options.absentSections?.length ? " of this part" : ""} (discoverable current pages, ${fullSplit ? "split by section" : "one document"}): ${absoluteUrl(options.site, options.base, "/llms-full.txt")}`,
+          ...(options.absentSections?.length
+            ? [
+                `Other parts have their own: ${options.absentSections
+                  .map((section) => absoluteUrl(options.site, options.base, `/${section.slug}/llms-full.txt`))
+                  .join(", ")}`,
+              ]
+            : []),
           "",
         ]),
     "## Pages",
@@ -923,7 +946,10 @@ function llmsFullBodies(
     members.reduce((sum, page) => sum + blockBytes.get(page)!, 0) -
     1;
   const total = documentBytes(header, pages);
-  if (total <= limit) {
+  const sectionDocuments = options.sectionDocuments
+    ? new Set(options.sectionDocuments)
+    : null;
+  if (!sectionDocuments && total <= limit) {
     return {
       bodies: [
         {
@@ -985,8 +1011,9 @@ function llmsFullBodies(
     ].join("\n");
 
   const report: string[] = [];
-  const bodies: Array<{ reference: LlmsEndpointReference; body: string }> = [
-    {
+  const bodies: Array<{ reference: LlmsEndpointReference; body: string }> = [];
+  if (!sectionDocuments) {
+    bodies.push({
       reference: { scope: "site", surface: "full" },
       body: indexBody(
         options.title,
@@ -995,9 +1022,9 @@ function llmsFullBodies(
         groups,
         leaves,
       ),
-    },
-  ];
-  report.push(`  /llms-full.txt ${mebibytes(utf8Length(bodies[0]!.body))} (index)`);
+    });
+    report.push(`  /llms-full.txt ${mebibytes(utf8Length(bodies[0]!.body))} (index)`);
+  }
   const emit = (group: PreparedLlmsGroup) => {
     const bytes = sizeOf(group);
     const reference = { scope: "section" as const, surface: "full" as const, section: group.slug };
@@ -1030,6 +1057,14 @@ function llmsFullBodies(
     );
     for (const child of group.children) emit(child);
   };
+  if (sectionDocuments) {
+    // One document per section the slice holds; only a section over the
+    // limit is worth a report.
+    for (const group of groups) if (sectionDocuments.has(group.slug)) emit(group);
+    if (report.some((line) => line.includes("(index")))
+      options.info?.(`llms-full.txt is split by section:\n${report.join("\n")}`);
+    return { bodies, split: true };
+  }
   for (const group of groups) emit(group);
   options.info?.(
     `llms-full.txt would be ${mebibytes(total)}, over ${mebibytes(limit)}, so it's split by section:\n${report.join("\n")}`,

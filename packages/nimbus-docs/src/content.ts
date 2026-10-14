@@ -47,6 +47,7 @@ import {
   getRegisteredApiCollections,
   resolveRegisteredApiCollection,
 } from "./_internal/api-collection-registry.js";
+import { isCollectionInBuildSlice } from "./_internal/build-slice.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import { prepareMarkdownLoader } from "./_internal/markdown-loader.js";
 import {
@@ -178,6 +179,10 @@ function wrapNimbusMarkdown<T extends Loader>(
       generation: NIMBUS_MARKDOWN_GENERATION,
       base,
       role,
+      // Partials always load: a page in the slice may render one.
+      empty:
+        role === "page" &&
+        !isCollectionInBuildSlice(context.config.root, context.collection),
       transformRenderMarkdown: false,
       transform: (source, sourceId) =>
         normalizeAuthoredLinks(source, {
@@ -465,6 +470,29 @@ export function apiCollection(options?: ApiCollectionOptions): {
         (registeredOutput(astroConfig.root) ?? astroConfig.output) !== "static";
       const preparedRoot = preparedMarkdownRootKey(astroConfig.root);
       const preparedSession = getPreparedMarkdownSession(preparedRoot);
+      if (!isCollectionInBuildSlice(astroConfig.root, collection)) {
+        // A partial build that leaves this reference out: no spec is parsed,
+        // and the collection is committed empty so it stays a known page
+        // collection whose routes emit nothing. The store is cleared
+        // unconditionally so no previous build's pages survive.
+        await runPreparedMarkdownTransaction(
+          preparedRoot,
+          `api:${collection}`,
+          async () => {
+            if (getPreparedMarkdownSession(preparedRoot) !== preparedSession) {
+              return;
+            }
+            store.clear();
+            const epoch = beginPreparedMarkdownLoad(
+              preparedRoot,
+              collection,
+              false,
+            );
+            commitPreparedDataCollection(preparedRoot, collection, epoch, []);
+          },
+        );
+        return;
+      }
       const reportedErrors = new WeakSet<Error>();
       const targets = resolveApiFamily({
         collection,

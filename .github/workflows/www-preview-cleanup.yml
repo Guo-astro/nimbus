@@ -28,8 +28,9 @@ jobs:
           if [ "$state" != 'closed' ]; then exit 0; fi
           open=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="$OWNER:$BRANCH" --jq 'length')
           if [ "$open" != '0' ]; then exit 0; fi
-          name=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq '.[] | select(.user.login == "cloudflare-workers-and-pages[bot]") | .body' |
+          bodies=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "cloudflare-workers-and-pages[bot]") | .body')
+          name=$(printf '%s\n' "$bodies" |
             grep -oE '/services/view/nimbus-docs/production/previews/[A-Za-z0-9._-]+' | tail -1 | sed 's|.*/previews/||') || true
           if [ -z "$name" ]; then
             echo "No Workers Builds Preview was reported on this PR."

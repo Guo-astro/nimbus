@@ -107,7 +107,7 @@ If a new connection expires before it validates, delete and recreate it near the
 
 ### Live www Previews
 
-[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) named after the branch, with `/` replaced by `-` (`feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>`. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built. Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) whose name is derived from the branch name (for example, `feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>` with the exact name. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built. Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
 
 Pushes to `main` build but never update production; only the release deploy does. The `nimbus-docs` Worker's Builds settings must keep that true:
 

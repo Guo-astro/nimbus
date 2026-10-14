@@ -823,6 +823,22 @@
       ]
     },
     {
+      "id": "search-provider-slices",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "partial-builds",
+      "summary": "Optionally update the Pagefind search provider, so search in a site built with NIMBUS_BUILD_ONLY loads its own slice's index and finds pages in the other slices.",
+      "affected": "Sites created from the starter that build with NIMBUS_BUILD_ONLY and still use src/components/ui/search/providers/pagefind.ts.",
+      "instructions": [
+        "No action is needed for a whole-site build: the current provider keeps loading the site's index.",
+        "If src/components/ui/search/providers/pagefind.ts is unmodified, run nimbus-docs diff src/components/ui/search/providers/pagefind.ts --apply.",
+        "If you've edited it, import searchIndex from virtual:nimbus/config, load pagefind.js from searchIndex.bundle, and pass each URL in searchIndex.merge to mergeIndex. Both are served URLs with the base included, so use them unchanged; set Pagefind's baseUrl to the base with one trailing slash."
+      ],
+      "verify": [
+        "Deploy the slices, open a page in a slice without the docs collection, and confirm search finds pages from the root slice as well as its own."
+      ]
+    },
+    {
       "id": "connect-mcp",
       "introducedIn": "0.19.0",
       "mode": "optional",

@@ -54,7 +54,7 @@ pnpm templates:check                             # generate + scaffold + build o
 pnpm local                                       # spin up the local sandbox (generates + scaffolds offline)
 ```
 
-Root `build` runs at default concurrency; `pnpm -r` topo order builds `nimbus-docs` first. `apps/www`'s `build` no longer builds `nimbus-docs`, so a bare `pnpm --filter @nimbus/www build` on a clean checkout (or after a `nimbus-docs` version bump) fails. Build www with `pnpm --filter "@nimbus/www..." build` (www plus its workspace dependencies) or root `pnpm build`; deploy with `pnpm run deploy` in `apps/www` (its `predeploy` builds the framework).
+Root `build` runs at default concurrency; `pnpm -r` topo order builds `nimbus-docs` first. `apps/www`'s `build` no longer builds `nimbus-docs`, so a bare `pnpm --filter @nimbus/www build` on a clean checkout (or after a `nimbus-docs` version bump) fails. Build www with `pnpm --filter "@nimbus/www..." build` (www plus its workspace dependencies) or root `pnpm build`. Production deploys only from the Release workflow (see CONTRIBUTING.md, "Releases"); don't deploy it locally.
 
 ## The boundary test (read before adding any file)
 

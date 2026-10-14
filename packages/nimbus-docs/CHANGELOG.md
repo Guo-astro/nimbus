@@ -1,5 +1,15 @@
 # @cloudflare/nimbus-docs
 
+## 0.18.1
+
+### Patch Changes
+
+- [#247](https://github.com/cloudflare/nimbus/pull/247) [`b98bd3f`](https://github.com/cloudflare/nimbus/commit/b98bd3f232478d98c02e6b860ed86ad24454abc0) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Generated `_headers` rules leave out any header the site's own `_headers` already sets for that path, site-wide rules included, so hosts no longer send doubled values such as `Access-Control-Allow-Origin: *, *`.
+
+- [#250](https://github.com/cloudflare/nimbus/pull/250) [`d664242`](https://github.com/cloudflare/nimbus/commit/d664242d7913daea36eabe11590a4592fa7c0339) Thanks [@sansynx](https://github.com/sansynx)! - Keep application warnings visible during concurrent OpenAPI specification publication.
+
+- [#257](https://github.com/cloudflare/nimbus/pull/257) [`e9a4360`](https://github.com/cloudflare/nimbus/commit/e9a4360ec80e3c7616a564dfaa5283b23013a87a) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - New Cloudflare projects, and `nimbus-docs add adapter-cloudflare` when `wrangler.jsonc` has no valid date, get a `compatibility_date` the installed Workers runtime supports instead of today's date, so local dev starts.
+
 ## 0.18.0
 
 ### Minor Changes

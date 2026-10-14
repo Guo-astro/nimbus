@@ -27,7 +27,12 @@ const WHOLE_SITE = { bundle: "/pagefind/", merge: [] };
 async function pagefindUrlFor(
   base: string,
   searchIndex: { bundle: string; merge: string[] } = WHOLE_SITE,
-): Promise<{ loaded: string; merged: string[]; baseUrls: string[] }> {
+): Promise<{
+  loaded: string;
+  merged: string[];
+  baseUrls: string[];
+  results: Array<{ url: string; subResults?: Array<{ url: string }> }>;
+}> {
   const source = fs
     .readFileSync(PROVIDER, "utf8")
     .replace(
@@ -60,15 +65,33 @@ async function pagefindUrlFor(
           merged.push(href);
           if (options?.baseUrl) baseUrls.push(options.baseUrl);
         },
-        search: async () => ({ results: [] }),
+        // One result. The fake doesn't apply `baseUrl` (real Pagefind does),
+        // so any base on the way out was added by the provider.
+        search: async () => ({
+          results: [
+            {
+              data: async () => ({
+                url: "/docs-es/guide/",
+                meta: { title: "Guide" },
+                sub_results: [{ title: "Setup", url: "/docs-es/guide/#setup" }],
+              }),
+            },
+          ],
+        }),
       };
     },
     window: { location: { origin: "https://example.com" } },
   });
   try {
-    const { provider } = (await import(pathToFileURL(file).href)) as { provider: { init(): Promise<void> } };
+    const { provider } = (await import(pathToFileURL(file).href)) as {
+      provider: {
+        init(): Promise<void>;
+        search(query: string): Promise<Array<{ url: string; subResults?: Array<{ url: string }> }>>;
+      };
+    };
     await provider.init();
-    return { loaded, merged, baseUrls };
+    const results = await provider.search("guide");
+    return { loaded, merged, baseUrls, results };
   } finally {
     delete globals.__config;
     delete globals.__searchIndex;
@@ -79,14 +102,20 @@ async function pagefindUrlFor(
   }
 }
 
-test("search loads Pagefind below the site's base, with or without a trailing slash", async () => {
+test("search loads the bundle the virtual config names, as served", async () => {
   assert.equal((await pagefindUrlFor("/")).loaded, "https://example.com/pagefind/pagefind.js");
-  assert.equal((await pagefindUrlFor("/docs")).loaded, "https://example.com/docs/pagefind/pagefind.js");
-  assert.equal((await pagefindUrlFor("/docs/")).loaded, "https://example.com/docs/pagefind/pagefind.js");
+  assert.equal(
+    (await pagefindUrlFor("/docs", { bundle: "/docs/pagefind/", merge: [] })).loaded,
+    "https://example.com/docs/pagefind/pagefind.js",
+  );
   assert.deepEqual((await pagefindUrlFor("/")).merged, [], "a whole-site build merges nothing");
-  assert.deepEqual((await pagefindUrlFor("/docs/")).baseUrls, ["/docs/"], "result URLs resolve under the base");
 });
 
+test("result URLs resolve under the base, with or without a trailing slash", async () => {
+  assert.deepEqual((await pagefindUrlFor("/")).baseUrls, ["/"]);
+  assert.deepEqual((await pagefindUrlFor("/docs")).baseUrls, ["/docs/"]);
+  assert.deepEqual((await pagefindUrlFor("/docs/")).baseUrls, ["/docs/"]);
+});
 
 test("a slice build loads its own bundle and merges the other slices' bundles", async () => {
   const { loaded, merged } = await pagefindUrlFor("/", {
@@ -100,4 +129,23 @@ test("a slice build loads its own bundle and merges the other slices' bundles", 
 test("a slice's results resolve from the site root, not from under the slice's bundle", async () => {
   const { baseUrls } = await pagefindUrlFor("/", { bundle: "/docs-es/pagefind/", merge: ["/pagefind/"] });
   assert.deepEqual(baseUrls, ["/", "/"], "the slice's own index and the merged one both resolve at /");
+});
+
+test("a slice under a base fetches its served bundles unchanged, even when the base equals a mount", async () => {
+  const docs = await pagefindUrlFor("/docs", {
+    bundle: "/docs/docs-es/pagefind/",
+    merge: ["/docs/pagefind/"],
+  });
+  assert.equal(docs.loaded, "https://example.com/docs/docs-es/pagefind/pagefind.js");
+  assert.deepEqual(docs.merged, ["https://example.com/docs/pagefind/"]);
+  assert.deepEqual(docs.baseUrls, ["/docs/", "/docs/"]);
+  const api = await pagefindUrlFor("/api", { bundle: "/api/api/pagefind/", merge: ["/api/pagefind/"] });
+  assert.equal(api.loaded, "https://example.com/api/api/pagefind/pagefind.js");
+  assert.deepEqual(api.merged, ["https://example.com/api/pagefind/"]);
+});
+
+test("result URLs come back as Pagefind gives them: its baseUrl adds the base, the provider adds nothing", async () => {
+  const { results } = await pagefindUrlFor("/docs", { bundle: "/docs/pagefind/", merge: [] });
+  assert.equal(results[0]?.url, "/docs-es/guide/");
+  assert.equal(results[0]?.subResults?.[0]?.url, "/docs-es/guide/#setup");
 });

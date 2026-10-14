@@ -23,6 +23,7 @@ test("runtime config strips inline API specs", async () => {
   const plugin = virtualConfigPlugin(config, {
     getIndexedCollections: async () => ["api"],
     requestRenderingCollections: ["api"],
+    base: "/docs",
     versionAlternates: {},
     apiCollections: ["api"],
     headDefaults: {
@@ -38,6 +39,8 @@ test("runtime config strips inline API specs", async () => {
   assert.ok(!source.includes(sentinel));
   assert.match(source, /"spec":\{\}/);
   assert.match(source, /indexedCollections = \["api"\]/);
+  // The whole-site search bundle is a served URL, base included.
+  assert.match(source, /searchIndex = \{"bundle":"\/docs\/pagefind\/","merge":\[\]\}/);
 });
 
 test("build-only API config retains specs and the project root", () => {
@@ -76,6 +79,7 @@ test("a content.config.ts edit invalidates the virtual config in dev", async () 
   const plugin = virtualConfigPlugin({} as NimbusConfig, {
     getIndexedCollections: async () => lists.shift() ?? ["docs", "blog"],
     requestRenderingCollections: [],
+    base: "/",
     versionAlternates: {},
     apiCollections: [],
     headDefaults: {

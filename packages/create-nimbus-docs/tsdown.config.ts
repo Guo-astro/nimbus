@@ -11,6 +11,7 @@ const minNodeVersion = pkg.engines?.node?.replace(/^>=/, "") ?? "20.0.0";
 const isPreview = process.env.NIMBUS_PREVIEW === "1";
 const previewPr = process.env.PR_NUMBER ?? null;
 const previewRef = process.env.NIMBUS_PREVIEW_REF ?? null;
+const previewRegistryUrl = process.env.NIMBUS_PREVIEW_REGISTRY_URL ?? null;
 
 function requirePreviewPr(): string {
   if (!previewPr || !/^[1-9]\d*$/.test(previewPr)) {
@@ -24,6 +25,13 @@ function requirePreviewRef(): string {
     throw new Error("NIMBUS_PREVIEW=1 requires a 7-character Git commit in NIMBUS_PREVIEW_REF.");
   }
   return previewRef;
+}
+
+function requirePreviewRegistryUrl(): string {
+  if (!previewRegistryUrl || !/^https:\/\/[^/\s]+\/registry$/.test(previewRegistryUrl)) {
+    throw new Error("NIMBUS_PREVIEW=1 requires an HTTPS /registry URL in NIMBUS_PREVIEW_REGISTRY_URL.");
+  }
+  return previewRegistryUrl;
 }
 
 export default defineConfig({
@@ -46,6 +54,7 @@ export default defineConfig({
     __MIN_NODE_VERSION__: JSON.stringify(minNodeVersion),
     __PREVIEW__: JSON.stringify(isPreview),
     __PREVIEW_PR__: JSON.stringify(previewPr),
+    __PREVIEW_REGISTRY_URL__: JSON.stringify(isPreview ? requirePreviewRegistryUrl() : null),
   },
   hooks: {
     async "build:done"(ctx) {

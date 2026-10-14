@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     branches: [main]
+  # Redeploy the current published release's docs site and registry.
+  workflow_dispatch:
 
 # Serialize releases: never let two runs race on the version-bump PR or npm.
 concurrency: ${{ github.workflow }}-${{ github.ref }}
@@ -13,8 +15,12 @@ permissions: {}
 jobs:
   release:
     name: Release
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: release
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
     permissions:
       contents: write # push the version-bump PR branch, git tags, and the templates branch/tag
       pull-requests: write # open/update the version-bump PR
@@ -98,13 +104,15 @@ jobs:
       #     each package's `repository.url`. Going public is also the hard
       #     requirement for unauthenticated giget scaffolds (this design cannot
       #     expose templates without exposing source) — flip it public (after a
-      #     full-history secret scan), or drop this env line + `id-token: write`,
-      #     before the first real release.
+      #     full-history secret scan), or disable explicit provenance before the
+      #     first real release. Keep `id-token: write` for npm Trusted Publishing.
       - name: Create version-bump PR or publish
+        id: publish
         uses: changesets/action@3841a0683d3cfa6dae0f9bb335290003010fe3f0 # v1.9.0
         with:
           version: pnpm changeset:version
           publish: node scripts/release.mjs publish
+          createGithubReleases: false # reconcile them after the published output is recorded
           commit: "chore: bump package versions"
           title: "chore: bump package versions"
         env:
@@ -112,11 +120,141 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           NPM_CONFIG_PROVENANCE: "true"
 
-      # Changesets may fail after pushing package tags but before creating every
-      # GitHub Release. Reconcile those releases independently so a rerun heals
-      # the partial state without republishing packages.
+      - name: Push published package tags
+        if: ${{ !cancelled() && steps.publish.outputs.published == 'true' }}
+        run: |
+          for pkg in nimbus-docs create-nimbus-docs; do
+            name=$(jq -r .name "packages/$pkg/package.json")
+            version=$(jq -r .version "packages/$pkg/package.json")
+            tag="$name@$version"
+            if git rev-parse --quiet --verify "refs/tags/$tag" > /dev/null; then
+              git push origin "refs/tags/$tag"
+            fi
+          done
+
+      # GitHub Releases are independent of the published output, so a Release
+      # API failure does not skip the www deploy after npm publication.
       - name: Reconcile GitHub Releases
-        if: always() && steps.app-token.outcome == 'success'
+        if: ${{ !cancelled() && steps.app-token.outcome == 'success' }}
         run: node scripts/reconcile-github-releases.mjs
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  build-www:
+    name: Build released www
+    needs: release
+    if: ${{ !cancelled() && (needs.release.outputs.published == 'true' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # package tags locate the published release commit
+          persist-credentials: false
+
+      # A release builds its own commit. A manual run builds the newer of the
+      # two packages' npm `latest` tags; the deploy job rechecks both versions.
+      - name: Choose the published release commit
+        id: commit
+        run: |
+          sha=$GITHUB_SHA
+          if [ "$EVENT" = 'workflow_dispatch' ]; then
+            docs="refs/tags/@cloudflare/nimbus-docs@$(npm view @cloudflare/nimbus-docs dist-tags.latest)"
+            cli="refs/tags/@cloudflare/create-nimbus-docs@$(npm view @cloudflare/create-nimbus-docs dist-tags.latest)"
+            for tag in "$docs" "$cli"; do
+              if ! git rev-parse --quiet --verify "$tag^{commit}" > /dev/null; then
+                echo "::error::Release tag ${tag#refs/tags/} is missing."
+                exit 1
+              fi
+            done
+            if git merge-base --is-ancestor "$docs" "$cli"; then
+              sha=$(git rev-parse "$cli^{commit}")
+            elif git merge-base --is-ancestor "$cli" "$docs"; then
+              sha=$(git rev-parse "$docs^{commit}")
+            else
+              echo "::error::Could not order the release tags $docs and $cli."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$sha" origin/main; then
+              echo "::error::Release commit $sha is not on main."
+              exit 1
+            fi
+          fi
+          git checkout --quiet --detach "$sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+        env:
+          EVENT: ${{ github.event_name }}
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @nimbus/www run predeploy
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: released-www-dist
+          path: apps/www/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 7
+
+  deploy-www:
+    name: Deploy released www
+    needs: build-www
+    if: ${{ !cancelled() && needs.build-www.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: cloudflare
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.build-www.outputs.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install Wrangler
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: released-www-dist
+          path: apps/www/dist
+
+      - name: Deploy only the current published release
+        working-directory: apps/www
+        run: |
+          set -o pipefail
+          for pkg in nimbus-docs create-nimbus-docs; do
+            expected=$(jq -r .version "../../packages/$pkg/package.json")
+            latest=$(npm view "@cloudflare/$pkg" dist-tags.latest --json | jq -er '.')
+            if [ "$expected" != "$latest" ]; then
+              echo "::error::@cloudflare/$pkg at this commit is $expected, but npm latest is $latest. Refusing to replace the newer site."
+              exit 1
+            fi
+          done
+          pnpm exec wrangler deploy
+          curl --fail --show-error --silent --retry 5 --retry-delay 3 \
+            https://nimbus-docs.com/registry/registry.json | jq -e \
+            --arg version "$(jq -r .version ../../packages/nimbus-docs/package.json)" \
+            '.registryVersion == $version'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

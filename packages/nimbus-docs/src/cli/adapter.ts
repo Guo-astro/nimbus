@@ -28,6 +28,7 @@ import {
   type AdapterRecipe,
   type RequestRenderingEdit,
   type WranglerInputs,
+  workersCompatibilityDate,
 } from "../_internal/adapters.js";
 import { isRangeSubset, satisfies } from "../_internal/semver-lite.js";
 import { invocation, quoteForDisplay } from "./pm.js";
@@ -293,6 +294,8 @@ export async function installAdapter(
     ...detectWranglerFloor(recipe, cwd),
     ...detectAdapterSwitch(cwd, adapter, priorAdapter),
   );
+  // After the install, so the date comes from the runtime the project now has.
+  const compatibilityDate = recipe.serverWrangler ? await workersCompatibilityDate(cwd) : "";
 
   // Re-read AFTER the install and re-apply to the CURRENT bytes: a postinstall,
   // a formatter, or a concurrent edit may have rewritten the config between the
@@ -327,7 +330,7 @@ export async function installAdapter(
   if (edit.status === "noop") {
     // Already wired (hand-edit, recovery, or the install itself); deps ensured.
     recordAdapterProvenance(cwd, adapter);
-    const wr = manageServerWrangler(recipe, cwd);
+    const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
     return {
       status: "noop",
       adapter,
@@ -354,7 +357,7 @@ export async function installAdapter(
   }
 
   recordAdapterProvenance(cwd, adapter);
-  const wr = manageServerWrangler(recipe, cwd);
+  const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
 
   return {
     status: "applied",
@@ -482,6 +485,8 @@ function redirectBaseWarnings(cwd: string): string[] {
 function manageServerWrangler(
   recipe: AdapterRecipe,
   cwd: string,
+  /** For a config without a valid one of its own (`workersCompatibilityDate`). */
+  compatibilityDate: string,
 ): { result: WranglerWriteResult | null; warnings: string[] } {
   const serverWrangler = recipe.serverWrangler;
   if (!serverWrangler) return { result: null, warnings: [] };
@@ -501,7 +506,7 @@ function manageServerWrangler(
     compatibilityDate:
       isValidCompatibilityDate(existing?.compatibility_date)
         ? existing.compatibility_date
-        : today(),
+        : compatibilityDate,
   });
   const mergeSettingsFrom = (existing?: Record<string, unknown>) => {
     const cfg = buildServerWranglerConfig(recipe, inputsFrom(existing))!;
@@ -709,10 +714,6 @@ function detectWranglerFloor(recipe: AdapterRecipe, cwd: string): string[] {
     ];
   }
   return [];
-}
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 async function installMissingDeps(

@@ -8,15 +8,14 @@ name: Preview release
 # `pnpm add https://pkg.pr.new/@cloudflare/nimbus-docs@<PR#>`.
 #
 # The label is removed at the end, so re-adding it triggers a fresh preview.
+#
+# Fork PRs work too. The same label starts the Fork preview build, whose
+# deploy comments the fork's www Preview; this run uses the fork's copy of this
+# file, with a read-only token, after a maintainer approves the run.
 on:
   pull_request:
     branches: [main]
     types: [labeled]
-
-# One preview per PR; a newer label event cancels the older run.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number }}
-  cancel-in-progress: true
 
 # Default-deny; the job opts into exactly what it needs.
 permissions: {}
@@ -24,25 +23,27 @@ permissions: {}
 jobs:
   preview:
     name: Build & publish preview
-    # Only the `pr preview` label, only on this repo, and only for same-repo
-    # branches. Forks don't receive the OIDC id-token that pkg.pr.new
-    # authenticates with (and PR policy already redirects unsolicited forks),
-    # so a fork run could never publish anyway.
     if: >-
       github.repository == 'cloudflare/nimbus' &&
-      github.event.label.name == 'pr preview' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.label.name == 'pr preview'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
+    # One preview per PR; a newer label event cancels the older run. Job-level,
+    # so runs for other labels, whose job is skipped, don't cancel it.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.number }}
+      cancel-in-progress: true
     permissions:
       contents: read
-      pull-requests: write # remove the trigger label; the bot's PR comment uses the App's own token
-      id-token: write # pkg.pr.new authenticates the publish via GitHub OIDC (no npm token, no secret)
+      pull-requests: write # remove the trigger label (same-repo only; fork tokens are read-only)
+    env:
+      FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # changelog-github finds the commit that added each changeset
+          persist-credentials: false
 
       # The preview version comes from the branch's package versions. A branch
       # behind the latest release would be stamped as a pre-release of a version
@@ -53,7 +54,7 @@ jobs:
             branch=$(jq -r .version "packages/$pkg/package.json")
             main=$(git show "origin/main:packages/$pkg/package.json" | jq -r .version)
             if [ "$branch" != "$main" ]; then
-              gh pr edit "$PR" --repo "$REPO" --remove-label "pr preview"
+              [ "$FORK" = true ] || gh pr edit "$PR" --repo "$REPO" --remove-label "pr preview"
               echo "::error::This branch has @cloudflare/$pkg $branch, but main has $main. Merge main into the branch, then add the label again."
               exit 1
             fi
@@ -62,6 +63,56 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.number }}
+
+      # Same-repo heads take the URL from the Workers Builds comment. Fork heads
+      # wait up to 15 minutes for the Fork preview workflow's comment; either
+      # way the URL counts only once it serves this commit.
+      - name: Require a live www Preview of this commit
+        id: registry
+        run: |
+          sha=$(git rev-parse HEAD)
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
+          read -r state head_sha <<< "$current"
+          if [ "$FORK" = true ]; then
+            author='github-actions[bot]'
+            match='<!-- nimbus-fork-preview -->'
+            deadline=$((SECONDS + 900))
+          else
+            author='cloudflare-workers-and-pages[bot]'
+            match='/services/view/nimbus-docs/'
+            deadline=$SECONDS
+          fi
+          while :; do
+            comment=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+              --jq ".[] | select(.user.login == \"$author\" and (.body | contains(\"$match\"))) | .id" | sort -n | tail -1)
+            url=''
+            served_sha=''
+            registry_version=''
+            if [ -n "$comment" ]; then
+              url=$(gh api "repos/$REPO/issues/comments/$comment" --jq '.body' | \
+                grep -oE 'Preview URL: https://[A-Za-z0-9.-]+' | head -1 | sed 's/^Preview URL: //') || true
+            fi
+            if [ -n "$url" ]; then
+              served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+                "$url/_nimbus-preview-sha.txt") || true
+              registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+                "$url/registry/registry.json" | jq -er '.registryVersion') || true
+            fi
+            if [ "$served_sha" = "$sha" ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
+            sleep 15
+          done
+          if [ "$state" != 'open' ] || [ "$head_sha" != "$sha" ] || [ "$served_sha" != "$sha" ] || \
+            [ "$registry_version" != "$(jq -r .version packages/nimbus-docs/package.json)" ]; then
+            [ "$FORK" = true ] || gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'
+            echo "::error::No live www Preview of this PR head (url: ${url:-none}, serving: ${served_sha:-none}). Wait for its build to finish, then reapply the label."
+            exit 1
+          fi
+          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          echo "registry_url=$url/registry" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -92,11 +143,19 @@ jobs:
       # preview. (pkg-pr-new also runs each package's `prepack` when packing, so
       # this is belt-and-suspenders — but it keeps a build break visible as its
       # own step rather than buried in the publish output.)
-      - run: pnpm --filter ./packages/nimbus-docs --filter ./packages/create-nimbus-docs build
+      - name: Build preview packages
+        run: |
+          sha=$(git rev-parse HEAD)
+          NIMBUS_PREVIEW_REF="${sha:0:7}" pnpm --filter ./packages/nimbus-docs --filter ./packages/create-nimbus-docs build
+        env:
+          NIMBUS_PREVIEW: "1"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          NIMBUS_PREVIEW_REGISTRY_URL: ${{ steps.registry.outputs.registry_url }}
 
       # Remove the label before publishing so a maintainer can re-add it to
       # retry, even if the publish step below fails.
       - name: Remove preview label
+        if: env.FORK != 'true'
         run: gh pr edit "$PR" --repo "$REPO" --remove-label "pr preview"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,14 +176,24 @@ jobs:
       #
       # Prerequisites (one-time, outside this file):
       #   - Install the pkg-pr-new GitHub App (https://github.com/apps/pkg-pr-new)
-      #     on cloudflare/nimbus. The App install + OIDC id-token IS the auth;
-      #     there is no token secret.
+      #     on cloudflare/nimbus. That is the whole auth: the App learns of each
+      #     workflow run and accepts publishes from it while it runs. No token,
+      #     no secret, no OIDC. A fork run can therefore publish too, which is
+      #     why fork workflow approval must stay at "all external contributors".
       #   - The repo must be PUBLIC. pkg.pr.new serves artifacts from public,
       #     unauthenticated URLs and does not support private repos — same
       #     public-flip prerequisite the npm release already depends on.
       - name: Publish preview
         run: |
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
+          read -r state head_sha <<< "$current"
           PREVIEW_SHA="$(git rev-parse HEAD)"
+          served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+            "$PREVIEW_URL/_nimbus-preview-sha.txt")
+          if [ "$state" != 'open' ] || [ "$head_sha" != "$PREVIEW_SHA" ] || [ "$served_sha" != "$PREVIEW_SHA" ]; then
+            echo '::error::The PR or its live www Preview changed during the package build. Reapply the label.'
+            exit 1
+          fi
           NIMBUS_PREVIEW_REF="${PREVIEW_SHA:0:7}" pnpm exec pkg-pr-new publish \
             --pnpm \
             --compact \
@@ -133,5 +202,10 @@ jobs:
             ./packages/nimbus-docs \
             ./packages/create-nimbus-docs
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           NIMBUS_PREVIEW: "1"
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number }}
+          PREVIEW_URL: ${{ steps.registry.outputs.preview_url }}
+          NIMBUS_PREVIEW_REGISTRY_URL: ${{ steps.registry.outputs.registry_url }}

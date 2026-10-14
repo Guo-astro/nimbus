@@ -517,7 +517,7 @@ export async function gatherOutdated(
         action: {
           kind: "review",
           automatic: false,
-          instructions: [`Update with ${invocation(`add ${finding.slug} --overwrite`, cwd)}; it keeps files the project edited and lists them. Don't add --yes unless the user chose to discard those edits.`],
+          instructions: ["Review the recorded local files against the current registry source. Preserve project-owned changes; do not automate --overwrite."],
         },
       });
       if (finding.status === "unverified") {
@@ -651,7 +651,7 @@ function formatOutdatedPretty(result: OutdatedResult, flags: UpgradeFlags): stri
   if (unavailable("registry") || result.status === "failed" || unavailable("project")) lines.push("", "Registry components: unavailable");
   else if (behind.length === 0) lines.push("", "Registry components: up to date ✓");
   else {
-    lines.push("", `Registry components behind (update with \`${invocation("add <slug> --overwrite")}\`; it keeps files you've edited):`);
+    lines.push("", "Registry components behind (review only; overwrite is not automated):");
     for (const item of behind) lines.push(`  ${item.slug}: ${item.local} locally`);
   }
   for (const warning of result.warnings.filter((item) => item.scope === "registry")) lines.push(`  ! ${warning.message}`);

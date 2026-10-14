@@ -41,9 +41,6 @@ importers:
       openapi-sampler:
         specifier: 1.7.4
         version: 1.7.4
-      sharp:
-        specifier: ^0.35.4
-        version: 0.35.4(@types/node@24.13.3)
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.6.0
@@ -6278,6 +6275,7 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.4
       '@img/sharp-win32-x64': 0.35.4
       '@types/node': 24.13.3
+    optional: true
 
   shebang-command@2.0.0:
     dependencies:

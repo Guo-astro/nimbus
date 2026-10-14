@@ -1,7 +1,4 @@
-import { fileURLToPath } from "node:url";
-
 import { getOgImagePages } from "@cloudflare/nimbus-docs/runtime";
-import { publicDir, root } from "astro:config/server";
 import { OGImageRoute } from "astro-og-canvas";
 import { ogCardConfig } from "./_og-card-config";
 
@@ -16,7 +13,5 @@ export const { getStaticPaths, GET } = await OGImageRoute({
     title: page.title,
     description: page.description ?? "",
     ...ogCardConfig,
-    fonts: [fileURLToPath(new URL("fonts/Inter-Bold.ttf", publicDir))],
-    cacheDir: fileURLToPath(new URL("node_modules/.astro-og-canvas", root)),
   }),
 });

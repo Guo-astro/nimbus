@@ -339,6 +339,14 @@ async function main(): Promise<void> {
 
   if (command === "add") {
     const slugs = [slug!, ...rest];
+    // A source reached without its kind: the grammar is `add source <name>`.
+    const source = slugs.find((s) => resolveSource(s));
+    if (source) {
+      p.log.error(
+        `\`${source}\` is a content source. Did you mean \`${invocation(`add source ${source}`)}\`? Nothing was installed.`,
+      );
+      process.exit(1);
+    }
     // Every slug is checked before anything is installed, so `add a typo`
     // installs nothing rather than `a` and then stopping.
     const unknown = slugs.filter(
@@ -487,12 +495,6 @@ async function addCommand(
   if (adapterId) {
     await runAdapterInstall(adapterId, `adapter-${adapterId}`, flags.print);
     return;
-  }
-
-  // A source reached without its kind: the grammar is `add source <name>`.
-  if (resolveSource(slug)) {
-    p.log.error(`\`${slug}\` is a content source. Did you mean \`${invocation(`add source ${slug}`)}\`?`);
-    process.exit(1);
   }
 
   const entry = getIndexEntry(slug);

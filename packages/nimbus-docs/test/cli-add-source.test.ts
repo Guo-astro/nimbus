@@ -168,9 +168,11 @@ test("unknown names, extra positionals, wrong flags and a source without its kin
       assert.equal(bare.code, 1);
       assert.match(bare.all, new RegExp(`Did you mean \`.*add source ${name}\`\\?`));
     }
-    const twoSlugs = await run(dir, "add", "card", "dialog");
-    assert.equal(twoSlugs.code, 1);
-    assert.match(twoSlugs.all, /takes one name/);
+    // Among several slugs too, before anything is installed.
+    const mixed = await run(dir, "add", "card", "github");
+    assert.equal(mixed.code, 1);
+    assert.match(mixed.all, /Did you mean `.*add source github`\?/);
+    assert.ok(!existsSync(path.join(dir, "src/components/ui/card")), "nothing installed");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

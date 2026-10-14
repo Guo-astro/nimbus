@@ -1,8 +1,4 @@
-/**
- * The remote MCP server behind `/mcp`: the web-standard SDK's stateless
- * handler with two read tools over the page index and the Markdown twins.
- * One module wraps the SDK so a swap stays away from the route and tests.
- */
+/** One module wraps the SDK so a swap stays away from the route and tests. */
 import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotocol/server";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import type { McpServerIdentity } from "./identity.js";
@@ -42,7 +38,6 @@ export interface ListPagesResult {
   nextCursor?: string;
 }
 
-/** What the route gives the handler: the baked index and each page's Markdown. */
 export interface DocsMcpSource {
   readIndex(request: Request): Promise<McpPageIndex>;
   /** The page's clean Markdown, or `null` when its twin is missing. */

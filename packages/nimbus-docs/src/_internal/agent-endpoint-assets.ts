@@ -101,7 +101,6 @@ export interface AgentEndpointAssetManifest {
   audience: "public";
   markdownAssets: MarkdownEndpointAsset[];
   llmsAssets: LlmsEndpointAsset[];
-  /** The remote MCP server's page list, when the site serves one; see `mcp/page-index.ts`. */
   pageIndex?: PageIndexAsset;
   headings: PreparedHeadingRecord[];
 }
@@ -534,7 +533,6 @@ function withAssetBase(base: string, pathname: string): string {
   return `${prefix}${pathname}`;
 }
 
-/** The docs version a collection holds: the primary one is current, `docs-<v>` is `<v>`. */
 function docsVersion(
   collection: string,
   versions: BakeAgentEndpointAssetsOptions["versions"],
@@ -734,7 +732,6 @@ function preparedLlmsPage(
   };
 }
 
-/** The `llms.txt` section of a page: a primary page's first id segment, another collection's label. */
 function llmsSection(
   page: Pick<PreparedLlmsPage, "collection" | "id">,
   versions: BakeAgentEndpointAssetsOptions["versions"],

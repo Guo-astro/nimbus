@@ -11,7 +11,6 @@ export const MCP_CARD_MEDIA_TYPE = "application/mcp-server-card+json";
 /** The pinned Server Card schema (v1, revision 526201bb). */
 export const MCP_CARD_SCHEMA =
   "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json";
-/** The name a site gets when its hostname can't become a server name. */
 export const MCP_FALLBACK_NAME = "local.nimbus/docs";
 const MCP_NAME_SUFFIX = "/docs";
 const MCP_NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
@@ -27,7 +26,6 @@ export function mcpUrl(
   return new URL(withBase(pathname, base), site).href;
 }
 
-/** The card's absolute URL for an endpoint URL, in the endpoint's trailing-slash form. */
 export function mcpCardUrl(endpointUrl: string): string {
   return endpointUrl.endsWith("/") ? `${endpointUrl}server-card/` : `${endpointUrl}/server-card`;
 }

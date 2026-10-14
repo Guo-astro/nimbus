@@ -9,9 +9,9 @@ name: Preview release
 #
 # The label is removed at the end, so re-adding it triggers a fresh preview.
 #
-# Fork PRs work too. Their www Preview comes from the Fork preview workflow,
-# which the same label starts; this run then uses the fork's copy of this file,
-# with a read-only token, after a maintainer approves the run.
+# Fork PRs work too. The same label starts the Fork preview build, whose
+# deploy comments the fork's www Preview; this run uses the fork's copy of this
+# file, with a read-only token, after a maintainer approves the run.
 on:
   pull_request:
     branches: [main]
@@ -27,7 +27,7 @@ jobs:
       github.repository == 'cloudflare/nimbus' &&
       github.event.label.name == 'pr preview'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     # One preview per PR; a newer label event cancels the older run. Job-level,
     # so runs for other labels, whose job is skipped, don't cancel it.
     concurrency:
@@ -65,7 +65,7 @@ jobs:
           PR: ${{ github.event.number }}
 
       # Same-repo heads take the URL from the Workers Builds comment. Fork heads
-      # wait up to 10 minutes for the Fork preview workflow's comment; either
+      # wait up to 15 minutes for the Fork preview workflow's comment; either
       # way the URL counts only once it serves this commit.
       - name: Require a live www Preview of this commit
         id: registry
@@ -76,7 +76,7 @@ jobs:
           if [ "$FORK" = true ]; then
             author='github-actions[bot]'
             match='<!-- nimbus-fork-preview -->'
-            deadline=$((SECONDS + 600))
+            deadline=$((SECONDS + 900))
           else
             author='cloudflare-workers-and-pages[bot]'
             match='/services/view/nimbus-docs/'

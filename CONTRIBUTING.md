@@ -120,7 +120,7 @@ Pushes to `main` build but never update production; only the release deploy does
 | Deploy command    | `echo "Production deploys run from release.yml"` (never `wrangler deploy`) |
 | Preview builds    | Enabled                                                                    |
 | Preview command   | Default, `npx wrangler preview`                                            |
-| Preview URLs      | `<name>.nimbus-docs.com` (the `workers.dev` URLs are behind Access)        |
+| Preview URLs      | `<name>.nimbus-docs.com`; `workers.dev` off (`preview_urls`, next release) |
 | Build watch paths | Default (include `*`, exclude nothing)                                     |
 
 Build command:
@@ -157,10 +157,9 @@ record no reviewed baseline in `nimbus.json`.
 
 #### Fork PR previews
 
-Fork branches get no Workers Builds Preview, so the `pr preview` label on a fork PR also starts the [Fork preview](.github/workflows/fork-preview.yml) workflow. It builds the fork's www with no credentials, then a separate job deploys only the built files to a Worker Preview named `fork-<PR#>` and comments its URL and commit. Add the label, then approve the pending "Preview release" run; it waits up to 10 minutes for that Preview before publishing packages against it.
+Fork branches get no Workers Builds Preview. Instead, the `pr preview` label on a fork PR starts the [Fork preview build](.github/workflows/fork-preview-build.yml), an ordinary fork run with no secrets. When it finishes, the [Fork preview](.github/workflows/fork-preview.yml) workflow, which always runs from `main`, deploys only the built files to `https://fork-<PR#>.nimbus-docs.com` and comments the URL and commit. Add the label, then approve the fork's pending runs; Preview release waits up to 15 minutes for that Preview before publishing packages against it.
 
-- The commit in the comment is the one deployed: the PR head when the label was added. Review that commit, not an earlier one.
-- A fork Preview serves unreviewed contributor code on the account's `workers.dev` subdomain. The deploy job writes `_nimbus-preview-sha.txt` and a `noindex` `_headers` itself, and replaces the fork's `_redirects` with `main`'s, so a fork's own headers and redirects are not previewed. It refuses a `_worker.js`.
-- Fork workflow approval must stay at "Require approval for all external contributors". pkg.pr.new needs no secret, so an approved fork run, from the fork's own copy of the workflow, can publish.
-- The workflow needs the `WWW_PREVIEW_HOST` repository variable, `nimbus-docs.<subdomain>.workers.dev`, and an Actions event policy that allows `pull_request_target` for `pr-policy.yml`, `www-preview-cleanup.yml` and `fork-preview.yml`. Scope that policy to those three workflows: its event list is an allowlist, so an unscoped policy blocks every other trigger.
+- The deploy goes ahead only while the PR's head is the built commit and the label is still on it. The label comes off after each build, so review the commit in the comment, and reapply the label for a fresh preview.
+- A fork Preview serves unreviewed contributor code on `nimbus-docs.com`. The deploy writes `_nimbus-preview-sha.txt` and a `noindex` `_headers` itself and uses `main`'s `_redirects`, so a fork's own headers and redirects are not previewed. It refuses a `_worker.js`.
+- Fork workflow approval must stay at "Require approval for all external contributors". A fork's own copies of these workflows run once approved, so approval is what stops a fork building or publishing on every push.
 - Closing the PR deletes `fork-<PR#>`. If that fails, run `pnpm exec wrangler preview delete --name fork-<PR#> --skip-confirmation` from `apps/www`.

@@ -1,0 +1,52 @@
+name: Fork preview build
+
+# A maintainer's `pr preview` label on a fork PR builds that PR's www, as the
+# fork equivalent of a Workers Builds branch build. This is an ordinary fork
+# `pull_request` run: no secrets, a read-only token, a PR-scoped cache, and it
+# needs a maintainer's approval. The Fork preview workflow deploys the files.
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build fork www
+    if: >-
+      github.repository == 'cloudflare/nimbus' &&
+      github.event.label.name == 'pr preview' &&
+      github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @nimbus/www run predeploy
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fork-www-dist
+          path: apps/www/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 1

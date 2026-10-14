@@ -7,13 +7,12 @@ import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotoc
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import type { McpServerIdentity } from "./identity.js";
 import type { McpPageIndex, McpPageRecord } from "./page-index.js";
-import { stripBase, toRouteKey } from "../url.js";
+import { stripBase, toRouteKey, withoutHtmlExtension } from "../url.js";
 
 /** Bodies over this are answered `413` before anything is parsed. */
 export const MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024;
 /** A body over the limit is still read up to this, so `wrangler dev` can reuse the connection. */
 export const MCP_MAX_DRAIN_BYTES = 1024 * 1024;
-/** `list_pages` returns this many pages per call. */
 export const MCP_LIST_PAGE_SIZE = 200;
 /** `get_page` content is cut near this many code points, with `truncated: true`. */
 export const MCP_PAGE_CONTENT_LIMIT = 100_000;
@@ -86,7 +85,7 @@ export const LIST_PAGES_TOOL = {
   description:
     "List published documentation pages: title, URL, Markdown URL, description, section and version. " +
     "By default the list matches site search: pages marked noindex and deprecated versions are left out. " +
-    `Filter by section (a top-level path segment) or by one version; pass nextCursor back as cursor for the next ${MCP_LIST_PAGE_SIZE}.`,
+    `Filter by section (a top-level path segment; the home page is index) or by one version; pass nextCursor back as cursor for the next ${MCP_LIST_PAGE_SIZE}.`,
   inputSchema: {
     type: "object",
     additionalProperties: false,
@@ -144,7 +143,7 @@ export function resolvePageRecord(
   } catch {
     return undefined;
   }
-  const route = toRouteKey(stripBase(pathname, base));
+  const route = toRouteKey(withoutHtmlExtension(stripBase(pathname, base)));
   const markdownPath = /\.md$/i.test(route) ? route : route === "/" ? "/index.md" : `${route}/index.md`;
   return index.pages.find((page) => page.markdownPath === markdownPath);
 }

@@ -1593,6 +1593,10 @@ export function invalidateAgentEndpointAssets(root: URL | string): void {
   if (configured) configured.invalidation += 1;
 }
 
+function withoutBody<T>({ body: _body, ...record }: T & { body: string }): T {
+  return record as T;
+}
+
 export async function bakeAgentEndpointAssets(
   options: BakeAgentEndpointAssetsOptions,
 ): Promise<AgentEndpointAssetManifest> {
@@ -2005,9 +2009,9 @@ export async function bakeAgentEndpointAssets(
     generation: AGENT_ENDPOINT_ASSET_GENERATION,
     base,
     audience: "public",
-    markdownAssets: records.map(({ body: _body, ...record }) => record),
-    llmsAssets: llmsRecords.map(({ body: _body, ...record }) => record),
-    ...(pageIndexRecord ? { pageIndex: (({ body: _body, ...record }) => record)(pageIndexRecord) } : {}),
+    markdownAssets: records.map(withoutBody),
+    llmsAssets: llmsRecords.map(withoutBody),
+    ...(pageIndexRecord ? { pageIndex: withoutBody(pageIndexRecord) } : {}),
     headings: headingRecords,
   };
   const isFresh = () => {

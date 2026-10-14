@@ -388,10 +388,10 @@ test("get_page accepts an absolute URL, a site path, a .md path, a query and a f
   }
 });
 
-test("get_page strips a configured base from URLs and paths", () => {
+test("get_page strips a configured base and an .html extension from URLs and paths", () => {
   const base = "/docs/";
   const index: McpPageIndex = { version: 1, versions: [], pages: [record("/guide/", { base })] };
-  for (const url of [`${SITE}/docs/guide/`, "/docs/guide/", "/guide/", "/docs/guide/index.md"]) {
+  for (const url of [`${SITE}/docs/guide/`, "/docs/guide/", "/guide/", "/docs/guide/index.md", "/docs/guide.html", "/docs/guide/index.html"]) {
     assert.equal(resolvePageRecord(url, index, base)?.markdownPath, "/guide/index.md", url);
   }
 });

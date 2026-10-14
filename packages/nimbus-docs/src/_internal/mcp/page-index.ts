@@ -2,7 +2,7 @@
  * The page index the remote MCP server lists from: one record per page
  * that has a Markdown twin, baked with the agent-endpoint assets when
  * `agents.mcp` is on and read at request time through the staged-asset
- * reader, so the Worker never carries the content store. Hidden versions
+ * reader, so the server bundle never carries the content store. Hidden versions
  * and drafts are not in it at all.
  */
 export const MCP_PAGE_INDEX_VERSION = 1;

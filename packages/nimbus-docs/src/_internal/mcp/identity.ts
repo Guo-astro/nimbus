@@ -17,12 +17,7 @@ const MCP_NAME_SUFFIX = "/docs";
 const MCP_NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
 const MCP_NAME_MAX_LENGTH = 200;
 
-/**
- * The absolute `/mcp` URL under `site` and `base`. With `trailingSlash:
- * "always"` the endpoint is `/mcp/`: Astro answers the other form with a
- * 308, which keeps a POST, but clients that don't follow redirects need the
- * form the site serves.
- */
+/** The absolute `/mcp` URL under `site` and `base`, in the site's trailing-slash form. */
 export function mcpUrl(
   site: string,
   base: string,
@@ -104,7 +99,6 @@ export function mcpServerIdentity(input: {
   };
 }
 
-/** The Server Card document for `/mcp/server-card`. */
 export function mcpServerCard(identity: McpServerIdentity) {
   return {
     $schema: MCP_CARD_SCHEMA,

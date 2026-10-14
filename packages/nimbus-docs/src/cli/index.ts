@@ -747,7 +747,7 @@ async function runAdapterInstall(
     cwd,
     installDeps: async (deps, at) => {
       const pm = detectPackageManager(at);
-      const { bin, args } = pmAddCommand(pm, deps, { exact: true });
+      const { bin, args } = pmAddCommand(pm, deps);
       const display = `${bin} ${args.map(quoteForDisplay).join(" ")}`;
       spinner.start(display);
       try {

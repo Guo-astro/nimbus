@@ -49,6 +49,7 @@ export default defineConfig({
 | `search`                         | object \| `false` | Search backend. See [Search](/navigation/search).                             |
 | `versions`                       | object            | Versioning manifest — each version is its own content collection.             |
 | `rendering`                      | object            | Build or request rendering policy for canonical content collection routes.    |
+| `agents`                         | object            | Agent services the site runs itself. `agents.mcp` serves a remote MCP server. |
 | `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/writing/content-sources). |
 
 ### Content sources
@@ -77,7 +78,7 @@ Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
 #### Enable request rendering
 
-Request rendering requires three things: `output: "server"` in the Astro config, a compatible Astro adapter, and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
+Request rendering requires a compatible Astro adapter and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
 
 Set the default when most or all canonical collection routes should render on request:
 
@@ -169,6 +170,20 @@ See [Server adapters](/cli#server-adapters) for installer behavior and safety ch
 ##### Other Astro adapters
 
 For prose collections, use the official [Node](https://docs.astro.build/en/guides/integrations-guide/node/), [Netlify](https://docs.astro.build/en/guides/integrations-guide/netlify/), or [Vercel](https://docs.astro.build/en/guides/integrations-guide/vercel/) adapter with `output: "server"` and the same Nimbus rendering policy. Follow the adapter's deployment instructions, serve the generated static assets alongside the server, and verify the production HTTP responses. [Docs for agents](/ai/docs-for-agents#markdown-negotiation) includes a Node example and explains how static Markdown is retrieved on each target.
+
+### Agents
+
+`agents` turns on services the site runs for agents, as opposed to the files it publishes for them. There is one key:
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `mcp` | boolean | Serve a remote MCP server at `/mcp` with `list_pages` and `get_page`. Needs a server adapter and the `@modelcontextprotocol/server` package. Default `false`. |
+
+```ts
+agents: { mcp: true },
+```
+
+See [Remote MCP server](/ai/remote-mcp) for what it serves and how clients connect.
 
 ## Links and trailing slashes
 

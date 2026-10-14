@@ -46,6 +46,8 @@ const LANE = process.env.TEMPLATES_CHECK_LANE ?? "static";
 if (!LANES.includes(LANE)) {
   fail(`TEMPLATES_CHECK_LANE must be one of ${LANES.join(", ")}; received ${LANE}`);
 }
+// The lanes that serve the site turn on the remote MCP server too.
+const MCP = LANE === "node" || LANE === "cloudflare";
 
 // Package manager for the scaffold install/build. Default is the ambient pnpm
 // (pinned pnpm 9); set SCAFFOLD_PNPM to a corepack spec (e.g. `pnpm@latest`) to
@@ -170,6 +172,34 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = 
           `${route} returned ${response.status} without ${JSON.stringify(expected)}: ${JSON.stringify(body.slice(0, 300))}`,
         );
       }
+    }
+    if (MCP) {
+      const card = await fetch(`${siteUrl}/mcp/server-card`, { signal: AbortSignal.timeout(5_000) });
+      assert.equal(card.status, 200, `${base}/mcp/server-card`);
+      assert.equal(card.headers.get("Content-Type"), "application/mcp-server-card+json");
+      assert.equal(card.headers.get("Access-Control-Allow-Origin"), "*");
+      assert.match((await card.json()).remotes?.[0]?.url ?? "", new RegExp(`${base}/mcp/?$`));
+      const rpc = (id, method, params) =>
+        fetch(`${siteUrl}/mcp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+          body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+          signal: AbortSignal.timeout(5_000),
+        });
+      const initialize = await rpc(1, "initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "templates-check", version: "0" },
+      });
+      assert.equal(initialize.status, 200, `${base}/mcp initialize`);
+      assert.match(await initialize.text(), /"serverInfo"/);
+      const call = await rpc(2, "tools/call", { name: "get_page", arguments: { url: `${base}/owned-by-slug/` } });
+      assert.equal(call.status, 200, `${base}/mcp get_page`);
+      assert.match(call.headers.get("Content-Type") ?? "", /^application\/json/, `${base}/mcp answers with JSON`);
+      const message = await call.json();
+      const page = JSON.parse(message.result?.content?.[0]?.text ?? "{}");
+      assert.ok(page.content?.includes("This text lives in"), `get_page reads the deployed Markdown: ${JSON.stringify(message).slice(0, 300)}`);
+      assert.equal(page.truncated, undefined);
     }
     for (const route of ["/", "/owned-by-slug/"]) {
       const markdown = await fetch(`${siteUrl}${route}`, {
@@ -433,6 +463,13 @@ if (requestRendering !== (LANE !== "static")) {
   fail(`${LANE} scaffold has an unexpected request-rendering default`);
 }
 ok(`scaffolded the ${LANE} lane via --template-dir`);
+if (MCP) {
+  const configPath = join(site, "astro.config.ts");
+  const source = readFileSync(configPath, "utf8");
+  const configured = source.replace("defineNimbusConfig({", "defineNimbusConfig({\n  agents: { mcp: true },");
+  assert.notEqual(configured, source, "missing Nimbus config fixture seam");
+  writeFileSync(configPath, configured);
+}
 const nodeRuntimePort = LANE === "node" ? await availablePort() : undefined;
 if (nodeRuntimePort !== undefined) {
   const configPath = join(site, "astro.config.ts");
@@ -456,6 +493,9 @@ for (const field of ["dependencies", "devDependencies"]) {
   }
 }
 if (!rewired) fail(`scaffolded project declares no ${NIMBUS_NAME} dependency`);
+if (MCP) {
+  pkg.dependencies["@modelcontextprotocol/server"] = NIMBUS_PKG.peerDependencies["@modelcontextprotocol/server"];
+}
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
 // Keep the scaffold's workspace configuration active so dependency build

@@ -1,4 +1,5 @@
 import { collectionMountPrefix } from "./collection-mount.js";
+import { isSearchable } from "./discoverability.js";
 import {
   contentInventoryEntryUrl,
   requestInventoryVersionStatusKey,
@@ -47,10 +48,7 @@ export async function GET() {
       ),
     );
     const discoverable = data.noindex !== true && !versionStatus?.isHidden;
-    const searchable =
-      !versionStatus?.isHidden &&
-      (data.searchable === true ||
-        (data.searchable !== false && data.noindex !== true));
+    const searchable = !versionStatus?.isHidden && isSearchable(item.entry);
     const route: RequestRouteInventoryEntry = {
       collection,
       url: contentInventoryEntryUrl(

@@ -29,7 +29,7 @@ import {
   type LlmsFullBlock,
   type LlmsFullHeader,
 } from "./llms-full.js";
-import { isDiscoverable } from "./discoverability.js";
+import { isDiscoverable, isSearchable } from "./discoverability.js";
 import { mergePartialHeadings } from "./partial-headings.js";
 import {
   PREPARED_HEADINGS_GENERATION,
@@ -50,6 +50,11 @@ import {
   renderEntryAsMarkdown,
 } from "./transform.js";
 import { formatLabel } from "./sidebar.js";
+import {
+  MCP_PAGE_INDEX_VERSION,
+  type McpPageIndex,
+  type McpPageRecord,
+} from "./mcp/page-index.js";
 import { toDocumentHref, toRouteKey, withBase } from "./url.js";
 import type {
   GeneratedMarkdownComponentTransform,
@@ -62,7 +67,7 @@ import type {
   MarkdownEndpointReference,
 } from "../agent-endpoints.js";
 
-export const AGENT_ENDPOINT_ASSET_MANIFEST_VERSION = 5;
+export const AGENT_ENDPOINT_ASSET_MANIFEST_VERSION = 6;
 export const AGENT_ENDPOINT_ASSET_GENERATION = 1;
 
 export interface MarkdownEndpointAsset extends MarkdownEndpointReference {
@@ -83,14 +88,29 @@ export type LlmsEndpointAsset = LlmsEndpointReference & {
   path: string;
 };
 
+export interface PageIndexAsset {
+  digest: string;
+  mediaType: string;
+  path: string;
+}
+
 export interface AgentEndpointAssetManifest {
-  version: 5;
+  version: 6;
   generation: number;
   base: string;
   audience: "public";
   markdownAssets: MarkdownEndpointAsset[];
   llmsAssets: LlmsEndpointAsset[];
+  pageIndex?: PageIndexAsset;
   headings: PreparedHeadingRecord[];
+}
+
+function manifestAssets(manifest: AgentEndpointAssetManifest): Array<{ path: string }> {
+  return [
+    ...manifest.markdownAssets,
+    ...manifest.llmsAssets,
+    ...(manifest.pageIndex ? [manifest.pageIndex] : []),
+  ];
 }
 
 export type AgentEndpointVisibilityDecision =
@@ -108,8 +128,11 @@ export interface BakeAgentEndpointAssetsOptions {
   versions?: {
     current: string;
     others: readonly string[];
+    deprecated?: readonly string[];
     hidden?: readonly string[];
   };
+  /** The remote MCP endpoint, when the site serves one; `llms.txt` names it. */
+  mcpUrl?: string;
   citationIndex?: ReadonlyMap<string, string>;
   componentMap?: Record<string, GeneratedMarkdownComponentTransform>;
   partialResolver?: GeneratedMarkdownPartialResolver;
@@ -358,11 +381,7 @@ async function cleanupAssets(
 ): Promise<void> {
   const pendingReaders = agentEndpointAssetState.readers.get(root)?.idle;
   if (pendingReaders) await pendingReaders;
-  const retained = new Set(
-    [...manifest.markdownAssets, ...manifest.llmsAssets].map(
-      (asset) => asset.path,
-    ),
-  );
+  const retained = new Set(manifestAssets(manifest).map((asset) => asset.path));
   const assetDirectory = path.join(directory, "assets");
   const entries = await readdir(assetDirectory, { withFileTypes: true });
   await Promise.all(
@@ -393,11 +412,7 @@ async function publishManifest(
     const created: string[] = [];
     const removeCreated = async () => {
       const retained = new Set(
-        previous
-          ? [...previous.markdownAssets, ...previous.llmsAssets].map(
-              (asset) => asset.path,
-            )
-          : [],
+        previous ? manifestAssets(previous).map((asset) => asset.path) : [],
       );
       await Promise.all(
         created
@@ -518,18 +533,22 @@ function withAssetBase(base: string, pathname: string): string {
   return `${prefix}${pathname}`;
 }
 
+function docsVersion(
+  collection: string,
+  versions: BakeAgentEndpointAssetsOptions["versions"],
+): string | undefined {
+  if (!versions) return undefined;
+  if (collection === PRIMARY_COLLECTION) return versions.current;
+  const version = collection.startsWith("docs-") ? collection.slice("docs-".length) : undefined;
+  return version && versions.others.includes(version) ? version : undefined;
+}
+
 function entryVersion(
   entry: Pick<PreparedMarkdownEntry, "collection" | "id" | "data">,
   versions: BakeAgentEndpointAssetsOptions["versions"],
 ): string | undefined {
   if (typeof entry.data.version === "string") return entry.data.version;
-  if (!versions) return undefined;
-  if (entry.collection === PRIMARY_COLLECTION) return versions.current;
-  if (entry.collection.startsWith("docs-")) {
-    const version = entry.collection.slice("docs-".length);
-    if (versions.others.includes(version)) return version;
-  }
-  return undefined;
+  return docsVersion(entry.collection, versions);
 }
 
 function preparedMarkdownUrls(
@@ -713,6 +732,72 @@ function preparedLlmsPage(
   };
 }
 
+function llmsSection(
+  page: Pick<PreparedLlmsPage, "collection" | "id">,
+  versions: BakeAgentEndpointAssetsOptions["versions"],
+): string {
+  return page.collection === PRIMARY_COLLECTION
+    ? page.id.split("/")[0]!
+    : collectionLabel(page.collection, versions);
+}
+
+/**
+ * One MCP page-index record. Only docs pages carry a version: an API
+ * entry's own version is its API's, not one of the site's docs versions.
+ */
+function mcpPageRecord(
+  entry: Pick<PreparedMarkdownEntry, "collection" | "id" | "data">,
+  page: PreparedLlmsPage,
+  options: BakeAgentEndpointAssetsOptions,
+): McpPageRecord {
+  const version = docsVersion(entry.collection, options.versions);
+  const deprecated =
+    version !== undefined &&
+    (options.versions?.deprecated ?? []).includes(version);
+  return {
+    title: page.title,
+    ...(page.description ? { description: page.description } : {}),
+    url: absoluteUrl(options.site, options.base, page.url),
+    markdownUrl: absoluteUrl(options.site, options.base, page.markdownUrl),
+    markdownPath: page.markdownUrl,
+    section: llmsSection(page, options.versions),
+    ...(version ? { version } : {}),
+    ...(deprecated ? { deprecated: true as const } : {}),
+    searchable: isSearchable(entry),
+  };
+}
+
+function mcpPageIndexAsset(
+  pages: McpPageRecord[],
+  base: string,
+  options: BakeAgentEndpointAssetsOptions,
+): PageIndexAsset & { body: string } {
+  pages.sort((a, b) => compare(a.url, b.url));
+  const hidden = options.versions?.hidden ?? [];
+  const pageIndex: McpPageIndex = {
+    version: MCP_PAGE_INDEX_VERSION,
+    versions: options.versions
+      ? [options.versions.current, ...options.versions.others].filter((version) => !hidden.includes(version))
+      : [],
+    pages,
+  };
+  const body = `${JSON.stringify(pageIndex)}\n`;
+  const fingerprint = digest(
+    JSON.stringify({
+      generation: AGENT_ENDPOINT_ASSET_GENERATION,
+      base,
+      audience: "public",
+      pageIndex: digest(body),
+    }),
+  );
+  return {
+    digest: `sha256:${fingerprint}`,
+    mediaType: "application/json",
+    path: `assets/${fingerprint}.json`,
+    body,
+  };
+}
+
 function sidebarGroupLabel(data: Record<string, unknown>): string | undefined {
   const sidebar = data.sidebar as { group?: { label?: unknown } } | undefined;
   const label = sidebar?.group?.label;
@@ -728,10 +813,7 @@ function groupPreparedLlmsPages(
   const secondary = new Map<string, PreparedLlmsPage[]>();
   const versionSlugs = new Set(options.versions?.others ?? []);
   for (const page of pages) {
-    const slug =
-      page.collection === PRIMARY_COLLECTION
-        ? page.id.split("/")[0]!
-        : collectionLabel(page.collection, options.versions);
+    const slug = llmsSection(page, options.versions);
     const buckets =
       page.collection === PRIMARY_COLLECTION ? primary : secondary;
     const bucket = buckets.get(slug);
@@ -860,6 +942,12 @@ function siteIndexAsset(
             : []),
           "",
         ]),
+    ...(options.mcpUrl
+      ? [
+          `MCP server (Streamable HTTP; tools list_pages and get_page over these pages): ${options.mcpUrl}`,
+          "",
+        ]
+      : []),
     "## Pages",
     "",
     ...rows.map((row) => row.line),
@@ -1246,7 +1334,8 @@ export function agentEndpointAssetsRuntimePlugin(
         `export const projectRoot = ${JSON.stringify(preparedMarkdownRootKey(root))};\n` +
         `export const base = ${JSON.stringify(manifest.base)};\n` +
         `export const markdownAssets = ${JSON.stringify(manifest.markdownAssets)};\n` +
-        `export const llmsAssets = ${JSON.stringify(manifest.llmsAssets)};\n`
+        `export const llmsAssets = ${JSON.stringify(manifest.llmsAssets)};\n` +
+        `export const pageIndex = ${JSON.stringify(manifest.pageIndex ?? null)};\n`
       );
     },
     handleHotUpdate(context) {
@@ -1305,7 +1394,7 @@ export async function stageAgentEndpointAssets(
   const manifest = await ensureAgentEndpointAssets(projectRoot);
   const sourceRoot = agentEndpointAssetRoot(projectRoot);
   const targetRoot = path.join(outputRoot, "_nimbus", "agent-endpoint-assets");
-  const assets = [...manifest.markdownAssets, ...manifest.llmsAssets];
+  const assets = manifestAssets(manifest);
   const copies = assets.map((asset) => ({
     source: resolveContainedAssetPath(sourceRoot, asset.path),
     target: resolveContainedAssetPath(targetRoot, asset.path),
@@ -1501,6 +1590,10 @@ export function invalidateAgentEndpointAssets(root: URL | string): void {
   if (configured) configured.invalidation += 1;
 }
 
+function withoutBody<T>({ body: _body, ...record }: T & { body: string }): T {
+  return record as T;
+}
+
 export async function bakeAgentEndpointAssets(
   options: BakeAgentEndpointAssetsOptions,
 ): Promise<AgentEndpointAssetManifest> {
@@ -1604,6 +1697,7 @@ export async function bakeAgentEndpointAssets(
   const headingRecords: PreparedHeadingRecord[] = [];
   const preparedLlmsPages: PreparedLlmsPage[] = [];
   const llmsRoutePages: PreparedLlmsPage[] = [];
+  const indexPages: McpPageRecord[] = [];
   const componentRevisions = componentFingerprint(options.componentMap);
   const partialResolverRevision = options.partialResolver?.revision ?? "";
   const citationFingerprint = digest(
@@ -1648,6 +1742,7 @@ export async function bakeAgentEndpointAssets(
     );
     const page = preparedLlmsPage(entry, markdown, options);
     llmsRoutePages.push(page);
+    if (options.mcpUrl) indexPages.push(mcpPageRecord(entry, page, options));
     if (isDiscoverable(entry)) preparedLlmsPages.push(page);
     if (entry.headings) {
       const headings = /\.md$/iu.test(entry.filePath ?? "")
@@ -1729,6 +1824,7 @@ export async function bakeAgentEndpointAssets(
     if (decision.status === "exclude") continue;
     const routePage = preparedLlmsPage(entry, "", options);
     llmsRoutePages.push(routePage);
+    if (options.mcpUrl) indexPages.push(mcpPageRecord(entry, routePage, options));
     const coordinate = entry.data.coordinate;
     if (typeof coordinate !== "string") {
       throw new Error(
@@ -1870,6 +1966,7 @@ export async function bakeAgentEndpointAssets(
       };
     });
   llmsRecords.sort((a, b) => compare(preparedLlmsKey(a), preparedLlmsKey(b)));
+  const pageIndexRecord = options.mcpUrl ? mcpPageIndexAsset(indexPages, base, options) : undefined;
   headingRecords.sort(
     (a, b) => compare(a.collection, b.collection) || compare(a.id, b.id),
   );
@@ -1909,8 +2006,9 @@ export async function bakeAgentEndpointAssets(
     generation: AGENT_ENDPOINT_ASSET_GENERATION,
     base,
     audience: "public",
-    markdownAssets: records.map(({ body: _body, ...record }) => record),
-    llmsAssets: llmsRecords.map(({ body: _body, ...record }) => record),
+    markdownAssets: records.map(withoutBody),
+    llmsAssets: llmsRecords.map(withoutBody),
+    ...(pageIndexRecord ? { pageIndex: withoutBody(pageIndexRecord) } : {}),
     headings: headingRecords,
   };
   const isFresh = () => {
@@ -1928,7 +2026,7 @@ export async function bakeAgentEndpointAssets(
       manifest,
       previousManifest,
       isFresh,
-      [...records, ...llmsRecords],
+      [...records, ...llmsRecords, ...(pageIndexRecord ? [pageIndexRecord] : [])],
       async () => {
         const configured = agentEndpointAssetState.roots.get(root);
         let installed = !configuredAtStart;

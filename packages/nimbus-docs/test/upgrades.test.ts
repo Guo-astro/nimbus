@@ -44,6 +44,7 @@ test("only universally skippable entries are optional", () => {
       "api-sidebar-filter",
       "api-version-picker",
       "browser-documentation-search",
+      "connect-mcp",
       "homepage-renders-on-request",
       "image-zoom",
       "lighter-sidebar-markup",
@@ -66,6 +67,16 @@ test("only universally skippable entries are optional", () => {
     UPGRADE_MANIFEST.entries.find((entry) => entry.id === "compact-coordinate-manifest")?.mode,
     "review-required",
   );
+});
+
+test("upgrade guidance names each adapter command as it runs", () => {
+  for (const entry of UPGRADE_MANIFEST.entries) {
+    for (const line of entry.instructions) assert.doesNotMatch(line, /add adapter-</, entry.id);
+  }
+  const connect = UPGRADE_MANIFEST.entries.find((entry) => entry.id === "connect-mcp")!;
+  for (const host of ["cloudflare", "netlify", "node", "vercel"]) {
+    assert.ok(connect.instructions.some((line) => line.includes(`nimbus-docs add adapter-${host}`)), host);
+  }
 });
 
 test("upgrade guidance targets canonical agent endpoint APIs", () => {

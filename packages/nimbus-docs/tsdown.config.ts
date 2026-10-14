@@ -35,6 +35,8 @@ export default defineConfig({
     "_internal/request-route-inventory":
       "src/_internal/request-route-inventory.ts",
     "_internal/version-switch-route": "src/_internal/version-switch-route.ts",
+    "_internal/mcp/route": "src/_internal/mcp/route.ts",
+    "_internal/mcp/card-route": "src/_internal/mcp/card-route.ts",
     "_internal/git-last-updated": "src/_internal/git-last-updated.ts",
     "_internal/agent-endpoint-assets":
       "src/_internal/agent-endpoint-assets.ts",
@@ -73,6 +75,9 @@ export default defineConfig({
     // never resolves or bundles them.
     "@scalar/openapi-parser",
     "@readme/httpsnippet",
+    // The MCP server SDK is an optional peer: only the injected /mcp route
+    // imports it, and only a site with agents.mcp injects that route.
+    /^@modelcontextprotocol\//,
   ],
   // Bundle the remark-lint stack, the Markdown serializer, and github-slugger
   // into dist so consuming projects don't gain new transitive deps. Their

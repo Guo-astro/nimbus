@@ -394,6 +394,33 @@ test("scaffolds into the current folder, named after it", async () => {
   }
 });
 
+test("preview mode replaces a template's registry override and keeps its other variables", async () => {
+  const cwd = makeCwd();
+  const templates = makeGeneratedTemplates();
+  fs.writeFileSync(
+    path.join(templates, "template", ".env"),
+    "FOO=1\nNIMBUS_REGISTRY_URL=https://old.example/registry\n\nBAR=2",
+  );
+  try {
+    await scaffold(
+      { ...BASE_OPTIONS, dir: "my-docs" },
+      {
+        cwd,
+        previewMode: true,
+        previewTemplatesDir: templates,
+        previewRegistryUrl: "https://new.example/registry",
+      },
+    );
+
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "my-docs", ".env"), "utf8"),
+      "FOO=1\n\nBAR=2\nNIMBUS_REGISTRY_URL=https://new.example/registry\n",
+    );
+  } finally {
+    cleanup(cwd, templates);
+  }
+});
+
 test("scaffolds into a cloned repository, and a failure keeps its .git", async () => {
   const cwd = makeCwd();
   const good = makeTemplate();

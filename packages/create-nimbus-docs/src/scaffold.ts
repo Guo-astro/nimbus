@@ -306,8 +306,11 @@ export async function scaffold(
     writeNimbusJson(target, options, preview);
     if (preview?.registry) {
       const envPath = join(target, ".env");
-      const existing = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
-      writeFileSync(envPath, `${existing}${existing && !existing.endsWith("\n") ? "\n" : ""}NIMBUS_REGISTRY_URL=${preview.registry}\n`);
+      const kept = existsSync(envPath)
+        ? readFileSync(envPath, "utf8").split("\n").filter((line) => !/^\s*NIMBUS_REGISTRY_URL\s*=/.test(line))
+        : [];
+      while (kept.at(-1) === "") kept.pop();
+      writeFileSync(envPath, [...kept, `NIMBUS_REGISTRY_URL=${preview.registry}`, ""].join("\n"));
     }
     stopProgress("Project configured.");
   } catch (err) {

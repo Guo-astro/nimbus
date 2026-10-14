@@ -43,6 +43,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0 # changelog-github finds the commit that added each changeset
+          persist-credentials: false
 
       # The preview version comes from the branch's package versions. A branch
       # behind the latest release would be stamped as a pre-release of a version
@@ -62,6 +63,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.number }}
+
+      - name: Require a live www Preview of this commit
+        id: registry
+        run: |
+          sha=$(git rev-parse HEAD)
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
+          read -r state head_sha <<< "$current"
+          comment=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq '.[] | select(.user.login == "cloudflare-workers-and-pages[bot]" and (.body | contains("/services/view/nimbus-docs/"))) | .id' | sort -n | tail -1)
+          url=''
+          served_sha=''
+          registry_version=''
+          if [ -n "$comment" ]; then
+            url=$(gh api "repos/$REPO/issues/comments/$comment" --jq '.body' | \
+              grep -oE 'Preview URL: https://[A-Za-z0-9.-]+' | head -1 | sed 's/^Preview URL: //') || true
+          fi
+          if [ -n "$url" ]; then
+            served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/_nimbus-preview-sha.txt") || true
+            registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/registry/registry.json" | jq -er '.registryVersion') || true
+          fi
+          if [ "$state" != 'open' ] || [ "$head_sha" != "$sha" ] || [ "$served_sha" != "$sha" ] || \
+            [ "$registry_version" != "$(jq -r .version packages/nimbus-docs/package.json)" ]; then
+            gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'
+            echo "::error::No live Workers Builds Preview of this PR head (url: ${url:-none}, serving: ${served_sha:-none}). Wait for its build to finish, then reapply the label."
+            exit 1
+          fi
+          echo "preview_url=$url" >> "$GITHUB_OUTPUT"
+          echo "registry_url=$url/registry" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -92,7 +127,14 @@ jobs:
       # preview. (pkg-pr-new also runs each package's `prepack` when packing, so
       # this is belt-and-suspenders — but it keeps a build break visible as its
       # own step rather than buried in the publish output.)
-      - run: pnpm --filter ./packages/nimbus-docs --filter ./packages/create-nimbus-docs build
+      - name: Build preview packages
+        run: |
+          sha=$(git rev-parse HEAD)
+          NIMBUS_PREVIEW_REF="${sha:0:7}" pnpm --filter ./packages/nimbus-docs --filter ./packages/create-nimbus-docs build
+        env:
+          NIMBUS_PREVIEW: "1"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          NIMBUS_PREVIEW_REGISTRY_URL: ${{ steps.registry.outputs.registry_url }}
 
       # Remove the label before publishing so a maintainer can re-add it to
       # retry, even if the publish step below fails.
@@ -124,7 +166,15 @@ jobs:
       #     public-flip prerequisite the npm release already depends on.
       - name: Publish preview
         run: |
+          current=$(gh api "repos/$REPO/pulls/$PR" --jq '[.state, .head.sha] | join(" ")')
+          read -r state head_sha <<< "$current"
           PREVIEW_SHA="$(git rev-parse HEAD)"
+          served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+            "$PREVIEW_URL/_nimbus-preview-sha.txt")
+          if [ "$state" != 'open' ] || [ "$head_sha" != "$PREVIEW_SHA" ] || [ "$served_sha" != "$PREVIEW_SHA" ]; then
+            echo '::error::The PR or its live www Preview changed during the package build. Reapply the label.'
+            exit 1
+          fi
           NIMBUS_PREVIEW_REF="${PREVIEW_SHA:0:7}" pnpm exec pkg-pr-new publish \
             --pnpm \
             --compact \
@@ -133,5 +183,10 @@ jobs:
             ./packages/nimbus-docs \
             ./packages/create-nimbus-docs
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           NIMBUS_PREVIEW: "1"
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number }}
+          PREVIEW_URL: ${{ steps.registry.outputs.preview_url }}
+          NIMBUS_PREVIEW_REGISTRY_URL: ${{ steps.registry.outputs.registry_url }}

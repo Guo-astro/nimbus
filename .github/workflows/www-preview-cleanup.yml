@@ -1,0 +1,55 @@
+name: www Preview cleanup
+
+# Workers Builds creates one Preview per pushed branch and links it in its PR
+# comment. Delete that Preview when the PR closes. Never checks out PR code.
+on:
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  delete:
+    name: Delete closed PR Preview
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      github.event.pull_request.head.ref != 'templates'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: cloudflare
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Delete the branch Preview
+        run: |
+          state=$(gh api "repos/$REPO/pulls/$PR" --jq '.state')
+          if [ "$state" != 'closed' ]; then exit 0; fi
+          open=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="$OWNER:$BRANCH" --jq 'length')
+          if [ "$open" != '0' ]; then exit 0; fi
+          bodies=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "cloudflare-workers-and-pages[bot]") | .body')
+          name=$(printf '%s\n' "$bodies" |
+            grep -oE '/services/view/nimbus-docs/production/previews/[A-Za-z0-9._-]+' | tail -1 | sed 's|.*/previews/||') || true
+          if [ -z "$name" ]; then
+            echo "No Workers Builds Preview was reported on this PR."
+            exit 0
+          fi
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' -X DELETE \
+            --max-time 30 --retry 3 --retry-all-errors \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/workers/nimbus-docs/previews/$name")
+          case "$status" in
+            2??) echo "Deleted Preview $name." ;;
+            404) echo "Preview $name already absent." ;;
+            *) echo "::error::Could not delete Preview $name (HTTP $status)."; exit 1 ;;
+          esac
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

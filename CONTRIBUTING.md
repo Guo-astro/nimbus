@@ -77,8 +77,9 @@ Working on the docs site (`apps/www`):
 
 ```sh
 pnpm --filter "@nimbus/www..." build   # build www plus the workspace packages it depends on
-pnpm --filter @nimbus/www run deploy   # deploy; its predeploy rebuilds nimbus-docs first
 ```
+
+Production deploys only from the Release workflow; see [Releases](#releases).
 
 A bare `pnpm --filter @nimbus/www build` doesn't rebuild `nimbus-docs`, so after a version bump it fails with a stale-version error until the package is rebuilt.
 
@@ -86,13 +87,49 @@ A bare `pnpm --filter @nimbus/www build` doesn't rebuild `nimbus-docs`, so after
 
 ### Releases
 
-Merging the "chore: bump package versions" PR publishes to npm. Right after it publishes, deploy the docs site:
+Merging the "chore: bump package versions" PR publishes to npm, then automatically deploys the docs site and its registry. A run that only opens the version-bump PR does not deploy www. Production is only deployed by the Release workflow.
+
+If npm publishes but the www deploy fails, run the Release workflow manually from `main` (**Actions → Release → Run workflow**) while no other Release run is in progress; a manual run can cancel a queued one, so rerun any it cancels. It skips publishing, builds the newer of the two packages' npm `latest` release tags, and deploys only if both package versions at that commit match npm `latest`. Rerunning a whole push-triggered Release run does not redeploy if nothing new was published.
+
+If publishing failed partway, recover any missing git tags as the release script instructs. If a package still needs publishing, rerun the push-triggered run; it deploys once publishing completes. If both packages are already on npm, use the manual run.
+
+There is no rollback to an older release: the deploy refuses a release older than npm `latest`, so fix forward with a new release. In an emergency, Cloudflare's Worker deployment rollback is the only sanctioned production change outside the Release workflow.
+
+`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ. The release deploy and PR Preview cleanup use the `cloudflare` GitHub Environment with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; publishing uses a separate `release` Environment with `APP_ID` and `APP_PRIVATE_KEY`. Both environments are restricted to `main`, with no repository-level copies of these secrets, so only code on `main` can use them; anyone who can merge to `main` can reach them. Only the release deploy should update production, but that is a policy, not a boundary: Workers Builds can also deploy with its own token (see below).
+
+On npm, both `@cloudflare/nimbus-docs` and `@cloudflare/create-nimbus-docs` need a trusted publisher for `cloudflare/nimbus`, workflow `release.yml`, environment `release`, with direct `npm publish` allowed. Existing connections cannot be edited. Cut over each package separately, when that package next has a planned release:
+
+1. Add its new environment-bound connection shortly before that release.
+2. Publish that package within two days, and confirm **the new connection** shows as validated. A successful publish alone does not prove it was used while the old connection remains.
+3. Only then delete that package's old connections without the `release` environment.
+
+If a new connection expires before it validates, delete and recreate it near the next release; keep the old connection until its replacement validates. During this cutover, the old connections still allow OIDC publishing without the environment restriction. That restriction applies to trusted-publisher connections only after the old ones are removed; npm token and manual publishing access are configured separately in npm's Publishing access settings.
+
+### Live www Previews
+
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) whose name is derived from the branch name (for example, `feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>` with the exact name. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built. Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
+
+Pushes to `main` build but never update production; only the release deploy does. The `nimbus-docs` Worker's Builds settings must keep that true:
+
+| Setting           | Value                                                                      |
+| ----------------- | -------------------------------------------------------------------------- |
+| Root directory    | `apps/www`                                                                 |
+| Build variable    | `SKIP_DEPENDENCY_INSTALL=1`                                                |
+| Build command     | See below                                                                  |
+| Production branch | `main`                                                                     |
+| Deploy command    | `echo "Production deploys run from release.yml"` (never `wrangler deploy`) |
+| Preview builds    | Enabled                                                                    |
+| Preview command   | Default, `npx wrangler preview`                                            |
+| Preview URLs      | `<name>.nimbus-docs.com` (the `workers.dev` URLs are behind Access)        |
+| Build watch paths | Default (include `*`, exclude nothing)                                     |
+
+Build command:
 
 ```sh
-pnpm --filter @nimbus/www run deploy
+case "$WORKERS_CI_BRANCH" in dependabot/*|templates) exit 1 ;; esac && pnpm install --frozen-lockfile && pnpm run build:workers
 ```
 
-`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ.
+The build command stops Dependabot and `templates` builds before any of their code runs, so those commits show a failed Workers Builds check. Keep the default watch paths: the `pr preview` label needs a Preview of the PR's latest commit, and a skipped build leaves an older one. Workers Builds runs other branches' code with its own Cloudflare API token, so anyone who can push a branch can use that token. If PR-close cleanup fails, a build still running at close recreates the Preview, or a PR doesn't target `main` or is retargeted away from it, run `pnpm exec wrangler preview delete --name <name> --skip-confirmation`, using the name from the bot's dashboard link, from `apps/www` with access to the Worker account.
 
 ### Preview releases
 
@@ -106,7 +143,7 @@ registry. A bot then comments on the PR with install commands like:
 pnpm add https://pkg.pr.new/@cloudflare/nimbus-docs@<PR#>
 ```
 
-The label is removed automatically; re-add it to publish a fresh preview.
+The label is removed automatically; re-add it to publish a fresh preview. The PR's www Preview must have deployed successfully for the same commit first. If it is still building, wait and reapply the label. An on-demand preview scaffold writes that Preview's `/registry` URL to its gitignored `.env`, which `nimbus-docs add` reads; `nimbus.json` records Preview provenance but does not configure `add`. Released scaffolds continue using the production registry. After a new push, reapply the label and reinstall the preview packages to match the new registry code. A cloned preview scaffold needs the env override set again.
 
 Preview packages carry the version the release PR would give them, as a
 pre-release such as `0.16.0-pr.<number>.sha<sha>`, so installing one on a site runs

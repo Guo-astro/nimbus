@@ -57,7 +57,7 @@ The card is listed in `/.well-known/ai-catalog.json`, and `llms.txt` names the e
 
 Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the paths are `/mcp/` and `/mcp/server-card/`. Use exactly that form: `astro dev` answers the other with `404`, and a production server may redirect it. The Node adapter redirects with a `301`, which clients follow as a `GET`, so the server answers `405`. Redirects also carry no CORS headers. The card, `llms.txt` and the Copy MCP URL action all give the right form.
 
-A page or content entry at either path fails the build, since the server would hide it.
+A page, content entry or public file at either path fails the build, since the server would hide it.
 
 ## The tools
 

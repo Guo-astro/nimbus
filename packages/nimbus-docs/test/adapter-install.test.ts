@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   ADAPTER_IDS,
@@ -58,6 +60,23 @@ test("cloudflare recipe uses node prerender env and pins 14.3.x", () => {
   const cf = ADAPTER_RECIPES.cloudflare;
   assert.match(cf.adapterExpression, /prerenderEnvironment:\s*"node"/);
   assert.equal(cf.installSpec, "@astrojs/cloudflare@~14.3.0");
+});
+
+test("the partial builds guide names the cloudflare recipe's versions", () => {
+  const cf = ADAPTER_RECIPES.cloudflare;
+  const guide = readFileSync(
+    fileURLToPath(new URL("../../../apps/www/src/content/docs/partial-builds.mdx", import.meta.url)),
+    "utf8",
+  );
+  const range = (spec: string) => spec.slice(spec.lastIndexOf("@") + 1);
+  assert.ok(
+    guide.includes(`\`${cf.pkg}\` (\`${range(cf.installSpec)}\``),
+    `partial-builds.mdx must name ${cf.installSpec}`,
+  );
+  assert.ok(
+    guide.includes(`\`wrangler\` \`${range(cf.serverWrangler!.wranglerFloor)}\``),
+    `partial-builds.mdx must name ${cf.serverWrangler!.wranglerFloor}`,
+  );
 });
 
 test("cloudflare inserts request rendering in a semicolonless Nimbus config", () => {

@@ -21,6 +21,7 @@ export {
   applyAdapterToConfig,
   buildServerWranglerConfig,
   sanitizeWorkerName,
+  workersCompatibilityDate,
 } from "./_internal/adapters.js";
 export type {
   AdapterId,

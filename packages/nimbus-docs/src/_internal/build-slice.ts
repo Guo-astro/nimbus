@@ -14,6 +14,7 @@
 
 import { collectionMountPrefix, type VersionInfo } from "./collection-mount.js";
 import { preparedMarkdownRootKey } from "./prepared-markdown-registry.js";
+import { withBase } from "./url.js";
 
 export const BUILD_ONLY_ENV = "NIMBUS_BUILD_ONLY";
 
@@ -121,9 +122,12 @@ export function routeOwner(
 /**
  * Where a partial build writes. A slice holding the root collection is a
  * root slice and writes where a full build does. Any other slice writes its
- * site-wide artifacts (sitemap files, the Pagefind bundle, `_nimbus/`, its
- * bundled CSS and JS) under its prefix: the mount of the first collection
- * the variable names, so a Worker on that prefix's zone routes serves them.
+ * site-wide artifacts (sitemap files, the Pagefind bundle,
+ * `_nimbus/shiki.css`, its bundled CSS and JS) under its prefix: the mount
+ * of the first collection the variable names, so a Worker on that prefix's
+ * zone routes serves them. Like every Astro output path, the prefix is
+ * base-free: under `base: "/docs"` the files are at `docs-es/…` in the
+ * output and served at `/docs/docs-es/…`.
  */
 export interface BuildSliceLayout {
   collections: readonly string[];
@@ -167,20 +171,23 @@ export function pagefindBundlePath(mount: string): string {
 /**
  * What the search client loads: this build's bundle, and the bundles of the
  * page collections outside the slice to merge into it, so one search box
- * still covers the site. A full build merges nothing.
+ * still covers the site. A full build merges nothing. Served URLs, base
+ * included, so a search provider fetches them as they are.
  */
 export function searchIndexLayout(
   layout: BuildSliceLayout | null,
   pageCollections: readonly string[],
   versions: VersionInfo | null,
+  base: string,
 ): { bundle: string; merge: string[] } {
-  if (!layout) return { bundle: pagefindBundlePath(""), merge: [] };
+  const served = (mount: string) => withBase(pagefindBundlePath(mount), base);
+  if (!layout) return { bundle: served(""), merge: [] };
   const merge = [
     ...new Set(
       pageCollections
         .filter((name) => !layout.collections.includes(name))
-        .map((name) => pagefindBundlePath(collectionMountPrefix(name, versions))),
+        .map((name) => served(collectionMountPrefix(name, versions))),
     ),
   ];
-  return { bundle: pagefindBundlePath(layout.prefix), merge };
+  return { bundle: served(layout.prefix), merge };
 }

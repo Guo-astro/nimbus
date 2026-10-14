@@ -107,7 +107,7 @@ If a new connection expires before it validates, delete and recreate it near the
 
 ### Live www Previews
 
-[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) named after the branch. The Cloudflare bot comments its URL on the PR. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built; see [Fork PR previews](#fork-pr-previews). Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) whose name is derived from the branch name (for example, `feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>` with the exact name. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built; see [Fork PR previews](#fork-pr-previews). Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
 
 Pushes to `main` build but never update production; only the release deploy does. The `nimbus-docs` Worker's Builds settings must keep that true:
 
@@ -120,7 +120,7 @@ Pushes to `main` build but never update production; only the release deploy does
 | Deploy command    | `echo "Production deploys run from release.yml"` (never `wrangler deploy`) |
 | Preview builds    | Enabled                                                                    |
 | Preview command   | Default, `npx wrangler preview`                                            |
-| Preview URLs      | Default `workers.dev`                                                      |
+| Preview URLs      | `<name>.nimbus-docs.com` (the `workers.dev` URLs are behind Access)        |
 | Build watch paths | Default (include `*`, exclude nothing)                                     |
 
 Build command:
@@ -129,7 +129,7 @@ Build command:
 case "$WORKERS_CI_BRANCH" in dependabot/*|templates|fork-*) exit 1 ;; esac && pnpm install --frozen-lockfile && pnpm run build:workers
 ```
 
-The build command stops Dependabot, `templates` and `fork-*` builds before any of their code runs (`fork-*` names belong to fork PR Previews, so don't use them for branches), so those commits show a failed Workers Builds check. Keep the default watch paths: the `pr preview` label needs a Preview of the PR's latest commit, and a skipped build leaves an older one. Workers Builds runs other branches' code with its own Cloudflare API token, so anyone who can push a branch can use that token. If PR-close cleanup fails, a build still running at close recreates the Preview, or a PR doesn't target `main` or is retargeted away from it, run `pnpm exec wrangler preview delete --name <branch> --skip-confirmation` from `apps/www` with access to the Worker account.
+The build command stops Dependabot, `templates` and `fork-*` builds before any of their code runs (`fork-*` names belong to fork PR Previews, so don't use them for branches), so those commits show a failed Workers Builds check. Keep the default watch paths: the `pr preview` label needs a Preview of the PR's latest commit, and a skipped build leaves an older one. Workers Builds runs other branches' code with its own Cloudflare API token, so anyone who can push a branch can use that token. If PR-close cleanup fails, a build still running at close recreates the Preview, or a PR doesn't target `main` or is retargeted away from it, run `pnpm exec wrangler preview delete --name <name> --skip-confirmation`, using the name from the bot's dashboard link, from `apps/www` with access to the Worker account.
 
 ### Preview releases
 

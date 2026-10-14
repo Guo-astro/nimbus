@@ -69,10 +69,7 @@ export async function publishOpenApiSpec(
   const unresolved: string[] = [];
   const input = rootFile ?? structuredClone(source);
   let document: unknown;
-  // The bundler reports a failed reference through this hook and also prints
-  // its own line; the named warning below is the one owners act on.
-  const warn = console.warn;
-  console.warn = () => {};
+  // Collect unresolved references for the contextual publication warning.
   try {
     document = await bundle(input as never, {
       plugins: [readFiles(), parseYaml(), parseJson()],
@@ -82,8 +79,6 @@ export async function publishOpenApiSpec(
     });
   } catch (error) {
     return { error: (error as Error).message };
-  } finally {
-    console.warn = warn;
   }
   // The url map names every file the bundle read; it has no place in the output.
   const embedded = document as { "x-ext-urls"?: Record<string, string> };

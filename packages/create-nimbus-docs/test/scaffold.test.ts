@@ -68,7 +68,16 @@ function makeTemplate(pkgJson = `{ "name": "template", "version": "0.0.0" }`): s
 }
 
 function makeCwd(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  // A wrangler the scaffold target resolves from its parent, the way a
+  // workspace hoists it: a new wrangler.jsonc takes its compatibility date
+  // from this workerd, and no test reaches the registry.
+  fs.mkdirSync(path.join(cwd, "node_modules", "wrangler"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
+  return cwd;
 }
 
 function makeGeneratedTemplates(): string {
@@ -290,6 +299,9 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
       fs.readFileSync(path.join(target, "package.json"), "utf8"),
     );
     assert.ok(pkg.devDependencies?.wrangler, "wrangler injected for cloudflare");
+    // Its compatibility date is the resolved wrangler's workerd date, not today's.
+    const wrangler = JSON.parse(fs.readFileSync(path.join(target, "wrangler.jsonc"), "utf8"));
+    assert.equal(wrangler.compatibility_date, "2025-01-01");
 
     // workerd is declined in BOTH schemes, without a blanket approval.
     const ws = fs.readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8");
@@ -391,6 +403,33 @@ test("scaffolds into the current folder, named after it", async () => {
     assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8")).name, "team-docs");
   } finally {
     cleanup(path.dirname(cwd), tmpl);
+  }
+});
+
+test("preview mode replaces a template's registry override and keeps its other variables", async () => {
+  const cwd = makeCwd();
+  const templates = makeGeneratedTemplates();
+  fs.writeFileSync(
+    path.join(templates, "template", ".env"),
+    "FOO=1\nNIMBUS_REGISTRY_URL=https://old.example/registry\n\nBAR=2",
+  );
+  try {
+    await scaffold(
+      { ...BASE_OPTIONS, dir: "my-docs" },
+      {
+        cwd,
+        previewMode: true,
+        previewTemplatesDir: templates,
+        previewRegistryUrl: "https://new.example/registry",
+      },
+    );
+
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "my-docs", ".env"), "utf8"),
+      "FOO=1\n\nBAR=2\nNIMBUS_REGISTRY_URL=https://new.example/registry\n",
+    );
+  } finally {
+    cleanup(cwd, templates);
   }
 });
 

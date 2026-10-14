@@ -20,6 +20,7 @@
  */
 
 import type { NimbusConfig } from "../types.js";
+import { searchIndexLayout } from "./build-slice.js";
 import type { VersionAlternatesTable } from "./version-alternates.js";
 
 const VIRTUAL_ID = "virtual:nimbus/config";
@@ -61,7 +62,8 @@ export interface VirtualConfigExtras {
   /**
    * The partial build this is, or null: its collections and the prefix its
    * site-wide files live under (`""` for a root slice), with the Pagefind
-   * bundle the search client loads and the other slices' bundles it merges.
+   * bundle the search client loads and the other slices' bundles it merges
+   * (served URLs, base included).
    */
   getBuildSlice?: () => Promise<{
     collections: readonly string[];
@@ -69,6 +71,8 @@ export interface VirtualConfigExtras {
     search: { bundle: string; merge: readonly string[] };
   } | null>;
   requestRenderingCollections: string[];
+  /** Astro's `base`, for the whole-site search bundle's served URL. */
+  base: string;
   /**
    * Build-time alternates table for cross-version SEO links. Empty `{}`
    * when the site is unversioned or has only the current version.
@@ -141,7 +145,7 @@ export function virtualConfigPlugin(
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
           `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
           `export const buildSlice = ${JSON.stringify(buildSlice)};\n` +
-          `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? { bundle: "/pagefind/", merge: [] })};\n` +
+          `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? searchIndexLayout(null, [], null, extras.base))};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +
           `export const versionAlternates = ${JSON.stringify(extras.versionAlternates)};\n` +
           `export const apiCollections = ${JSON.stringify(extras.apiCollections)};\n` +

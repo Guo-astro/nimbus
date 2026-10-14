@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { STARTER_MANIFEST } from "../../nimbus-starter-source/starter.manifest.mjs";
@@ -20,6 +22,7 @@ import {
 import { bytesHash, readNimbusJson } from "../src/cli/nimbus-json.js";
 import type { NimbusJson } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
+import { runningNimbusVersion } from "../src/_internal/upgrades.js";
 
 function item(name: string, files: RegistryFile[]): ComponentItem {
   return { name, type: "registry:ui", title: name, description: "t", dependencies: [], registryDependencies: [], files };
@@ -268,6 +271,35 @@ function starterFixture() {
     cleanup: () => fs.rmSync(root, { recursive: true, force: true }),
   };
 }
+
+test("preview outdated reports unavailable comparisons and diff names the scaffolder", () => {
+  const fixture = starterFixture();
+  try {
+    fs.writeFileSync(path.join(fixture.project, "nimbus.json"), JSON.stringify({
+      version: "0.7.13-pr.243.shaabc", lastReviewedNimbusVersion: null, templatesTag: null, components: [], preview: { pr: 243 },
+    }));
+    fs.writeFileSync(path.join(fixture.project, "package.json"), JSON.stringify({ dependencies: {
+      "@cloudflare/nimbus-docs": "https://pkg.pr.new/@cloudflare/nimbus-docs@243",
+    } }));
+    const pkg = path.join(fixture.project, "node_modules", "@cloudflare", "nimbus-docs");
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "@cloudflare/nimbus-docs", version: runningNimbusVersion() }));
+    const cli = fileURLToPath(new URL("../src/cli/index.ts", import.meta.url));
+    const run = (...args: string[]) => spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), cli, ...args], {
+      cwd: fixture.project, encoding: "utf8", env: { ...process.env, NO_COLOR: "1" },
+    });
+    const outdated = run("outdated", "--template-dir", fixture.project);
+    assert.match(outdated.stdout, /Package APIs: unavailable/);
+    assert.match(outdated.stdout, /Starter files: unavailable/);
+    assert.doesNotMatch(outdated.stdout, /Starter files: up to date/);
+    const diff = run("diff", "src/pages/index.astro");
+    assert.equal(diff.status, 1);
+    assert.match(diff.stdout + diff.stderr, /scaffolder version 0\.7\.13-pr\.243/);
+    assert.match(diff.stdout + diff.stderr, /copy.*fresh scaffold/i);
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 async function runDiff(
   file: string | undefined,

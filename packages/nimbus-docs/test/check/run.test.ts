@@ -35,6 +35,21 @@ test("placeholder site warns; missing search still errors with exit 1", async ()
   }
 });
 
+test("a spread after search: false leaves search unknown, not missing", async () => {
+  for (const config of [
+    `{ site: "https://docs.example.com", title: "X", search: false, ...shared }`,
+    `{ site: "https://docs.example.com", title: "X", ...shared }`,
+  ]) {
+    const dir = project(config);
+    try {
+      const r = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+      assert.ok(!r.findings.some((f) => f.code === "nimbus/pagefind-missing"), config);
+    } finally {
+      cleanup(dir);
+    }
+  }
+});
+
 test("real site with search disabled passes env with exit 0", async () => {
   const dir = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
   try {
@@ -42,6 +57,26 @@ test("real site with search disabled passes env with exit 0", async () => {
     assert.equal(r.summary.errors, 0);
     assert.equal(exitCodeFor(r.summary), 0);
     assert.ok(r.location, "config object should be locatable");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("agents.mcp without the MCP server SDK is an error until it is installed", async () => {
+  const dir = project(`{ site: "https://docs.example.com", title: "X", search: false, agents: { mcp: true } }`);
+  try {
+    const r = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+    const sdk = r.findings.find((f) => f.code === "nimbus/mcp-sdk-missing");
+    assert.ok(sdk);
+    assert.equal(sdk.severity, "error");
+    assert.match(sdk.message, /@modelcontextprotocol\/server@2/);
+    assert.equal(exitCodeFor(r.summary), 1);
+
+    const pkg = path.join(dir, "node_modules", "@modelcontextprotocol", "server");
+    fs.mkdirSync(pkg, { recursive: true });
+    fs.writeFileSync(path.join(pkg, "package.json"), `{ "name": "@modelcontextprotocol/server" }`);
+    const installed = await runChecks(dir, { env: true, structure: false, authoring: false, types: false });
+    assert.equal(installed.summary.errors, 0);
   } finally {
     cleanup(dir);
   }

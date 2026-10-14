@@ -837,6 +837,24 @@
       "verify": [
         "Deploy the slices, open a page in a slice without the docs collection, and confirm search finds pages from the root slice as well as its own."
       ]
+    },
+    {
+      "id": "connect-mcp",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "remote-mcp",
+      "summary": "Optionally serve a remote MCP server at /mcp and show a Copy MCP URL page action.",
+      "affected": "Sites scaffolded before 0.19.0 that want agents to read the docs over MCP.",
+      "instructions": [
+        "No action is needed: sites without agents.mcp are unchanged.",
+        "To serve the server, add the server adapter for your host if the site has none (nimbus-docs add adapter-cloudflare, nimbus-docs add adapter-netlify, nimbus-docs add adapter-node or nimbus-docs add adapter-vercel), install @modelcontextprotocol/server@2, and set agents: { mcp: true } in the Nimbus config.",
+        "To show the Copy MCP URL action, run nimbus-docs diff src/components/ConnectMcp.astro --apply and nimbus-docs diff src/components/connect-mcp.client.ts --apply. diff needs a site on a released version; otherwise copy both files from a newly scaffolded site.",
+        "Then in src/layouts/DocsLayout.astro, import ConnectMcp from \"@/components/ConnectMcp.astro\" and { capabilities } from \"virtual:nimbus/agent-capabilities\", and when capabilities.mcpUrl is set render <ConnectMcp /> after <PageActions />, as the starter's DocsLayout.astro does (nimbus-docs diff src/layouts/DocsLayout.astro shows the change). Without the server, keep <PageActions /> as it is."
+      ],
+      "verify": [
+        "Run astro dev, then npx @modelcontextprotocol/inspector --cli http://localhost:4321/mcp --transport http --method tools/list (with the base path, and /mcp/ under trailingSlash: \"always\"), and confirm it lists get_page and list_pages.",
+        "Open a docs page, click Copy MCP URL, and confirm it copies the /mcp URL and briefly shows Copied."
+      ]
     }
   ]
 }

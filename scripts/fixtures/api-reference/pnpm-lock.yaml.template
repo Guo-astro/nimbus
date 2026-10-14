@@ -299,6 +299,7 @@ packages:
     engines: {node: '>=22.12.0'}
     hasBin: true
     peerDependencies:
+      '@modelcontextprotocol/server': '>=2.3.0 <3.0.0'
       '@readme/httpsnippet': '>=10.0.0'
       '@scalar/openapi-parser': '>=0.10.0 <1.0.0'
       astro: '>=7.2.6 <8.0.0'
@@ -306,6 +307,8 @@ packages:
       react: '>=19.0.0'
       react-dom: '>=19.0.0'
     peerDependenciesMeta:
+      '@modelcontextprotocol/server':
+        optional: true
       '@readme/httpsnippet':
         optional: true
       '@scalar/openapi-parser':

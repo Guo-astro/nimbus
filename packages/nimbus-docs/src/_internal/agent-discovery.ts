@@ -1,5 +1,6 @@
 import type { AgentCapabilities } from "../types.js";
 import { safeDecode, withBase } from "./url.js";
+import { MCP_CARD_MEDIA_TYPE, mcpCardUrl, type McpServerIdentity } from "./mcp/identity.js";
 import {
   API_CATALOG_MEDIA_TYPE,
   API_CATALOG_PATH,
@@ -13,6 +14,8 @@ export interface AgentDiscoveryOptions {
   base: string;
   output: "static" | "server";
   homepageMarkdownFallback?: boolean;
+  /** The remote MCP server's identity, when `agents.mcp` is on. */
+  mcp?: McpServerIdentity;
 }
 export interface ArdEntry {
   identifier: string;
@@ -111,6 +114,17 @@ export function agentDiscoveryManifest(
       [
         `Find agent skills published by ${options.title}`,
         `Install a skill for working with ${options.title}`,
+      ],
+    );
+  if (capabilities.mcpUrl)
+    add(
+      "mcp",
+      `${options.title} MCP server`,
+      MCP_CARD_MEDIA_TYPE,
+      mcpCardUrl(capabilities.mcpUrl),
+      [
+        `Read the ${options.title} documentation over MCP`,
+        `List the pages of the ${options.title} documentation`,
       ],
     );
   return {

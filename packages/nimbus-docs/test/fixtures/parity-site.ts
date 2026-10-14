@@ -212,6 +212,7 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
     configure,
     write,
     read: (file) => readFile(path.join(root, file), "utf8"),
-    remove: () => rm(root, { recursive: true, force: true }),
+    // Retried: under load, macOS can report a folder not empty mid-removal.
+    remove: () => rm(root, { recursive: true, force: true, maxRetries: 5 }),
   };
 }

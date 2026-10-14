@@ -276,6 +276,12 @@ test("synthetic optional entries are informational across migrate, check, and ou
   assert.ok(checkResult.findings.every((finding: { code: string; severity: string }) =>
     finding.code === "nimbus/upgrade-optional" && finding.severity === "info"
   ));
+  assert.ok(
+    checkResult.findings.every((finding: { message: string }) =>
+      /Optional upgrade `[^`]+`: listed until `[^`]*migrate[^`]*` records \S+ as reviewed \(answer yes, or pass --yes\)\./.test(finding.message),
+    ),
+    JSON.stringify(checkResult.findings.map((f: { message: string }) => f.message)),
+  );
 
   const template = path.join(root, "template-source");
   fs.mkdirSync(path.join(template, "src"), { recursive: true });

@@ -1,5 +1,13 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.7.13
+
+### Patch Changes
+
+- [#225](https://github.com/cloudflare/nimbus/pull/225) [`6832653`](https://github.com/cloudflare/nimbus/commit/6832653822717d975079e8326269dbe1a1444a7d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Use the matching PR registry in on-demand preview scaffolds.
+
+- [#257](https://github.com/cloudflare/nimbus/pull/257) [`e9a4360`](https://github.com/cloudflare/nimbus/commit/e9a4360ec80e3c7616a564dfaa5283b23013a87a) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - New Cloudflare projects, and `nimbus-docs add adapter-cloudflare` when `wrangler.jsonc` has no valid date, get a `compatibility_date` the installed Workers runtime supports instead of today's date, so local dev starts.
+
 ## 0.7.12
 
 ### Patch Changes

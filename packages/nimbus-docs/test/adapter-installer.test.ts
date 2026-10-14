@@ -52,6 +52,16 @@ function project(dir: string, opts: { config?: string; astroDep?: boolean } = {}
       dependencies: astroDep ? { astro: "^7.0.0" } : {},
     }),
   );
+  installWrangler(dir);
+}
+
+/** An installed wrangler, so a new wrangler.jsonc's date never reaches the registry. */
+function installWrangler(dir: string): void {
+  mkdirSync(join(dir, "node_modules", "wrangler"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
 }
 
 test("applies the adapter: flips config, installs deps, records provenance", async () => {

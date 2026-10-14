@@ -6,10 +6,10 @@ import {
   applyAdapterToConfig,
   buildServerWranglerConfig,
   sanitizeWorkerName,
+  workersCompatibilityDate,
   type AdapterId,
 } from "@cloudflare/nimbus-docs/adapters";
 import { ScaffoldError } from "../scaffold.js";
-import { today } from "./deploy.js";
 
 // Build output an adapter's platform writes into the project root; ignore it so
 // a fresh `git init` doesn't stage it. Cloudflare's `.wrangler/` is already in
@@ -62,17 +62,18 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
  * Write the user-facing server `wrangler.jsonc` for an adapter that ships one
  * (Cloudflare today), via the same shared emitter and serialization the CLI
  * opt-in uses. Worker name and `compatibility_date` are freshly derived here
- * (from the dir name and today's date), so this file — unlike astro.config —
+ * (from the dir name and the Workers runtime the project will install,
+ * `workersCompatibilityDate`), so this file — unlike astro.config —
  * is not guaranteed byte-identical to a later `add adapter-<id>`. No-op for
  * adapters whose platform owns its own deploy config.
  */
-export function writeServerWrangler(dir: string, adapter: AdapterId): void {
+export async function writeServerWrangler(dir: string, adapter: AdapterId): Promise<void> {
   const recipe = ADAPTER_RECIPES[adapter];
+  if (!recipe.serverWrangler) return;
   const cfg = buildServerWranglerConfig(recipe, {
     name: sanitizeWorkerName(basename(dir)),
-    compatibilityDate: today(),
-  });
-  if (!cfg) return;
+    compatibilityDate: await workersCompatibilityDate(dir),
+  })!;
   writeFileSync(join(dir, "wrangler.jsonc"), JSON.stringify(cfg, null, 2) + "\n");
 }
 

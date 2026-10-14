@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 
+import nimbus from "../src/index.js";
 import { resolveSite } from "../src/_internal/site-detect.js";
 
 const PLACEHOLDER = "https://example.com";
@@ -147,4 +152,45 @@ test("*.example.com is also treated as a placeholder", () => {
   const r = run({}, { configuredSite: "https://docs.example.com" });
   assert.equal(r.adopted, false);
   assert.match(r.warning ?? "", /example\.com/);
+});
+
+async function buildSiteWarnings(adapter: string | undefined): Promise<string[]> {
+  const root = await mkdtemp(path.join(tmpdir(), "nimbus-site-signal-"));
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "wrangler.jsonc"), "{}\n");
+  const warnings: string[] = [];
+  const logger = { warn: (m: string) => warnings.push(m), info() {}, error() {}, debug() {}, fork: () => logger };
+  const dir = (p: string) => pathToFileURL(p + path.sep);
+  const integration = nimbus(
+    { site: PLACEHOLDER, title: "T", description: "D", locale: "en" } as never,
+    { validateMdx: false, admonitions: false, sitemap: false, markdown: { processor: {} as never } },
+  );
+  await integration.hooks["astro:config:setup"]!({
+    command: "build",
+    injectRoute() {},
+    addMiddleware() {},
+    updateConfig: () => ({}) as never,
+    config: {
+      root: dir(root),
+      srcDir: dir(path.join(root, "src")),
+      cacheDir: dir(path.join(root, ".cache")),
+      base: "",
+      build: { format: "directory" },
+      adapter: adapter ? { name: adapter } : undefined,
+    },
+    logger,
+  } as never);
+  return warnings.filter((m) => m.includes("`site`"));
+}
+
+test("a leftover wrangler config names Cloudflare only when no other adapter is configured", async () => {
+  for (const adapter of [undefined, "@astrojs/cloudflare"]) {
+    assert.match((await buildSiteWarnings(adapter)).join("\n"), /Cloudflare Workers/, String(adapter));
+  }
+  for (const adapter of ["@astrojs/node", "@astrojs/vercel", "@astrojs/netlify"]) {
+    const [warning, ...rest] = await buildSiteWarnings(adapter);
+    assert.deepEqual(rest, [], adapter);
+    assert.doesNotMatch(warning ?? "", /Cloudflare/, adapter);
+    assert.match(warning ?? "", /is the placeholder/, adapter);
+  }
 });

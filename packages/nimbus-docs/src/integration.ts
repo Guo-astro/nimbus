@@ -1520,7 +1520,9 @@ export function nimbus(
         const siteResult = resolveSite({
           configuredSite: config.site,
           env: process.env,
-          cloudflareSignal: detectDeploySignals(projectRoot).cloudflare,
+          cloudflareSignal:
+            detectDeploySignals(projectRoot).cloudflare &&
+            (!astroConfig.adapter || astroConfig.adapter.name === "@astrojs/cloudflare"),
         });
         config.site = siteResult.site;
         if (command === "build") {

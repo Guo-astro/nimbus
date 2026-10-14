@@ -31,8 +31,7 @@ Only `astro build` honours the variable. `astro dev`, `astro sync` and `nimbus-d
 A build fails when:
 
 - a name isn't one of the site's page collections. Page collections are known after content sync, so a mistyped name costs one sync before failing;
-- the docs version collections (`docs` and every `docs-<version>`) are split across slices. They build together;
-- `astro.config` sets a `base` other than `/`. A sliced site deploys at the origin root.
+- the docs version collections (`docs` and every `docs-<version>`) are split across slices. They build together.
 
 ## What a slice writes
 
@@ -91,14 +90,75 @@ location /                { proxy_pass https://docs-root.internal; }
 
 Each slice's `_headers` and `_redirects` cover that slice's files; hosts that don't read those files need the same rules in their own configuration, as for a whole-site build ([Docs for agents](/ai/docs-for-agents#agent-discovery)).
 
+### Under a base
+
+With `base: "/docs"` in `astro.config`, a slice writes the same files, and every URL it serves and advertises is under the base. Each slice's prefix becomes `<base><prefix>`:
+
+| | At the origin root | Under `base: "/docs"` |
+|---|---|---|
+| The slice's routes | `/docs-es`, `/docs-es/*`, `/og/docs-es/*`, `/og/docs-es.png` | `/docs/docs-es`, `/docs/docs-es/*`, `/docs/og/docs-es/*`, `/docs/og/docs-es.png` |
+| The root slice's routes | `/*` | `/docs`, `/docs/*` |
+| The slice's sitemap | `/docs-es/sitemap-index.xml` | `/docs/docs-es/sitemap-index.xml` |
+
+Deploy each slice the way the whole site deploys under the base: its origin serves the output under `/docs`, and the router passes the path through unchanged. Astro leaves the base out of `dist/`, so a slice's pages are at `dist/docs-es/…` and are served at `/docs/docs-es/…`.
+
+**Cloudflare:** add `@astrojs/cloudflare` (`~14.3.0`, with `wrangler` `^4.127.1`) and keep `output: "static"`. The adapter nests the output under the base (`dist/client/docs/…`) and keeps `_headers` and `_redirects` at `dist/client`, where Workers reads them; `404.html` stays under the base, where Workers' `404-page` handling still finds it. Install it by hand: `nimbus-docs add adapter-cloudflare` also switches the site to `output: "server"`.
+
+```js title="astro.config.mjs"
+import cloudflare from "@astrojs/cloudflare";
+
+export default defineConfig({
+  base: "/docs",
+  output: "static",
+  adapter: cloudflare({ prerenderEnvironment: "node" }),
+  // …
+});
+```
+
+```jsonc title="wrangler.docs-es.jsonc (the docs-es slice)"
+{
+  "name": "docs-site-es",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./dist/client", "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "example.com/docs/docs-es", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/docs-es/*", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/og/docs-es/*", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/og/docs-es.png", "zone_name": "example.com" }
+  ]
+}
+```
+
+The root slice's file has the same `assets` block and the routes `example.com/docs` and `example.com/docs/*`. With the adapter, Nimbus also copies the root slice's discovery files to the origin root (`/.well-known/…`, [Docs for agents](/ai/docs-for-agents#agent-discovery)): add `example.com/.well-known/*` to its routes if the origin root is yours, or serve those files from the site that owns it. Deploy every slice, the root one too, with `--config` (`npx wrangler deploy --config wrangler.jsonc`): without it, `wrangler deploy` uses the configuration the adapter generates instead of yours.
+
+**A reverse proxy:** the same `location` blocks with `/docs` in front (`location /docs/docs-es/ { proxy_pass https://docs-es.internal; }`). `proxy_pass` without a path passes the request path through, base included, so each origin serves its slice under `/docs`.
+
+**A static host with rewrites:** publish each slice with its output under `/docs` (move the contents of `dist/` into `dist/docs/` before publishing), and rewrite `/docs/docs-es/*` to `https://docs-es.example.app/docs/docs-es/:splat`.
+
+To check slices locally, serve each output under the base (with the adapter, `npx serve dist/client` already does), and match each slice in `compose.mjs` under the base. OG images are under the base too (`/docs/og/docs-es/…`), so the base goes in front of `/og` as well, not only in front of the prefix:
+
+```js title="scripts/compose.mjs"
+const base = "/docs";
+// …
+const slice = slices.find(
+  ({ prefix }) =>
+    path === `${base}${prefix}` ||
+    path.startsWith(`${base}${prefix}/`) ||
+    path.startsWith(`${base}/og${prefix}/`) ||
+    path === `${base}/og${prefix}.png`,
+);
+```
+
 ### Announce every sitemap
 
 `robots.txt` is yours (`src/pages/robots.txt.ts`), and search engines read sitemaps from it. Add one `Sitemap:` line per slice:
 
 ```ts title="src/pages/robots.txt.ts"
-`Sitemap: ${new URL("/sitemap-index.xml", config.site).href}`,
-`Sitemap: ${new URL("/docs-es/sitemap-index.xml", config.site).href}`,
+`Sitemap: ${new URL(withBase("/sitemap-index.xml", import.meta.env.BASE_URL), config.site).href}`,
+`Sitemap: ${new URL(withBase("/docs-es/sitemap-index.xml", import.meta.env.BASE_URL), config.site).href}`,
 ```
+
+Search engines read `robots.txt` only at the origin root. Under a base, the site's own file is served at `/docs/robots.txt`, so add the `Sitemap:` lines to the origin's `robots.txt`, or submit each slice's sitemap to the search engines directly.
 
 ### Check a slice before it's live
 
@@ -142,6 +202,8 @@ searchIndex.bundle; // "/docs-es/pagefind/" in the docs-es slice, "/pagefind/" o
 searchIndex.merge; // the other slices' bundles, [] in a whole-site build
 ```
 
+Both are served URLs: under `base: "/docs"`, the bundle is `/docs/docs-es/pagefind/`. Fetch them as they are, and set Pagefind's `baseUrl` to the base with one trailing slash (`/docs/`).
+
 A slice of several collections writes one bundle; the other collections' bundle URLs answer 404 and the client skips them.
 
 ## Links between slices
@@ -167,8 +229,8 @@ const SLICES = [
   {
     name: "docs-site",
     only: "docs,api",
-    preview: "npx wrangler versions upload",
-    deploy: "npx wrangler deploy",
+    preview: "npx wrangler versions upload --config wrangler.jsonc",
+    deploy: "npx wrangler deploy --config wrangler.jsonc",
   },
   {
     name: "docs-site-es",

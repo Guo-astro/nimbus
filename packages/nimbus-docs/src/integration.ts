@@ -190,7 +190,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, toDocumentHref, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, stripBase, toDocumentHref, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
 import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
@@ -1108,15 +1108,6 @@ export function nimbus(
         sliceLayoutForBuild = buildSliceForBuild
           ? buildSliceLayout(buildSliceForBuild, versionMounts())
           : null;
-        if (sliceLayoutForBuild && astroConfig.base && astroConfig.base !== "/") {
-          // Every path a slice writes and advertises would need the base
-          // prepended, and a mistake there surfaces as production 404s
-          // under zone routes; not supported yet.
-          throw authorError(
-            `nimbus-docs: ${BUILD_ONLY_ENV} builds a site deployed at "/", but astro.config sets base to "${astroConfig.base}".`,
-            `Deploy the site at the origin root to build it in slices, or unset ${BUILD_ONLY_ENV}.`,
-          );
-        }
         if (sliceLayoutForBuild && !sliceLayoutForBuild.root) {
           // The slice's pages load their bundled CSS and JS from the assets
           // directory, which at the root the zone routes to another Worker.
@@ -2697,6 +2688,7 @@ export function nimbus(
                       layout,
                       await getPageCollectionsForBuild(),
                       versionMounts(),
+                      astroConfig.base,
                     ),
                   };
                 },
@@ -2711,6 +2703,7 @@ export function nimbus(
                   );
                 },
                 requestRenderingCollections: [...requestRenderingCollections],
+                base: astroConfig.base,
                 versionAlternates,
                 apiCollections,
                 headDefaults: {
@@ -2970,7 +2963,7 @@ export function nimbus(
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
             "  export const emptyCollections: readonly string[];",
-            "  /** The Pagefind bundle to load, site-root-relative, and the other slices' bundles to merge into it (none in a whole-site build). */",
+            "  /** The Pagefind bundle to load and the other slices' bundles to merge into it (none in a whole-site build): served URLs, base included. */",
             "  export const searchIndex: { bundle: string; merge: readonly string[] };",
             "  /** Collections whose canonical routes render on request. Build-only. */",
             "  export const requestRenderingCollections: readonly string[];",
@@ -3349,7 +3342,10 @@ export function nimbus(
           ? path.join(distDir, ...sliceOutput.prefix.split("/").filter(Boolean))
           : distDir;
         const droppedRoutes = new Set(sliceOutput ? droppedRootRoutes() : []);
-        for (const route of droppedRoutes) sitemapExcludedPaths.add(canonicalizePathname(route));
+        // The sitemap filter compares served paths, so the base goes on.
+        for (const route of droppedRoutes) {
+          sitemapExcludedPaths.add(canonicalizePathname(withBase(route, astroBaseForBuild)));
+        }
         const publicPages = pages.filter(
           ({ pathname }) =>
             !isRequestRouteInventoryPath(pathname, astroBaseForBuild) &&
@@ -3642,6 +3638,7 @@ export function nimbus(
           projectRoot: projectRootForBuild,
           base: astroBaseForBuild,
           distDir,
+          assetRoot,
           assetsDir: assetsDirForBuild,
           excludeDirs: walkExcludes,
           pages: publicPages,
@@ -3738,6 +3735,8 @@ function materializeRouteTruth(input: {
   projectRoot: string;
   base: string;
   distDir: string;
+  /** Where the host reads `_redirects`: `distDir`, or above it when the Cloudflare adapter nests the output under `base`. */
+  assetRoot: string;
   assetsDir: string;
   /** Directories under `distDir` left out of the walk, beside `assetsDir`. */
   excludeDirs?: readonly string[];
@@ -3772,6 +3771,7 @@ function materializeRouteTruth(input: {
     }
     const redirects = siteRedirects({
       distDir: input.distDir,
+      assetRoot: input.assetRoot,
       file: input.redirects.file,
       defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
       logger: input.logger,
@@ -3797,15 +3797,21 @@ function materializeRouteTruth(input: {
           routes.add(route);
           fromPrior++;
         }
+        // Redirect sources are served paths; one outside the base belongs to the root collection.
+        const hasBase = withBase("/", input.base) !== "/";
+        const redirectKey = (from: string) => {
+          const inside = stripBase(from, input.base);
+          return hasBase && inside === from ? "/" : routeKey(inside);
+        };
         const seen = new Set(redirects.map((r) => r.from));
         for (const r of prior.redirects) {
-          if (seen.has(r.from) || !fromOutside(routeKey(r.from))) continue;
+          if (seen.has(r.from) || !fromOutside(redirectKey(r.from))) continue;
           redirects.push(r);
           seen.add(r.from);
         }
         const seenPages = new Set(redirectPages.map((r) => r.from));
         for (const r of prior.redirectPages) {
-          if (seenPages.has(r.from) || !fromOutside(routeKey(r.from))) continue;
+          if (seenPages.has(r.from) || !fromOutside(redirectKey(r.from))) continue;
           redirectPages.push(r);
           seenPages.add(r.from);
         }
@@ -3865,11 +3871,18 @@ function materializeRouteTruth(input: {
  */
 function siteRedirects(input: {
   distDir: string;
+  assetRoot: string;
   file: string | undefined;
   defaultStatus: number;
   logger: { warn: (msg: string) => void };
 }): NormalizedRedirect[] {
-  const files = [path.join(input.distDir, "_redirects")].filter((f) => fs.existsSync(f));
+  // The Cloudflare adapter moves `_redirects` out of an output nested under
+  // `base` before this runs; read it where the host will.
+  const files = [
+    [input.assetRoot, input.distDir]
+      .map((dir) => path.join(dir, "_redirects"))
+      .find((f) => fs.existsSync(f)),
+  ].filter((f): f is string => f !== undefined);
   if (input.file !== undefined) files.push(input.file);
 
   const out: NormalizedRedirect[] = [];

@@ -123,7 +123,7 @@ The site's `editPattern` describes the docs repository, so a source gets its own
 
 ## Development server, lint and check
 
-`astro dev` resolves each source when it starts and keeps that snapshot; restart it to follow a branch that has moved. `.nimbus/sources` isn't watched.
+`astro dev` resolves each source when it starts and keeps that snapshot; restart it to follow a branch that has moved. `.nimbus/sources` isn't watched. A source it can't fetch and has no snapshot of leaves its collections empty: see [Build without a source](#build-without-a-source).
 
 `nimbus-docs lint` and `check` read the snapshots the last build or dev start selected, and report a problem in one by source and repository path (`sdk: docs/guides/intro.mdx:12`), where its author fixes it. `--fix` never writes a snapshot: its fixable findings stay in the report. Before the first build there is no snapshot, and lint names the collection as not inspected.
 
@@ -133,6 +133,40 @@ The site's `editPattern` describes the docs repository, so a source gets its own
 - `nimbus/source-unreferenced` (warning): a source no collection and no `api` entry reads.
 
 A `sources` map that is computed beyond a templated ref defers only the checks that need it.
+
+## Build without a source
+
+`astro build` is strict; every other command starts without a source it can't fetch.
+
+**A partial build fetches only what it reads.** With [`NIMBUS_BUILD_ONLY`](/partial-builds), a build fetches a source when a collection in the slice reads it, or when any `api` entry does (a page in the slice may cite any API). Every other source isn't fetched and keeps the snapshot it last selected, so `lint` and the next full build still find it:
+
+```text
+nimbus: source "acme-sdk" not fetched: no collection in NIMBUS_BUILD_ONLY=docs reads it.
+```
+
+The build reads `src/content.config.ts` as text, without running it, so write `source` as a string literal in `docsCollection()` there. A collection set up any other way (a variable or `{ source }` as the source, an options object, a helper or an imported collection, `docsCollection` under another name, a spread entry) hides the read, and the slice fetches every source, naming what hid it:
+
+```text
+nimbus: NIMBUS_BUILD_ONLY fetches every source: collection "sdk" sets its source in a way the build can't read without running src/content.config.ts. Write source as a string literal to let slices skip it.
+```
+
+A schema field named `source` counts as a read too; `schema: docsCollection().schema` reads nothing. A loader imported from another module (`defineCollection({ loader: sdkLoader })`) can't be seen at all: a slice that skips its source fails, naming the collection and the source.
+
+**A build fails without a source.** A source that can't be fetched and has no snapshot fails `astro build` with git's error, what reads the source, and where to give git a credential:
+
+```text
+nimbus-docs: could not fetch source "acme-sdk" (https://github.com/acme/acme-sdk.git @ main): <git's error>. No snapshot of this repo, ref and path exists under .nimbus/sources/acme-sdk/.
+  Read by: collection "sdk".
+  Give git a credential: https://nimbus-docs.com/writing/content-sources/#private-repositories
+```
+
+**Everything else starts without it.** `astro dev` and `astro sync` (which `astro check` runs) start without such a source: its collections are empty, the rest of the site works, and the log says so once per start:
+
+```text
+nimbus: source "acme-sdk" (https://github.com/acme/acme-sdk.git @ main) is unavailable; collections "sdk", "sdk-guides" are empty until it can be fetched (restart to retry). A full build fails until then. git: <git's error>
+```
+
+`astro preview` runs no git command and reads the snapshots already there; a source with none leaves its collections empty until a build fetches it. A source an `api` entry reads still fails these commands, since an API reference can't render without its spec, and so does a configuration error such as a `path` missing at the commit. A large pinned repository fetched for the first time waits up to the fetch timeout before a command starts without it; a missing credential fails in seconds.
 
 ## Timeouts
 

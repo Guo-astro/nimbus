@@ -313,7 +313,13 @@ body {
 	overflow: hidden;
 }
 
-/* ---- Scrollbar ---- */
+/* ---- Scrollbar ----
+   Thin and quiet everywhere, coloured from the theme. Chrome and Firefox use
+   the standard properties; Safari uses the WebKit pseudo-elements below. */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in oklch, var(--nb-foreground) 20%, transparent) transparent;
+}
 ::-webkit-scrollbar {
 	width: 6px;
 	height: 6px;

@@ -420,6 +420,15 @@ pre.astro-code span {
 
 /* ---- Premium code chrome ---- */
 
+/* Code reads left to right in every language, so a code surface keeps its
+   title bar, copy button, badge and tabs in LTR order on an RTL page. */
+.nb-code-figure,
+[data-slot="code-group"],
+[data-slot="package-managers"],
+[data-nb-api-coderail] {
+	direction: ltr;
+}
+
 /* Every Shiki block is wrapped in a .nb-code-figure (titled or not).
    Chrome lives on the figure so the language badge + copy button can sit
    on a non-scrolling ancestor — iOS Safari slides absolutely-positioned
@@ -662,6 +671,13 @@ pre.astro-code .highlighted-word {
 		opacity: 1;
 	}
 	details[open] > .nb-sidebar-row::after {
+		rotate: 90deg;
+	}
+	/* Right to left, the closed caret points the other way and opens downward. */
+	.nb-sidebar-row:dir(rtl)::after {
+		rotate: 180deg;
+	}
+	details[open] > .nb-sidebar-row:dir(rtl)::after {
 		rotate: 90deg;
 	}
 	.nb-sidebar-list {

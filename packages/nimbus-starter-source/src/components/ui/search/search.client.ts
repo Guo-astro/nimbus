@@ -82,7 +82,7 @@ export function initSearch(config: SearchConfig): SearchInstance {
 
     if (result.subResults?.length) {
       const subList = document.createElement("div");
-      subList.className = "mt-2 border-l border-border pl-3";
+      subList.className = "mt-2 border-s border-border ps-3";
       for (const sub of result.subResults.slice(0, 3)) {
         subList.appendChild(resultLink(sub.title, sub.url, "block truncate py-0.5 text-xs text-muted-foreground no-underline hover:text-foreground"));
       }

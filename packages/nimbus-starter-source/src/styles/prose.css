@@ -23,12 +23,12 @@
 }
 
 .docs-content :where(ul:not([class])) {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: disc;
 }
 
 .docs-content :where(ol:not([class])) {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: decimal;
 }
 
@@ -42,7 +42,7 @@
 
 .docs-content :where(li:not([class])) {
   margin: 0.25rem 0;
-  padding-left: 0.25rem;
+  padding-inline-start: 0.25rem;
 }
 
 /* Markers sit back a step so the text leads, not the bullet. */
@@ -55,8 +55,8 @@
 }
 
 .docs-content :where(blockquote:not([class])) {
-  padding-left: 1rem;
-  border-left: 2px solid var(--nb-border-strong);
+  padding-inline-start: 1rem;
+  border-inline-start: 2px solid var(--nb-border-strong);
   color: var(--nb-muted-foreground);
 }
 
@@ -137,7 +137,7 @@
 }
 
 .docs-content .heading-anchor {
-  margin-left: 0.5rem;
+  margin-inline-start: 0.5rem;
   color: var(--nb-muted-foreground);
   text-decoration: none;
   opacity: 0;
@@ -223,7 +223,7 @@
   display: table;
   width: 100%;
   max-width: 100%;
-  text-align: left;
+  text-align: start;
   border-collapse: separate;
   border-spacing: 0;
   border-radius: var(--nb-radius);
@@ -246,7 +246,7 @@
 .docs-content :where(th:not([class])),
 .docs-content :where(td:not([class])) {
   padding: 0.625rem 0.875rem;
-  text-align: left;
+  text-align: start;
   vertical-align: top;
   border-bottom: 1px solid var(--nb-border);
 }
@@ -398,5 +398,5 @@
 .docs-content :where([data-footnote-ref]) {
   font-weight: 500;
   text-decoration: none;
-  margin-left: 0.0625rem;
+  margin-inline-start: 0.0625rem;
 }

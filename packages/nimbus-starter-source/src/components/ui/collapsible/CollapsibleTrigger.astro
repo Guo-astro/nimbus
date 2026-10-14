@@ -16,7 +16,7 @@ const { class: className, type, "data-slot": slot = "collapsible-trigger", ...at
   data-slot={slot}
   type={type ?? "button"}
   data-nb-collapsible-trigger
-  class={cn("w-full text-left cursor-pointer select-none", className)}
+  class={cn("w-full text-start cursor-pointer select-none", className)}
   {...attrs}
 >
   <slot />

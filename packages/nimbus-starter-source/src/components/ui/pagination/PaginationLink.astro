@@ -28,7 +28,7 @@ const caption = label ?? (isNext ? "Next" : "Previous");
   class={cn(
     "nb-pagination-link relative flex min-w-0 flex-1 items-center gap-3 rounded-full py-1 no-underline",
     "focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring",
-    isNext ? "justify-end pr-2.5 pl-5 text-right" : "pr-5 pl-2.5",
+    isNext ? "justify-end pe-2.5 ps-5 text-end" : "pe-5 ps-2.5",
     className,
   )}
   {...attrs}
@@ -48,7 +48,7 @@ const caption = label ?? (isNext ? "Next" : "Previous");
     position: absolute;
     top: 0.75rem;
     bottom: 0.75rem;
-    left: 0;
+    inset-inline-start: 0;
     width: 1px;
     background: var(--nb-border);
     transition: opacity 200ms;

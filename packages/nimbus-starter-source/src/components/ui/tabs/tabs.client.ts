@@ -73,19 +73,20 @@ function initTabContainer(container: HTMLElement): () => void {
     // Keep the active tab within the horizontally-scrollable (scrollbar-hidden)
     // strip's visible range. Fires on every activate() — including the initial
     // paint and a synced/restored selection — so a right-edge active tab can't
-    // render off-screen with no affordance. scrollLeft directly (not
-    // scrollIntoView, which would also scroll the page vertically).
+    // render off-screen with no affordance. Scrolls by the overhang (not
+    // scrollIntoView, which would also scroll the page vertically), which
+    // works in both directions; RTL scrollLeft runs negative.
     onActivate: (index) => {
       if (!tablist) return;
       const trigger =
         tablist.querySelectorAll<HTMLElement>("[data-nb-tabs-trigger]")[index];
       if (!trigger) return;
-      const left = trigger.offsetLeft;
-      const right = left + trigger.offsetWidth;
-      if (left < tablist.scrollLeft) {
-        tablist.scrollLeft = left;
-      } else if (right > tablist.scrollLeft + tablist.clientWidth) {
-        tablist.scrollLeft = right - tablist.clientWidth;
+      const list = tablist.getBoundingClientRect();
+      const tab = trigger.getBoundingClientRect();
+      if (tab.left < list.left) {
+        tablist.scrollLeft += tab.left - list.left;
+      } else if (tab.right > list.right) {
+        tablist.scrollLeft += tab.right - list.right;
       }
     },
   });
@@ -94,8 +95,10 @@ function initTabContainer(container: HTMLElement): () => void {
   const markOverflow = () => {
     if (!tablist) return;
     const max = tablist.scrollWidth - tablist.clientWidth;
-    const start = tablist.scrollLeft > 1;
-    const end = tablist.scrollLeft < max - 1;
+    // RTL scrollLeft runs from 0 down to -max, so measure the distance.
+    const scrolled = Math.abs(tablist.scrollLeft);
+    const start = scrolled > 1;
+    const end = scrolled < max - 1;
     const state = start && end ? "both" : start ? "start" : end ? "end" : null;
     if (state) tablist.dataset.overflow = state;
     else delete tablist.dataset.overflow;

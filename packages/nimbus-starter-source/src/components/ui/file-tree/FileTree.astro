@@ -51,17 +51,18 @@ const { class: className, ...attrs } = Astro.props;
   .file-tree :global(ul) {
     list-style: none;
     margin: 0;
-    padding: 0 0 0 1.25rem;
+    padding: 0;
+    padding-inline-start: 1.25rem;
   }
 
-  .file-tree > :global(ul) { padding-left: 0; }
+  .file-tree > :global(ul) { padding-inline-start: 0; }
 
   /* Guide lines on nested lists */
   .file-tree :global(ul ul) { position: relative; }
   .file-tree :global(ul ul)::before {
     content: "";
     position: absolute;
-    left: 0.4375rem;
+    inset-inline-start: 0.4375rem;
     top: 0;
     bottom: 0.25rem;
     width: 1px;
@@ -123,6 +124,9 @@ const { class: className, ...attrs } = Astro.props;
     transition: transform 0.15s ease;
   }
 
+  .file-tree :global(.ft-chev:dir(rtl)) {
+    transform: rotate(180deg);
+  }
   .file-tree :global(details[open] > summary > .ft-chev) {
     transform: rotate(90deg);
   }

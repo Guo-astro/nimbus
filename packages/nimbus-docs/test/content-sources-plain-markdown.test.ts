@@ -94,6 +94,7 @@ test("a title comes from the first heading outside code, else the file name", as
     assert.equal(titleFromFile(file("b.md", "---\nfoo: 1\n---\n# From body\n"), "b"), "From body");
     assert.equal(titleFromFile(file("c.md", "No headings here.\n"), "guides/getting-started"), "Getting Started");
     assert.equal(titleFromFile(undefined, "x/quick-start"), "Quick Start");
+    assert.equal(titleFromFile(file("d.md", "## The <code>Client</code> class <script>x</script>\n"), "d"), "The Client class x");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

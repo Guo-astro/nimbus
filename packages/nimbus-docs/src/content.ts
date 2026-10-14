@@ -283,6 +283,18 @@ export function docsCollection<
   };
 }
 
+/** Text with inline HTML tags removed, and no angle bracket left. */
+function withoutTags(text: string): string {
+  let out = "";
+  let inTag = false;
+  for (const char of text) {
+    if (char === "<") inTag = true;
+    else if (char === ">") inTag = false;
+    else if (!inTag) out += char;
+  }
+  return out;
+}
+
 /**
  * The title of a page with none in its frontmatter: its first Markdown
  * heading (outside code fences, inline markup removed), else its file name.
@@ -307,11 +319,11 @@ export function titleFromFile(filePath: string | undefined, id: string): string 
     if (fence !== null) continue;
     const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
     if (!heading) continue;
-    const title = heading[1]!
+    const title = withoutTags(heading[1]!)
       .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
       .replace(/`([^`]*)`/g, "$1")
       .replace(/(\*\*|__|\*|_)(.+?)\1/g, "$2")
-      .replace(/<[^>]+>/g, "")
+
       .trim();
     if (title) return title;
   }

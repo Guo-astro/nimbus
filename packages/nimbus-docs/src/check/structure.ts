@@ -58,7 +58,7 @@ export async function checkStructure(
   const config = checkConfigZod(findings, notes, parsed);
   await checkApiCollections(cwd, findings, notes, parsed, config);
   const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config);
-  if (parsed.ok && config && !parsed.unresolved.includes("...spread")) {
+  if (parsed.ok && config) {
     const feature = serverAdapterFeature({
       unbundledApi: !parsed.unresolved.includes("api") && !!config.api?.some((entry) => entry.bundle === false),
       requestRendering,

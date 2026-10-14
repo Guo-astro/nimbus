@@ -163,3 +163,12 @@ test("an opaque accessor cannot leave an overridden rendering policy behind", as
     assert.ok(literalOverride.findings.some((f) => f.code === "nimbus/config-invalid"), accessor);
   }
 });
+
+test("a field written after a spread is trusted; one before it may be overridden", async () => {
+  const after = await check("...shared, agents: { mcp: true }", "", "const shared = {};");
+  assert.equal(missing(after).length, 1);
+  assert.match(missing(after)[0]!.message, /agents\.mcp serves \/mcp/);
+  const before = await check("agents: { mcp: true }, ...shared", "", "const shared = {};");
+  assert.deepEqual(missing(before), []);
+  assert.ok(before.notes.some((n) => n.code === "nimbus/config-unresolved"));
+});

@@ -262,6 +262,7 @@ test("a source editPattern needs {path}, and the page bundle gets only ref and e
   const plugin = virtualConfigPlugin(config, {
     getIndexedCollections: async () => ["docs"],
     requestRenderingCollections: [],
+    base: "/",
     versionAlternates: {},
     apiCollections: [],
     headDefaults: {

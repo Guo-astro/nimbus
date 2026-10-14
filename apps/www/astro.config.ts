@@ -20,7 +20,6 @@ const nimbusConfig = defineNimbusConfig({
       "registry",
       "project-structure",
       "configuration",
-      "partial-builds",
       "api-reference",
       "adding-components",
       { label: "Writing", icon: "ph:pencil-simple", autogenerate: { directory: "writing" } },

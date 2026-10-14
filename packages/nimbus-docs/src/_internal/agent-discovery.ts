@@ -174,15 +174,8 @@ export function agentDiscoveryHeaderRules(
     skillPaths?: readonly string[];
     ownerHeaders?: string;
     warn?: (message: string) => void;
-    /**
-     * Whether this output serves the origin root: the homepage, `.well-known`
-     * and the API catalog. False for a partial build without the root
-     * collection, whose rules then cover only the files it emits.
-     */
-    originRoot?: boolean;
   } = {},
 ): string {
-  const originRoot = text.originRoot !== false;
   const home = withBase("/", options.base).replace(/\/$/, "");
   const homePaths = new Set([home || "/", `${home}/`]);
   const owner = ownerHeaderPolicies(text.ownerHeaders ?? "");
@@ -192,10 +185,11 @@ export function agentDiscoveryHeaderRules(
   const links = agentHomepageLinks(capabilities, options).map(
     (value) => ["Link", value] as const,
   );
-  for (const path of originRoot ? homePaths : []) rules.push({ pattern: path, headers: [...links] });
-  for (const path of originRoot
-    ? ["/.well-known/ard.json", "/.well-known/ai-catalog.json"]
-    : []) {
+  for (const path of homePaths) rules.push({ pattern: path, headers: [...links] });
+  for (const path of [
+    "/.well-known/ard.json",
+    "/.well-known/ai-catalog.json",
+  ]) {
     rules.push({
       pattern: path,
       headers: [
@@ -223,7 +217,7 @@ export function agentDiscoveryHeaderRules(
     }
     rules.push({ pattern, headers: [["Content-Type", `${type}; charset=utf-8`]], evaluated: true });
   };
-  if (originRoot && capabilities.homepageMarkdownUrl) {
+  if (capabilities.homepageMarkdownUrl) {
     const pathname = new URL(capabilities.homepageMarkdownUrl).pathname;
     addTextRule(pathname, "text/markdown", [pathname]);
   }
@@ -256,7 +250,7 @@ export function agentDiscoveryHeaderRules(
       members,
     );
   }
-  if (originRoot && capabilities.apis.length) {
+  if (capabilities.apis.length) {
     // Extensionless, so no host can infer its type; HEAD carries the Link too.
     rules.push({
       pattern: API_CATALOG_PATH,

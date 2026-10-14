@@ -9,7 +9,6 @@ import fs from "node:fs";
 
 import * as p from "@clack/prompts";
 
-import { BUILD_ONLY_ENV } from "../_internal/build-slice.js";
 import { rewriteConfigField } from "../_internal/parse-nimbus-config.js";
 import { isAbsoluteHttpUrl } from "../_internal/validate.js";
 import { depInstalled, hasPackageJson } from "../check/probe.js";
@@ -51,11 +50,6 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
   }
 
   const cwd = process.cwd();
-  if (process.env[BUILD_ONLY_ENV]?.trim()) {
-    process.stderr.write(
-      `nimbus-docs: ${BUILD_ONLY_ENV} is set, but only \`astro build\` builds a slice; check reads the whole site and ignores it.\n`,
-    );
-  }
   const scopes = resolveScopes(flags);
   const wantJson = flags.json === true || flags.format === "json";
 

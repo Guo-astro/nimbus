@@ -258,6 +258,34 @@ test("the 2026-07-28 protocol discovers the server and calls a tool with its hea
   assert.equal((toolText(page) as { url: string }).url, `${SITE}/guide/`);
 });
 
+test("every request is answered with one JSON body, never a stream; a notification is 202 with no body", async () => {
+  const handler = handlerFor(INDEX);
+  const responses = [
+    await handler.fetch(rpcRequest(URL_, "initialize", INITIALIZE_PARAMS, 1)),
+    await handler.fetch(rpcRequest(URL_, "tools/call", { name: "get_page", arguments: { url: "/guide/" } }, 2)),
+    await handler.fetch(
+      rpcRequest(URL_, "server/discover", { _meta: MODERN_META }, 3, {
+        "MCP-Protocol-Version": "2026-07-28",
+        "Mcp-Method": "server/discover",
+      }),
+    ),
+  ];
+  for (const response of responses) {
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /^application\/json/);
+    assert.equal((JSON.parse(await response.text()) as { jsonrpc: string }).jsonrpc, "2.0");
+  }
+  const notification = await handler.fetch(
+    new Request(URL_, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    }),
+  );
+  assert.equal(notification.status, 202);
+  assert.equal(await notification.text(), "");
+});
+
 test("tools/list returns get_page and list_pages with strict input schemas and read-only annotations", async () => {
   const handler = handlerFor(INDEX);
   const message = await readRpcResponse(await handler.fetch(rpcRequest(URL_, "tools/list")));

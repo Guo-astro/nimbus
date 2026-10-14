@@ -195,7 +195,8 @@ async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = 
       assert.match(await initialize.text(), /"serverInfo"/);
       const call = await rpc(2, "tools/call", { name: "get_page", arguments: { url: `${base}/owned-by-slug/` } });
       assert.equal(call.status, 200, `${base}/mcp get_page`);
-      const message = JSON.parse((await call.text()).match(/^data: (.*)$/m)?.[1] ?? "{}");
+      assert.match(call.headers.get("Content-Type") ?? "", /^application\/json/, `${base}/mcp answers with JSON`);
+      const message = await call.json();
       const page = JSON.parse(message.result?.content?.[0]?.text ?? "{}");
       assert.ok(page.content?.includes("This text lives in"), `get_page reads the deployed Markdown: ${JSON.stringify(message).slice(0, 300)}`);
       assert.equal(page.truncated, undefined);

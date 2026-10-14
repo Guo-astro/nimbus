@@ -1,5 +1,11 @@
 /** One module wraps the SDK so a swap stays away from the route and tests. */
-import { McpServer, createMcpHandler, fromJsonSchema } from "@modelcontextprotocol/server";
+import {
+  McpServer,
+  WebStandardStreamableHTTPServerTransport,
+  createMcpHandler,
+  fromJsonSchema,
+  isLegacyRequest,
+} from "@modelcontextprotocol/server";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
 import type { McpServerIdentity } from "./identity.js";
 import type { McpPageIndex, McpPageRecord } from "./page-index.js";
@@ -350,10 +356,27 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
     return server;
   };
 
-  const sdk = createMcpHandler(({ requestInfo }) => serverFor(requestInfo!), {
-    legacy: "stateless",
+  // Every answer is one JSON body: the tools emit nothing before their
+  // result, so a stream would carry a single event. The SDK's own 2025-era
+  // path always streams, so that traffic is served here per request.
+  const modern = createMcpHandler(({ requestInfo }) => serverFor(requestInfo!), {
+    legacy: "reject",
+    responseMode: "json",
     maxRequestBodySize: MCP_MAX_REQUEST_BODY_BYTES,
   });
+  const legacy = async (request: Request): Promise<Response> => {
+    const server = serverFor(request);
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    await server.connect(transport);
+    try {
+      return await transport.handleRequest(request);
+    } finally {
+      await server.close();
+    }
+  };
 
   return {
     async fetch(request) {
@@ -375,7 +398,10 @@ export function createDocsMcpHandler(options: DocsMcpHandlerOptions): DocsMcpHan
           413,
         );
       }
-      const response = await sdk.fetch(new Request(request, { body }));
+      const sized = new Request(request, { body });
+      const response = (await isLegacyRequest(sized.clone()))
+        ? await legacy(sized)
+        : await modern.fetch(sized);
       const headers = new Headers(response.headers);
       for (const [name, value] of Object.entries(CORS_HEADERS)) headers.set(name, value);
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });

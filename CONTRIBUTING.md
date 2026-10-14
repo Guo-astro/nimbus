@@ -120,7 +120,7 @@ Pushes to `main` build but never update production; only the release deploy does
 | Deploy command    | `echo "Production deploys run from release.yml"` (never `wrangler deploy`) |
 | Preview builds    | Enabled                                                                    |
 | Preview command   | Default, `npx wrangler preview`                                            |
-| Preview URLs      | Default `workers.dev`                                                      |
+| Preview URLs      | `<name>.nimbus-docs.com` (the `workers.dev` URLs are behind Access)        |
 | Build watch paths | Default (include `*`, exclude nothing)                                     |
 
 Build command:

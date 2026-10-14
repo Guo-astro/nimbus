@@ -22,6 +22,8 @@ import {
   isNimbusServerWrangler,
   isNimbusStaticWrangler,
   sanitizeWorkerName,
+  workerdVersionDate,
+  workersCompatibilityDate,
 } from "../src/_internal/adapters.js";
 import { installAdapter, type DepInstaller } from "../src/cli/adapter.js";
 import { writeFileAtomic } from "../src/cli/fs-atomic.js";
@@ -47,11 +49,22 @@ function scratch(): string {
   return mkdtempSync(join(tmpdir(), "nimbus-wrangler-"));
 }
 
-function project(dir: string): void {
+function project(dir: string, options: { wrangler?: boolean } = {}): void {
   writeFileSync(join(dir, "astro.config.ts"), STARTER_CONFIG);
   writeFileSync(
     join(dir, "package.json"),
     JSON.stringify({ name: "docs", dependencies: { astro: "^7.0.0" } }),
+  );
+  // The installed wrangler a new config's compatibility date comes from, so
+  // no test reaches the registry.
+  if (options.wrangler !== false) installWrangler(dir, "1.20250101.1");
+}
+
+function installWrangler(dir: string, workerd: string): void {
+  mkdirSync(join(dir, "node_modules/wrangler"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules/wrangler/package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd } }),
   );
 }
 
@@ -179,6 +192,20 @@ test("cloudflare with no wrangler.jsonc writes the server config", async () => {
   assert.deepEqual(w.compatibility_flags, ["nodejs_compat"]);
   assert.ok(!("directory" in (w.assets as object)), "no static assets.directory");
   assert.ok(!("main" in w));
+  // The installed runtime's date, not today's.
+  assert.equal(w.compatibility_date, "2025-01-01");
+});
+
+test("cloudflare dates a new config by the wrangler the install just added", async () => {
+  const dir = scratch();
+  project(dir, { wrangler: false });
+  const installing: DepInstaller = async () => {
+    installWrangler(dir, "1.20250202.1");
+    return { ok: true };
+  };
+  const res = await installAdapter("cloudflare", { cwd: dir, installDeps: installing });
+  assert.equal(res.status, "applied");
+  assert.equal(readWrangler(dir).compatibility_date, "2025-02-02");
 });
 
 for (const filename of ["wrangler.json", "wrangler.toml"]) {
@@ -708,3 +735,83 @@ for (const adapter of ["vercel", "node", "netlify"] as const) {
     );
   });
 }
+
+// ---------------------------------------------------------------------------
+// The compatibility date a new wrangler config gets
+// ---------------------------------------------------------------------------
+
+const NOW = new Date("2026-10-14T00:24:00.000Z");
+const registry = (body: unknown, ok = true): typeof fetch =>
+  (async () => ({ ok, json: async () => body })) as unknown as typeof fetch;
+const unreachable: typeof fetch = async () => {
+  throw new Error("offline");
+};
+
+test("workerd versions name the newest date they support", () => {
+  assert.equal(workerdVersionDate("1.20261006.1"), "2026-10-06");
+  assert.equal(workerdVersionDate("^1.20261006.1"), null);
+  assert.equal(workerdVersionDate("1.20261306.1"), null);
+  assert.equal(workerdVersionDate("2.20261006.0"), "2026-10-06");
+  assert.equal(workerdVersionDate(undefined), null);
+});
+
+test("the compatibility date comes from the installed wrangler's workerd, without the registry", async () => {
+  const dir = scratch();
+  mkdirSync(join(dir, "node_modules/wrangler"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules/wrangler/package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20261006.1" } }),
+  );
+  let fetched = false;
+  const date = await workersCompatibilityDate(dir, {
+    now: NOW,
+    fetch: (async () => {
+      fetched = true;
+      throw new Error("not expected");
+    }) as typeof fetch,
+  });
+  assert.equal(date, "2026-10-06");
+  assert.equal(fetched, false);
+});
+
+test("another major's installed wrangler is skipped: its workerd can be ahead", async () => {
+  const dir = scratch();
+  mkdirSync(join(dir, "node_modules/wrangler"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules/wrangler/package.json"),
+    JSON.stringify({ name: "wrangler", version: "5.0.0", dependencies: { workerd: "1.20261013.1" } }),
+  );
+  const date = await workersCompatibilityDate(dir, {
+    now: NOW,
+    fetch: registry({ version: "4.150.0", dependencies: { workerd: "1.20261006.1" } }),
+  });
+  assert.equal(date, "2026-10-06");
+});
+
+test("without an install, the date comes from the workerd wrangler's latest release pins", async () => {
+  const date = await workersCompatibilityDate(scratch(), {
+    now: NOW,
+    fetch: registry({ version: "4.150.0", dependencies: { workerd: "1.20261006.1" } }),
+  });
+  assert.equal(date, "2026-10-06");
+});
+
+test("offline, or with an unreadable answer, the date falls back to 30 days ago", async () => {
+  for (const fetchImpl of [
+    unreachable,
+    registry({}, false),
+    registry({ version: "4.150.0", dependencies: { workerd: "^1.20261006.1" } }),
+    // Another major's workerd can be ahead of the one a project installs.
+    registry({ version: "5.0.0", dependencies: { workerd: "1.20261006.1" } }),
+  ]) {
+    assert.equal(await workersCompatibilityDate(scratch(), { now: NOW, fetch: fetchImpl }), "2026-09-14");
+  }
+});
+
+test("the compatibility date is never after today", async () => {
+  const date = await workersCompatibilityDate(scratch(), {
+    now: NOW,
+    fetch: registry({ version: "4.150.0", dependencies: { workerd: "1.20261020.1" } }),
+  });
+  assert.equal(date, "2026-10-14");
+});

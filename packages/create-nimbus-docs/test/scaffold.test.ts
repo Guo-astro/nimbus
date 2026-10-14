@@ -68,7 +68,16 @@ function makeTemplate(pkgJson = `{ "name": "template", "version": "0.0.0" }`): s
 }
 
 function makeCwd(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  // A wrangler the scaffold target resolves from its parent, the way a
+  // workspace hoists it: a new wrangler.jsonc takes its compatibility date
+  // from this workerd, and no test reaches the registry.
+  fs.mkdirSync(path.join(cwd, "node_modules", "wrangler"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
+  return cwd;
 }
 
 function makeGeneratedTemplates(): string {
@@ -273,6 +282,9 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
       fs.readFileSync(path.join(target, "package.json"), "utf8"),
     );
     assert.ok(pkg.devDependencies?.wrangler, "wrangler injected for cloudflare");
+    // Its compatibility date is the resolved wrangler's workerd date, not today's.
+    const wrangler = JSON.parse(fs.readFileSync(path.join(target, "wrangler.jsonc"), "utf8"));
+    assert.equal(wrangler.compatibility_date, "2025-01-01");
 
     // workerd is declined in BOTH schemes, without a blanket approval.
     const ws = fs.readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8");

@@ -72,7 +72,16 @@ function makeTemplate(astroConfig = STARTER_CONFIG): string {
 }
 
 function makeCwd(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  // A wrangler the scaffold target resolves from its parent, the way a
+  // workspace hoists it: a new wrangler.jsonc takes its compatibility date
+  // from this workerd, and no test reaches the registry.
+  fs.mkdirSync(path.join(cwd, "node_modules", "wrangler"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
+  return cwd;
 }
 
 function internals(cwd: string, templateDir: string) {
@@ -203,6 +212,8 @@ test("server + cloudflare writes a server wrangler.jsonc (nodejs_compat, no stat
     const wrangler = readJson(path.join(cwd, "my-docs", "wrangler.jsonc"));
     assert.ok(wrangler.$schema, "carries a $schema");
     assert.deepEqual(wrangler.compatibility_flags, ["nodejs_compat"]);
+    // The resolved wrangler's workerd date, not today's.
+    assert.equal(wrangler.compatibility_date, "2025-01-01");
     assert.equal(
       wrangler.assets?.directory,
       undefined,

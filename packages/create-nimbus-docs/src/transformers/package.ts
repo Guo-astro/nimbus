@@ -36,6 +36,8 @@ export async function updatePackageJson(
       // docs site is a pure static build; the adapter would only be paid-for
       // weight (and currently breaks vite resolution for satteri's WASI
       // entry under the cloudflare adapter context).
+      // Same major as the Cloudflare recipe's `wranglerFloor`: a new config's
+      // compatibility date is read from that major's workerd.
       addWrangler(pkg, "^4.95.0");
       addCloudflareScripts(pkg);
     }

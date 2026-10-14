@@ -2218,15 +2218,15 @@ export function nimbus(
           });
         }
         if (config.agents?.mcp) {
-          // The server at /mcp and its card, both on request. A public file
-          // at either path is a collision here; pages and content entries are
-          // checked after content sync (`runPostSyncPageChecks`).
+          // Pages and content entries are checked after content sync (`runPostSyncPageChecks`).
           for (const [pattern, name] of [
             [MCP_PATH, "mcp/route"],
             [MCP_CARD_PATH, "mcp/card-route"],
           ] as const) {
-            const owned = path.join(publicDir, pattern);
-            if (fs.existsSync(owned))
+            const owned = [pattern, `${pattern}.html`, `${pattern}/index.html`]
+              .map((file) => path.join(publicDir, file))
+              .find((file) => fs.statSync(file, { throwIfNoEntry: false })?.isFile());
+            if (owned)
               throw authorError(
                 `Nimbus serves ${pattern} when agents.mcp is on. Move ${path.relative(projectRoot, owned)}, or set agents.mcp to false.`,
               );

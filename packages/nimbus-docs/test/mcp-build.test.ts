@@ -204,7 +204,7 @@ function suite(name: string, options: { host: string; base?: string }) {
     const dist = (pathname: string) => path.join(site.root, "dist", ...pathname.replace(/^\//, "").split("/"));
 
     before(async () => {
-      site = await buildSite(options);
+      site = await buildSite({ ...options, files: { "public/mcp/logo.svg": "<svg/>\n" } });
     });
     after(async () => {
       if (process.env.NIMBUS_MCP_KEEP) return;
@@ -325,6 +325,10 @@ function suite(name: string, options: { host: string; base?: string }) {
       assert.equal(entry?.url, `${endpoint}/server-card`);
       assert.equal(existsSync(dist("/mcp/server-card")), false, "no prerendered card file");
     });
+
+    test("a public file under mcp/ that serves neither path is published as is", () => {
+      assert.ok(existsSync(dist("/mcp/logo.svg")));
+    });
   });
 }
 
@@ -353,12 +357,15 @@ test("a static build with agents.mcp is an author error that names the adapter",
   );
 });
 
-test("a page or content entry at /mcp or its card is an author error, not a silently shadowed page", async () => {
+test("a page, content entry or public file at /mcp or its card is an author error, not a silently shadowed page", async () => {
   for (const [file, route] of [
     ["src/content/docs/mcp.mdx", "/mcp"],
     ["src/content/docs/mcp.md", "/mcp"],
     ["src/content/docs/mcp/server-card.md", "/mcp/server-card"],
     ["src/pages/mcp.astro", "/mcp"],
+    ["public/mcp.html", "/mcp"],
+    ["public/mcp/index.html", "/mcp"],
+    ["public/mcp/server-card", "/mcp/server-card"],
   ] as const) {
     await assert.rejects(
       () =>

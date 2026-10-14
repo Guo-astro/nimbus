@@ -69,8 +69,17 @@ function filesUnder(path) {
   });
 }
 
+/**
+ * A build's runtime files, without sourcemaps. The Workers Vite plugin emits
+ * them by default, and their embedded sources (comments included) aren't code
+ * the Worker runs.
+ */
+function runtimeFilesUnder(path) {
+  return filesUnder(path).filter((file) => !file.endsWith(".map"));
+}
+
 function outputText(path) {
-  return filesUnder(path)
+  return runtimeFilesUnder(path)
     .map((file) => readFileSync(file).toString("utf8"))
     .join("\n");
 }
@@ -763,7 +772,7 @@ async function withWorkerd(site, check, assetsDirectory) {
 }
 
 function assertSizeBudgets(site) {
-  const workerFiles = filesUnder(join(site, "dist", "server")).map((file) =>
+  const workerFiles = runtimeFilesUnder(join(site, "dist", "server")).map((file) =>
     readFileSync(file),
   );
   const workerBytes = workerFiles.reduce(
@@ -936,7 +945,7 @@ function workerPurityViolations(files) {
 
 function assertWorkerPurity(directory) {
   const violations = workerPurityViolations(
-    filesUnder(directory).map((file) => ({
+    runtimeFilesUnder(directory).map((file) => ({
       path: file,
       body: readFileSync(file),
     })),

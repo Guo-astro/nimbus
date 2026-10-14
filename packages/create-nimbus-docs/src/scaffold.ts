@@ -281,7 +281,7 @@ export async function scaffold(
     normalizePackageManagerFiles(target, packageManager);
     if (options.output === "server") {
       await applyAdapter(target, options.adapter);
-      writeServerWrangler(target, options.adapter);
+      await writeServerWrangler(target, options.adapter);
       appendAdapterIgnoreEntries(target, options.adapter);
       if (options.adapter === "cloudflare") {
         // wrangler (added by updatePackageJson) pulls workerd; decline its

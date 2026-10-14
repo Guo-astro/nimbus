@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sanitizeWorkerName } from "@cloudflare/nimbus-docs/adapters";
+import { sanitizeWorkerName, workersCompatibilityDate } from "@cloudflare/nimbus-docs/adapters";
 
 /**
  * Apply deploy target configuration.
@@ -58,13 +58,14 @@ export function declineBuildScript(dir: string, name: string): void {
 
 async function writeWranglerConfig(dir: string): Promise<void> {
   const projectName = dir.split(/[\\/]/).pop() ?? "my-docs";
+  const compatibilityDate = await workersCompatibilityDate(dir);
   writeFileSync(
     join(dir, "wrangler.jsonc"),
     JSON.stringify(
       {
         $schema: "node_modules/wrangler/config-schema.json",
         name: sanitizeWorkerName(projectName),
-        compatibility_date: today(),
+        compatibility_date: compatibilityDate,
         assets: {
           directory: "./dist",
           not_found_handling: "404-page",
@@ -74,8 +75,4 @@ async function writeWranglerConfig(dir: string): Promise<void> {
       2,
     ) + "\n",
   );
-}
-
-export function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }

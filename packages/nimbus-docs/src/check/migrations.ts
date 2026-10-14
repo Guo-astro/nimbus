@@ -55,10 +55,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
             scope: "migrations" as const,
             code: entry.mode === "optional" ? "nimbus/upgrade-optional" : "nimbus/upgrade-review",
             severity: entry.mode === "optional" ? ("info" as const) : ("error" as const),
-            message:
-              entry.mode === "optional"
-                ? `${entry.summary} Optional upgrade \`${entry.id}\`: listed until \`${command.display}\` records ${baseline.targetVersion} as reviewed (answer yes, or pass --yes).`
-                : `${entry.summary} Review upgrade \`${entry.id}\` with \`${command.display}\`.`,
+            message: `${entry.summary} ${entry.mode === "optional" ? "Optional upgrade" : "Review upgrade"} \`${entry.id}\` with \`${command.display}\`.`,
             fixable: false,
             ...(entry.mode === "optional"
               ? {}

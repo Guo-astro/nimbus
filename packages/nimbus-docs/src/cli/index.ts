@@ -9,8 +9,8 @@
  *   nimbus-docs list                   → list
  *   nimbus-docs list --type ui|lib|feature
  *   nimbus-docs add                    → list
- *   nimbus-docs add <slug...>          → install (component path or feature path)
- *   nimbus-docs add <slug...> --yes    → component: no prompts, keeps differing files
+ *   nimbus-docs add <slug>             → install (component path or feature path)
+ *   nimbus-docs add <slug> --yes       → component: skip overwrite prompts
  *   nimbus-docs add <feature> --print  → print an agent-handoff recipe
  *
  * Feature behavior: print markdown to stdout iff `--print` OR an agent is
@@ -35,7 +35,7 @@ import {
 } from "./adapter.js";
 import { BUNDLED_INDEX } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents, keptLines, registerHint, starterBaseline } from "./component.js";
+import { installComponents, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
 import { installFeature, shouldUseAgentHandoff } from "./feature.js";
 import { initCommand } from "./init.js";
@@ -110,7 +110,7 @@ const HELP = `
   Commands:
     list [--type ui|lib|feature]   List available registry items
     add                            Same as \`list\`
-    add <slug...>                  Install components or hand off a feature
+    add <slug>                     Install a component or hand off a feature
     add server-output --adapter <vercel|node|netlify|cloudflare>
                                    Opt into server output: flip \`output\` to "server" + wire the adapter
     add adapter-<vercel|node|netlify|cloudflare>
@@ -123,8 +123,8 @@ const HELP = `
     lint                           Lint .mdx content for authoring-quality issues
 
   Flags:
-    --yes, -y                      Assume yes for prompts; with --overwrite, replaces edited files too
-    --overwrite                    \`add\`: replace files you haven't edited; asks about edited ones in a terminal, else keeps them and exits 1
+    --yes, -y                      Assume yes for prompts (command-specific writes still apply)
+    --overwrite                    \`add\`: replace existing files with registry versions (upgrade)
     --apply                        \`diff <file>\`: write the upstream change (clean files only)
     --dry-run                      \`migrate\`: plan without prompting or writing
     --diff                         \`migrate\`: print proposed edits without prompting or writing
@@ -149,11 +149,11 @@ const HELP = `
     --version, -v
 
   Environment:
-    GIGET_AUTH=<token>             \`outdated\`/\`diff\`/\`add --overwrite\`: GitHub token for the template lookup (anonymous: 60 requests/hour)
+    GIGET_AUTH=<token>             \`outdated\`/\`diff\`: GitHub token for the template lookup (anonymous: 60 requests/hour)
 
   Examples (run with your package manager — see Usage above):
     nimbus-docs add dialog                              # component: resolve + install
-    nimbus-docs add card --overwrite                    # update card; keeps your edits unless you say so
+    nimbus-docs add card --overwrite                    # re-install over your copy (review with git)
     nimbus-docs check                                   # build-free preflight (env + structure + authoring + types + migrations)
     nimbus-docs check --json                            # agent-readable findings + fixes
     nimbus-docs check --fix                             # apply safe fixes, prompt for the rest
@@ -233,7 +233,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const [command, slug, ...moreSlugs] = args._;
+  const [command, slug] = args._;
 
   const flagError = unknownFlagError(command, process.argv.slice(2));
   if (flagError) {
@@ -314,32 +314,13 @@ async function main(): Promise<void> {
   }
 
   if (command === "add") {
-    const slugs = [slug!, ...moreSlugs];
-    // Every slug is checked before anything is installed, so `add a typo`
-    // installs nothing rather than `a` and then stopping.
-    const unknown = slugs.filter(
-      (s) => s !== "server-output" && !ADAPTER_SLUGS[s] && !getIndexEntry(s),
-    );
-    if (unknown.length > 0) {
-      p.log.error(
-        `Unknown registry item${unknown.length === 1 ? "" : "s"}: ${unknown.map((s) => `\`${s}\``).join(", ")}. ` +
-          `Nothing was installed. Try \`${invocation("list")}\` to see what's available.`,
-      );
-      process.exit(1);
-    }
-    if (args.print && slugs.length > 1) {
-      p.log.error("`--print` takes one slug. Nothing was installed.");
-      process.exit(1);
-    }
-    for (const current of slugs) {
-      await addCommand(current, {
-        yes: args.yes,
-        print: args.print,
-        overwrite: args.overwrite,
-        adapter: args.adapter,
-        templateDir: args["template-dir"],
-      });
-    }
+    await addCommand(slug!, {
+      yes: args.yes,
+      print: args.print,
+      overwrite: args.overwrite,
+      adapter: args.adapter,
+      templateDir: args["template-dir"],
+    });
     return;
   }
 
@@ -507,8 +488,7 @@ async function addCommand(
   if (skew) p.log.warn(skew);
 
   const starter = starterBaseline(nimbus, srcRoot, flags.templateDir);
-  const cleanup = () => starter?.cleanup();
-  process.once("exit", cleanup);
+  process.once("exit", () => starter?.cleanup());
   const report = await installComponents(items, {
     cwd,
     yes: flags.yes,
@@ -517,8 +497,7 @@ async function addCommand(
     recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
     starter,
   });
-  cleanup();
-  process.off("exit", cleanup);
+  starter?.cleanup();
 
   const lines: string[] = [];
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -526,22 +505,12 @@ async function addCommand(
   if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
   if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
   if (report.replaced.length > 0) {
-    const notes: string[] = [];
-    if (report.replacedEdited > 0) notes.push(`${report.replacedEdited} had local edits`);
-    if (report.replacedUncompared > 0) notes.push(`${report.replacedUncompared} could not be compared`);
-    const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
-    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));
+    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  lines.push(...keptLines(report, slug, starter));
-  // `--overwrite` didn't finish: tell a script, without stopping the other slugs.
-  if (report.keptUnasked.length > 0) process.exitCode = 1;
-  const keptPlain = report.kept.filter(
-    (file) => ![...report.keptUnasked, ...report.keptDeclined].some((k) => k.files.includes(file)),
-  );
-  if (keptPlain.length > 0) {
+  if (report.kept.length > 0) {
     lines.push(
-      `↷ Kept ${plural(keptPlain.length, "file")} that ${keptPlain.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace; it checks for your edits first):`,
-      ...keptPlain.map((file) => `    ${file}`),
+      `↷ Kept ${plural(report.kept.length, "file")} that ${report.kept.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace):`,
+      ...report.kept.map((file) => `    ${file}`),
     );
   }
   if (report.npmDepsInstalled.length > 0) {

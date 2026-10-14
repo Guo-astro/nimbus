@@ -790,37 +790,6 @@
       "verify": [
         "Open a URL that doesn't exist and confirm the tab reads \"Page not found | <site>\" and the page source has <meta name=\"robots\" content=\"noindex\">."
       ]
-    },
-    {
-      "id": "pnpm-sharp",
-      "introducedIn": "0.19.0",
-      "mode": "optional",
-      "changeset": "upgrade-safety",
-      "summary": "Optionally add sharp so pages with local images build on pnpm.",
-      "affected": "Sites created with pnpm before 0.19.0.",
-      "instructions": [
-        "No action is needed until a page uses a local image; the build then fails with MissingSharp.",
-        "Run pnpm add sharp. npm, yarn and bun sites already resolve it through Astro."
-      ],
-      "verify": [
-        "Add a local image to a page and build; the page renders the image."
-      ]
-    },
-    {
-      "id": "og-font-path",
-      "introducedIn": "0.19.0",
-      "mode": "optional",
-      "changeset": "upgrade-safety",
-      "summary": "Optionally resolve the social-card font from the project so builds started elsewhere work.",
-      "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts and src/pages/og.png.ts.",
-      "instructions": [
-        "No action is needed when you build from the site's folder.",
-        "Run nimbus-docs outdated. When src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts are all unmodified, apply all three with nimbus-docs diff <file> --apply; applying the config alone drops the font.",
-        "If you've edited any of them, add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to both routes' image options, importing publicDir and root from astro:config/server, then drop fonts from the config."
-      ],
-      "verify": [
-        "From the parent folder, run astro build --root <site>; the build writes the OG cards."
-      ]
     }
   ]
 }

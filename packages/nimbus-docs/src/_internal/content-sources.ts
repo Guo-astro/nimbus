@@ -477,10 +477,14 @@ const SHA_REFUSED =
 async function resolveRef(repo: string, ref: string): Promise<string> {
   // The `^{}` pattern asks for an annotated tag's peeled commit, which
   // ls-remote prints only when a pattern names it.
-  const out = await git(
-    ["ls-remote", "--", repo, `refs/heads/${ref}`, `refs/tags/${ref}`, `refs/tags/${ref}^{}`],
-    { timeout: timeoutMs(RESOLVE_TIMEOUT_ENV, DEFAULT_RESOLVE_TIMEOUT) },
-  );
+  // A full ref name (`refs/pull/12/head`, `refs/heads/main`) is asked for as
+  // written; a short name as a branch or a tag.
+  const patterns = ref.startsWith("refs/")
+    ? [ref, `${ref}^{}`]
+    : [`refs/heads/${ref}`, `refs/tags/${ref}`, `refs/tags/${ref}^{}`];
+  const out = await git(["ls-remote", "--", repo, ...patterns], {
+    timeout: timeoutMs(RESOLVE_TIMEOUT_ENV, DEFAULT_RESOLVE_TIMEOUT),
+  });
   const lines = out.split("\n").filter((line) => line.trim());
   // A branch wins over a tag of the same name; an annotated tag lists the
   // tag object first and the commit it points at as `<ref>^{}`.

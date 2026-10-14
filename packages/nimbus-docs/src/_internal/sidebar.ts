@@ -152,7 +152,8 @@ function createLink(
   const badge = entry.data.draft
     ? (entry.data.sidebar?.badge ?? { text: "Draft", variant: "warning" })
     : entry.data.sidebar?.badge;
-  const label = entry.data.sidebar?.label ?? entry.data.title;
+  // A schema that makes `title` optional must not leave a blank link.
+  const label = entry.data.sidebar?.label ?? entry.data.title ?? formatLabel(entry.id.split("/").pop() || entry.id);
   const order = entry.data.sidebar?.order ?? Number.MAX_VALUE;
 
   // `external_link` rewrites the sidebar destination. The page itself

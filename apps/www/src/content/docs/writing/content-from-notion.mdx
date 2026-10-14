@@ -49,7 +49,7 @@ The database id is the 32-character hex string in the database's URL. A database
 
 Rename them with `notionLoader({ database, properties: { slug: "URL", status: "State" } })`. A property you named that is missing or of the wrong type fails the build, listing the data source's properties.
 
-**Publishing fails closed.** With no `Status` property and nothing configured, every row publishes, and one log line says so. With one, a row publishes only when its value is `Published` (change it with `publishedValue`), or when its checkbox is checked. Every other row is a draft, exactly like a local draft: shown in `astro dev` with the Draft badge, absent from `astro build`.
+**Publishing fails closed.** With no `Status` property and nothing configured, every row publishes, and one log line says so. With one, a row publishes only when its value is `Published`, or when its checkbox is checked. Notion's own status options are Not started, In progress and Done: if "Done" means published in your database, set `publishedValue: "Done"`. When no row publishes, the build warns and lists the values the database uses. Every other row is a draft, exactly like a local draft: shown in `astro dev` with the Draft badge, absent from `astro build`.
 
 Two rows with one slug fail the build naming both Notion page ids, drafts included, before anything is written. A row with no slug and an empty title fails naming its page id. Without a `Slug`, renaming a page changes its URL.
 

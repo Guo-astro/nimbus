@@ -335,6 +335,13 @@ function isPublished(page: PageObjectResponse, status: NonNullable<PropertyPlan[
   return false;
 }
 
+function statusText(page: PageObjectResponse, status: NonNullable<PropertyPlan["status"]>): string | undefined {
+  const value = propertyValue(page, status.name);
+  if (value?.type === "status") return value.status?.name;
+  if (value?.type === "select") return value.select?.name;
+  return undefined;
+}
+
 function rateLimitHint(error: unknown): string {
   if (error instanceof APIResponseError && error.code === "rate_limited") {
     const reason = error.additional_data?.rate_limit_reason;
@@ -352,7 +359,7 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
         retry: { maxRetries: 5 },
         ...(options.fetch ? { fetch: options.fetch } : {}),
       });
-      let entries: Array<{ id: string; pageId: string; title: string; data: Record<string, unknown>; body: string }>;
+      let entries: Array<{ id: string; pageId: string; title: string; data: Record<string, unknown>; body: string; status?: string }>;
       try {
         const dataSourceId = await resolveDataSource(notion, options);
         const source = (await notion.dataSources.retrieve({ data_source_id: dataSourceId })) as { properties: Record<string, Property> };
@@ -385,12 +392,23 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
           }
           if (orderValue?.type === "number" && orderValue.number !== null) data.sidebar = { order: orderValue.number };
           if (plan.status && !isPublished(page, plan.status)) data.draft = true;
-          return { id, pageId: page.id, title, data, body };
+          return { id, pageId: page.id, title, data, body, status: plan.status ? statusText(page, plan.status) : undefined };
         });
       } catch (error) {
         if (error instanceof Error && error.message.startsWith("notionLoader:")) throw error;
         const message = error instanceof Error ? error.message : String(error);
         fail(`reading Notion failed, nothing was written: ${message}.${rateLimitHint(error)}`);
+      }
+
+      // Every row a draft usually means the published value is named
+      // differently in this database ("Done", "Live"): say so, with what's there.
+      if (entries.length > 0 && entries.every((entry) => entry.data.draft === true)) {
+        const seen = [...new Set(entries.map((entry) => entry.status).filter(Boolean))];
+        logger.warn(
+          `notionLoader: no row is published, so the collection is empty in a build. A row publishes when its status is ` +
+            `"${options.publishedValue ?? "Published"}"` +
+            (seen.length ? `; this database uses ${seen.map((v) => `"${v}"`).join(", ")}. Set publishedValue to the one that means published.` : "."),
+        );
       }
 
       // Duplicates are checked before anything is written: Nimbus can't tell

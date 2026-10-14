@@ -37,7 +37,11 @@ to edit) and `@notionhq/client`. You wire it up.
    token in `NOTION_TOKEN`: `.env` locally (check `.env` is gitignored), and
    the build's environment in CI. Never in code.
 3. **The collection name and URL prefix**, for example `handbook` at `/handbook`.
-4. **The properties.** Defaults, by name: `Description` (rich text),
+4. **The publishing value.** Notion creates a status property with Not started,
+   In progress and Done. Ask which value means published; if it isn't
+   `Published`, pass `publishedValue` (for example `publishedValue: "Done"`).
+   Otherwise every row is a draft and the build warns that nothing published.
+5. **The properties.** Defaults, by name: `Description` (rich text),
    `Slug` (rich text, the page's URL; else the slugified title), `Order`
    (number, sidebar order), `Status` (status, select or checkbox; a row
    publishes when it is `Published`, or checked). Ask if theirs differ.

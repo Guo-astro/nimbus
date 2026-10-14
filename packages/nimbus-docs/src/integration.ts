@@ -91,6 +91,7 @@ import { formatLabel } from "./_internal/sidebar.js";
 import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
 import { entryRouteUrl } from "./_internal/astro-slug.js";
+import { rewriteSourceLinks } from "./_internal/source-links.js";
 import {
   parsePageCollectionSources,
   placeStaticCollections,
@@ -2593,7 +2594,7 @@ export function nimbus(
           format: "markdown" | "mdx",
         ) =>
           authoredLinks.normalizeAuthoredLinks(
-            resolveAuthoredCitations(source, sourceId),
+            resolveAuthoredCitations(rewriteSourceLinks(source, sourceId), sourceId),
             { base: authoredLinkBase, format, sourceId },
           );
         const preparedMarkdownProcessor = decorateMarkdownProcessor(

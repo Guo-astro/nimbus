@@ -58,6 +58,8 @@ import {
   resolveContentSource,
 } from "./_internal/content-sources.js";
 import { normalizeSourcePath } from "./_internal/source-repo.js";
+import { registerSourceCollectionFolder, rewriteSourceLinks } from "./_internal/source-links.js";
+import { formatLabel } from "./_internal/sidebar.js";
 import {
   beginPreparedMarkdownLoad,
   cancelPreparedMarkdownLoad,
@@ -228,16 +230,18 @@ function wrapNimbusMarkdown<T extends Loader>(
             },
           }
         : {}),
-      transform: (source, sourceId) =>
-        normalizeAuthoredLinks(source, {
+      transform: (source, sourceId) => {
+        const filePath = sourceId
+          ? fileURLToPath(new URL(sourceId, context.config.root))
+          : undefined;
+        return normalizeAuthoredLinks(rewriteSourceLinks(source, filePath), {
           base,
           sourceId: sourceId
             ? `${context.collection}:${sourceId}`
             : context.collection,
-          filePath: sourceId
-            ? fileURLToPath(new URL(sourceId, context.config.root))
-            : undefined,
-        }),
+          filePath,
+        });
+      },
     });
     await Reflect.apply(
       Reflect.get(prepared, "load", prepared) as Loader["load"],
@@ -277,6 +281,41 @@ export function docsCollection<
     loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema,
   };
+}
+
+/**
+ * The title of a page with none in its frontmatter: its first Markdown
+ * heading (outside code fences, inline markup removed), else its file name.
+ */
+export function titleFromFile(filePath: string | undefined, id: string): string {
+  const fallback = formatLabel(id.split("/").pop() || id);
+  if (!filePath) return fallback;
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return fallback;
+  }
+  text = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+  let fence: string | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      fence = fence === null ? fenceMatch[1]! : null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!heading) continue;
+    const title = heading[1]!
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/(\*\*|__|\*|_)(.+?)\1/g, "$2")
+      .replace(/<[^>]+>/g, "")
+      .trim();
+    if (title) return title;
+  }
+  return fallback;
 }
 
 /**
@@ -354,8 +393,26 @@ function sourceGlob(source: string, rawBase: string | undefined, pattern: string
       }
       const rootDir = fileURLToPath(context.config.root);
       const relative = path.relative(rootDir, folder).split(path.sep).join("/");
+      registerSourceCollectionFolder({ collection: context.collection, folder });
+      // A repository's docs often have no frontmatter: a page without a
+      // `title` takes its first heading, else its file name.
+      const parseData = Reflect.get(context, "parseData", context) as typeof context.parseData;
+      const parseWithTitle: typeof context.parseData = (props) =>
+        Reflect.apply(parseData, context, [
+          props.data?.title === undefined
+            ? { ...props, data: { ...props.data, title: titleFromFile(props.filePath, props.id) } }
+            : props,
+        ]);
       const inner = glob({ base: `./${relative}`, pattern });
-      await inner.load(transparentProxy(context, new Map([["watcher", undefined]])));
+      await inner.load(
+        transparentProxy(
+          context,
+          new Map<PropertyKey, unknown>([
+            ["watcher", undefined],
+            ["parseData", parseWithTitle],
+          ]),
+        ),
+      );
     },
   };
   nimbusGlobFiles.set(loader, (root) => {

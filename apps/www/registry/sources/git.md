@@ -130,7 +130,9 @@ Locally, git's credential helper or an SSH remote (`git@…`) already works.
 ## 6. Previews from the source repository
 
 A pull request in the source repository can preview its docs on this site by
-building with `<NAME>_DOCS_REF` set to the pull request's commit (or branch).
+building with `<NAME>_DOCS_REF` set to the pull request's head commit, or on
+GitHub its full ref name `refs/pull/<number>/head` (a `ref` starting with
+`refs/` is used as written).
 Set the variable in the docs site's preview build, for example from a
 workflow in the source repository that triggers the docs site's deploy hook
 with the commit. For a private source, the preview build needs the same read
@@ -148,6 +150,19 @@ credential as production.
    `sdk: docs/guides/intro.mdx:12`, to be fixed in the source repository.
 
 ## Notes for the agent
+
+- Pages need no frontmatter: one without a `title` takes its first heading,
+  else its file name. Relative links between the collection's pages
+  (`2-options.md#signal`) become page URLs; a relative link to a file the
+  collection doesn't publish (`../readme.md`) stays as written and the build
+  warns. Tell the user about those warnings rather than rewriting their docs.
+- A collection's own URL (`/sdk/`) is its `index.md`. If the source has none,
+  say the starter's section tab for it will 404, and suggest adding one in the
+  source repository or pointing the sidebar at the first page.
+- If the site has no `sidebar.items`, adding one replaces the default sidebar:
+  include `{ label: "Docs", autogenerate: { collection: "docs" } }` first.
+- Caching `.nimbus/sources` in CI: key the cache on the ref, so preview builds
+  don't prune production's snapshot.
 
 - MDX from the source runs at build like local MDX, including its imports.
   On a repository the user doesn't control, pin a commit.

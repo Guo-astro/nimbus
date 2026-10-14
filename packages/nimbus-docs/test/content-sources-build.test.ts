@@ -196,6 +196,19 @@ test("a changed path with the remote gone fails naming the source; a pin-to-bran
   }
 });
 
+test("a full ref name such as a pull request's head builds from that commit", async () => {
+  const { site, remote } = await sourceSite();
+  try {
+    git(remote.work, "switch", "-q", "-c", "pr");
+    await remote.commit({ "docs/reference/client.md": "---\ntitle: Client\n---\n\nThe client, from a pull request.\n" });
+    git(remote.work, "push", "-q", "origin", "HEAD:refs/pull/7/head");
+    await build(configFor(site, { repo: remote.bare, ref: "refs/pull/7/head", path: "docs" }));
+    assert.match(await site.read("dist/sdk-reference/client/index.html"), /from a pull request/);
+  } finally {
+    await site.remove();
+  }
+});
+
 test("a relative local repo builds, and a path missing at a new commit is an author error that never falls back", async () => {
   const { site, remote } = await sourceSite();
   try {

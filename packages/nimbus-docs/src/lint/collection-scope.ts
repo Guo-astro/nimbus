@@ -51,17 +51,23 @@ export function pageCollectionLintScope(
   const owners: Array<{ dir: string; collection: string }> = [];
   const files = new Set<string>();
   const unplaced: string[] = [];
+  const markdown = new Set<string>();
   for (const [collection, place] of places) {
     if (place.kind === "unplaced") {
       unplaced.push(`${collection} (${place.reason})`);
       continue;
     }
-    if (inside(contentDir, place.dir)) continue;
-    owners.push({ dir: place.dir, collection });
     const patterns = typeof place.pattern === "string" ? [place.pattern] : place.pattern;
     const positive = patterns.filter((p) => !p.startsWith("!"));
     const negative = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
     const matches = picomatch(positive, negative.length > 0 ? { ignore: negative } : {});
+    // Lint reads MDX; count the Markdown pages it leaves out, so a clean
+    // result doesn't hide them.
+    for (const { abs, rel } of walkFilesSync(place.dir, { extensions: [".md"] })) {
+      if (matches(rel)) markdown.add(abs);
+    }
+    if (inside(contentDir, place.dir)) continue;
+    owners.push({ dir: place.dir, collection });
     for (const { abs, rel } of walkFilesSync(place.dir, { extensions: [".mdx"] })) {
       if (matches(rel)) files.add(abs);
     }
@@ -80,8 +86,11 @@ export function pageCollectionLintScope(
       return source ? `${source.name}: ${source.path}` : undefined;
     },
     readOnlySource: (absPath) => sourceOf(absPath)?.name,
-    notes: unplaced.length
-      ? [`not inspected: ${unplaced.join(", ")}.`]
-      : [],
+    notes: [
+      ...(unplaced.length ? [`not inspected: ${unplaced.join(", ")}.`] : []),
+      ...(markdown.size
+        ? [`${markdown.size} Markdown (.md) page${markdown.size === 1 ? "" : "s"} not linted: lint reads .mdx files.`]
+        : []),
+    ],
   };
 }

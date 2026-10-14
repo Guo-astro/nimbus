@@ -57,7 +57,15 @@ export const collections = {
 };
 ```
 
-Each collection mounts at its name and still needs its route file and a sidebar entry, like any collection: `nimbus-docs add new-collection` writes both. One source feeds any number of collections from one checkout.
+Each collection mounts at its name and still needs its route file and a sidebar entry, like any collection. `nimbus-docs add new-collection --print` prints the steps for both (the route file, and adding the collection to `sidebar.items`). A site with no `sidebar.items` shows only `docs` in the sidebar; once you add `sidebar.items`, list `docs` there too, since the list replaces the default. A collection's own URL (`/sdk-guides/`) is its `index.md` page: without one, the starter's section tabs link to a page that doesn't exist. One source feeds any number of collections from one checkout.
+
+## Docs written for GitHub
+
+A repository's docs folder usually works as written:
+
+- **Titles.** A page with no `title` in its frontmatter takes its first heading (`## Promise API`), else its file name. The heading still shows in the page, under the title.
+- **Links between pages.** A relative link to another page of the same collection (`[Options](2-options.md#signal)`, `../guides/intro.md`) becomes that page's URL on the site, in the HTML and the Markdown version. A relative link to a file the collection doesn't publish (`../readme.md`) stays as written, and the build prints one warning per file naming it: point it at a published page or an absolute URL.
+- **Lint.** `nimbus-docs lint` reads `.mdx` files; it says how many `.md` pages that leaves out.
 
 The pages are pages in every way a local page is: callouts, components (including ones imported beside the page), images, `api.ref:` citations, link checking, collision checks, MDX validation, Markdown versions, `llms.txt` and search. Two entries that resolve to one URL fail the build, whichever collections they come from.
 
@@ -201,8 +209,8 @@ jobs:
 
 **Floating staging.** A staging deployment can set `SDK_DOCS_REF=main` and rebuild from a deploy hook the source repository calls on push.
 
-**Previews from the source repository.** A pull request in the source repository can preview its docs on the docs site: trigger the docs site's preview build with `SDK_DOCS_REF` set to the pull request's commit. For a private source, the preview environment needs a read token, given to git as above, not to Nimbus.
+**Previews from the source repository.** A pull request in the source repository can preview its docs on the docs site: trigger the docs site's preview build with `SDK_DOCS_REF` set to the pull request's head commit (or, on GitHub, the full ref name `refs/pull/<number>/head`; a `ref` that starts with `refs/` is used as written). For a private source, the preview environment needs a read token, given to git as above, not to Nimbus.
 
-**Caching.** Cache `.nimbus/sources` between CI runs; a pinned commit is then a cache hit with no fetch.
+**Caching.** Cache `.nimbus/sources` between CI runs; a pinned commit is then a cache hit with no fetch. A build keeps only the snapshots its own declaration selects, so a preview build with another ref prunes production's snapshot from a shared cache. Key the cache on the ref (for example `sources-${{ env.SDK_DOCS_REF }}`) so previews and production don't share one.
 
 **Git on the build image.** Builds run `git`. Most CI and hosting images include it; check yours.

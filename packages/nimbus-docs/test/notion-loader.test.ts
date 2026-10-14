@@ -113,6 +113,14 @@ test("drafts, duplicate and empty ids, and a missing token", async () => {
   assert.equal(drafts.entries.get("two")!.data.draft, true);
   assert.match(drafts.entries.get("two")!.body!, /Two body\./, "a draft keeps its body");
 
+  api.set(base([page("p1", "One", { slug: "one", status: "Done" }), page("p2", "Two", { slug: "two", status: "In progress" })]));
+  const allDrafts = await load({ database: DB });
+  assert.ok(
+    allDrafts.logs.some((line) => /no row is published[\s\S]*this database uses "Done", "In progress"\. Set publishedValue/.test(line)),
+    allDrafts.logs.join("\n"),
+  );
+  assert.ok(!(await load({ database: DB, publishedValue: "Done" })).logs.some((line) => /no row is published/.test(line)));
+
   api.set(base([page("p1", "One", { slug: "same", status: "Published" }), page("p2", "Two", { slug: "same", status: "Draft" })]));
   const state = context();
   state.entries.set("kept", { id: "kept", data: {} });

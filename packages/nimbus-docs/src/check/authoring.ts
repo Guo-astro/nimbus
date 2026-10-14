@@ -69,7 +69,10 @@ export function checkAuthoring(
     ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
   ].sort();
   for (const note of lintScope.notes) {
-    notes.push({ code: "nimbus/page-collection-not-on-disk", reason: note });
+    notes.push({
+      code: note.startsWith("not inspected") ? "nimbus/page-collection-not-on-disk" : "nimbus/markdown-not-linted",
+      reason: note,
+    });
   }
   if (files.length === 0) {
     return { scope: "authoring", findings, notes, evaluated: true };

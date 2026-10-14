@@ -29,7 +29,7 @@ Flags — combine with `lint`:
 
 It walks `src/content/`, runs each authoring rule you've enabled, and exits non-zero when any `error`-severity finding survives.
 
-It also reads page collections that load from another folder, including [content sources](/writing/content-sources): a problem in a source's snapshot is reported as `sdk: docs/guides/intro.mdx:12`, its path in the source repository, and `--fix` leaves the snapshot untouched. A collection with no files on disk, such as a Notion database, is named as not inspected.
+It also reads page collections that load from another folder, including [content sources](/writing/content-sources): a problem in a source's snapshot is reported as `sdk: docs/guides/intro.mdx:12`, its path in the source repository, and `--fix` leaves the snapshot untouched. A collection with no files on disk, such as a Notion database, is named as not inspected. Lint reads `.mdx` files, and says how many Markdown (`.md`) pages that leaves out.
 
 ## Configure severities
 

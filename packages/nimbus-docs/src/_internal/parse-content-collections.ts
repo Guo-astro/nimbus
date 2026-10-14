@@ -577,7 +577,7 @@ function readPageCollections(
   // `docsCollection(`, and any name it's imported under
   // (`import { docsCollection as dc }`); `ns.docsCollection(` matches as is.
   const aliases = [...stripped.matchAll(/\bdocsCollection\s+as\s+([A-Za-z_$][\w$]*)/g)].map((m) =>
-    m[1]!.replace(/\$/g, "\\$"),
+    m[1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
   );
   // Not `\b`: an identifier may start with `$`, which `\b` never precedes.
   const calls = new RegExp(`(?<![\\w$])(?:${["docsCollection", ...aliases].join("|")})\\s*\\(`, "g");

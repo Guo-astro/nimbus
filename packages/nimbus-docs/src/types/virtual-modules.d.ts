@@ -30,14 +30,15 @@ declare module "virtual:nimbus/config" {
   export const emptyCollections: readonly string[];
   /**
    * The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice
-   * without the root collection keeps its site-wide files under `prefix`.
+   * without the root collection keeps its site-wide files under `prefix`
+   * (base-free, like every output path); `search` holds served URLs.
    */
   export const buildSlice: {
     collections: readonly string[];
     prefix: string;
     search: { bundle: string; merge: readonly string[] };
   } | null;
-  /** The Pagefind bundle to load (site-root-relative) and the bundles to merge into it. */
+  /** The Pagefind bundle to load and the bundles to merge into it: served URLs, base included. */
   export const searchIndex: { bundle: string; merge: readonly string[] };
   export const requestRenderingCollections: readonly string[];
   export const versionAlternates: import("../_internal/version-alternates.js").VersionAlternatesTable;

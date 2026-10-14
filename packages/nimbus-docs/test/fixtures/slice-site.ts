@@ -8,7 +8,7 @@
 // to its twin in the other locale and two pages of its own, and a few
 // `api.ref:` citations.
 
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -181,6 +181,8 @@ export interface SliceSiteOptions {
   rendering?: unknown;
   /** Server output through an adapter named `@astrojs/cloudflare`. */
   server?: boolean;
+  /** Static output through the same adapter, as a Cloudflare deploy under a base uses it. */
+  staticAdapter?: boolean;
   /** `bundle: false` on the API collection (its pages become static assets). */
   apiBundle?: false;
   /**
@@ -207,18 +209,36 @@ export interface SliceSite {
   remove: () => Promise<void>;
 }
 
-/** An on-demand adapter that Nimbus's request-rendering gate accepts. */
+/**
+ * An on-demand adapter that Nimbus's request-rendering gate accepts. Under a
+ * base it lays out the client output the way `@astrojs/cloudflare` 14 does:
+ * nested under the base, with `_headers`, `_redirects` and `.assetsignore`
+ * moved back up to the asset root once the build is done.
+ */
 function cloudflareNamedAdapter(entrypoint: string): AstroIntegration {
+  let client: URL | undefined;
+  let assetRoot: URL | undefined;
   return {
     name: "@astrojs/cloudflare",
     hooks: {
-      "astro:config:done": ({ setAdapter }) => {
+      "astro:config:done": ({ setAdapter, config }) => {
+        if (config.base !== "/") {
+          assetRoot = new URL(config.build.client.href);
+          config.build.client = new URL(`.${config.base}/`, config.build.client);
+          client = config.build.client;
+        }
         setAdapter({
           name: "@astrojs/cloudflare",
           entrypointResolution: "auto",
           serverEntrypoint: entrypoint,
           supportedAstroFeatures: { serverOutput: "stable" },
         });
+      },
+      "astro:build:done": async () => {
+        if (!client || !assetRoot) return;
+        for (const file of [".assetsignore", "_headers", "_redirects"]) {
+          await rename(new URL(file, client), new URL(file, assetRoot)).catch(() => undefined);
+        }
       },
     },
   };
@@ -371,7 +391,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
   );
 
   let adapter: AstroIntegration | undefined;
-  if (options.server) {
+  if (options.server || options.staticAdapter) {
     await write(
       "server-entry.mjs",
       'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n',
@@ -388,7 +408,7 @@ export async function sliceSite(options: SliceSiteOptions): Promise<SliceSite> {
     logLevel: options.logLevel ?? "silent",
     ...(adapter
       ? {
-          output: "server" as const,
+          output: options.server ? ("server" as const) : ("static" as const),
           adapter,
           build: { client: path.join(root, "dist"), server: path.join(root, ".server") },
         }
@@ -478,6 +498,8 @@ export async function filePaths(site: SliceSite, dir = "dist"): Promise<string[]
 export async function builtSearchConfig(
   site: SliceSite,
   htmlPath: string,
+  /** The site's base: script URLs carry it, `dist/` paths don't. */
+  base = "",
 ): Promise<{ bundle: string; merge: string[] }> {
   const html = await site.read(htmlPath);
   // Vite re-emits the literal minified: unquoted keys, backtick strings.
@@ -493,7 +515,9 @@ export async function builtSearchConfig(
   const found = new Set<string>();
   const inline = find(html);
   if (inline) found.add(inline);
-  const script = /<script[^>]*\bsrc="([^"]+)"/u.exec(html)?.[1];
+  const scriptSrc = /<script[^>]*\bsrc="([^"]+)"/u.exec(html)?.[1];
+  const script =
+    base && scriptSrc?.startsWith(`${base}/`) ? scriptSrc.slice(base.length) : scriptSrc;
   if (!inline && script?.startsWith("/")) {
     const assetsDir = path.posix.dirname(script);
     for (const file of await filePaths(site)) {

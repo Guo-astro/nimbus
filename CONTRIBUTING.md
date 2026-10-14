@@ -95,7 +95,7 @@ If publishing failed partway, recover any missing git tags as the release script
 
 There is no rollback to an older release: the deploy refuses a release older than npm `latest`, so fix forward with a new release. In an emergency, Cloudflare's Worker deployment rollback is the only sanctioned production change outside the Release workflow.
 
-`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ. The release deploy and PR Preview cleanup use the `cloudflare` GitHub Environment with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; publishing uses a separate `release` Environment with `APP_ID` and `APP_PRIVATE_KEY`. Both environments are restricted to `main`, with no repository-level copies of these secrets, so only code on `main` can use them; anyone who can merge to `main` can reach them. Only the release deploy should update production, but that is a policy, not a boundary: Workers Builds can also deploy with its own token (see below).
+`nimbus-docs add` installs components from the registry the docs site serves, so the two must ship together. Before the deploy, the registry still serves the previous release's components, which may lack what the new package needs. Don't deploy from `main` between merging a feature and publishing its release, either: the registry would then serve components that need APIs the published package doesn't have yet. `add` warns when the registry and the project's `@cloudflare/nimbus-docs` versions differ. The release deploy, fork PR Previews and PR Preview cleanup use the `cloudflare` GitHub Environment with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; publishing uses a separate `release` Environment with `APP_ID` and `APP_PRIVATE_KEY`. Both environments are restricted to `main`, with no repository-level copies of these secrets, so only code on `main` can use them; anyone who can merge to `main` can reach them. Only the release deploy should update production, but that is a policy, not a boundary: Workers Builds can also deploy with its own token (see below).
 
 On npm, both `@cloudflare/nimbus-docs` and `@cloudflare/create-nimbus-docs` need a trusted publisher for `cloudflare/nimbus`, workflow `release.yml`, environment `release`, with direct `npm publish` allowed. Existing connections cannot be edited. Cut over each package separately, when that package next has a planned release:
 
@@ -107,7 +107,7 @@ If a new connection expires before it validates, delete and recreate it near the
 
 ### Live www Previews
 
-[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) whose name is derived from the branch name (for example, `feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>` with the exact name. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built. Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) deploys each pushed branch, except `main`, Dependabot branches, and `templates`, to a [Worker Preview](https://developers.cloudflare.com/workers/previews/) whose name is derived from the branch name (for example, `feat/foo` becomes `feat-foo`). The Cloudflare bot comments its URL on the PR, and its dashboard link ends in `/previews/<name>` with the exact name. Test the PR's registry with `NIMBUS_REGISTRY_URL=<url>/registry`. Fork branches are not built; see [Fork PR previews](#fork-pr-previews). Closing a PR deletes its branch's Preview; Previews for branches without a PR are evicted by Cloudflare's per-Worker Preview limit.
 
 Pushes to `main` build but never update production; only the release deploy does. The `nimbus-docs` Worker's Builds settings must keep that true:
 
@@ -120,16 +120,16 @@ Pushes to `main` build but never update production; only the release deploy does
 | Deploy command    | `echo "Production deploys run from release.yml"` (never `wrangler deploy`) |
 | Preview builds    | Enabled                                                                    |
 | Preview command   | Default, `npx wrangler preview`                                            |
-| Preview URLs      | `<name>.nimbus-docs.com` (the `workers.dev` URLs are behind Access)        |
+| Preview URLs      | `<name>.nimbus-docs.com`; `workers.dev` off (`preview_urls`, next release) |
 | Build watch paths | Default (include `*`, exclude nothing)                                     |
 
 Build command:
 
 ```sh
-case "$WORKERS_CI_BRANCH" in dependabot/*|templates) exit 1 ;; esac && pnpm install --frozen-lockfile && pnpm run build:workers
+case "$WORKERS_CI_BRANCH" in dependabot/*|templates|fork-*) exit 1 ;; esac && pnpm install --frozen-lockfile && pnpm run build:workers
 ```
 
-The build command stops Dependabot and `templates` builds before any of their code runs, so those commits show a failed Workers Builds check. Keep the default watch paths: the `pr preview` label needs a Preview of the PR's latest commit, and a skipped build leaves an older one. Workers Builds runs other branches' code with its own Cloudflare API token, so anyone who can push a branch can use that token. If PR-close cleanup fails, a build still running at close recreates the Preview, or a PR doesn't target `main` or is retargeted away from it, run `pnpm exec wrangler preview delete --name <name> --skip-confirmation`, using the name from the bot's dashboard link, from `apps/www` with access to the Worker account.
+The build command stops Dependabot, `templates` and `fork-*` builds before any of their code runs (`fork-*` names belong to fork PR Previews, so don't use them for branches), so those commits show a failed Workers Builds check. Keep the default watch paths: the `pr preview` label needs a Preview of the PR's latest commit, and a skipped build leaves an older one. Workers Builds runs other branches' code with its own Cloudflare API token, so anyone who can push a branch can use that token. If PR-close cleanup fails, a build still running at close recreates the Preview, or a PR doesn't target `main` or is retargeted away from it, run `pnpm exec wrangler preview delete --name <name> --skip-confirmation`, using the name from the bot's dashboard link, from `apps/www` with access to the Worker account.
 
 ### Preview releases
 
@@ -154,3 +154,12 @@ behind the latest release gets no preview; merge main into it first.
 `create-nimbus-docs` previews scaffold from the PR's own starter, bundled into the
 preview package and pinned to the matching `@cloudflare/nimbus-docs` preview. They
 record no reviewed baseline in `nimbus.json`.
+
+#### Fork PR previews
+
+Fork branches get no Workers Builds Preview. Instead, the `pr preview` label on a fork PR starts the [Fork preview build](.github/workflows/fork-preview-build.yml), an ordinary fork run with no secrets. When it finishes, the [Fork preview](.github/workflows/fork-preview.yml) workflow, which always runs from `main`, deploys only the built files to `https://fork-<PR#>.nimbus-docs.com` and comments the URL and commit. Add the label, then approve the fork's pending runs; Preview release waits up to 15 minutes for that Preview before publishing packages against it.
+
+- The deploy goes ahead only while the PR's head is the built commit and the label is still on it. The label comes off after each build, so review the commit in the comment, and reapply the label for a fresh preview.
+- A fork Preview serves unreviewed contributor code on `nimbus-docs.com`. The deploy writes `_nimbus-preview-sha.txt` and a `noindex` `_headers` itself and uses `main`'s `_redirects`, so a fork's own headers and redirects are not previewed. It refuses a `_worker.js`.
+- Fork workflow approval must stay at "Require approval for all external contributors". A fork's own copies of these workflows run once approved, so approval is what stops a fork building or publishing on every push.
+- Closing the PR deletes `fork-<PR#>`. If that fails, run `pnpm exec wrangler preview delete --name fork-<PR#> --skip-confirmation` from `apps/www`.

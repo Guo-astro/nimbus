@@ -8,13 +8,18 @@
 export type RegistryEntryType =
   | "registry:ui"
   | "registry:lib"
-  | "registry:feature";
+  | "registry:feature"
+  | "registry:source";
 
 export interface RegistryIndexEntry {
   name: string;
   type: RegistryEntryType;
   title: string;
   description: string;
+  /** `registry:source` only: other names for the entry, each with the host it names. */
+  aliases?: Record<string, string>;
+  /** `registry:source` only: the entry installs files (`components/<name>.json`). */
+  installs?: boolean;
 }
 
 export interface BundledIndex {
@@ -370,6 +375,24 @@ export const BUNDLED_INDEX: BundledIndex = {
       "type": "registry:feature",
       "title": "Pagefind search",
       "description": "Add static Pagefind indexing and the Nimbus search dialog to an existing docs site."
+    },
+    "git": {
+      "name": "git",
+      "type": "registry:source",
+      "title": "Git repository",
+      "description": "Pages from another git repository: a pinned commit cached locally, edit links into that repository, previews from its pull requests.",
+      "aliases": {
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "bitbucket": "Bitbucket"
+      }
+    },
+    "notion": {
+      "name": "notion",
+      "type": "registry:source",
+      "title": "Notion database",
+      "description": "Pages from a Notion database: title, description, slug, order and publishing from its properties.",
+      "installs": true
     }
   }
 };

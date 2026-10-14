@@ -31,8 +31,11 @@ export interface ReconstructOptions {
   root: string;
   source: string;
   fetchItem: (slug: string) => Promise<ComponentItem | null>;
-  knownType: (slug: string) => "registry:ui" | "registry:lib" | null;
-  /** Known `registry:lib` slugs to probe under `root` (their files aren't in components/ui/). */
+  knownType: (slug: string) => "registry:ui" | "registry:lib" | "registry:source" | null;
+  /**
+   * Known `registry:lib` and `registry:source` slugs to probe under `root`
+   * (their files aren't in components/ui/).
+   */
   libSlugs: string[];
 }
 
@@ -237,9 +240,14 @@ export async function initCommand(flags: InitFlags): Promise<void> {
     source: registrySource(),
     knownType: (slug) => {
       const entry = getIndexEntry(slug);
-      return entry?.type === "registry:ui" || entry?.type === "registry:lib" ? entry.type : null;
+      return entry?.type === "registry:ui" || entry?.type === "registry:lib" || entry?.type === "registry:source"
+        ? entry.type
+        : null;
     },
-    libSlugs: listEntries({ type: "registry:lib" }).map((e) => e.name),
+    libSlugs: [
+      ...listEntries({ type: "registry:lib" }),
+      ...listEntries({ type: "registry:source" }),
+    ].map((e) => e.name),
     fetchItem: async (slug) => {
       try {
         return await fetchComponent(slug);

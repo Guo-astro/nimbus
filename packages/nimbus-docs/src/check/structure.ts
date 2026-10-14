@@ -20,6 +20,8 @@ import { serverAdapterFeature, serverAdapterMessage, type ServerFeature } from "
 import { parseAstroConfigFields, type ConfigParseResult } from "../_internal/parse-nimbus-config.js";
 import {
   parseCollectionBases,
+  parsePageCollectionFolders,
+  placeStaticCollections,
   parseContentCollections,
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
@@ -40,23 +42,28 @@ import { isRequiredCanonicalRouteComponent } from "../_internal/route-ownership.
 import {
   contentEntryUrl,
   enumerateEntriesByBase,
+  enumerateGlobEntries,
   enumerateStaticPageRoutes,
   findDuplicateRoutes,
   type RouteOwner,
 } from "../lint/site-model.js";
 import type { CheckFinding, Note, ScopeReport } from "./finding.js";
+import { probeSources, sourceFindings } from "./sources.js";
+import { parseContentSourcePath } from "../_internal/source-paths.js";
 import { lineOf, relFile } from "./loc.js";
 import type { NimbusConfig } from "../types.js";
 
 export async function checkStructure(
   cwd: string,
   parsed: ConfigParseResult,
+  snapshots: ReadonlyMap<string, { contentDir: string }> = new Map(),
 ): Promise<ScopeReport> {
   const findings: CheckFinding[] = [];
   const notes: Note[] = [];
 
   const config = checkConfigZod(findings, notes, parsed);
   await checkApiCollections(cwd, findings, notes, parsed, config);
+  checkSourceReferences(cwd, findings, parsed, config);
   const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config);
   if (parsed.ok && config) {
     const feature = serverAdapterFeature({
@@ -66,7 +73,7 @@ export async function checkStructure(
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
   }
-  await checkDuplicateRoutes(cwd, findings, parsed);
+  await checkDuplicateRoutes(cwd, findings, parsed, snapshots);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
 
@@ -189,6 +196,51 @@ async function checkApiCollections(
       file: relFile(contentConfigPath),
       line: lineOf(api.source, registration.offset),
       message: unconfiguredApiCollectionMessage(registration.key, configured),
+      fixable: false,
+    });
+  }
+}
+
+/**
+ * A declared source that nothing reads is a warning: a collection reads it
+ * with `docsCollection({ source })`, an `api` entry with `spec: { source }`.
+ * Skipped, silently, when either side can't be read statically: a computed
+ * `sources` or `api` field, a spread, or a registration the parser can't see.
+ */
+function checkSourceReferences(
+  cwd: string,
+  findings: CheckFinding[],
+  parsed: ConfigParseResult,
+  config: NimbusConfig | null,
+): void {
+  if (!parsed.ok || config === null) return;
+  const names = Object.keys(config.sources ?? {});
+  if (names.length === 0) return;
+  if (["api", "...spread"].some((field) => parsed.unresolved.includes(field))) return;
+  const contentConfigPath = path.join(cwd, "src", "content.config.ts");
+  const places = parsePageCollectionFolders(cwd, contentConfigPath);
+  if (places === null || [...places.values()].some((place) => place.kind === "unplaced")) return;
+
+  const referenced = new Set<string>();
+  for (const place of places.values()) if (place.kind === "source") referenced.add(place.source);
+  for (const entry of config.api ?? []) {
+    for (const holder of entry.versions ?? [entry]) {
+      const spec = holder.spec as { source?: unknown } | string | undefined;
+      if (typeof spec === "object" && spec !== null && typeof spec.source === "string") referenced.add(spec.source);
+    }
+  }
+  const sourcesField = parsed.location.fields.get("sources");
+  for (const name of names) {
+    if (referenced.has(name)) continue;
+    findings.push({
+      scope: "structure",
+      code: "nimbus/source-unreferenced",
+      severity: "warn",
+      file: relFile(parsed.location.file),
+      line: lineOf(parsed.location.source, sourcesField?.keyStart ?? parsed.location.objectStart),
+      message:
+        `sources.${name} is declared but nothing reads it. ` +
+        `Add docsCollection({ source: "${name}" }) to src/content.config.ts, point an api entry at it with spec: { source: "${name}", path }, or remove it.`,
       fixable: false,
     });
   }
@@ -340,9 +392,25 @@ function checkConfigZod(
   const file = relFile(parsed.location.file);
   const line = lineOf(parsed.location.source, parsed.location.objectStart);
 
-  const hasSpread = parsed.unresolved.includes("...spread");
-  if (parsed.unresolved.length > 0) {
-    const fields = parsed.unresolved
+  const probe: Record<string, unknown> = { ...parsed.config };
+  // A `sources` map whose only computed values are templated refs
+  // (`process.env.SDK_DOCS_REF ?? "<commit>"`) is read with each ref's
+  // fallback, so a preview-ready config keeps its readiness.
+  let templatedRefs = new Set<string>();
+  let unresolved = parsed.unresolved;
+  if (probe.sources === undefined && unresolved.includes("sources")) {
+    const raw = parsed.location.fields.get("sources")?.raw;
+    const sources = raw === undefined ? null : probeSources(raw);
+    if (sources) {
+      probe.sources = sources.probe;
+      templatedRefs = sources.templated;
+      unresolved = unresolved.filter((field) => field !== "sources");
+    }
+  }
+
+  const hasSpread = unresolved.includes("...spread");
+  if (unresolved.length > 0) {
+    const fields = unresolved
       .map((u) => (u === "...spread" ? "a spread (`...`)" : `\`${u}\``))
       .join(", ");
     notes.push({
@@ -352,7 +420,6 @@ function checkConfigZod(
     });
   }
 
-  const probe: Record<string, unknown> = { ...parsed.config };
   if (
     probe.site === undefined &&
     (hasSpread || parsed.unresolved.includes("site"))
@@ -371,7 +438,20 @@ function checkConfigZod(
   }
 
   try {
-    return validateNimbusConfig(probe);
+    // A computed `sources` defers only the checks that need the map.
+    const config = validateNimbusConfig(probe, {
+      deferSources: probe.sources === undefined && (hasSpread || unresolved.includes("sources")),
+    });
+    if (config.sources) {
+      const sourcesField = parsed.location.fields.get("sources");
+      findings.push(
+        ...sourceFindings(config.sources, templatedRefs, {
+          file,
+          line: lineOf(parsed.location.source, sourcesField?.keyStart ?? parsed.location.objectStart),
+        }),
+      );
+    }
+    return config;
   } catch (err) {
     findings.push({
       scope: "structure",
@@ -390,13 +470,16 @@ async function checkDuplicateRoutes(
   cwd: string,
   findings: CheckFinding[],
   parsed: ConfigParseResult,
+  snapshots: ReadonlyMap<string, { contentDir: string }>,
 ): Promise<void> {
   const srcDir = path.join(cwd, "src");
   const contentRoot = path.join(srcDir, "content");
-  if (!existsSync(contentRoot)) return;
 
   const contentConfigPath = path.join(srcDir, "content.config.ts");
   const collectionBases = await parseCollectionBases(contentConfigPath);
+  // Where each page collection's files are, wherever the folder: the same
+  // static reading `lint` uses. Collections it can't place are skipped.
+  const placed = placeStaticCollections(parsePageCollectionFolders(cwd, contentConfigPath), snapshots);
 
   const versions =
     parsed.ok && isVersionsObject(parsed.config.versions)
@@ -416,28 +499,48 @@ async function checkDuplicateRoutes(
           )
           .filter((name): name is string => typeof name === "string")
       : [];
+  // Without a build record, add the page collections the config shows
+  // statically: a Nimbus factory or `withNimbusMarkdown()` over a folder.
   const pageCollections =
     readPageCollectionsFile(cwd)?.collections ?? [
       ...new Set([
         "docs",
         ...(versions?.others ?? []).map((version) => `docs-${version}`),
         ...apiCollections,
+        ...[...(placed ?? [])]
+          .filter(([, place]) => place.kind === "folder" && place.role === "page")
+          .map(([key]) => key),
       ]),
     ];
 
   const indexedBases = new Map<string, string>();
+  const contentOwners: RouteOwner[] = [];
   for (const key of pageCollections) {
+    const place = placed?.get(key);
+    if (place?.kind === "unplaced") continue;
+    if (place?.kind === "folder") {
+      for (const entry of enumerateGlobEntries(key, place.dir, place.pattern, cwd)) {
+        contentOwners.push({
+          url: contentEntryUrl(entry, versions),
+          source: place.source
+            ? `${place.source}: ${(parseContentSourcePath(entry.relPath)?.path ?? entry.relPath)}`
+            : entry.relPath,
+          kind: "content",
+        });
+      }
+      continue;
+    }
     indexedBases.set(key, collectionBases?.get(key) ?? key);
   }
-
-  const contentOwners: RouteOwner[] = enumerateEntriesByBase(
-    contentRoot,
-    indexedBases,
-  ).map((entry) => ({
-    url: contentEntryUrl(entry, versions),
-    source: `src/content/${entry.relPath}`,
-    kind: "content" as const,
-  }));
+  if (existsSync(contentRoot)) {
+    for (const entry of enumerateEntriesByBase(contentRoot, indexedBases)) {
+      contentOwners.push({
+        url: contentEntryUrl(entry, versions),
+        source: `src/content/${entry.relPath}`,
+        kind: "content",
+      });
+    }
+  }
 
   const pagesRoot = path.join(srcDir, "pages");
   const pageOwners: RouteOwner[] = existsSync(pagesRoot)

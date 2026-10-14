@@ -9,7 +9,7 @@ The `nimbus-docs` CLI lists what's in the registry, installs it, records what yo
 
 ## `nimbus-docs list`
 
-Lists every installable component, utility, and feature.
+Lists every installable component, utility, feature and content source.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list" />
 
@@ -18,6 +18,7 @@ Filter by type:
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type ui" />
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type lib" />
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type feature" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="list --type source" />
 
 Running `nimbus-docs add` with no slug shows the same list.
 
@@ -94,6 +95,20 @@ When the command runs inside a detected coding agent, it emits a versioned recip
 Always run the project’s production build afterward. See [Rendering policy](/configuration#rendering-policy) for per-collection build/request overrides.
 
 The equivalent long form is `nimbus-docs add server-output --adapter <cloudflare|vercel|netlify|node>`.
+
+## `nimbus-docs add source <name|url>`
+
+Adds a content source: part of the site built from another git repository, a Notion database, or any provider. See [Content from other sources](/writing/content-sources).
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source github --print | claude" />
+
+| Name | Source |
+|---|---|
+| `git`, `github`, `gitlab`, `bitbucket` | Another git repository. The aliases print the same guide with the host's values. |
+| `notion` | A Notion database. Installs `src/loaders/notion.ts` and `@notionhq/client` first. |
+| a URL | A provider's documentation: a guide for writing its loader, starting from that URL. |
+
+`add source` alone lists them. Like a feature, the guide goes to your coding agent: printed when one is detected or `--print` is passed, otherwise the command shows how to pipe it. A source that installs files installs them first, with every install line on stderr, so a pipe carries the guide alone; a file you've changed is kept unless you pass `--overwrite`. A source's name on its own (`add notion`) points you to `add source notion`.
 
 ## `nimbus-docs init`
 
@@ -201,7 +216,7 @@ Checks that couldn't run are listed as `notes` on their scope rather than as fin
 
 ## `nimbus-docs lint`
 
-Walks `src/content/`, runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
+Walks `src/content/`, and the folders of page collections that load from elsewhere (including [content sources](/writing/content-sources)), runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 

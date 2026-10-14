@@ -16,6 +16,11 @@ at `/changelog`, a glossary at `/glossary`. Anything that lives
 alongside the primary `docs` collection at its own URL prefix and is
 NOT a frozen version of the docs.
 
+**For content that lives somewhere else** (another git repository, a Notion
+database, a CMS), start with `nimbus-docs add source <name|url>` instead
+(`add source` alone lists them). Its guide sends you back here only for the
+route, rendering-policy and sidebar steps.
+
 **For docs versions, this is the wrong recipe.** A version (`docs-v1`,
 `docs-2025-q1`, etc.) needs the version manifest, the picker install,
 and picker wiring on top of what this recipe does. Use `nimbus-docs add

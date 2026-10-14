@@ -57,6 +57,19 @@ export interface LintOptions {
    * killing the process mid-rename.
    */
   signal?: AbortSignal;
+  /**
+   * The collection a file belongs to, for files outside `src/content` (a
+   * page collection whose glob reads another folder). Falls back to the
+   * `src/content/<name>/` path.
+   */
+  collectionOf?: (absPath: string) => string | null;
+  /** How a file is named in findings, when not by its project-relative path. */
+  displayPath?: (absPath: string) => string | undefined;
+  /**
+   * The content source a file's snapshot belongs to. `fixPaths` never
+   * writes such a file: its fixable findings stay in the report.
+   */
+  readOnlySource?: (absPath: string) => string | undefined;
 }
 
 export interface LintSummary {
@@ -243,13 +256,14 @@ export function lintPaths(
   const out: Diagnostic[] = [];
   for (const abs of absPaths) {
     if (opts.signal?.aborted) break;
-    const rel = path.relative(projectRoot, abs);
+    const rel = opts.displayPath?.(abs) ?? path.relative(projectRoot, abs);
     try {
       const source = fs.readFileSync(abs, "utf8");
       const parsed = parseSource(source, {
         path: rel,
         absPath: abs,
-        collection: inferCollection(rel),
+        collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
       });
       out.push(...lintFile(parsed, opts));
     } catch (err) {
@@ -310,7 +324,12 @@ export function fixPaths(
 
   for (const abs of absPaths) {
     if (opts.signal?.aborted) break;
-    const rel = path.relative(projectRoot, abs);
+    const rel = opts.displayPath?.(abs) ?? path.relative(projectRoot, abs);
+    // A source snapshot stays byte-identical to its commit: report, never write.
+    if (opts.readOnlySource?.(abs) !== undefined) {
+      remaining.push(...lintPaths([abs], projectRoot, opts));
+      continue;
+    }
     try {
       const original = fs.readFileSync(abs, "utf8");
       let current = original;
@@ -321,7 +340,8 @@ export function fixPaths(
         const parsed = parseSource(current, {
           path: rel,
           absPath: abs,
-          collection: inferCollection(rel),
+          collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
         });
         const diagnostics = lintFile(parsed, opts);
         const result = applyFixes(current, diagnostics);

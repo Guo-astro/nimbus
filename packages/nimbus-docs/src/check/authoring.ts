@@ -26,12 +26,16 @@ import {
   type CollectionsConfig,
   type RulesConfig,
 } from "../lint/index.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "./finding.js";
 
 const LINK_RULES = ["nimbus/internal-link", "nimbus/redirected-link"] as const;
 
-export function checkAuthoring(cwd: string): ScopeReport {
+export function checkAuthoring(
+  cwd: string,
+  snapshots: ReadonlyMap<string, { contentDir: string }> = new Map(),
+): ScopeReport {
   const findings: CheckFinding[] = [];
   const notes: Note[] = [];
   const hasLintJson = fs.existsSync(path.join(cwd, ".nimbus", "lint.json"));
@@ -60,12 +64,26 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   }
 
-  const files = findMdxFiles([path.join(cwd, "src", "content")]);
+  const lintScope = pageCollectionLintScope(cwd, snapshots);
+  const files = [
+    ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
+  ].sort();
+  for (const note of lintScope.notes) {
+    notes.push({
+      code: note.startsWith("not inspected") ? "nimbus/page-collection-not-on-disk" : "nimbus/markdown-not-linted",
+      reason: note,
+    });
+  }
   if (files.length === 0) {
     return { scope: "authoring", findings, notes, evaluated: true };
   }
 
-  let effective = config;
+  let effective = {
+    ...config,
+    collectionOf: lintScope.collectionOf,
+    displayPath: lintScope.displayPath,
+    readOnlySource: lintScope.readOnlySource,
+  };
   if (!hasLintJson) {
     notes.push({
       code: "nimbus/authoring-optin-skipped",

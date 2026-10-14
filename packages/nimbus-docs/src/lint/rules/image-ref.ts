@@ -44,7 +44,7 @@ import type { Rule } from "../rule.js";
 export const imageRef: Rule = {
   code: "nimbus/image-ref",
   run(ctx) {
-    const root = inferProjectRoot(ctx.file.absPath);
+    const root = ctx.file.projectRoot ?? inferProjectRoot(ctx.file.absPath);
     const aliases = readAliases(ctx.options.aliases);
     // Pass through raw, unfiltered — `matchesAnyIgnore` caches its
     // compiled matcher on this array's identity. Filtering here would

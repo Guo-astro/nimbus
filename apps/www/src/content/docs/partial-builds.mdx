@@ -347,3 +347,4 @@ A pull request that touches only `src/content/docs-es/` builds and previews the 
 - The site's WebMCP search uses the root slice's bundle.
 - Cross-slice version pickers aren't supported: the docs version collections build together.
 - A slice can't span part of a collection.
+- A slice fetches only the content sources its collections and `api` entries read, and every source when `src/content.config.ts` sets one in a way the build can't read: see [Build without a source](/writing/content-sources#build-without-a-source).

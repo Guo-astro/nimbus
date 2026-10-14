@@ -19,10 +19,14 @@
  * apostrophe in `// the user's content` would otherwise flip the brace walker
  * into "inside a string" mode for the rest of the file, and a comma in
  * `// foo, bar` would split an entry that doesn't exist.
+ *
+ * String literals are skipped, so `"file:///x"` or a glob pattern like
+ * `"**\/*.md"` isn't read as the start of a comment.
  */
 export function stripComments(source: string): string {
-  return source.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m) =>
-    m.replace(/[^\n]/g, " "),
+  return source.replace(
+    /(["'`])(?:\\.|(?!\1)[^\\])*\1|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+    (m) => (m[0] === "/" ? m.replace(/[^\n]/g, " ") : m),
   );
 }
 

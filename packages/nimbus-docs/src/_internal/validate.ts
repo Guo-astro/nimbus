@@ -10,6 +10,13 @@ import type { NimbusConfig } from "../types.js";
 import { withStrictKeys, reportUnknownKeys } from "./strict-keys.js";
 import { prefixEntryFault, routeSlugFault } from "./api/route-policy.js";
 import { GENERATED_SAMPLE_LANGS } from "./api/samples.js";
+import {
+  isCommitRef,
+  isSpecFromSource,
+  normalizeSourcePath,
+  redactRepo,
+  repoCredentialFault,
+} from "./source-repo.js";
 
 // `new URL("https:example.com")` does NOT throw (protocol `https:`, host
 // `example.com`), so a bare `.url()`/`new URL()` check waves through a missing
@@ -197,9 +204,166 @@ const specSourceSchema = z.union(
   [z.string().min(1), z.record(z.string(), z.unknown())],
   {
     error:
-      '"api[].spec" must be a local file path (string) or an inline OpenAPI object — remote URLs are not supported in v1',
+      '"api[].spec" must be a local file path (string), { source, path } naming a content source, or an inline OpenAPI object — remote URLs are not supported in v1',
   },
 );
+
+// Content sources: `sources: { <name>: { repo, ref, path, editPattern } }`.
+// The name is a cache folder; `ref` is a full commit (reproducible) or a
+// branch or tag name; `path` is a folder inside the repository. `repo` never
+// carries a credential, and no message echoes one.
+const SOURCE_NAME = /^[a-z0-9-]+$/;
+const ABBREVIATED_COMMIT = /^[0-9a-f]{7,39}$/i;
+const contentSourceShape = {
+  repo: z
+    .string({ error: '"sources.<name>.repo" must be a string: an https or ssh URL, or a local path, that `git clone` accepts' })
+    .min(1, '"sources.<name>.repo" must not be empty')
+    .superRefine((repo, ctx) => {
+      if (repo.startsWith("-")) {
+        ctx.addIssue({ code: "custom", message: '"sources.<name>.repo" must not start with "-" (git would read it as an option)' });
+        return;
+      }
+      const fault = repoCredentialFault(repo);
+      if (fault) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `"sources.<name>.repo" ${fault} (${redactRepo(repo)}). Nimbus never takes a credential in repo: give it to git instead, ` +
+            "through a credential helper, an SSH key, or http.<url>.extraHeader set with GIT_CONFIG_COUNT/GIT_CONFIG_KEY_0/GIT_CONFIG_VALUE_0 in CI",
+        });
+      }
+    }),
+  ref: z
+    .string({ error: '"sources.<name>.ref" must be a string: a 40-character commit, or a branch or tag name' })
+    .superRefine((ref, ctx) => {
+      const fault = !ref
+        ? "must not be empty"
+        : isCommitRef(ref)
+          ? undefined
+          : ABBREVIATED_COMMIT.test(ref)
+            ? `looks like an abbreviated commit. Use the full 40-character commit (\`git rev-parse ${ref}\`) so the build is reproducible`
+            : /^[0-9A-F]{40}$/.test(ref)
+              ? "must be a lowercase 40-character commit"
+              : /^-|[\s~^:?*[\\]|\.\.|@\{|\.lock$|\/$|^\/|\/\//.test(ref)
+                ? "must be a 40-character commit or a branch or tag name git accepts"
+                : undefined;
+      if (fault) ctx.addIssue({ code: "custom", message: `"sources.<name>.ref" ${fault}` });
+    }),
+  path: z
+    .string({ error: '"sources.<name>.path" must be a string: a folder inside the repository, or "" for the whole repository' })
+    .default("")
+    .superRefine((value, ctx) => {
+      const fault = /^[A-Za-z]:|^[\\/]/.test(value)
+        ? "must be relative to the repository root"
+        : value.split(/[\\/]/).includes("..")
+          ? 'must not contain a ".." segment'
+          : undefined;
+      if (fault) ctx.addIssue({ code: "custom", message: `"sources.<name>.path" ${fault}` });
+    })
+    .transform((value) => normalizeSourcePath(value)),
+  // The same rule as the site's `editPattern`: without `{path}` every page of
+  // the source would link to the same place.
+  editPattern: z
+    .string({ error: '"sources.<name>.editPattern" must be a string with the "{path}" placeholder, e.g. "https://github.com/acme/sdk/edit/{ref}/{path}"' })
+    .optional()
+    .refine((value) => value === undefined || value.includes("{path}"), {
+      message:
+        '"sources.<name>.editPattern" must contain the "{path}" placeholder, which is replaced with the file\'s path inside the repository ' +
+        '("{ref}" is replaced with the configured ref). Example: "https://github.com/acme/sdk/edit/{ref}/{path}"',
+    }),
+};
+const contentSourceKeys = new Set(Object.keys(contentSourceShape));
+const contentSourceSchema = z
+  .object(contentSourceShape)
+  .passthrough()
+  .superRefine((source, ctx) => {
+    reportUnknownKeys(source, ctx, contentSourceKeys, {
+      removedKeys: {},
+      contextLabel: "sources field",
+      unknownHint: () => 'Valid keys are "repo", "ref", "path", and "editPattern".',
+    });
+  });
+const sourcesSchema = z
+  .record(z.string(), contentSourceSchema, {
+    error: '"sources" must be an object of { repo, ref, path } entries keyed by source name',
+  })
+  .optional()
+  .superRefine((sources, ctx) => {
+    for (const name of Object.keys(sources ?? {})) {
+      if (!SOURCE_NAME.test(name)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: `source name "${name}" must be lowercase letters, digits, and dashes only (it becomes the cache folder .nimbus/sources/${name}/)`,
+        });
+      }
+    }
+  });
+
+interface ConfigIssue {
+  path: (string | number)[];
+  message: string;
+}
+
+/**
+ * A spec read through a source names a declared source and a file inside
+ * the source's `path` (the sparse checkout holds nothing else). Separate
+ * from the schema so `check` can defer it when `sources` is computed.
+ */
+function sourceSpecIssues(data: unknown): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  const shaped = data as {
+    api?: { collection?: string; spec?: unknown; versions?: { spec?: unknown }[] }[];
+    sources?: Record<string, { path?: string }>;
+  };
+  if (!Array.isArray(shaped?.api)) return issues;
+  shaped.api.forEach((entry, i) => {
+    if (!entry || typeof entry !== "object") return;
+    const holders: { spec?: unknown; path: (string | number)[] }[] = Array.isArray(entry.versions)
+      ? entry.versions.map((version, vi) => ({ spec: version?.spec, path: ["api", i, "versions", vi, "spec"] }))
+      : [{ spec: entry.spec, path: ["api", i, "spec"] }];
+    for (const holder of holders) {
+      if (!isSpecFromSource(holder.spec)) continue;
+      const { source, path: specPath } = holder.spec as { source: string; path?: unknown };
+      const declared = shaped.sources?.[source];
+      const names = Object.keys(shaped.sources ?? {});
+      if (!declared) {
+        issues.push({
+          path: [...holder.path, "source"],
+          message:
+            `api collection "${entry.collection}" reads its spec from source "${source}", which "sources" doesn't declare` +
+            (names.length
+              ? `. Declared: ${names.map((name) => `"${name}"`).join(", ")}`
+              : `. Add sources: { "${source}": { repo, ref, path } } to the config`),
+        });
+        continue;
+      }
+      if (typeof specPath !== "string" || !normalizeSourcePath(specPath)) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message: `api collection "${entry.collection}" reads its spec from source "${source}" but names no file. Set path to the spec's path inside the repository, e.g. "openapi.json"`,
+        });
+        continue;
+      }
+      const normalized = normalizeSourcePath(specPath);
+      const folder = normalizeSourcePath(declared.path);
+      if (normalized.split("/").includes("..")) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message: `api collection "${entry.collection}": spec path "${specPath}" must not contain a ".." segment`,
+        });
+      } else if (folder && normalized !== folder && !normalized.startsWith(`${folder}/`)) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message:
+            `api collection "${entry.collection}" reads "${normalized}" from source "${source}", but that source checks out only "${folder}/". ` +
+            `Widen sources.${source}.path to a folder that contains the spec, or set it to "" for the whole repository`,
+        });
+      }
+    }
+  });
+  return issues;
+}
 
 /**
  * Version ids that would shadow a top-level page slug within a family
@@ -639,6 +803,7 @@ const nimbusConfigSchema = withStrictKeys(
     search: searchSchema,
     versions: versionsSchema,
     api: apiSchema,
+    sources: sourcesSchema,
     apiReferences: apiReferencesSchema,
     rendering: renderingSchema,
     agents: agentsSchema,
@@ -702,9 +867,21 @@ const nimbusConfigSchema = withStrictKeys(
   });
 });
 
-export function validateNimbusConfig(input: unknown): NimbusConfig {
+export interface ValidateNimbusConfigOptions {
+  /**
+   * `sources` couldn't be read (a computed map in `check`): skip the checks
+   * that need it (a spec's source and path) and run everything else.
+   */
+  deferSources?: boolean;
+}
+
+export function validateNimbusConfig(
+  input: unknown,
+  options: ValidateNimbusConfigOptions = {},
+): NimbusConfig {
   const result = nimbusConfigSchema.safeParse(input);
-  if (result.success) {
+  const sourceIssues = options.deferSources ? [] : sourceSpecIssues(input);
+  if (result.success && sourceIssues.length === 0) {
     // Zod safeParse upstream validated the shape against nimbusConfigSchema;
     // double-cast restores the type info tsc lost through the schema's
     // generic `Record<string, unknown>` representation.
@@ -715,7 +892,11 @@ export function validateNimbusConfig(input: unknown): NimbusConfig {
   //   - the dotted config path (so it's greppable in nimbus.config.ts)
   //   - the validator message
   //   - the offending value (truncated) when one was supplied
-  const issues = result.error.issues
+  const allIssues: Array<{ path: PropertyKey[]; message: string }> = [
+    ...(result.success ? [] : result.error.issues),
+    ...sourceIssues,
+  ];
+  const issues = allIssues
     .map((issue) => {
       // Zod v4 widens path entries to PropertyKey. Symbols never appear in
       // our schema (no symbol keys), so it's safe to coerce to string|number
@@ -749,6 +930,9 @@ function formatReceived(input: unknown, path: ReadonlyArray<string | number>): s
     if (cursor === undefined) return null;
   }
   if (cursor === undefined) return null;
+  // A source's `repo` could carry a credential: never echo it, nor the
+  // objects around it (the message shows it redacted).
+  if (path[0] === "sources" && (path.length < 3 || path[2] === "repo")) return null;
   try {
     const json = JSON.stringify(cursor);
     if (json === undefined) return String(cursor);

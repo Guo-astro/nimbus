@@ -74,7 +74,9 @@ export const STARTER_MANIFEST = {
   // React diagram chrome ships via the `diagram` / `diagram-scene`
   // registry slugs (which also add the react deps), never in day-1
   // templates. The fat tree keeps it as the registry source.
-  registryOnlyPaths: ["src/components/react/"],
+  // `src/loaders/` holds the loaders `nimbus-docs add source <name>` installs
+  // (Notion); the fat tree typechecks them but never runs them.
+  registryOnlyPaths: ["src/components/react/", "src/loaders/"],
 
   // React is only imported by the `src/components/react/` tree above (and
   // referenced inside a fenced example in components.mdx, which never
@@ -85,6 +87,8 @@ export const STARTER_MANIFEST = {
     "react-dom",
     "@types/react",
     "@types/react-dom",
+    // Only `src/loaders/notion.ts` imports it; `add source notion` re-adds it.
+    "@notionhq/client",
   ],
 
   // Add path prefixes here (ending with "/") to strip whole trees from

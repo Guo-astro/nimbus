@@ -103,6 +103,8 @@ export const collections = {
 
 The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`.
 
+A page collection's files can live anywhere. A glob over a folder outside `src/` (a checkout of another repository, a shared folder in a monorepo) gets callouts, components, citations, links, collision checks and lint exactly as a page under `src/content` does. A loader with no files (a CMS) gets everything that reads the entry: routes, the sidebar, citations, links, Markdown versions, `llms.txt`, search and URL collision checks. Its pages are Markdown only, so no callouts or components, and `nimbus-docs lint` names the collection as not inspected. Such a loader must check its ids for duplicates before it writes, because without a file Nimbus can't tell a collision from an update. In a hand-written glob, two files with one slug fail the build, except a byte-identical copy, which Astro's glob never writes; the factories catch that too. For content in another repository or a CMS, see [Content from other sources](/writing/content-sources).
+
 Page collections come from the helpers: a collection made with `docsCollection()`, `componentsCollection()`, or a `withNimbusMarkdown()`-wrapped loader becomes pages — routed, indexed, and included in search, the sitemap, `llms.txt`, and Markdown versions. Every other collection is plain Astro data: Nimbus doesn't route it, index it, check it, or fail on it, no wrapping is needed, and `getCollection()` works as in any Astro site. Collection names carry no meaning — there is no reserved `_` prefix. `apiCollection()` is the purpose-built exception for API references because Nimbus supplies its renderer.
 
 ## Custom route helpers

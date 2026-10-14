@@ -25,7 +25,7 @@ declare module "astro:config/client" {
 }
 
 declare module "virtual:nimbus/config" {
-  export const config: import("../types.js").NimbusConfig;
+  export const config: import("../types.js").RuntimeNimbusConfig;
   export const indexedCollections: readonly string[];
   export const emptyCollections: readonly string[];
   /**

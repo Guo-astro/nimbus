@@ -18,6 +18,7 @@
  *   })),
  */
 
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,6 +51,15 @@ import {
 import { isCollectionInBuildSlice } from "./_internal/build-slice.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import { prepareMarkdownLoader } from "./_internal/markdown-loader.js";
+import {
+  missingContentSource,
+  recordUnavailableSourceCollection,
+  registeredContentSourceNames,
+  resolveContentSource,
+} from "./_internal/content-sources.js";
+import { normalizeSourcePath } from "./_internal/source-repo.js";
+import { registerSourceCollectionFolder, rewriteSourceLinks } from "./_internal/source-links.js";
+import { formatLabel } from "./_internal/sidebar.js";
 import {
   beginPreparedMarkdownLoad,
   cancelPreparedMarkdownLoad,
@@ -84,8 +94,9 @@ export interface DocsCollectionOptions<
   TFields extends Record<string, z.ZodTypeAny> = Record<string, never>,
 > {
   /**
-   * Directory under `src/content/` to load docs from.
-   * Default: `"docs"`.
+   * Directory under `src/content/` to load docs from. Default: `"docs"`.
+   * With `source`, a folder inside the source's `path` instead (default
+   * `""`, the whole `path`); it may not contain `..`.
    */
   base?: string;
   /**
@@ -93,6 +104,13 @@ export interface DocsCollectionOptions<
    * Default: `"** /*.{md,mdx}"` (space added to avoid breaking this comment).
    */
   pattern?: string;
+  /**
+   * Read the collection from a content source declared in the Nimbus
+   * config's `sources`, by name, instead of `src/content`. The integration
+   * resolves the source to a snapshot before content sync; `base` is then
+   * relative to the source's `path`.
+   */
+  source?: string;
   /**
    * Extra fields merged into the default docs schema. Lets users add
    * project-specific frontmatter (author, tags, etc.) without rebuilding
@@ -142,6 +160,20 @@ const NIMBUS_MARKDOWN_GENERATION = 1;
 // unchanged (whatever role it was wrapped with), or the nested wrappers would
 // queue the same collection transaction inside itself and deadlock the load.
 const wrappedMarkdownLoaders = new WeakMap<Loader, Loader>();
+// The folder and pattern of each glob a Nimbus factory constructs, so the
+// duplicate-slug pass walks exactly those files. Nimbus's own values; a
+// hand-written glob has none and is checked through its store writes.
+type GlobFiles = { base: string; pattern: string | string[] };
+const nimbusGlobFiles = new WeakMap<
+  Loader,
+  GlobFiles | ((root: URL) => GlobFiles | undefined)
+>();
+
+function nimbusGlob(base: string, pattern: string): Loader {
+  const loader = glob({ base, pattern });
+  nimbusGlobFiles.set(loader, { base, pattern });
+  return loader;
+}
 
 type ApiLoaderModule = typeof import("./_internal/api-loader.js");
 
@@ -172,8 +204,11 @@ function wrapNimbusMarkdown<T extends Loader>(
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
 
+  const globFilesOf = nimbusGlobFiles.get(loader);
   const wrappedLoad: Loader["load"] = async (context) => {
     const base = context.config.base || "/";
+    const globFiles =
+      typeof globFilesOf === "function" ? globFilesOf(context.config.root) : globFilesOf;
     const normalizeAuthoredLinks = getAuthoredLinkNormalizer();
     const prepared = prepareMarkdownLoader(loader, {
       generation: NIMBUS_MARKDOWN_GENERATION,
@@ -184,16 +219,29 @@ function wrapNimbusMarkdown<T extends Loader>(
         role === "page" &&
         !isCollectionInBuildSlice(context.config.root, context.collection),
       transformRenderMarkdown: false,
-      transform: (source, sourceId) =>
-        normalizeAuthoredLinks(source, {
+      ...(globFiles
+        ? {
+            files: {
+              base: path.resolve(
+                fileURLToPath(context.config.root),
+                globFiles.base,
+              ),
+              pattern: globFiles.pattern,
+            },
+          }
+        : {}),
+      transform: (source, sourceId) => {
+        const filePath = sourceId
+          ? fileURLToPath(new URL(sourceId, context.config.root))
+          : undefined;
+        return normalizeAuthoredLinks(rewriteSourceLinks(source, filePath), {
           base,
           sourceId: sourceId
             ? `${context.collection}:${sourceId}`
             : context.collection,
-          filePath: sourceId
-            ? fileURLToPath(new URL(sourceId, context.config.root))
-            : undefined,
-        }),
+          filePath,
+        });
+      },
     });
     await Reflect.apply(
       Reflect.get(prepared, "load", prepared) as Loader["load"],
@@ -222,10 +270,168 @@ export function docsCollection<
     strictFrontmatter: options.strictFrontmatter,
   });
 
+  if (options.source !== undefined) {
+    return {
+      loader: withNimbusMarkdown(sourceGlob(options.source, options.base, pattern)),
+      schema,
+    };
+  }
+
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema,
   };
+}
+
+/** Text with inline HTML tags removed, and no angle bracket left. */
+function withoutTags(text: string): string {
+  let out = "";
+  let inTag = false;
+  for (const char of text) {
+    if (char === "<") inTag = true;
+    else if (char === ">") inTag = false;
+    else if (!inTag) out += char;
+  }
+  return out;
+}
+
+/**
+ * The title of a page with none in its frontmatter: its first Markdown
+ * heading (outside code fences, inline markup removed), else its file name.
+ */
+export function titleFromFile(filePath: string | undefined, id: string): string {
+  const fallback = formatLabel(id.split("/").pop() || id);
+  if (!filePath) return fallback;
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return fallback;
+  }
+  text = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+  let fence: string | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const fenceMatch = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      fence = fence === null ? fenceMatch[1]! : null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (!heading) continue;
+    const title = withoutTags(heading[1]!)
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/`([^`]*)`/g, "$1")
+      .replace(/(\*\*|__|\*|_)(.+?)\1/g, "$2")
+
+      .trim();
+    if (title) return title;
+  }
+  return fallback;
+}
+
+/**
+ * The glob behind `docsCollection({ source })`: Astro's glob over
+ * `<snapshot>/<path>/<base>`, looked up at load time, by project root, from
+ * the snapshots the integration resolved at setup. A snapshot is frozen for
+ * the process, so the glob gets no watcher.
+ */
+function sourceGlob(source: string, rawBase: string | undefined, pattern: string): Loader {
+  const sourceBase = normalizeSourcePath(rawBase);
+  if (/^[A-Za-z]:|^[\\/]/.test(rawBase ?? "") || sourceBase.split("/").includes("..")) {
+    throw authorError(
+      `nimbus-docs: docsCollection({ source: ${JSON.stringify(source)}, base: ${JSON.stringify(rawBase)} }): ` +
+        "with source, base is a folder inside the source's path and may not be absolute or contain \"..\".",
+    );
+  }
+  const folderOf = (root: URL) => {
+    const snapshot = resolveContentSource(root, source);
+    return snapshot && path.join(snapshot.contentDir, sourceBase);
+  };
+  const loader: Loader = {
+    name: "nimbus-docs:content-source",
+    async load(context) {
+      const META_KEY = "nimbus:content-source";
+      const snapshot = resolveContentSource(context.config.root, source);
+      const missing = snapshot ? undefined : missingContentSource(context.config.root, source);
+      if (missing === "unavailable") {
+        // A command that starts without the source (dev, sync): the
+        // collection is empty, with nothing left from an earlier run.
+        recordUnavailableSourceCollection(context.config.root, context.collection);
+        context.store.clear();
+        context.meta.delete(META_KEY);
+        return;
+      }
+      if (missing === "skipped") {
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" reads source "${source}", which this slice skipped because ` +
+            "src/content.config.ts doesn't show the read; write source as a string literal in docsCollection() in " +
+            "src/content.config.ts, not in a helper or another module.",
+        );
+      }
+      if (!snapshot) {
+        const declared = registeredContentSourceNames(context.config.root);
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" in src/content.config.ts sets source: ${JSON.stringify(source)}, ` +
+            `but the Nimbus config declares no source named "${source}" in \`sources\`.`,
+          declared.length
+            ? `Declared sources: ${declared.map((name) => `"${name}"`).join(", ")}.`
+            : `Add sources: { ${JSON.stringify(source)}: { repo, ref, path } } to the Nimbus config.`,
+        );
+      }
+      const folder = path.join(snapshot.contentDir, sourceBase);
+      let empty: boolean;
+      try {
+        empty = fs.readdirSync(folder).length === 0;
+      } catch {
+        empty = true;
+      }
+      if (empty) {
+        const where = [snapshot.path, sourceBase].filter(Boolean).join("/");
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" reads source "${source}" at commit ${snapshot.commit.slice(0, 12)}, ` +
+            `but ${where ? `the folder "${where}"` : "the repository"} is missing or empty there.`,
+          `Check sources.${source}.path, the collection's base, and the ref.`,
+        );
+      }
+      // Astro's glob keeps a stored entry (and its old filePath) when the
+      // file's digest is unchanged, so a new snapshot folder would leave
+      // unchanged pages pointing at the previous one. Start from an empty
+      // store whenever the snapshot or folder changes.
+      const stamp = `${snapshot.identity}:${snapshot.commit}:${sourceBase}`;
+      if (context.meta.get(META_KEY) !== stamp) {
+        context.store.clear();
+        context.meta.set(META_KEY, stamp);
+      }
+      const rootDir = fileURLToPath(context.config.root);
+      const relative = path.relative(rootDir, folder).split(path.sep).join("/");
+      registerSourceCollectionFolder({ collection: context.collection, folder });
+      // A repository's docs often have no frontmatter: a page without a
+      // `title` takes its first heading, else its file name.
+      const parseData = Reflect.get(context, "parseData", context) as typeof context.parseData;
+      const parseWithTitle: typeof context.parseData = (props) =>
+        Reflect.apply(parseData, context, [
+          props.data?.title === undefined
+            ? { ...props, data: { ...props.data, title: titleFromFile(props.filePath, props.id) } }
+            : props,
+        ]);
+      const inner = glob({ base: `./${relative}`, pattern });
+      await inner.load(
+        transparentProxy(
+          context,
+          new Map<PropertyKey, unknown>([
+            ["watcher", undefined],
+            ["parseData", parseWithTitle],
+          ]),
+        ),
+      );
+    },
+  };
+  nimbusGlobFiles.set(loader, (root) => {
+    const folder = folderOf(root);
+    return folder ? { base: folder, pattern } : undefined;
+  });
+  return loader;
 }
 
 /**
@@ -248,7 +454,7 @@ export function partialsCollection<
     : partialsSchema;
 
   return {
-    loader: wrapNimbusMarkdown(glob({ base, pattern }), "partials"),
+    loader: wrapNimbusMarkdown(nimbusGlob(base, pattern), "partials"),
     schema,
   };
 }
@@ -281,7 +487,7 @@ export function componentsCollection(
   const pattern = options.pattern ?? DEFAULT_PATTERN;
 
   return {
-    loader: withNimbusMarkdown(glob({ base, pattern })),
+    loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
     schema: componentsSchema,
   };
 }

@@ -18,6 +18,7 @@
  */
 
 import fs from "node:fs";
+import picomatch from "picomatch";
 
 import type { NormalizedRedirect } from "../_internal/redirect-emitters.js";
 import path from "node:path";
@@ -121,6 +122,36 @@ export function enumerateEntriesByBase(
         ...(slug === undefined ? {} : { slug }),
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Walk one Nimbus-constructed glob: the folder and pattern a collection
+ * factory passed to `glob()`, wherever the folder is. Ids follow the glob
+ * loader (path without extension, frontmatter `slug` wins); `relPath` is
+ * project-relative for messages. Only `.md` and `.mdx` are pages.
+ */
+export function enumerateGlobEntries(
+  collection: string,
+  base: string,
+  pattern: string | readonly string[],
+  projectRoot: string,
+): ContentEntry[] {
+  const patterns = typeof pattern === "string" ? [pattern] : [...pattern];
+  const positive = patterns.filter((p) => !p.startsWith("!"));
+  const negative = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
+  const matches = picomatch(positive, negative.length > 0 ? { ignore: negative } : {});
+  const out: ContentEntry[] = [];
+  for (const { abs, rel } of walkFilesSync(base, { extensions: [".md", ".mdx"] })) {
+    if (!matches(rel)) continue;
+    const slug = readSlug(abs);
+    out.push({
+      collection,
+      id: rel.replace(/\.mdx?$/, ""),
+      relPath: path.relative(projectRoot, abs).split(path.sep).join("/"),
+      ...(slug === undefined ? {} : { slug }),
+    });
   }
   return out;
 }

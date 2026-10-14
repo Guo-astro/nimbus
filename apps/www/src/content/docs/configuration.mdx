@@ -50,6 +50,20 @@ export default defineConfig({
 | `versions`                       | object            | Versioning manifest — each version is its own content collection.             |
 | `rendering`                      | object            | Build or request rendering policy for canonical content collection routes.    |
 | `agents`                         | object            | Agent services the site runs itself. `agents.mcp` serves a remote MCP server. |
+| `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/writing/content-sources). |
+
+### Content sources
+
+`sources` declares git repositories by name; `docsCollection({ source, base })` and `api[].spec: { source, path }` read them.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `repo` | string | **Required.** An `https` or `ssh` URL, or a local path. A URL with a token or password is refused; give credentials to git. |
+| `ref` | string | **Required.** A 40-character commit, or a branch or tag name. |
+| `path` | string | Folder to check out, relative to the repository root. Default `""`, the whole repository. |
+| `editPattern` | string | Edit links for the source's pages: `{path}` is repository-relative, `{ref}` the configured ref. |
+
+`nimbus-docs check` reports `nimbus/source-floating-ref` for a branch or tag `ref` and `nimbus/source-unreferenced` for a source nothing reads, both as warnings. `NIMBUS_SOURCES_RESOLVE_TIMEOUT` and `NIMBUS_SOURCES_FETCH_TIMEOUT` set the resolve and fetch timeouts in seconds (defaults 30 and 600).
 
 ### Rendering policy
 

@@ -66,7 +66,7 @@ import {
 import { IMPLEMENTED_CODES } from "./lint/rules/index.js";
 import {
   contentEntryUrl,
-  enumerateEntriesByBase,
+  enumerateGlobEntries,
   enumerateStaticPageRoutes,
   findDuplicateRoutes,
   formatDuplicateRoutes,
@@ -91,7 +91,22 @@ import { droppedRootRoutes, removeRootArtifacts } from "./_internal/slice-output
 import { formatLabel } from "./_internal/sidebar.js";
 import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
-import { parseCollectionBases } from "./_internal/parse-content-collections.js";
+import { rewriteSourceLinks } from "./_internal/source-links.js";
+import {
+  parsePageCollectionSources,
+  placeStaticCollections,
+} from "./_internal/parse-content-collections.js";
+import {
+  applySourceSpecs,
+  collectSourceSpecs,
+  describeSourceReaders,
+  registerContentSources,
+  releaseContentSourceLeases,
+  resolveContentSources,
+  SOURCES_DIR,
+  unavailableSourceCollections,
+  unavailableSourceWarning,
+} from "./_internal/content-sources.js";
 import {
   pageCollectionsFilePath,
   resolvePageCollections,
@@ -231,8 +246,10 @@ import {
 import {
   beginPreparedMarkdownSession,
   getPreparedMarkdownSnapshot,
+  isPreparedMarkdownSourceFile,
   preparedMarkdownRootKey,
 } from "./_internal/prepared-markdown-registry.js";
+import { currentPageLoadScope } from "./_internal/page-load-scope.js";
 import type {
   GeneratedMarkdownComponentTransform,
   GeneratedMarkdownPartialResolver,
@@ -416,13 +433,14 @@ export interface NimbusIntegrationOptions {
    * Build-time MDX PascalCase tag validation.
    *
    *   - `true` (default): parse `src/components.ts` for the globals
-   *     registry and fail the build on unknown PascalCase tags found
-   *     in `src/content/**\/*.mdx`.
+   *     registry and fail the build on unknown PascalCase tags in the
+   *     `.mdx` files of every page and partials collection, wherever
+   *     their files live.
    *   - `false`: skip validation entirely.
    *   - `{ componentsPath }`: override the registry file location.
    *     Relative paths resolve to the project root.
-   *   - `{ contentDirs }`: override the scanned directories. Relative
-   *     paths resolve to the project root. Default: `["src/content"]`.
+   *   - `{ contentDirs }`: scan exactly these directories instead.
+   *     Relative paths resolve to the project root.
    *   - `{ skip }`: filter out files (e.g. vendored or generated MDX).
    *
    * Runs as a pre-build content pass rather than as a remark plugin so
@@ -444,11 +462,12 @@ export interface NimbusIntegrationOptions {
    * types: `note`, `info`, `tip`, `caution`, `warning`, `important`,
    * `danger` (mapped to Nimbus's 4 Aside slots).
    *
-   *   - `true` (default): rewrite against `src/content/**\/*.mdx`.
+   *   - `true` (default): rewrite `src/content/**\/*.mdx` and the `.mdx`
+   *     files of every page and partials collection, wherever they live.
    *   - `false`: skip the transform; `:::` syntax renders as literal text.
    *   - `{ typeAliases }`: extra type → Aside mappings for product
    *     synonyms (`{ heads: "tip" }`).
-   *   - `{ contentDirs }`: override the scanned directories.
+   *   - `{ contentDirs }`: rewrite exactly these directories instead.
    *   - `{ skip }`: per-file opt-out.
    *
     * Runs as a scoped native Sätteri AST pass. Incompatible custom processors
@@ -559,6 +578,10 @@ export function nimbus(
     { rules: options.rules, collections: options.collections },
     IMPLEMENTED_CODES,
   );
+
+  // The `api[].spec: { source, path }` entries, found once: each setup run
+  // points them at the snapshot of that run.
+  const sourceSpecs = collectSourceSpecs(config.api);
 
   // Threaded from `astro:config:setup` to `astro:build:done` so the post-
   // build materialization knows where to write `.nimbus/routes.json` and
@@ -981,27 +1004,53 @@ export function nimbus(
 
     // Build validator `nimbus/duplicate-slug`: two sources that resolve to
     // the same URL silently shadow each other during `astro build` (Astro
-    // dedupes colliding routes before the integration sees them). The check
-    // walks only page collections' source folders — the registry's store
-    // keeps one entry per id, so reading it would hide collisions inside one
-    // collection (`docs/foo.mdx` vs `docs/foo/index.mdx`). Each folder comes
-    // from `parseCollectionBases` (a `base:` lookup, not a classification),
-    // and falls back to the collection name.
-    const collectionBases = await parseCollectionBases(
-      path.join(srcDirForBuild, "content.config.ts"),
-    );
-    const pageBases = new Map<string, string>();
+    // dedupes colliding routes before the integration sees them). Every
+    // page collection is found through the registry record, wherever its
+    // files live:
+    //   - a glob a Nimbus factory constructed records its folder and
+    //     pattern, and the pass walks those files. The store keeps one entry
+    //     per id, so only the walk sees two files with one slug, including a
+    //     byte-identical copy `glob()` never writes.
+    //   - any other collection contributes its recorded entries (by final
+    //     id), plus the same-id writes its load noted and still stood at
+    //     commit (a hand-written glob's two files with one slug).
+    // Different ids on one URL (across collections, or against a static
+    // page) then meet in `findDuplicateRoutes`.
+    const preparedSnapshot = getPreparedMarkdownSnapshot(projectRootForBuild);
+    const contentOwners: RouteOwner[] = [];
     for (const key of pageCollections) {
-      pageBases.set(key, collectionBases?.get(key) ?? key);
+      const record = preparedSnapshot?.collections.get(key);
+      if (!record || record.role !== "page") continue;
+      if (record.files) {
+        for (const entry of enumerateGlobEntries(
+          key,
+          record.files.base,
+          record.files.pattern,
+          projectRootForBuild,
+        )) {
+          contentOwners.push({
+            url: contentEntryUrl(entry, versionInfo),
+            source: entry.relPath,
+            kind: "content",
+          });
+        }
+        continue;
+      }
+      const prefix = collectionMountPrefix(key, versionInfo);
+      const owned = new Set<string>();
+      const own = (id: string, source: string) => {
+        const url = entryRouteUrl(prefix, id);
+        if (owned.has(`${url}\0${source}`)) return;
+        owned.add(`${url}\0${source}`);
+        contentOwners.push({ url, source, kind: "content" });
+      };
+      for (const entry of record.entries.values()) {
+        own(entry.id, entry.filePath ?? `${key}:${entry.id}`);
+      }
+      for (const collision of record.collisions ?? []) {
+        for (const file of collision.files) own(collision.id, file);
+      }
     }
-    const contentOwners: RouteOwner[] = enumerateEntriesByBase(
-      path.join(projectRootForBuild, "src/content"),
-      pageBases,
-    ).map((entry) => ({
-      url: contentEntryUrl(entry, versionInfo),
-      source: `src/content/${entry.relPath}`,
-      kind: "content" as const,
-    }));
     const pageOwners: RouteOwner[] = enumerateStaticPageRoutes(
       path.join(srcDirForBuild, "pages"),
       projectRootForBuild,
@@ -1168,6 +1217,73 @@ export function nimbus(
         }
         navBuildInputs = { srcDir, base: astroConfig.base, hasApi: Boolean(config.api?.length) };
         setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
+        // Content sources come first: the API spec read and the citation
+        // index below read files inside the snapshots, and so do the loaders
+        // at content sync. A dev restart re-resolves (a config edit may
+        // change a branch) and drops the previous run's leases first.
+        releaseContentSourceLeases(projectRoot);
+        // Which collections read each source, from the content config's
+        // text: a slice fetches only the sources it reads, and messages
+        // about a source name its readers.
+        const collectionSources = parsePageCollectionSources(
+          projectRoot,
+          path.join(srcDir, "content.config.ts"),
+        );
+        const sourceReadsHidden = collectionSources.hidden.length > 0;
+        const apiSourceReaders = new Map<string, string[]>();
+        for (const spec of sourceSpecs) {
+          apiSourceReaders.set(spec.source, [...(apiSourceReaders.get(spec.source) ?? []), spec.collection]);
+        }
+        const skippedSources: string[] = [];
+        const sourceNames = Object.keys(config.sources ?? {});
+        if (buildSliceForBuild && sourceNames.length > 0) {
+          if (sourceReadsHidden) {
+            logger.warn(
+              `nimbus: ${BUILD_ONLY_ENV} fetches every source: ${collectionSources.hidden.join(", ")} ` +
+                `${collectionSources.hidden.length === 1 ? "sets its" : "set their"} source in a way the build can't read ` +
+                "without running src/content.config.ts. Write source as a string literal to let slices skip it.",
+            );
+          } else {
+            for (const name of sourceNames) {
+              const readers = collectionSources.readers.get(name) ?? [];
+              if (apiSourceReaders.has(name) || readers.some((collection) => buildSliceForBuild!.includes(collection))) continue;
+              skippedSources.push(name);
+              logger.info(
+                `nimbus: source "${name}" not fetched: no collection in ${BUILD_ONLY_ENV}=${buildSliceForBuild.join(",")} reads it.`,
+              );
+            }
+          }
+        }
+        // `astro build` is strict; dev and sync (and `astro check`, through
+        // sync) start without a source git can't reach, and preview reads
+        // only the snapshots already there.
+        const { snapshots: sourceSnapshots, unavailable } = await resolveContentSources(config.sources, {
+          projectRoot,
+          log: (level, message) => logger[level](message),
+          mode: command === "build" ? "fetch" : command === "preview" ? "offline" : "degrade",
+          skip: new Set(skippedSources),
+          required: new Set(apiSourceReaders.keys()),
+          readBy: (name) =>
+            describeSourceReaders(
+              collectionSources.readers.get(name) ?? [],
+              apiSourceReaders.get(name) ?? [],
+              sourceReadsHidden,
+            ),
+        });
+        for (const [name, source] of unavailable) {
+          logger.warn(
+            unavailableSourceWarning(
+              source,
+              sourceReadsHidden ? null : (collectionSources.readers.get(name) ?? []),
+              command,
+            ),
+          );
+        }
+        registerContentSources(astroConfig.root, sourceSnapshots, {
+          skipped: skippedSources,
+          unavailable: unavailable.keys(),
+        });
+        applySourceSpecs(sourceSpecs, sourceSnapshots, projectRoot);
         beginPreparedMarkdownSession(astroConfig.root);
         registerApiCollections(
           astroConfig.root,
@@ -1647,11 +1763,26 @@ export function nimbus(
         servesFullDocument = undefined;
         nestedLlmsSections = undefined;
 
-        // Scan every code-fence language used in `src/content/**/*.{mdx,md}`
-        // so Shiki eager-loads grammars at startup. This makes cold-build
-        // output stable regardless of file processing order (Shiki's lazy
-        // load otherwise depends on which file hits a grammar first).
-        const codeBlocks = await scanCodeBlocks(projectRoot, SHIKI_LANG_ALIAS);
+        // Scan every code-fence language used in `src/content/**/*.{mdx,md}`,
+        // and in page collections whose glob reads another folder, so Shiki
+        // eager-loads grammars at startup. This makes cold-build output
+        // stable regardless of file processing order (Shiki's lazy load
+        // otherwise depends on which file hits a grammar first).
+        const contentRootForScan = path.join(projectRoot, "src", "content");
+        const outsideFolders = [
+          ...placeStaticCollections(collectionSources.places, sourceSnapshots).values(),
+        ]
+          .flatMap((place) =>
+            place.kind === "folder" &&
+            path.relative(contentRootForScan, place.dir).startsWith("..")
+              ? [place.dir]
+              : [],
+          );
+        const codeBlocks = await scanCodeBlocks(
+          projectRoot,
+          SHIKI_LANG_ALIAS,
+          [...new Set(outsideFolders)],
+        );
         const codeBlockLangs = [
           ...new Set(codeBlocks.map(({ lang }) => lang)),
         ].sort();
@@ -2441,6 +2572,13 @@ export function nimbus(
           );
         }
 
+        // A page or partials collection's recorded file is in scope wherever
+        // it lives; the default folders keep their realpath containment.
+        const isRecordedPageFile = (file: string) =>
+          isPreparedMarkdownSourceFile(projectRoot, file);
+        const explicitCalloutDirs =
+          typeof options.admonitions === "object" &&
+          options.admonitions.contentDirs !== undefined;
         const admonitionOptions: AdmonitionOptions | undefined =
           options.admonitions === false
             ? undefined
@@ -2448,6 +2586,10 @@ export function nimbus(
                 ...(typeof options.admonitions === "object"
                   ? options.admonitions
                   : {}),
+                // An explicit `contentDirs` stays the whole callout scope.
+                ...(explicitCalloutDirs
+                  ? {}
+                  : { isRecorded: isRecordedPageFile }),
                 contentDirs: (
                   (typeof options.admonitions === "object"
                     ? options.admonitions.contentDirs
@@ -2508,6 +2650,8 @@ export function nimbus(
         // so a dev re-bake applies.
         const resolveAuthoredCitations = createAuthoredCitationResolver({
           contentDirs: citationContentDirs,
+          isRecorded: isRecordedPageFile,
+          getLoadScope: currentPageLoadScope,
           getCitationIndex: () => citationIndex,
           getUnpublishedCitations: () => unpublishedCitations,
         });
@@ -2517,7 +2661,7 @@ export function nimbus(
           format: "markdown" | "mdx",
         ) =>
           authoredLinks.normalizeAuthoredLinks(
-            resolveAuthoredCitations(source, sourceId),
+            resolveAuthoredCitations(rewriteSourceLinks(source, sourceId), sourceId),
             { base: authoredLinkBase, format, sourceId },
           );
         const preparedMarkdownProcessor = decorateMarkdownProcessor(
@@ -2629,6 +2773,13 @@ export function nimbus(
               "import.meta.env.NIMBUS_PROJECT_ROOT":
                 JSON.stringify(projectRoot),
             },
+            // A snapshot is frozen for the dev server's lifetime (it holds a
+            // lease); watching thousands of source files buys nothing.
+            server: {
+              watch: {
+                ignored: [path.join(projectRoot, SOURCES_DIR, "**").replaceAll("\\", "/")],
+              },
+            },
             plugins: [
               {
                 name: "nimbus-docs:api-picker-upgrade",
@@ -2652,6 +2803,7 @@ export function nimbus(
               },
               markdownSourcePlugin({
                 contentDirs: authoredLinkSourceDirs,
+                isRecorded: isRecordedPageFile,
                 transform: (source, filePath) =>
                   prepareAuthoredSource(source, filePath, "mdx"),
               }),
@@ -2763,9 +2915,11 @@ export function nimbus(
                 getEmptyCollections: async () => {
                   // The page collections outside the slice: empty on
                   // purpose, as opposed to a slice collection that happens
-                  // to have no pages. In dev the record changes under a
-                  // running server, so the list stays empty there.
-                  if (!buildSliceForBuild) return [];
+                  // to have no pages. Without a slice (dev), the collections
+                  // whose source is unavailable, recorded by their loaders
+                  // during content sync, which runs before anything loads
+                  // this module.
+                  if (!buildSliceForBuild) return unavailableSourceCollections(astroConfig.root);
                   return (await getPageCollectionsForBuild()).filter(
                     (name) => !buildSliceForBuild!.includes(name),
                   );
@@ -3030,8 +3184,9 @@ export function nimbus(
             '  export const options: { site: string; title: string; base: string; output: "static" | "server" };',
             "}",
             'declare module "virtual:nimbus/config" {',
-            '  import type { NimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
-            "  export const config: NimbusConfig;",
+            '  import type { RuntimeNimbusConfig, VersionAlternatesTable } from "@cloudflare/nimbus-docs/types";',
+            "  /** The validated config, with `sources` reduced to each source's `ref` and `editPattern`. */",
+            "  export const config: RuntimeNimbusConfig;",
             "  /** The page-collection list: collections made with Nimbus's helpers, plus API collections. See `getIndexedEntries()`. */",
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
@@ -3209,6 +3364,7 @@ export function nimbus(
         }
       },
       "astro:server:done": async () => {
+        releaseContentSourceLeases(projectRootForBuild);
         // The restart refresh re-runs loaders against the first server's
         // watcher (see `initialDevWatchers`); close it again so a stopped dev
         // server lets the process exit. Idempotent when nothing reopened it.
@@ -3407,6 +3563,8 @@ export function nimbus(
       },
       "astro:build:done": async ({ dir, pages, logger }) => {
         const distDir = fileURLToPath(dir);
+        // The build has read every page; a failed build releases at exit.
+        releaseContentSourceLeases(projectRootForBuild);
         // A slice without the root collection: its site-wide files go under
         // its prefix, and the root files it can't serve go (`slice-output.ts`).
         const sliceOutput =

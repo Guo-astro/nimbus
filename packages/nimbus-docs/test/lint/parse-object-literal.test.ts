@@ -34,6 +34,15 @@ test("stripComments neutralises quotes and braces inside comments", () => {
   assert.equal(out.slice(1, end).includes("Foo"), true);
 });
 
+test("stripComments leaves comment markers inside strings alone", () => {
+  const src = `import x from "file:///site/src/content.ts";\nglob({ pattern: "**/*.md" }); glob({ pattern: "**/*.mdx" }); // gone`;
+  const out = stripComments(src);
+  assert.equal(out.length, src.length);
+  assert.ok(out.includes(`"file:///site/src/content.ts"`));
+  assert.ok(out.includes(`"**/*.md" }); glob({ pattern: "**/*.mdx"`));
+  assert.ok(!out.includes("gone"));
+});
+
 test("findMatchingBrace walks nested braces and skips string literals", () => {
   const src = `{ a: { b: 1 }, s: "} not a close", c: 2 }`;
   const end = findMatchingBrace(src, 0);

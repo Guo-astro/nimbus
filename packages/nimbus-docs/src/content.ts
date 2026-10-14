@@ -52,6 +52,8 @@ import { isCollectionInBuildSlice } from "./_internal/build-slice.js";
 import { getAuthoredLinkNormalizer } from "./_internal/authored-link-normalizer.js";
 import { prepareMarkdownLoader } from "./_internal/markdown-loader.js";
 import {
+  missingContentSource,
+  recordUnavailableSourceCollection,
   registeredContentSourceNames,
   resolveContentSource,
 } from "./_internal/content-sources.js";
@@ -298,7 +300,24 @@ function sourceGlob(source: string, rawBase: string | undefined, pattern: string
   const loader: Loader = {
     name: "nimbus-docs:content-source",
     async load(context) {
+      const META_KEY = "nimbus:content-source";
       const snapshot = resolveContentSource(context.config.root, source);
+      const missing = snapshot ? undefined : missingContentSource(context.config.root, source);
+      if (missing === "unavailable") {
+        // A command that starts without the source (dev, sync): the
+        // collection is empty, with nothing left from an earlier run.
+        recordUnavailableSourceCollection(context.config.root, context.collection);
+        context.store.clear();
+        context.meta.delete(META_KEY);
+        return;
+      }
+      if (missing === "skipped") {
+        throw authorError(
+          `nimbus-docs: collection "${context.collection}" reads source "${source}", which this slice skipped because ` +
+            "src/content.config.ts doesn't show the read; write source as a string literal in docsCollection() in " +
+            "src/content.config.ts, not in a helper or another module.",
+        );
+      }
       if (!snapshot) {
         const declared = registeredContentSourceNames(context.config.root);
         throw authorError(
@@ -328,7 +347,6 @@ function sourceGlob(source: string, rawBase: string | undefined, pattern: string
       // file's digest is unchanged, so a new snapshot folder would leave
       // unchanged pages pointing at the previous one. Start from an empty
       // store whenever the snapshot or folder changes.
-      const META_KEY = "nimbus:content-source";
       const stamp = `${snapshot.identity}:${snapshot.commit}:${sourceBase}`;
       if (context.meta.get(META_KEY) !== stamp) {
         context.store.clear();

@@ -189,7 +189,7 @@ test("a changed path with the remote gone fails naming the source; a pin-to-bran
     // A different declaration never builds from another identity's files.
     await assert.rejects(
       build(configFor(site, { repo: remote.bare, ref: "main", path: "" })),
-      /could not fetch source "sdk"[\s\S]*no snapshot of this repo, ref and path exists/,
+      /could not fetch source "sdk"[\s\S]*No snapshot of this repo, ref and path exists/,
     );
   } finally {
     await site.remove();

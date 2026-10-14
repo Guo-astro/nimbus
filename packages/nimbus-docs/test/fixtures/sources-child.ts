@@ -22,7 +22,7 @@ if (mode === "lock") {
     log,
   );
 } else {
-  const snapshots = await resolveContentSources(JSON.parse(arg), { projectRoot: root, log });
+  const { snapshots } = await resolveContentSources(JSON.parse(arg), { projectRoot: root, log });
   process.stdout.write(`${JSON.stringify(Object.fromEntries([...snapshots].map(([name, s]) => [name, s.commit])))}\n`);
   if (mode === "hold") {
     process.stdout.write("ready\n");

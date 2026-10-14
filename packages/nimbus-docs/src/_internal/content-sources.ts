@@ -572,12 +572,20 @@ function snapshotOf(name: string, identity: string, identityDir: string, commit:
   };
 }
 
-async function resolveOne(
-  name: string,
-  declared: ContentSource,
-  projectRoot: string,
-  log: Log,
-): Promise<SourceSnapshot> {
+/** A declaration's snapshot folder and display, computed without git. */
+interface Declaration {
+  name: string;
+  declared: ContentSource;
+  repo: string;
+  sourcePath: string;
+  displayRepo: string;
+  identity: string;
+  identityDir: string;
+  label: string;
+  pinned: boolean;
+}
+
+function declaration(name: string, declared: ContentSource, projectRoot: string): Declaration {
   const fault = repoCredentialFault(declared.repo);
   if (fault) {
     throw authorError(
@@ -589,9 +597,47 @@ async function resolveOne(
   const repo = resolveSourceRepo(declared.repo, projectRoot);
   const displayRepo = redactRepo(declared.repo);
   const identity = sourceIdentity(repo, declared.ref, sourcePath);
-  const identityDir = path.join(sourcesRoot(projectRoot), name, identity);
-  const label = `source "${name}" (${displayRepo} @ ${declared.ref})`;
-  const pinned = isCommitRef(declared.ref);
+  return {
+    name,
+    declared,
+    repo,
+    sourcePath,
+    displayRepo,
+    identity,
+    identityDir: path.join(sourcesRoot(projectRoot), name, identity),
+    label: `source "${name}" (${displayRepo} @ ${declared.ref})`,
+    pinned: isCommitRef(declared.ref),
+  };
+}
+
+/**
+ * The snapshot a declaration selects now, found without git: a pinned ref's
+ * commit, a floating ref's last selected one. Undefined when it isn't there.
+ * Call under the lock.
+ */
+function offlineCommit(d: Declaration): string | undefined {
+  const commit = d.pinned ? d.declared.ref : readSelected(d.identityDir)?.commit;
+  return commit && readMarker(path.join(d.identityDir, commit)) ? commit : undefined;
+}
+
+/** A source that could not be fetched and has no snapshot to fall back to. */
+class SourceUnavailableError extends Error {
+  constructor(
+    readonly source: Declaration,
+    readonly failure: string | undefined,
+  ) {
+    super(`could not fetch ${source.label}`);
+  }
+}
+
+async function resolveOne(
+  name: string,
+  declared: ContentSource,
+  projectRoot: string,
+  log: Log,
+): Promise<SourceSnapshot> {
+  const d = declaration(name, declared, projectRoot);
+  const { sourcePath, repo, displayRepo, identity, identityDir, label, pinned } = d;
   const floatingNote = pinned ? "" : ` Ref "${declared.ref}" floats; pin a commit for reproducible builds.`;
   const level = pinned ? "info" : "warn";
   fs.mkdirSync(identityDir, { recursive: true });
@@ -668,31 +714,122 @@ async function resolveOne(
       return snapshotOf(name, identity, identityDir, fallback.commit, sourcePath, true);
     }
   }
-  throw authorError(
-    `nimbus-docs: could not fetch ${label}, and no snapshot of this repo, ref and path exists under ${SOURCES_DIR}/${name}/.`,
-    failure,
+  throw new SourceUnavailableError(d, failure);
+}
+
+const PRIVATE_REPOSITORIES_DOCS = "https://nimbus-docs.com/writing/content-sources/#private-repositories";
+
+function noSnapshotError(error: SourceUnavailableError, readBy: string | undefined): Error {
+  const failure = (error.failure ?? "the snapshot was removed while it was being selected").replace(/\.\s*$/, "");
+  return authorError(
+    `nimbus-docs: could not fetch ${error.source.label}: ${failure}. ` +
+      `No snapshot of this repo, ref and path exists under ${SOURCES_DIR}/${error.source.name}/.` +
+      (readBy ? `\n  Read by: ${readBy}.` : "") +
+      `\n  Give git a credential: ${PRIVATE_REPOSITORIES_DOCS}`,
   );
+}
+
+/** A source with no snapshot this run, in a command that starts without it. */
+export interface UnavailableSource {
+  /** `source "sdk" (https://github.com/acme/sdk.git @ main)`. */
+  label: string;
+  /** Git's error; undefined when no git ran (`astro preview`). */
+  failure?: string;
+}
+
+export interface ResolvedContentSources {
+  /** The snapshot each source read this run resolved to, by source name. */
+  snapshots: Map<string, SourceSnapshot>;
+  /** Sources that resolved to nothing (`degrade` and `offline` only). */
+  unavailable: Map<string, UnavailableSource>;
+}
+
+export interface ResolveContentSourcesOptions {
+  projectRoot: string;
+  log: Log;
+  /**
+   * `fetch` (`astro build`): a source that can't be fetched and has no
+   * snapshot fails. `degrade` (`astro dev`, `astro sync`): it is reported
+   * unavailable instead, when the failure is git's transport. `offline`
+   * (`astro preview`): no git runs; each source reads the snapshot it
+   * selects now, nothing is pruned and `current.json` isn't written.
+   */
+  mode?: "fetch" | "degrade" | "offline";
+  /** Sources not fetched: each keeps the snapshot it selects now, found without git. */
+  skip?: ReadonlySet<string>;
+  /** Sources that never degrade (an `api` entry reads them). */
+  required?: ReadonlySet<string>;
+  /** Who reads a source (`collection "sdk"`), for the message when it can't be fetched. */
+  readBy?: (name: string) => string;
 }
 
 /**
  * Resolve every declared source to a leased snapshot, in declaration order,
  * then prune. Writes `.nimbus/sources/current.json` for the tools that read
  * snapshots without the config (`lint`, `check`).
+ *
+ * A skipped source never runs git and is never leased: it keeps the snapshot
+ * its declaration selects now, in the prune and in `current.json`, so `lint`
+ * and the next full build still find it.
  */
 export async function resolveContentSources(
   sources: NimbusConfig["sources"],
-  options: { projectRoot: string; log: Log },
-): Promise<Map<string, SourceSnapshot>> {
+  options: ResolveContentSourcesOptions,
+): Promise<ResolvedContentSources> {
+  const { projectRoot, log, mode = "fetch", skip, required, readBy } = options;
   const snapshots = new Map<string, SourceSnapshot>();
+  const unavailable = new Map<string, UnavailableSource>();
   const entries = Object.entries(sources ?? {});
-  if (entries.length === 0 && !fs.existsSync(sourcesRoot(options.projectRoot))) return snapshots;
+  if (entries.length === 0 && !fs.existsSync(sourcesRoot(projectRoot))) return { snapshots, unavailable };
+  // Kept without being read: skipped sources, by name.
+  const kept = new Map<string, SourceSnapshot>();
   for (const [name, source] of entries) {
-    snapshots.set(name, await resolveOne(name, source, options.projectRoot, options.log));
+    if (mode === "offline" || skip?.has(name)) {
+      const d = declaration(name, source, projectRoot);
+      const lease = mode === "offline";
+      const commit = fs.existsSync(d.identityDir)
+        ? await withSourcesLock(
+            projectRoot,
+            () => {
+              const found = offlineCommit(d);
+              if (found && lease) createLease(projectRoot, path.join(d.identityDir, found));
+              return found;
+            },
+            log,
+          )
+        : undefined;
+      const snapshot = commit && snapshotOf(name, d.identity, d.identityDir, commit, d.sourcePath, !d.pinned);
+      if (!lease) {
+        if (snapshot) kept.set(name, snapshot);
+      } else if (snapshot) {
+        log("info", `nimbus: ${d.label}: using cached commit ${commit.slice(0, 12)}.`);
+        snapshots.set(name, snapshot);
+      } else {
+        if (required?.has(name)) {
+          // No git ran: the source isn't known to be unreachable, only unfetched.
+          const readers = readBy?.(name);
+          throw authorError(
+            `nimbus-docs: ${d.label} has no snapshot; run astro build first.` + (readers ? `\n  Read by: ${readers}.` : ""),
+          );
+        }
+        unavailable.set(name, { label: d.label });
+      }
+      continue;
+    }
+    try {
+      snapshots.set(name, await resolveOne(name, source, projectRoot, log));
+    } catch (error) {
+      if (!(error instanceof SourceUnavailableError)) throw error;
+      if (mode === "fetch" || required?.has(name)) throw noSnapshotError(error, readBy?.(name));
+      unavailable.set(name, { label: error.source.label, failure: error.failure });
+    }
   }
-  const declared = new Map([...snapshots.values()].map((s) => [`${s.name}/${s.identity}`, s.commit]));
-  await pruneContentSources(options.projectRoot, declared, options.log);
-  writeCurrentSources(options.projectRoot, snapshots);
-  return snapshots;
+  if (mode === "offline") return { snapshots, unavailable };
+  const current = new Map([...snapshots, ...kept]);
+  const declared = new Map([...current.values()].map((s) => [`${s.name}/${s.identity}`, s.commit]));
+  await pruneContentSources(projectRoot, declared, log);
+  writeCurrentSources(projectRoot, new Map(entries.flatMap(([name]) => (current.has(name) ? [[name, current.get(name)!]] : []))));
+  return { snapshots, unavailable };
 }
 
 // ---------------------------------------------------------------------------
@@ -771,23 +908,88 @@ export async function leaseCurrentSources(
 // ---------------------------------------------------------------------------
 
 // Snapshots per project root, filled at `astro:config:setup` and read by the
-// loaders `docsCollection({ source })` makes.
-const registryKey = Symbol.for("@cloudflare/nimbus-docs/content-sources/v2");
+// loaders `docsCollection({ source })` makes, with the sources this run has
+// no snapshot for: skipped by a partial build, or unavailable in a command
+// that starts without them.
+interface RegisteredSources {
+  snapshots: Map<string, SourceSnapshot>;
+  skipped: ReadonlySet<string>;
+  unavailable: ReadonlySet<string>;
+  /** Collections left empty because their source is unavailable. */
+  emptied: Set<string>;
+}
+const registryKey = Symbol.for("@cloudflare/nimbus-docs/content-sources/v3");
 const shared = globalThis as typeof globalThis & {
-  [registryKey]?: Map<string, Map<string, SourceSnapshot>>;
+  [registryKey]?: Map<string, RegisteredSources>;
 };
 const registry = (shared[registryKey] ??= new Map());
 
-export function registerContentSources(root: URL | string, snapshots: Map<string, SourceSnapshot>): void {
-  registry.set(preparedMarkdownRootKey(root), snapshots);
+export function registerContentSources(
+  root: URL | string,
+  snapshots: Map<string, SourceSnapshot>,
+  missing: { skipped?: Iterable<string>; unavailable?: Iterable<string> } = {},
+): void {
+  registry.set(preparedMarkdownRootKey(root), {
+    snapshots,
+    skipped: new Set(missing.skipped),
+    unavailable: new Set(missing.unavailable),
+    emptied: new Set(),
+  });
 }
 
 export function resolveContentSource(root: URL | string, name: string): SourceSnapshot | undefined {
-  return registry.get(preparedMarkdownRootKey(root))?.get(name);
+  return registry.get(preparedMarkdownRootKey(root))?.snapshots.get(name);
+}
+
+/** Why a declared source has no snapshot this run, if it is declared. */
+export function missingContentSource(root: URL | string, name: string): "skipped" | "unavailable" | undefined {
+  const entry = registry.get(preparedMarkdownRootKey(root));
+  if (entry?.skipped.has(name)) return "skipped";
+  if (entry?.unavailable.has(name)) return "unavailable";
+  return undefined;
 }
 
 export function registeredContentSourceNames(root: URL | string): string[] {
-  return [...(registry.get(preparedMarkdownRootKey(root))?.keys() ?? [])];
+  const entry = registry.get(preparedMarkdownRootKey(root));
+  return entry ? [...entry.snapshots.keys(), ...entry.skipped, ...entry.unavailable] : [];
+}
+
+/** A collection's loader found its source unavailable and left it empty. */
+export function recordUnavailableSourceCollection(root: URL | string, collection: string): void {
+  registry.get(preparedMarkdownRootKey(root))?.emptied.add(collection);
+}
+
+/** The collections left empty because their source is unavailable, after content sync. */
+export function unavailableSourceCollections(root: URL | string): string[] {
+  return [...(registry.get(preparedMarkdownRootKey(root))?.emptied ?? [])].sort();
+}
+
+/**
+ * The warning for a source a command starts without: which collections are
+ * empty (null when the config doesn't show every read), and git's error.
+ */
+export function unavailableSourceWarning(
+  source: UnavailableSource,
+  collections: readonly string[] | null,
+  command: string,
+): string {
+  const empty =
+    collections === null
+      ? "the collections that read it are empty"
+      : collections.length === 1
+        ? `collection "${collections[0]}" is empty`
+        : `collections ${collections.map((name) => `"${name}"`).join(", ")} are empty`;
+  if (command === "preview") {
+    // Preview runs no git: the source isn't known to be unreachable, and a
+    // build would fetch it.
+    const what = collections?.length === 0 ? "nothing reads it" : empty;
+    return `nimbus: ${source.label} has no snapshot yet; ${what} (run a build to fetch it).`;
+  }
+  const tail = source.failure ? ` git: ${source.failure}` : "";
+  if (collections?.length === 0) {
+    return `nimbus: ${source.label} is unavailable; nothing reads it, but a full build fails until it can be fetched (restart to retry).${tail}`;
+  }
+  return `nimbus: ${source.label} is unavailable; ${empty} until it can be fetched (restart to retry). A full build fails until then.${tail}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +998,8 @@ export function registeredContentSourceNames(root: URL | string): string[] {
 
 
 interface SpecFromSource {
+  /** The `api` entry's collection. */
+  collection: string;
   holder: { spec?: unknown };
   source: string;
   path: string;
@@ -811,7 +1015,12 @@ export function collectSourceSpecs(api: readonly ApiSpec[] | undefined): SpecFro
   for (const entry of api ?? []) {
     for (const holder of entry.versions ?? [entry]) {
       if (isSpecFromSource(holder.spec)) {
-        out.push({ holder, source: holder.spec.source, path: normalizeSourcePath(holder.spec.path) });
+        out.push({
+          collection: entry.collection,
+          holder,
+          source: holder.spec.source,
+          path: normalizeSourcePath(holder.spec.path),
+        });
       }
     }
   }
@@ -833,4 +1042,27 @@ export function applySourceSpecs(
     }
     holder.spec = path.relative(projectRoot, path.join(snapshot.dir, specPath)).split(path.sep).join("/");
   }
+}
+
+/**
+ * Who reads a source, for the message when it can't be fetched:
+ * `collection "sdk" and api entry "widgets"`. `hidden` when the content
+ * config may read it in a way its text doesn't show.
+ */
+export function describeSourceReaders(
+  collections: readonly string[],
+  apiEntries: readonly string[],
+  hidden: boolean,
+): string {
+  // An `api` entry with versions reads its source once per version.
+  const list = (one: string, many: string, names: readonly string[]) => {
+    const unique = [...new Set(names)];
+    return unique.length === 0 ? [] : [`${unique.length === 1 ? one : many} ${unique.map((name) => `"${name}"`).join(", ")}`];
+  };
+  const parts = [
+    ...list("collection", "collections", collections),
+    ...list("api entry", "api entries", apiEntries),
+    ...(hidden ? ["collections src/content.config.ts doesn't show"] : []),
+  ];
+  return parts.length > 0 ? parts.join(" and ") : "nothing; remove it from sources";
 }

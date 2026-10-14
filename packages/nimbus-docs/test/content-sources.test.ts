@@ -8,7 +8,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-import { applySourceSpecs, collectSourceSpecs, type SourceSnapshot } from "../src/_internal/content-sources.ts";
+import {
+  applySourceSpecs,
+  collectSourceSpecs,
+  describeSourceReaders,
+  resolveContentSources,
+  type SourceSnapshot,
+  unavailableSourceWarning,
+} from "../src/_internal/content-sources.ts";
+import { parsePageCollectionSources, placeStaticCollections } from "../src/_internal/parse-content-collections.ts";
 import { __resetLastUpdatedForTests, getLastUpdatedFromGit, getLastUpdatedStats } from "../src/_internal/git-last-updated.ts";
 import { parseContentSourcePath } from "../src/_internal/source-paths.ts";
 import { redactRepo, redactUrlUserinfo, repoCredentialFault } from "../src/_internal/source-repo.ts";
@@ -286,5 +294,145 @@ test("a snapshot path splits into source, identity, commit and repository path, 
     assert.equal(getLastUpdatedStats().missCount, 0);
   } finally {
     __resetLastUpdatedForTests();
+  }
+});
+
+test("a source that can't be fetched and has no snapshot fails with git's error, who reads it, and the credentials link", async () => {
+  const root = mkdtempSync(path.join(TEST_TMP, "nimbus-sources-message-"));
+  try {
+    const sdk = { repo: path.join(root, "missing.git"), ref: "main", path: "docs" };
+    const failure = async (readBy?: string) => {
+      try {
+        await resolveContentSources({ sdk }, { projectRoot: root, log: () => {}, readBy: readBy === undefined ? undefined : () => readBy });
+      } catch (error) {
+        return (error as Error).message;
+      }
+      throw new Error("expected the source to fail");
+    };
+    const message = await failure(describeSourceReaders(["sdk"], [], false));
+    assert.match(
+      message,
+      /^nimbus-docs: could not fetch source "sdk" \([^)]*missing\.git @ main\): [^\n]*(?:does not appear to be a git repository|not found|No such file)[\s\S]*\. No snapshot of this repo, ref and path exists under \.nimbus\/sources\/sdk\/\.\n {2}Read by: collection "sdk"\.\n {2}Give git a credential: https:\/\/nimbus-docs\.com\/writing\/content-sources\/#private-repositories$/,
+    );
+    assert.doesNotMatch(message, /NIMBUS_BUILD_ONLY/);
+    assert.match(
+      await failure(describeSourceReaders(["sdk-guides"], ["widgets", "widgets"], true)),
+      /\n {2}Read by: collection "sdk-guides" and api entry "widgets" and collections src\/content\.config\.ts doesn't show\.\n/,
+    );
+    assert.match(await failure(describeSourceReaders([], [], true)), /\n {2}Read by: collections src\/content\.config\.ts doesn't show\.\n/);
+    assert.match(await failure(describeSourceReaders([], [], false)), /\n {2}Read by: nothing; remove it from sources\.\n/);
+    assert.match(
+      await failure(describeSourceReaders(["a", "b"], [], false)),
+      /\n {2}Read by: collections "a", "b"\.\n/,
+    );
+
+    // The commands that start without it get the source back as unavailable.
+    const { snapshots, unavailable } = await resolveContentSources({ sdk }, { projectRoot: root, log: () => {}, mode: "degrade" });
+    assert.equal(snapshots.size, 0);
+    const missing = unavailable.get("sdk")!;
+    assert.match(
+      unavailableSourceWarning(missing, ["sdk", "sdk-guides"], "dev"),
+      /^nimbus: source "sdk" \([^)]+ @ main\) is unavailable; collections "sdk", "sdk-guides" are empty until it can be fetched \(restart to retry\)\. A full build fails until then\. git: \S/,
+    );
+    assert.match(unavailableSourceWarning(missing, null, "sync"), /the collections that read it are empty until it can be fetched/);
+    // Preview runs no git: the source is unfetched, not unreachable.
+    assert.equal(
+      unavailableSourceWarning({ label: missing.label }, ["sdk"], "preview"),
+      `nimbus: ${missing.label} has no snapshot yet; collection "sdk" is empty (run a build to fetch it).`,
+    );
+    // An api entry can't render without its spec: it never degrades.
+    await assert.rejects(
+      resolveContentSources({ sdk }, { projectRoot: root, log: () => {}, mode: "degrade", required: new Set(["sdk"]) }),
+      /could not fetch source "sdk"/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the content config shows which collections read a source, and what hides a read", () => {
+  const root = mkdtempSync(path.join(TEST_TMP, "nimbus-source-reads-"));
+  try {
+    const file = path.join(root, "content.config.ts");
+    const reads = (body: string, head = "") => {
+      writeFileSync(file, `${head}\nexport const collections = {\n${body}\n};\n`);
+      const parsed = parsePageCollectionSources(root, file);
+      return {
+        readers: Object.fromEntries(parsed.readers),
+        hidden: parsed.hidden,
+        kinds: Object.fromEntries([...(parsed.places ?? [])].map(([key, place]) => [key, place.kind])),
+      };
+    };
+    // A loader beside `docsCollection().schema` (the Notion guide's shape) reads no source.
+    assert.deepEqual(
+      reads(
+        [
+          `docs: defineCollection(docsCollection()),`,
+          `"sdk-guides": defineCollection(docsCollection({ source: "sdk", base: "guides" })),`,
+          `notion: defineCollection({ loader: withNimbusMarkdown(notionLoader({ database: "x" })), schema: docsCollection().schema }),`,
+          `fielded: defineCollection(docsCollection({ base: "f", schemaFields: { origin: z.string() } })),`,
+          `api: defineCollection(apiCollection()),`,
+        ].join("\n"),
+        `import { notionLoader } from "./loaders/notion";`,
+      ),
+      { readers: { sdk: ["sdk-guides"] }, hidden: [], kinds: { docs: "folder", "sdk-guides": "source", notion: "unplaced", fielded: "folder" } },
+    );
+    // A shorthand or variable source is unplaced, not a src/content folder.
+    assert.deepEqual(reads(`sdk: defineCollection(docsCollection({ source }))`, `const source = "sdk";`).kinds, { sdk: "unplaced" });
+    assert.deepEqual(reads(`sdk: defineCollection(docsCollection({ source: name }))`, `const name = "sdk";`).kinds, { sdk: "unplaced" });
+    // A schema field named `source` is a possible read; the collection stays in its folder.
+    assert.deepEqual(reads(`docs: defineCollection(docsCollection({ schemaFields: { source: z.string() } }))`), {
+      readers: {},
+      hidden: [`collection "docs"`],
+      kinds: { docs: "folder" },
+    });
+    // A local declaration is followed; a helper outside every entry is named by its call.
+    assert.deepEqual(reads(`sdk: sdkCollection`, `const sdkCollection = defineCollection(docsCollection({ source: "sdk" }));`).readers, { sdk: ["sdk"] });
+    assert.deepEqual(
+      reads(`docs: defineCollection(docsCollection())`, `const make = (name) => docsCollection({ source: name });`).hidden,
+      ["`docsCollection({ source: name })`"],
+    );
+    assert.deepEqual(reads(`[key]: defineCollection(docsCollection())`).hidden, ["the entry `[key]`"]);
+    // A collection the text doesn't show as a Nimbus one may read a source:
+    // a helper or imported function, an aliased or namespaced factory, a
+    // conditional, a wrapped loader. Nimbus's source-free factories and a
+    // plain Astro collection read none.
+    for (const [entry, head] of [
+      [`sdk: makeSdk("sdk")`, `import { makeSdk } from "./sdk";`],
+      [`sdk: dc({ source: "sdk" })`, `import { docsCollection as dc } from "@cloudflare/nimbus-docs/content";`],
+      [`sdk: defineCollection({ loader: dc({ source: "sdk" }).loader })`, `import { docsCollection as dc } from "x";`],
+      [`sdk: defineCollection({ loader: $dc({ source: "sdk" }).loader })`, `import { docsCollection as $dc } from "x";`],
+      [`sdk: defineCollection(n.docsCollection({ source: "sdk" }))`, `import * as n from "x";`],
+      [`sdk: defineCollection(flag ? docsCollection({ source: "sdk" }) : docsCollection())`, ""],
+      [`sdk: defineCollection({ loader: withNimbusMarkdown(docsCollection({ source: "sdk" }).loader) })`, ""],
+    ]) {
+      assert.deepEqual(reads(entry, head).hidden, [`collection "sdk"`], entry);
+    }
+    assert.deepEqual(
+      reads(
+        [
+          `api: defineCollection(apiCollection()),`,
+          `partials: defineCollection(partialsCollection()),`,
+          `data: defineCollection({ loader: glob({ base: "data" }) }),`,
+        ].join("\n"),
+      ).hidden,
+      [],
+    );
+    assert.deepEqual(reads(`docs: imported.docs`, `import * as imported from "./x";`).hidden, [`collection "docs"`]);
+    // `lint` and `check` place a source collection from `current.json`; with
+    // no snapshot it stays unplaced, saying why it may be missing.
+    writeFileSync(file, `export const collections = {\nsdk: defineCollection(docsCollection({ source: "sdk" })),\n};\n`);
+    assert.deepEqual([...placeStaticCollections(parsePageCollectionSources(root, file).places, new Map()).values()], [
+      {
+        kind: "unplaced",
+        reason:
+          'source "sdk" has no snapshot: not fetched yet, or unreachable at the last start; run a build or start the dev server',
+      },
+    ]);
+    // No content config reads nothing.
+    rmSync(file);
+    assert.deepEqual(parsePageCollectionSources(root, file), { places: null, readers: new Map(), hidden: [] });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

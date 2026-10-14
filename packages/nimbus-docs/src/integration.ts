@@ -92,16 +92,19 @@ import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
 import { entryRouteUrl } from "./_internal/astro-slug.js";
 import {
-  parsePageCollectionFolders,
+  parsePageCollectionSources,
   placeStaticCollections,
 } from "./_internal/parse-content-collections.js";
 import {
   applySourceSpecs,
   collectSourceSpecs,
+  describeSourceReaders,
   registerContentSources,
   releaseContentSourceLeases,
   resolveContentSources,
   SOURCES_DIR,
+  unavailableSourceCollections,
+  unavailableSourceWarning,
 } from "./_internal/content-sources.js";
 import {
   pageCollectionsFilePath,
@@ -1198,11 +1201,67 @@ export function nimbus(
         // at content sync. A dev restart re-resolves (a config edit may
         // change a branch) and drops the previous run's leases first.
         releaseContentSourceLeases(projectRoot);
-        const sourceSnapshots = await resolveContentSources(config.sources, {
+        // Which collections read each source, from the content config's
+        // text: a slice fetches only the sources it reads, and messages
+        // about a source name its readers.
+        const collectionSources = parsePageCollectionSources(
+          projectRoot,
+          path.join(srcDir, "content.config.ts"),
+        );
+        const sourceReadsHidden = collectionSources.hidden.length > 0;
+        const apiSourceReaders = new Map<string, string[]>();
+        for (const spec of sourceSpecs) {
+          apiSourceReaders.set(spec.source, [...(apiSourceReaders.get(spec.source) ?? []), spec.collection]);
+        }
+        const skippedSources: string[] = [];
+        const sourceNames = Object.keys(config.sources ?? {});
+        if (buildSliceForBuild && sourceNames.length > 0) {
+          if (sourceReadsHidden) {
+            logger.warn(
+              `nimbus: ${BUILD_ONLY_ENV} fetches every source: ${collectionSources.hidden.join(", ")} ` +
+                `${collectionSources.hidden.length === 1 ? "sets its" : "set their"} source in a way the build can't read ` +
+                "without running src/content.config.ts. Write source as a string literal to let slices skip it.",
+            );
+          } else {
+            for (const name of sourceNames) {
+              const readers = collectionSources.readers.get(name) ?? [];
+              if (apiSourceReaders.has(name) || readers.some((collection) => buildSliceForBuild!.includes(collection))) continue;
+              skippedSources.push(name);
+              logger.info(
+                `nimbus: source "${name}" not fetched: no collection in ${BUILD_ONLY_ENV}=${buildSliceForBuild.join(",")} reads it.`,
+              );
+            }
+          }
+        }
+        // `astro build` is strict; dev and sync (and `astro check`, through
+        // sync) start without a source git can't reach, and preview reads
+        // only the snapshots already there.
+        const { snapshots: sourceSnapshots, unavailable } = await resolveContentSources(config.sources, {
           projectRoot,
           log: (level, message) => logger[level](message),
+          mode: command === "build" ? "fetch" : command === "preview" ? "offline" : "degrade",
+          skip: new Set(skippedSources),
+          required: new Set(apiSourceReaders.keys()),
+          readBy: (name) =>
+            describeSourceReaders(
+              collectionSources.readers.get(name) ?? [],
+              apiSourceReaders.get(name) ?? [],
+              sourceReadsHidden,
+            ),
         });
-        registerContentSources(astroConfig.root, sourceSnapshots);
+        for (const [name, source] of unavailable) {
+          logger.warn(
+            unavailableSourceWarning(
+              source,
+              sourceReadsHidden ? null : (collectionSources.readers.get(name) ?? []),
+              command,
+            ),
+          );
+        }
+        registerContentSources(astroConfig.root, sourceSnapshots, {
+          skipped: skippedSources,
+          unavailable: unavailable.keys(),
+        });
         applySourceSpecs(sourceSpecs, sourceSnapshots, projectRoot);
         beginPreparedMarkdownSession(astroConfig.root);
         registerApiCollections(
@@ -1678,10 +1737,7 @@ export function nimbus(
         // otherwise depends on which file hits a grammar first).
         const contentRootForScan = path.join(projectRoot, "src", "content");
         const outsideFolders = [
-          ...placeStaticCollections(
-            parsePageCollectionFolders(projectRoot, path.join(srcDir, "content.config.ts")),
-            sourceSnapshots,
-          ).values(),
+          ...placeStaticCollections(collectionSources.places, sourceSnapshots).values(),
         ]
           .flatMap((place) =>
             place.kind === "folder" &&
@@ -2799,9 +2855,11 @@ export function nimbus(
                 getEmptyCollections: async () => {
                   // The page collections outside the slice: empty on
                   // purpose, as opposed to a slice collection that happens
-                  // to have no pages. In dev the record changes under a
-                  // running server, so the list stays empty there.
-                  if (!buildSliceForBuild) return [];
+                  // to have no pages. Without a slice (dev), the collections
+                  // whose source is unavailable, recorded by their loaders
+                  // during content sync, which runs before anything loads
+                  // this module.
+                  if (!buildSliceForBuild) return unavailableSourceCollections(astroConfig.root);
                   return (await getPageCollectionsForBuild()).filter(
                     (name) => !buildSliceForBuild!.includes(name),
                   );

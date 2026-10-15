@@ -41,7 +41,7 @@ export function apiCatalog(
         : {}),
       "service-doc": [
         { href: api.docsUrl, type: "text/html" },
-        { href: api.markdownUrl, type: "text/markdown" },
+        ...(api.markdownUrl ? [{ href: api.markdownUrl, type: "text/markdown" }] : []),
       ],
     })),
   };

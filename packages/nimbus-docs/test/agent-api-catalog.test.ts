@@ -92,3 +92,47 @@ test("the catalog, ARD and Link header code has no spec-format branches", () => 
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /openapi/i, file);
   }
 });
+
+test("a version without Markdown gets an HTML-only service-doc and a versioned ARD identifier", () => {
+  const versioned = createAgentCapabilities({
+    apis: [
+      {
+        collection: "pets",
+        version: "v1",
+        isDefault: false,
+        docsUrl: `${options.site}/docs/pets/?version=v1`,
+        spec: { url: `${options.site}/docs/pets/v1/openapi.json`, type: "application/vnd.oai.openapi+json" },
+      },
+    ],
+  });
+  const catalog = apiCatalog(versioned)!;
+  assert.equal(validate(catalog), true, JSON.stringify(validate.errors));
+  assert.deepEqual(catalog.linkset[0]!["service-doc"], [{ href: `${options.site}/docs/pets/?version=v1`, type: "text/html" }]);
+  const ard = agentDiscoveryManifest(versioned, options);
+  const entry = ard.entries.find((item) => item.url.endsWith("/pets/v1/openapi.json"))!;
+  assert.match(entry.identifier, /:api-pets-v1$/);
+  const links = agentHomepageLinks(versioned, options);
+  assert.ok(links.includes(apiCatalogLink(options.site)));
+  assert.doesNotMatch(links.join("\n"), /rel="service-(?:doc|desc)"/);
+});
+
+test("homepage links stay fixed as version inventory grows; catalog, ARD and spec headers remain complete", () => {
+  const publication = (version: string, isDefault: boolean) => ({
+    collection: "pets",
+    version,
+    isDefault,
+    docsUrl: `${options.site}/docs/pets/${isDefault ? "" : `?v=${version}`}`,
+    spec: { url: `${options.site}/docs/pets/${isDefault ? "" : `${version}/`}spec.json`, type: "application/json" },
+  });
+  const defaults = createAgentCapabilities({ apis: [publication("current", true)] });
+  const many = createAgentCapabilities({
+    // The default needn't be the first declaration.
+    apis: [...Array.from({ length: 100 }, (_, i) => publication(`v${i}`, false)), publication("current", true)],
+  });
+  assert.deepEqual(agentHomepageLinks(many, options), agentHomepageLinks(defaults, options));
+  assert.equal(apiCatalog(many)!.linkset.length, 101);
+  assert.equal(agentDiscoveryManifest(many, options).entries.length, 101);
+  const rules = agentDiscoveryHeaderRules(many, options);
+  assert.match(rules, /\/docs\/pets\/v99\/spec\.json\n  Content-Type: application\/json/);
+  assert.doesNotMatch(rules, /v99.*>; rel="service-/);
+});

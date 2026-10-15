@@ -765,12 +765,10 @@ const agentsSchema = withStrictKeys(
   {
     removedKeys: {},
     contextLabel: "agents sub-key",
-    unknownHint: (key) =>
-      key.toLowerCase() === "mcp"
-        ? "Did you mean `mcp`?"
-        : key.toLowerCase() === "discovery"
-          ? "Did you mean `discovery`?"
-          : "",
+    unknownHint: (key) => {
+      const known = ["mcp", "discovery"].find((name) => name === key.toLowerCase());
+      return known ? `Did you mean \`${known}\`?` : "";
+    },
   },
 ).optional();
 

@@ -866,7 +866,7 @@
       "instructions": [
         "No action is needed when this site owns its domain: discovery is published as before.",
         "If another site owns the domain's /.well-known, set agents: { discovery: false } in the Nimbus config. Nimbus then publishes no /.well-known/ard.json, ai-catalog.json or api-catalog, adds no rel=\"ard\" or rel=\"api-catalog\" homepage links, and keeps your own .well-known files.",
-        "Remove any .assetsignore entries or middleware you added to hide those files, and clean the deployment output once, since Nimbus doesn't delete files an earlier build wrote."
+        "Remove any .assetsignore entries or middleware you added to hide those files, then purge the cached homepage, whose Link header still lists the old files. On hosts that keep files from earlier deploys, such as an S3 sync without --delete, remove the old discovery files once."
       ],
       "verify": [
         "Build the site and confirm the output has no Nimbus discovery documents and the homepage Link header has no rel=\"ard\" or rel=\"api-catalog\"."

@@ -33,8 +33,8 @@
  *   - Dynamic JSX attrs (`<img src={x}>`) are skipped — not checkable.
  *   - `ignore: string[]` supports full glob syntax (`**`, `*`, `{a,b}`, …)
  *     via `../../_internal/ignore-glob.js` (picomatch-backed), matched
- *     against the cleaned URL (query/hash stripped, percent-decoded) —
- *     same shape as `internal-link`'s option.
+ *     against the cleaned URL (query/hash stripped, percent-decoded) and,
+ *     like `internal-link`'s option, without the site base.
  *
  * A miss whose containing directory exists produces a "did you mean" hint
  * from that directory's entries via Levenshtein distance.
@@ -72,22 +72,24 @@ export const imageRef: Rule = {
 
       const cleaned = cleanUrl(url);
       if (cleaned === "") continue;
-      if (matchesAnyIgnore(cleaned, ignore)) continue;
+
+      const aliased = aliases.some(([prefix]) => cleaned.startsWith(prefix));
+      const underBase = base !== "" && !aliased && cleaned.startsWith("/");
+      const based = underBase && (cleaned === decodedBase || cleaned.startsWith(`${decodedBase}/`));
+      const unbased = based ? cleaned.slice(decodedBase.length) || "/" : cleaned;
+      // Patterns are written without the base, as for links; one written with it still matches.
+      if (matchesAnyIgnore(unbased, ignore) || (based && matchesAnyIgnore(cleaned, ignore))) continue;
 
       const at = startOf(occ.node);
       const report = (message: string, fix?: DiagnosticFix) =>
         ctx.report({ message, line: at.line, column: at.column, ...(fix ? { fix } : {}) });
 
-      const aliased = aliases.some(([prefix]) => cleaned.startsWith(prefix));
-      if (base === "" || aliased || !cleaned.startsWith("/")) {
+      if (!underBase) {
         const resolved = resolveToDisk(cleaned, root, ctx.file.absPath, aliases);
         if (resolved === null) continue; // unrecognised shape — silence beats false-positive
         if (!fileExists(resolved.fullPath)) report(missing(url, resolved));
         continue;
       }
-
-      const based = cleaned === decodedBase || cleaned.startsWith(`${decodedBase}/`);
-      const unbased = based ? cleaned.slice(decodedBase.length) || "/" : cleaned;
 
       if (occ.kind === "component") {
         const resolved = inPublic(root, unbased);

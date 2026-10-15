@@ -1682,13 +1682,9 @@ export function nimbus(
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded
         // — a write failure must never break the build.
-        let lintBase: string | undefined;
-        try {
-          const { basePrefix } = await import("./_internal/authored-links.js");
-          lintBase = basePrefix(astroConfig.base || "/");
-        } catch {
-          // An invalid base fails the build where Markdown is prepared.
-        }
+        // An invalid base is left out here; it fails the build where Markdown is prepared.
+        const { normalizeBase } = await import("./lint/site-base.js");
+        const lintBase = normalizeBase(astroConfig.base || "/");
         materializeLintConfig(
           projectRoot,
           lintOptions.rules,

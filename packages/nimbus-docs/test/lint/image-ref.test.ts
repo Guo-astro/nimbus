@@ -416,7 +416,7 @@ test("image-ref under a base: components accept both forms, with no base report"
   }
 });
 
-test("image-ref under a base: ignore matches the URL as written and aliases resolve before the base", () => {
+test("image-ref under a base: ignore patterns are written without the base and aliases resolve before the base", () => {
   const setup = setupProject(["public/arch.png", "src/assets/shot.png"]);
   try {
     const diags = lintBased(
@@ -424,9 +424,13 @@ test("image-ref under a base: ignore matches the URL as written and aliases reso
       `${FM}
 ![Ignored](/arch.png)
 
+![Ignored with the base](/docs/generated/a.png)
+
+![Pattern with the base](/docs/legacy/b.png)
+
 ![Aliased](/assets/shot.png)
 `,
-      { ignore: ["/arch.png"], aliases: { "/assets/": "src/assets/" } },
+      { ignore: ["/arch.png", "/generated/**", "/docs/legacy/**"], aliases: { "/assets/": "src/assets/" } },
     );
     assert.deepEqual(diags, []);
   } finally {

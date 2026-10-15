@@ -121,7 +121,12 @@ test("a lint.json without base falls back to routes.json, normalised", () => {
     assert.deepEqual(res.messages, [SKIPS]);
     assert.doesNotMatch(res.stderr, UNKNOWN);
     assert.match(res.stderr, /older build without the site base[\s\S]*\.nimbus\/routes\.json[\s\S]*astro sync/);
+    const fromCheck = check({ lint: lintJson, routesBase: "/docs/" });
+    assert.deepEqual(fromCheck.messages, [SKIPS]);
+    assert.ok(fromCheck.notes.includes("nimbus/site-base-from-routes"));
+    assert.ok(!fromCheck.notes.includes("nimbus/site-base-unknown"));
   }
+  assert.ok(!check({ lint: { base: "/docs" }, routesBase: "/docs/" }).notes.includes("nimbus/site-base-from-routes"));
 });
 
 test("with no base anywhere, lint and check say they checked without one", () => {

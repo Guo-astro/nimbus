@@ -25,7 +25,7 @@ import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { leaseCurrentSources } from "../_internal/content-sources.js";
 import { materializedFeatures } from "../check/authoring.js";
 import { isBuildValidator } from "../lint/diagnostic.js";
-import { resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
+import { BASE_FROM_ROUTES_MESSAGE, resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import {
   findMdxFiles,
@@ -138,10 +138,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
   if (imageRefRuns && !baseKnown) {
     process.stderr.write(`nimbus-docs: ${UNKNOWN_SITE_BASE_MESSAGE}\n`);
   } else if (imageRefRuns && found && materializedBase === undefined) {
-    process.stderr.write(
-      "nimbus-docs: `.nimbus/lint.json` is from an older build without the site base, so image paths were checked " +
-        "against the base in `.nimbus/routes.json`. Run `astro sync` to record it.\n",
-    );
+    process.stderr.write(`nimbus-docs: ${BASE_FROM_ROUTES_MESSAGE}\n`);
   }
   if (found && lintConfigIsStale(cwd, { rules, collections, base: materializedBase })) {
     process.stderr.write(`nimbus-docs: ${STALE_LINT_CONFIG_MESSAGE}\n`);

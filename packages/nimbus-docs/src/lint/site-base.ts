@@ -12,6 +12,10 @@ import { readRouteTruth } from "./route-truth.js";
 export const UNKNOWN_SITE_BASE_MESSAGE =
   "Couldn't read the site base (run `astro sync`); image paths were checked as if the site had none.";
 
+export const BASE_FROM_ROUTES_MESSAGE =
+  "`.nimbus/lint.json` is from an older build without the site base, so image paths were checked " +
+  "against the base in `.nimbus/routes.json`. Run `astro sync` to record it.";
+
 export interface LintBase {
   base: string;
   /** False when no base was found and `base` is the `""` fallback. */

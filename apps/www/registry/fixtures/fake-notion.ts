@@ -31,7 +31,7 @@ export type PropertyTypes = Record<string, string>;
 
 export interface FakeData {
   databaseId: string;
-  dataSources: Array<{ id: string; name: string; properties?: PropertyTypes }>;
+  dataSources: Array<{ id: string; name: string; properties?: PropertyTypes; in_trash?: boolean }>;
   pages: FakePage[];
 }
 
@@ -183,7 +183,7 @@ export async function fakeNotion(initial: FakeData): Promise<FakeNotion> {
       let match: RegExpMatchArray | null;
       if ((match = url.pathname.match(/^\/v1\/databases\/([^/]+)$/)) && request.method === "GET") {
         if (match[1] !== data.databaseId) return send(404, { object: "error", status: 404, code: "object_not_found", message: "not found" });
-        return send(200, { object: "database", id: data.databaseId, data_sources: data.dataSources.map(({ id, name }) => ({ id, name })) });
+        return send(200, { object: "database", id: data.databaseId, data_sources: data.dataSources.map(({ id, name, in_trash }) => ({ id, name, in_trash: !!in_trash })) });
       }
       if ((match = url.pathname.match(/^\/v1\/data_sources\/([^/]+)$/)) && request.method === "GET") {
         const source = data.dataSources.find((s) => s.id === match![1]);

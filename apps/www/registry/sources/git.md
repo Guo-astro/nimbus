@@ -159,7 +159,7 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 </DocsLayout>
 ```
 
-**Rendering.** If the Nimbus config sets `rendering` (Cloudflare scaffolds set
+**Rendering.** If the Nimbus config sets `rendering` (a Cloudflare site with server output sets
 `rendering: { default: "request" }`), add the collection to `rendering.collections`, or the
 build fails: `collections: { <collection>: "request" }` (or `"build"` to prerender it). Without
 a `rendering` option, skip this.

@@ -100,6 +100,8 @@ test("data sources: one is used, two are listed, an explicit one skips discovery
   api.set({ ...base(), dataSources: [{ id: "ds1", name: "Docs" }, { id: "ds2", name: "Archive" }] });
   await assert.rejects(load({ database: DB }), /has 2 data sources; set `dataSource` to one of: Docs \(ds1\), Archive \(ds2\)\./);
   assert.deepEqual([...(await load({ dataSource: "ds2" })).entries.keys()], ["one"]);
+  api.set({ ...base(), dataSources: [{ id: "ds1", name: "Docs" }, { id: "ds2", name: "Archive", in_trash: true }] });
+  assert.deepEqual([...(await load({ database: DB })).entries.keys()], ["one"], "a trashed data source doesn't count");
   await assert.rejects(load({ database: "ffffffffffffffffffffffffffffffff", dataSource: "ds1" }), /doesn't belong to database/);
 });
 
@@ -115,6 +117,9 @@ test("properties: named ones must exist with the right type; the publishing rule
 
   api.set({ ...base(), dataSources: [{ id: "ds1", name: "Docs", properties: { Name: "title", Status: "date" } }] });
   await assert.rejects(load({ database: DB }), /property "Status" is date; the publishing property must be status, select or checkbox/);
+
+  api.set({ ...base(), dataSources: [{ id: "ds1", name: "Docs", properties: { Name: "title", State: "status" } }] });
+  await assert.rejects(load({ database: DB }), /there's no "Status" property, but "State" is a status property\. Set properties\.status: "State"/, "a renamed status never publishes drafts");
 
   api.set({ ...base(), dataSources: [{ id: "ds1", name: "Docs", properties: { Name: "title" } }] });
   await assert.rejects(load({ database: DB, publishedValue: "Live" }), /the publishing property "Status" doesn't exist/);
@@ -211,6 +216,7 @@ test("blocks become Markdown: headings move down a level, text an editor typed r
           { type: "to_do", text: ["done"], checked: true },
           { type: "table", rows: [["Key", "Value"], ["a", "1"]] },
           { type: "image", url: "https://example.test/logo.png", text: ["Logo"] },
+          { type: "bookmark", url: "https://example.test/a_b" },
           { type: "audio", text: [] },
           { type: "table_of_contents", text: [] },
           { type: "child_page", text: [], children: [{ type: "paragraph", text: ["Sub-page body."] }] },
@@ -227,6 +233,7 @@ test("blocks become Markdown: headings move down a level, text an editor typed r
   assert.match(body, /- \[x\] done/);
   assert.match(body, /\| Key \| Value \|/);
   assert.match(body, /!\[Logo\]\(https:\/\/example\.test\/logo\.png\)/);
+  assert.match(body, /\[https:\/\/example\.test\/a_b\]\(https:\/\/example\.test\/a_b\)/, "a bookmark links with its URL");
   assert.ok(loaded.logs.some((line) => /warn notionLoader: audio, table_of_contents, child_page blocks were left out \(no Markdown form, and a row's sub-pages aren't pages of the collection\)/.test(line)), loaded.logs.join("\n"));
 });
 

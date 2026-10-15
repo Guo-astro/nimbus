@@ -143,6 +143,12 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
       for (const type of ["audio", "table_of_contents", "breadcrumb", "child_page"]) {
         n2m.setCustomTransformer(type, () => (dropped.add(type), ""));
       }
+      // A bookmark links with its caption, else its URL.
+      n2m.setCustomTransformer("bookmark", (block) => {
+        if (!("type" in block) || block.type !== "bookmark") return false;
+        const caption = block.bookmark.caption.map((t) => t.plain_text).join("").trim();
+        return `[${caption ? escapeTyped(caption) : block.bookmark.url}](${block.bookmark.url})`;
+      });
 
       // Read everything before writing anything: a failed request fails the
       // load and leaves the last good content in place.
@@ -152,9 +158,9 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
         if (!dataSource) {
           if (!options.database) fail("set `database` (or `dataSource`).");
           const database = (await notion.databases.retrieve({ database_id: options.database! })) as {
-            data_sources?: Array<{ id: string; name: string }>;
+            data_sources?: Array<{ id: string; name: string; in_trash?: boolean }>;
           };
-          const sources = database.data_sources ?? [];
+          const sources = (database.data_sources ?? []).filter((s) => !s.in_trash);
           if (sources.length !== 1) {
             fail(`database ${options.database} has ${sources.length} data sources; set \`dataSource\` to one of: ${sources.map((s) => `${s.name} (${s.id})`).join(", ")}.`);
           }
@@ -193,6 +199,11 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
         }
         if (status?.type === "checkbox" && options.publishedValue) {
           fail(`property "${names.status}" is a checkbox, which has no values; remove publishedValue.`);
+        }
+        // A renamed status property must not publish every draft.
+        const renamed = status ? undefined : Object.values(properties).find((p) => p.type === "status");
+        if (renamed) {
+          fail(`there's no "${names.status}" property, but "${renamed.name}" is a status property. Set properties.status: "${renamed.name}", or rename it back.`);
         }
         if (!status) logger.info(`notionLoader: no "${names.status}" property, so every row publishes.`);
 
@@ -357,7 +368,7 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 </DocsLayout>
 ```
 
-**Rendering.** If the Nimbus config sets `rendering` (Cloudflare scaffolds set
+**Rendering.** If the Nimbus config sets `rendering` (a Cloudflare site with server output sets
 `rendering: { default: "request" }`), add the collection to `rendering.collections`, or the
 build fails: `collections: { <collection>: "request" }` (or `"build"` to prerender it). Without
 a `rendering` option, skip this.
@@ -376,6 +387,7 @@ tell the user the starter's section tab for it will 404, and suggest adding an i
 | The database | Result |
 |---|---|
 | No `Status` property, nothing configured | every row publishes (one info line says so) |
+| No `Status` property, but a status property under another name | the build fails naming it: set `properties.status` |
 | `Status` present | a row that isn't `Published` (or unchecked) is a draft: shown in `astro dev` with the Draft badge, absent from `astro build` |
 | A named property missing or of the wrong type | the build fails, listing the data source's properties |
 
@@ -397,6 +409,8 @@ the site changes only when it rebuilds.
 
 ## Notes for the agent
 
+- A Notion equation becomes `$$…$$` math. Unless the site turns on
+  `markdown.features.math` with the `math()` plugin, it shows as TeX source.
 - Notion file URLs (images uploaded to Notion) expire after an hour; images
   that must last belong on a host of their own.
 - The site doesn't update when Notion does: rebuild on a schedule, or from a

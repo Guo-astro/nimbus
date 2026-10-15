@@ -273,6 +273,27 @@ test("the parser is found where the build finds it: through Nimbus's own links, 
   }
 });
 
+test("a parser installed after a check is found by the next check in the same process", async () => {
+  const dir = project(API);
+  try {
+    // npm: Nimbus and another @scalar package are already installed when `check --fix` adds the parser.
+    fakePackage(path.join(dir, "node_modules/@cloudflare/nimbus-docs"), "@cloudflare/nimbus-docs");
+    fakePackage(path.join(dir, "node_modules/@scalar/json-magic"), "@scalar/json-magic");
+    assert.ok(await parserFinding(dir));
+    // Its entry only in `dist/`, like the real package: Node's resolver remembers the missing package.json.
+    const parser = path.join(dir, "node_modules/@scalar/openapi-parser");
+    fs.mkdirSync(path.join(parser, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(parser, "package.json"),
+      JSON.stringify({ name: "@scalar/openapi-parser", type: "module", exports: { ".": "./dist/index.js" } }),
+    );
+    fs.writeFileSync(path.join(parser, "dist/index.js"), "export {};\n");
+    assert.equal(await parserFinding(dir), undefined);
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test("no parser finding without api collections or under Plug'n'Play", async () => {
   const none = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
   const pnp = project(API);

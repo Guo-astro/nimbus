@@ -10,7 +10,6 @@
  */
 
 import fs from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 
 import { satisfies } from "semver";
@@ -253,26 +252,18 @@ function checkOpenApiParser(
 }
 
 /**
- * The build imports the parser from Nimbus's own location, so resolve it from
- * the installed `@cloudflare/nimbus-docs` (through pnpm's links), not only
- * from the project's `node_modules`.
+ * The build imports the parser from Nimbus's own location, so look for it
+ * from the installed `@cloudflare/nimbus-docs` (through pnpm's links), not
+ * only from the project's `node_modules`. On disk rather than through Node's
+ * resolver, so a parser `check --fix` just installed is found in the same run.
  */
 function openApiParserResolves(cwd: string): boolean {
-  let from = path.join(cwd, "package.json");
   for (let dir = cwd; ; dir = path.dirname(dir)) {
     const nimbus = path.join(dir, "node_modules", "@cloudflare", "nimbus-docs");
     if (fs.existsSync(path.join(nimbus, "package.json"))) {
-      from = path.join(fs.realpathSync(nimbus), "package.json");
-      break;
+      return depInstalled(fs.realpathSync(nimbus), "@scalar/openapi-parser");
     }
-    if (path.dirname(dir) === dir) break;
-  }
-  try {
-    createRequire(from).resolve("@scalar/openapi-parser");
-    return true;
-  } catch (error) {
-    // Installed, but its exports have no `require` path: still found.
-    return (error as NodeJS.ErrnoException).code === "ERR_PACKAGE_PATH_NOT_EXPORTED";
+    if (path.dirname(dir) === dir) return depInstalled(cwd, "@scalar/openapi-parser");
   }
 }
 

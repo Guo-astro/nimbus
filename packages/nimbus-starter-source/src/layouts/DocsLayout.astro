@@ -153,7 +153,7 @@ const showToc = headings !== false && (hasToc || headings.length > 0);
                 const raw = JSON.parse(sessionStorage.getItem("sidebar-state") || "null");
                 const state = raw && content.dataset.nbSidebarHash === raw.hash ? raw : null;
                 if (state) {
-                  const groups = content.querySelectorAll("[data-nb-sidebar-group]");
+                  const groups = content.querySelectorAll("details");
                   for (let i = 0; i < groups.length; i++) {
                     if (typeof state.open[i] === "boolean") {
                       setGroupOpen(groups[i], state.open[i]);
@@ -163,10 +163,10 @@ const showToc = headings !== false && (hasToc || headings.length > 0);
 
                 const active = sidebar.querySelector("[aria-current='page']");
                 if (active) {
-                  let d = active.closest("[data-nb-sidebar-group]");
+                  let d = active.closest("details");
                   while (d) {
                     setGroupOpen(d, true);
-                    d = d.parentElement && d.parentElement.closest("[data-nb-sidebar-group]");
+                    d = d.parentElement && d.parentElement.closest("details");
                   }
                 }
 

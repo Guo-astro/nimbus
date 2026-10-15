@@ -1,8 +1,5 @@
 import { mount } from "@cloudflare/nimbus-docs/client";
 
-// Only one bar on a page answers [ and ].
-let keyOwner: HTMLElement | null = null;
-
 // Warm the next page the moment its key goes down, so it's ready when the
 // press finishes. A plain prefetch link, so sites that turn off Astro's
 // prefetch still build.
@@ -64,14 +61,11 @@ function initPagination(root: HTMLElement): () => void {
   });
   resize.observe(root);
 
-  // [ and ] press the matching key, then go. Ignored while typing, with a
-  // modifier held, or while a dialog is open (search, the drawer, a zoomed
-  // image), so it never fights the browser, a text field or a modal.
+  // [ and ] press the matching key, then go: only while focus is in this bar,
+  // so single-key shortcuts never fire from elsewhere on the page (WCAG
+  // 2.1.4), and never with a modifier held.
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
-    if (document.querySelector("dialog[open]")) return;
-    const target = e.target;
-    if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
     const item = items.find((i) => i.dataset.nbPaginationKey === e.key);
     if (!item) return;
     e.preventDefault();
@@ -80,14 +74,10 @@ function initPagination(root: HTMLElement): () => void {
     show(item);
     window.setTimeout(() => item.click(), 140);
   };
-  const listens = root.dataset.keys !== "false" && (!keyOwner || !keyOwner.isConnected);
+  const listens = root.dataset.keys !== "false";
   if (listens) {
-    keyOwner = root;
     for (const item of items) item.setAttribute("aria-keyshortcuts", item.dataset.nbPaginationKey ?? "");
-    document.addEventListener("keydown", onKey);
-  } else {
-    // Its keys belong to another bar, so it doesn't show caps it can't honour.
-    root.dataset.keys = "false";
+    root.addEventListener("keydown", onKey);
   }
 
   return () => {
@@ -95,10 +85,7 @@ function initPagination(root: HTMLElement): () => void {
     root.removeEventListener("pointerleave", onLeave);
     root.removeEventListener("focusout", onFocusOut);
     resize.disconnect();
-    if (listens) {
-      document.removeEventListener("keydown", onKey);
-      keyOwner = null;
-    }
+    if (listens) root.removeEventListener("keydown", onKey);
   };
 }
 

@@ -23,7 +23,7 @@ interface Props extends HTMLAttributes<"nav"> {
   prevLabel?: string;
   /** Caption above the next page's title. */
   nextLabel?: string;
-  /** `[` and `]` move between pages. Only the first pagination on a page listens. */
+  /** `[` and `]` move between pages while focus is in the bar. */
   keys?: boolean;
 }
 

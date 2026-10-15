@@ -8,8 +8,8 @@ export interface AgentApiPublication {
   version?: string;
   /** The HTML reference. */
   docsUrl: string;
-  /** The reference's Markdown representation. */
-  markdownUrl: string;
+  /** The reference's Markdown representation, when the version has one. */
+  markdownUrl?: string;
   /** The published self-contained spec, when publishing is on and bundling succeeded. */
   spec?: { url: string; type: string };
 }

@@ -92,3 +92,23 @@ test("the catalog, ARD and Link header code has no spec-format branches", () => 
     assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /openapi/i, file);
   }
 });
+
+test("a version without Markdown gets an HTML-only service-doc and a versioned ARD identifier", () => {
+  const versioned = createAgentCapabilities({
+    apis: [
+      {
+        collection: "pets",
+        version: "v1",
+        docsUrl: `${options.site}/docs/pets/?version=v1`,
+        spec: { url: `${options.site}/docs/pets/v1/openapi.json`, type: "application/vnd.oai.openapi+json" },
+      },
+    ],
+  });
+  const catalog = apiCatalog(versioned)!;
+  assert.equal(validate(catalog), true, JSON.stringify(validate.errors));
+  assert.deepEqual(catalog.linkset[0]!["service-doc"], [{ href: `${options.site}/docs/pets/?version=v1`, type: "text/html" }]);
+  const ard = agentDiscoveryManifest(versioned, options);
+  const entry = ard.entries.find((item) => item.url.endsWith("/pets/v1/openapi.json"))!;
+  assert.match(entry.identifier, /:api-pets-v1$/);
+  assert.ok(agentHomepageLinks(versioned, options).includes(`<${options.site}/docs/pets/?version=v1>; rel="service-doc"; type="text/html"`));
+});

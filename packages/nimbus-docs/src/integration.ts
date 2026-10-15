@@ -135,7 +135,7 @@ import {
   AGENT_SKILLS_INDEX_PATH,
   publishAgentSkills,
 } from "./_internal/agent-skills.js";
-import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
+import { pageUrl, resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
@@ -207,7 +207,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, stripBase, toDocumentHref, toRouteKey, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, stripBase, toRouteKey, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
 import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
@@ -822,7 +822,6 @@ export function nimbus(
     const specWarnings: string[] = [];
     const apis: (AgentApiPublication & { hidden: boolean })[] = [];
     for (const api of resolveAllApiCollections(config.api)) {
-      if (pageAssetCollections.includes(api.family) && !api.isDefault) continue;
       let spec: { url: string; type: string } | undefined;
       if (api.publishSpec) {
         const published = await publishSpec(api);
@@ -842,18 +841,18 @@ export function nimbus(
           });
         }
       }
+      // Markdown references exist only for the default version of a
+      // query-addressed or `bundle: false` collection.
+      const hasMarkdown =
+        api.isDefault ||
+        (api.versionMode !== "query" && !pageAssetCollections.includes(api.family));
       apis.push({
         collection: api.family,
         ...(api.version ? { version: api.version } : {}),
-        docsUrl: absolute(toDocumentHref(api.mountPath)),
-        markdownUrl: absolute(`${api.mountPath}/index.md`),
+        docsUrl: absolute(pageUrl(api, "")),
+        ...(hasMarkdown ? { markdownUrl: absolute(`${api.mountPath}/index.md`) } : {}),
         ...(spec ? { spec } : {}),
-        // Discovery is default-only for query-addressed versions: a
-        // non-default version has no version-free docs or Markdown URL, so
-        // it drops off every discovery surface the way hidden versions do
-        // (its spec file still publishes above).
-        hidden:
-          api.hidden || (api.versionMode === "query" && !api.isDefault),
+        hidden: api.hidden,
       });
     }
     // Skills live at the origin root like the rest of .well-known, so their

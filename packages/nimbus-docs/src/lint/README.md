@@ -80,7 +80,7 @@ projects get zero new transitive deps when they install `nimbus-docs`.
 | `bare-url` | authoring | remark-lint | — |
 | `internal-link` | authoring | hand-rolled | did-you-mean hint |
 | `redirected-link` | authoring | hand-rolled | destination hint |
-| `image-ref` | authoring | hand-rolled | did-you-mean hint |
+| `image-ref` | authoring | hand-rolled | ✓ (the site base) |
 | `duplicate-slug` | build | hand-rolled | — |
 | `mdx-syntax` | build | parser | — |
 

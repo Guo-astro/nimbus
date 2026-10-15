@@ -51,6 +51,12 @@ export interface LintOptions {
    */
   site?: string;
   /**
+   * The deployment base in the renderer's form (`"/docs"`, `""` at the
+   * root), threaded into each rule's `ctx.base`. `image-ref` checks the path
+   * the browser will request with it.
+   */
+  base?: string;
+  /**
    * Cancellation signal — checked between files in `lintPaths`/`fixPaths`.
    * The CLI wires this to SIGINT so Ctrl-C stops the run after the
    * in-progress file finishes (its write is already atomic), instead of
@@ -155,6 +161,7 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
         file,
         options: resolved.options,
         site: opts.site,
+        base: opts.base,
         optionsOf: (code) =>
           resolveRuleForCollection(code, rules, collections, file.collection).options,
         report: (report) => reports.push(report),

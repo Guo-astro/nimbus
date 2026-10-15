@@ -24,6 +24,22 @@ const href = withBase("/installation", import.meta.env.BASE_URL);
 
 Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/installation", "/docs")` intentionally produces `/docs/docs/installation`.
 
+## Images under a deployment base
+
+Prefer relative image paths (`./architecture.png`) or files in `src/assets`. Astro optimizes them, and they work under any base.
+
+A file in `public/` is served under the base, and images follow Astro's rule rather than the link rule above: Nimbus adds the base to reference definitions, but not to inline images. With `base: "/docs"` and `public/architecture.png`:
+
+```md
+![Architecture](/docs/architecture.png)
+
+![Architecture][arch]
+
+[arch]: /architecture.png
+```
+
+Write the base in an inline image or `<img src>`, and leave it out of a reference definition. `nimbus-docs lint` reports either mistake with `nimbus/image-ref`, and `nimbus-docs lint --fix` repairs inline images and definitions when the file is in `public/`.
+
 ## The components registry
 
 Components listed in `src/components.ts` are available in every MDX file **without an import**:

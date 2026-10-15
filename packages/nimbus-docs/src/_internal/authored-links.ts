@@ -63,7 +63,7 @@ function fail(
   );
 }
 
-function basePrefix(base: string): string {
+export function basePrefix(base: string): string {
   if (
     !base.startsWith("/") ||
     base.startsWith("//") ||
@@ -164,7 +164,7 @@ function nodeRange(
   return [start, end];
 }
 
-function destinationOffset(
+export function destinationOffset(
   source: string,
   node: MdNode,
   sourceId: string | undefined,

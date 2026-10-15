@@ -178,7 +178,7 @@ For prose collections, use the official [Node](https://docs.astro.build/en/guide
 | Key | Type | Notes |
 | --- | --- | --- |
 | `mcp` | boolean | Serve a remote MCP server at `/mcp` with `list_pages` and `get_page`. Needs a server adapter and the `@modelcontextprotocol/server` package. Default `false`. |
-| `discovery` | `false` | Publish no origin-root discovery files (`/.well-known/ard.json`, `ai-catalog.json`, `api-catalog`) or homepage links to them, for a site on a domain another site owns. See [Shared domains](/ai/docs-for-agents#shared-domains). |
+| `discovery` | boolean | `false` publishes no origin-root discovery files (`/.well-known/ard.json`, `ai-catalog.json`, `api-catalog`) or homepage links to them, for a site on a domain another site owns. See [Shared domains](/ai/docs-for-agents#shared-domains). Default `true`. |
 
 ```ts
 agents: { mcp: true },

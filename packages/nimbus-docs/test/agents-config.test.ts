@@ -22,12 +22,13 @@ test("agents.mcp is a boolean under a strict agents block", () => {
   assert.throws(() => validateNimbusConfig({ ...site, agents: true }), /agents/);
 });
 
-test("agents.discovery accepts only false", () => {
-  assert.equal(validateNimbusConfig({ ...site, agents: { discovery: false } }).agents?.discovery, false);
-  for (const discovery of [true, "off", {}]) {
+test("agents.discovery is a boolean", () => {
+  for (const discovery of [true, false])
+    assert.equal(validateNimbusConfig({ ...site, agents: { discovery } }).agents?.discovery, discovery);
+  for (const discovery of ["off", {}]) {
     assert.throws(
       () => validateNimbusConfig({ ...site, agents: { discovery } }),
-      /"agents.discovery" must be false/,
+      /"agents.discovery" must be true or false/,
       JSON.stringify(discovery),
     );
   }

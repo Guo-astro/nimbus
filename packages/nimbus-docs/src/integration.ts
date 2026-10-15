@@ -2405,6 +2405,10 @@ export function nimbus(
             throw authorError(
               `Nimbus publishes /.well-known/agent-skills/ from the skills/ folder. Move your existing file at ${path.relative(projectRoot, collision)}, or remove skills/ to keep publishing it yourself.`,
             );
+          if (config.agents?.discovery === false && skills?.index)
+            logger.info(
+              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
+            );
         }
         params.addMiddleware?.({
           entrypoint: new URL(

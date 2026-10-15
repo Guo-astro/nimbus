@@ -121,6 +121,20 @@ test("the Cloudflare adapter's root copies follow the switch", async () => {
   }
 });
 
+test("off with a skills/ folder: the build says the skills still publish at the origin root", async () => {
+  const skills = { "deploy/SKILL.md": "---\nname: deploy\ndescription: Deploy with Wrangler.\n---\nSteps.\n" };
+  const notice = /agents\.discovery is false, but skills\/ still publishes \/\.well-known\/agent-skills\/ at the origin root/;
+  for (const off of [true, false]) {
+    const site = await discoveryFixture(undefined, "docs", false, skills, off ? OFF : {});
+    try {
+      const log = await captured(() => build({ ...site.config, logLevel: "info" }));
+      assert.equal(notice.test(log), off, log);
+    } finally {
+      await rm(site.root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("astro dev answers no discovery path when off, and serves the site's own file", async () => {
   for (const base of ["/", "/docs"]) {
     const site = await discoveryFixture(undefined, "docs", true, undefined, OFF);
@@ -161,4 +175,27 @@ test("static _headers and request-rendered homepages get the same links, without
   const rules = agentDiscoveryHeaderRules(capabilities, { ...options, discovery: false });
   assert.doesNotMatch(rules, DISCOVERY_RULES);
   for (const link of off) assert.ok(rules.includes(link), link);
+});
+
+test("off with several API versions: only each default's links, without the catalog", () => {
+  const api = (version: string, isDefault: boolean) => ({
+    collection: "pets",
+    version,
+    ...(isDefault ? {} : { isDefault: false }),
+    docsUrl: `https://example.test/docs/pets/${isDefault ? "" : `${version}/`}`,
+    spec: { url: `https://example.test/docs/pets/${isDefault ? "" : `${version}/`}openapi.json`, type: "application/json" },
+  });
+  const capabilities = createAgentCapabilities({ apis: [api("v1", false), api("v2", true), api("v0", false)] });
+  const links = agentHomepageLinks(capabilities, {
+    site: "https://example.test",
+    title: "Example",
+    base: "/docs",
+    output: "server",
+    discovery: false,
+  });
+  assert.deepEqual(links.filter((link) => /rel="service-/.test(link)), [
+    '<https://example.test/docs/pets/>; rel="service-doc"; type="text/html"',
+    '<https://example.test/docs/pets/openapi.json>; rel="service-desc"; type="application/json"',
+  ]);
+  assert.doesNotMatch(links.join("\n"), /rel="(ard|api-catalog)"/);
 });

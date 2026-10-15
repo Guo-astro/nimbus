@@ -198,11 +198,11 @@ export interface AgentsConfig {
   mcp?: boolean;
   /**
    * Origin-root discovery: `/.well-known/{ard.json, ai-catalog.json, api-catalog}`
-   * and the homepage `rel="ard"` / `rel="api-catalog"` links. Absent: published.
+   * and the homepage `rel="ard"` / `rel="api-catalog"` links. Default `true`.
    * `false`: none of these; your own `.well-known` files are kept.
    * `llms.txt`, Markdown links, skills and MCP are unaffected.
    */
-  discovery?: false;
+  discovery?: boolean;
 }
 
 export type RenderingMode = "build" | "request";

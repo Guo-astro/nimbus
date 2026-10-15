@@ -759,7 +759,7 @@ const agentsSchema = withStrictKeys(
       .boolean({ error: '"agents.mcp" must be true or false' })
       .optional(),
     discovery: z
-      .literal(false, { error: '"agents.discovery" must be false' })
+      .boolean({ error: '"agents.discovery" must be true or false' })
       .optional(),
   }),
   {

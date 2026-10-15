@@ -133,7 +133,7 @@ Cloudflare supports request-rendered prose and generated API collections. Choose
 
 The installer wires `@astrojs/cloudflare` and sets Astro to server output. It creates `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static configuration. Customized Wrangler files and alternate JSON or TOML configurations are preserved with manual guidance.
 
-When the active Nimbus config has no rendering policy, the installer adds `rendering: { default: "request" }`. Existing policies are preserved. If an imported or ambiguous Nimbus config cannot be edited safely, the installer completes the adapter setup and prints instructions for generating a coding-agent recipe. Generate that recipe with:
+When the active Nimbus config has no rendering policy, the installer adds `rendering: { default: "request" }`. Existing policies are preserved. If an imported or ambiguous Nimbus config cannot be edited safely, the installer completes the adapter setup; from a shell it prints instructions for generating a coding-agent recipe, and in a coding agent session it prints the recipe itself. Generate that recipe with:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print" />
 

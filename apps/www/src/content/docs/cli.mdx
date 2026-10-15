@@ -67,11 +67,11 @@ Use `--print` to force the markdown output, skipping detection.
 
 ### Server adapters
 
-For `adapter-cloudflare`, `adapter-vercel`, `adapter-netlify`, and `adapter-node`, the CLI installs the Astro adapter and rewrites the marked `output` block in `astro.config`. It refuses to replace a different adapter or a non-literal `output` value.
+Add the adapter for the host you deploy to: `adapter-cloudflare`, `adapter-netlify`, `adapter-node` or `adapter-vercel`. The CLI installs the Astro adapter and rewrites the marked `output` block in `astro.config`. It refuses to replace a different adapter or a non-literal `output` value. For a Node server:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-node" />
 
-`adapter-cloudflare` adds request rendering when the Nimbus config has no explicit rendering policy. Existing policies are preserved; imported or ambiguous configurations receive a coding-agent handoff instead of a speculative rewrite. The command creates a server-compatible `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static config; custom JSONC and alternate JSON/TOML configs stay untouched.
+On Cloudflare only, `adapter-cloudflare` also adds request rendering when the Nimbus config has no explicit rendering policy. Existing policies are preserved; imported or ambiguous configurations receive a coding-agent handoff instead of a speculative rewrite. The command creates a server-compatible `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static config; custom JSONC and alternate JSON/TOML configs stay untouched.
 
 After completing the adapter install, expect:
 
@@ -88,7 +88,7 @@ export default defineConfig({
 });
 ```
 
-When the command runs inside a detected coding agent, it emits a versioned recipe so the agent can safely adapt project-owned or split configuration. From a regular shell, use `--print` to request that recipe explicitly:
+A coding agent running an adapter command gets the same edits as a shell. For `adapter-cloudflare` only, where the CLI can't edit safely but an agent can (no marked `output` block, a CommonJS or symlinked config, a failed write, or a Nimbus config imported from another file), it says why and prints a versioned recipe for the agent to finish, and exits `0`. Use `--print` to get that recipe without changing anything:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print | claude" />
 

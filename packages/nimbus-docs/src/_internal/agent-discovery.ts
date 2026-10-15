@@ -171,9 +171,12 @@ export function agentHomepageLinks(
     );
   if (discovery && capabilities.apis.length)
     links.push(link(apiCatalogUrl(options.site), "api-catalog"));
-  for (const api of capabilities.apis)
+  // The catalog and ARD carry the full version inventory. Homepage headers
+  // advertise only family defaults, so adding versions doesn't grow responses.
+  const defaults = capabilities.apis.filter((api) => api.isDefault !== false);
+  for (const api of defaults)
     links.push(link(api.docsUrl, "service-doc", "text/html"));
-  for (const api of capabilities.apis)
+  for (const api of defaults)
     if (api.spec) links.push(link(api.spec.url, "service-desc", api.spec.type));
   return links;
 }

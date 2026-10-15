@@ -203,14 +203,13 @@ test("discovery headers share existing exact-path rules without replacing owner 
   }
 });
 
-test("many API versions get separate bounded Link lines with unchanged header values", () => {
+test("many API families get separate bounded Link lines with unchanged header values", () => {
   const capabilities = createAgentCapabilities({
     ...minimal,
     apis: Array.from({ length: 30 }, (_, version) => ({
-      collection: "pets",
-      version: `v${version}`,
-      docsUrl: `${options.site}/docs/pets/v${version}/`,
-      markdownUrl: `${options.site}/docs/pets/v${version}/index.md`,
+      collection: `pets-${version}`,
+      docsUrl: `${options.site}/docs/pets-${version}/`,
+      markdownUrl: `${options.site}/docs/pets-${version}/index.md`,
     })),
   });
   const values = agentHomepageLinks(capabilities, options);

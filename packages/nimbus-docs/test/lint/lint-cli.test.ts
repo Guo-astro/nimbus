@@ -202,7 +202,7 @@ function astroConfig(options: string): string {
   ].join("\n");
 }
 
-const STALE = /Lint rules changed since \.nimbus\/lint\.json was written[\s\S]*astro sync/;
+const STALE = /config changed since \.nimbus\/lint\.json was written[\s\S]*astro sync/;
 
 test("rules edited since lint.json was written: lint says it used the old ones", () => {
   const res = run({

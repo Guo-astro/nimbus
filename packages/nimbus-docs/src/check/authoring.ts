@@ -27,6 +27,7 @@ import {
   type RulesConfig,
 } from "../lint/index.js";
 import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { BASE_FROM_ROUTES_MESSAGE, resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "./finding.js";
 
@@ -78,8 +79,17 @@ export function checkAuthoring(
     return { scope: "authoring", findings, notes, evaluated: true };
   }
 
+  const { base, known: baseKnown } = resolveLintBase(cwd, config.base);
+  const imageRefRuns = ruleEnabledAnywhere("nimbus/image-ref", config.rules, config.collections);
+  if (imageRefRuns && !baseKnown) {
+    notes.push({ code: "nimbus/site-base-unknown", reason: UNKNOWN_SITE_BASE_MESSAGE, requiresBuild: true });
+  } else if (imageRefRuns && hasLintJson && config.base === undefined) {
+    notes.push({ code: "nimbus/site-base-from-routes", reason: BASE_FROM_ROUTES_MESSAGE, requiresBuild: true });
+  }
+
   let effective = {
     ...config,
+    base,
     collectionOf: lintScope.collectionOf,
     displayPath: lintScope.displayPath,
     readOnlySource: lintScope.readOnlySource,
@@ -116,6 +126,8 @@ export interface MaterializedConfig {
   collections: CollectionsConfig;
   site?: string;
   markdownFeatures?: Features;
+  /** The site base as the renderer applies it; absent in a file from an older version. */
+  base?: string;
 }
 
 export interface LoadMaterializedResult {
@@ -141,7 +153,13 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
     return { config: { rules: {}, collections: {} }, error: null };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown; markdownFeatures?: unknown };
+  let parsed: {
+    rules?: unknown;
+    collections?: unknown;
+    site?: unknown;
+    markdownFeatures?: unknown;
+    base?: unknown;
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -159,8 +177,9 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
     );
     const site = typeof parsed.site === "string" ? parsed.site : undefined;
     const markdownFeatures = materializedFeatures(parsed.markdownFeatures);
+    const base = typeof parsed.base === "string" ? parsed.base : undefined;
     return {
-      config: { rules: validated.rules, collections: validated.collections, site, markdownFeatures },
+      config: { rules: validated.rules, collections: validated.collections, site, markdownFeatures, base },
       error: null,
     };
   } catch (err) {

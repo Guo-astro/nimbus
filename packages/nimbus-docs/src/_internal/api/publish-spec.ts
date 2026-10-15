@@ -63,7 +63,7 @@ export async function publishOpenApiSpec(
     (import(/* @vite-ignore */ parser) as Promise<{
       dereference(document: unknown): Promise<{ errors?: { message: string }[] }>;
     }>).catch(async () => {
-      throw new Error(await openApiParserMissing());
+      throw new Error(await openApiParserMissing(rootDir));
     }),
   ]);
   const rootFile = typeof source === "string" ? path.resolve(rootDir, source) : undefined;

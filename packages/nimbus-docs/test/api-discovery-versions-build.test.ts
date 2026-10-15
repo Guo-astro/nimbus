@@ -230,11 +230,17 @@ test("specs publish for every version that allows it, hidden ones included, with
   ]);
 });
 
-test("the homepage Link header advertises the same versions", async () => {
+test("the homepage Link header advertises only defaults and the complete catalog", async () => {
   const headers = await output("_headers");
-  assert.ok(headers.includes(`<${ORIGIN}/qv/?v=v1>; rel="service-doc"`), headers);
-  assert.ok(headers.includes(`<${ORIGIN}/big/v1/>; rel="service-doc"`), headers);
-  assert.ok(headers.includes(`<${ORIGIN}/qv/v1/openapi.json>; rel="service-desc"`), headers);
+  assert.ok(headers.includes('<https://example.test/.well-known/api-catalog>; rel="api-catalog"'), headers);
+  for (const family of ["qv", "big", "pets"])
+    assert.ok(headers.includes(`<${ORIGIN}/${family}/>; rel="service-doc"`), headers);
+  for (const family of ["qv", "big"])
+    assert.ok(headers.includes(`<${ORIGIN}/${family}/openapi.json>; rel="service-desc"`), headers);
+  assert.doesNotMatch(headers, /(?:\?v=v[19]|\/v[19]\/).*?>; rel="service-/);
+  assert.ok(!headers.includes(`<${ORIGIN}/pets/openapi.json>; rel="service-desc"`));
+  // Non-default specs still receive content-type rules even though homepage links omit them.
+  assert.match(headers, /\/big\/v1\/openapi\.json\n {2}Content-Type: application\/vnd\.oai\.openapi\+json/);
   assert.doesNotMatch(headers, /v0\/>|v0\/openapi\.json>|\?v=v0/);
   // Hidden specs keep their media-type rule.
   assert.match(headers, /\/qv\/v0\/openapi\.json\n {2}Content-Type: application\/vnd\.oai\.openapi\+json/);

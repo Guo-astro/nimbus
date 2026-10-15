@@ -6,6 +6,8 @@
 export interface AgentApiPublication {
   collection: string;
   version?: string;
+  /** False for a non-default version; homepage headers link only defaults. Absent means default. */
+  isDefault?: boolean;
   /** The HTML reference. */
   docsUrl: string;
   /** The reference's Markdown representation, when the version has one. */

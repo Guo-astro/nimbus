@@ -849,6 +849,7 @@ export function nimbus(
       apis.push({
         collection: api.family,
         ...(api.version ? { version: api.version } : {}),
+        ...(!api.isDefault ? { isDefault: false } : {}),
         docsUrl: absolute(pageUrl(api, "")),
         ...(hasMarkdown ? { markdownUrl: absolute(`${api.mountPath}/index.md`) } : {}),
         ...(spec ? { spec } : {}),

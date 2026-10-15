@@ -39,7 +39,7 @@ export function virtualAgentCapabilitiesPlugin(
         if (pathname === API_CATALOG_PATH) {
           void get()
             .then(({ capabilities, options }) => {
-              const catalog = apiCatalog(capabilities);
+              const catalog = options.discovery === false ? undefined : apiCatalog(capabilities);
               if (!catalog) return next();
               response.setHeader("Content-Type", API_CATALOG_MEDIA_TYPE);
               response.setHeader("Access-Control-Allow-Origin", "*");
@@ -75,6 +75,8 @@ export function virtualAgentCapabilitiesPlugin(
         if (["/.well-known/ard.json", "/.well-known/ai-catalog.json"].includes(pathname)) {
           void get()
             .then(({ capabilities, options }) => {
+              // Off: Vite serves the site's own public/.well-known file, or 404s.
+              if (options.discovery === false) return next();
               response.setHeader("Content-Type", "application/json");
               response.setHeader("Access-Control-Allow-Origin", "*");
               response.end(

@@ -855,6 +855,22 @@
         "Run astro dev, then npx @modelcontextprotocol/inspector --cli http://localhost:4321/mcp --transport http --method tools/list (with the base path, and /mcp/ under trailingSlash: \"always\"), and confirm it lists get_page and list_pages.",
         "Open a docs page, click Copy MCP URL, and confirm it copies the /mcp URL and briefly shows Copied."
       ]
+    },
+    {
+      "id": "agent-discovery-opt-out",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "agent-discovery-opt-out",
+      "summary": "Optionally leave origin-root agent discovery to the site that owns a shared domain.",
+      "affected": "Sites deployed under a base on a domain whose /.well-known belongs to another site.",
+      "instructions": [
+        "No action is needed when this site owns its domain: discovery is published as before.",
+        "If another site owns the domain's /.well-known, set agents: { discovery: false } in the Nimbus config. Nimbus then publishes no /.well-known/ard.json, ai-catalog.json or api-catalog, adds no rel=\"ard\" or rel=\"api-catalog\" homepage links, and keeps your own .well-known files.",
+        "Remove any .assetsignore entries or middleware you added to hide those files, and clean the deployment output once, since Nimbus doesn't delete files an earlier build wrote."
+      ],
+      "verify": [
+        "Build the site and confirm the output has no Nimbus discovery documents and the homepage Link header has no rel=\"ard\" or rel=\"api-catalog\"."
+      ]
     }
   ]
 }

@@ -21,3 +21,15 @@ test("agents.mcp is a boolean under a strict agents block", () => {
   assert.throws(() => validateNimbusConfig({ ...site, agents: { search: true } }), /Unknown agents sub-key "search"/);
   assert.throws(() => validateNimbusConfig({ ...site, agents: true }), /agents/);
 });
+
+test("agents.discovery accepts only false", () => {
+  assert.equal(validateNimbusConfig({ ...site, agents: { discovery: false } }).agents?.discovery, false);
+  for (const discovery of [true, "off", {}]) {
+    assert.throws(
+      () => validateNimbusConfig({ ...site, agents: { discovery } }),
+      /"agents.discovery" must be false/,
+      JSON.stringify(discovery),
+    );
+  }
+  assert.throws(() => validateNimbusConfig({ ...site, agents: { Discovery: false } }), /Did you mean `discovery`\?/);
+});

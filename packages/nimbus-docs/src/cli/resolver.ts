@@ -32,7 +32,7 @@ export interface RegistryFile {
 
 export interface ComponentItem {
   name: string;
-  type: "registry:ui" | "registry:lib" | "registry:source";
+  type: "registry:ui" | "registry:lib";
   title: string;
   description: string;
   /** Registry release this item shipped in (provenance; drift is decided by hash). Optional. */
@@ -70,7 +70,7 @@ const registryFileSchema = z.object({
 
 const componentItemSchema = z.object({
   name: z.string().min(1),
-  type: z.enum(["registry:ui", "registry:lib", "registry:source"]),
+  type: z.enum(["registry:ui", "registry:lib"]),
   title: z.string(),
   description: z.string(),
   version: z.string().optional(),

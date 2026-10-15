@@ -1,6 +1,6 @@
 // Content sources (`nimbus-docs add source <name|url>`): names and aliases
 // share the slug namespace and never take a kind's name, the URL guide is not
-// a name, and a source's installed files stay out of shipped templates.
+// a name, and a source is a guide only: the agent writes any code from it.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -12,15 +12,12 @@ import { MANIFESTS } from "./manifests.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCES = resolve(HERE, "sources");
 const FEATURES = resolve(HERE, "features");
-const STARTER = resolve(HERE, "../../../packages/nimbus-starter-source");
 const KINDS = ["source"];
 
 interface Frontmatter {
   name: string;
   type: string;
   aliases?: Record<string, string>;
-  files?: string[];
-  dependencies?: string[];
   url?: boolean;
 }
 
@@ -30,12 +27,6 @@ const frontmatter = (file: string): Frontmatter =>
 const sources = readdirSync(SOURCES)
   .filter((file) => file.endsWith(".md"))
   .map((file) => ({ file, fm: frontmatter(resolve(SOURCES, file)) }));
-
-function starterList(key: string): string[] {
-  const src = readFileSync(resolve(STARTER, "starter.manifest.mjs"), "utf8");
-  const block = src.match(new RegExp(`${key}:\\s*\\[([\\s\\S]*?)\\]`));
-  return block ? [...block[1]!.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]!) : [];
-}
 
 test("source names and aliases are unique across the registry and never a kind", () => {
   const taken = new Set([
@@ -57,15 +48,10 @@ test("source names and aliases are unique across the registry and never a kind",
   assert.deepEqual([...seen].sort(), ["bitbucket", "git", "github", "gitlab", "notion"]);
 });
 
-test("the URL guide exists and isn't a name; installed files stay out of templates", () => {
+test("the URL guide exists and isn't a name; no source installs files", () => {
   assert.ok(sources.some(({ fm }) => fm.name === "from-url" && fm.url === true));
-  const paths = starterList("registryOnlyPaths").map((p) => p.replace(/^src\//, ""));
-  const deps = starterList("registryOnlyDependencies");
-  for (const { fm } of sources) {
-    for (const file of fm.files ?? []) {
-      assert.ok(paths.some((prefix) => file.startsWith(prefix)), `${fm.name}: ${file} ships in templates`);
-    }
-    for (const dep of fm.dependencies ?? []) assert.ok(deps.includes(dep), `${fm.name}: ${dep} ships in templates`);
+  for (const { file, fm } of sources) {
+    for (const key of ["files", "dependencies"]) assert.ok(!(key in fm), `${file}: "${key}" — the guide carries the code`);
   }
 });
 

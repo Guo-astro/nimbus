@@ -105,10 +105,10 @@ Adds a content source: part of the site built from another git repository, a Not
 | Name | Source |
 |---|---|
 | `git`, `github`, `gitlab`, `bitbucket` | Another git repository. The aliases print the same guide with the host's values. |
-| `notion` | A Notion database. Installs `src/loaders/notion.ts` and `@notionhq/client` first. |
+| `notion` | A Notion database. The agent installs `@notionhq/client` and `notion-to-md` and writes `src/loaders/notion.ts`. |
 | a URL | A provider's documentation: a guide for writing its loader, starting from that URL. |
 
-`add source` alone lists them. Like a feature, the guide goes to your coding agent: printed when one is detected or `--print` is passed, otherwise the command shows how to pipe it. A source that installs files installs them first, with every install line on stderr, so a pipe carries the guide alone; a file you've changed is kept unless you pass `--overwrite`. A source's name on its own (`add notion`) points you to `add source notion`.
+`add source` alone lists them. Like a feature, the guide goes to your coding agent: printed when one is detected or `--print` is passed, otherwise the command shows how to pipe it. `add source` writes no files: any code a source needs, the agent writes from the guide. A source's name on its own (`add notion`) points you to `add source notion`.
 
 ## `nimbus-docs init`
 

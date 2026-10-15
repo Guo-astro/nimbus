@@ -10,8 +10,7 @@
  * them as static assets at `/registry/*`):
  *   - `components/<slug>.json` per component/utility
  *   - `features/<slug>.md` copied verbatim from the source dir
- *   - `sources/<name>.md` copied verbatim, plus `components/<name>.json`
- *     (type `registry:source`) for a source that installs files
+ *   - `sources/<name>.md` copied verbatim
  *   - `registry.json` unified top-level index
  *
  * Feature markdown files are themselves the artifact (no JSON wrapper);
@@ -107,7 +106,7 @@ interface RegistryFile {
 
 interface RegistryItem {
   name: string;
-  type: ManifestEntry["type"] | "registry:source";
+  type: ManifestEntry["type"];
   title: string;
   description: string;
   version: string;
@@ -131,8 +130,6 @@ interface RegistryIndexEntry {
   description: string;
   /** `registry:source` only: other names for the entry, each with the host it names. */
   aliases?: Record<string, string>;
-  /** `registry:source` only: the entry installs files (`components/<name>.json`). */
-  installs?: boolean;
 }
 
 /** Frontmatter shape parsed from source markdown files. */
@@ -142,9 +139,6 @@ interface SourceFrontmatter {
   title: string;
   description: string;
   aliases?: Record<string, string>;
-  /** Files to install, relative to the starter's `src/`. */
-  files?: string[];
-  dependencies?: string[];
   /** The generic guide `add source <url>` prints; not a name. */
   url?: boolean;
 }
@@ -256,8 +250,6 @@ function emitBundledIndex(index: RegistryIndex): void {
     "  description: string;",
     "  /** `registry:source` only: other names for the entry, each with the host it names. */",
     "  aliases?: Record<string, string>;",
-    "  /** `registry:source` only: the entry installs files (`components/<name>.json`). */",
-    "  installs?: boolean;",
     "}",
     "",
     "export interface BundledIndex {",
@@ -364,12 +356,6 @@ function parseSourceFrontmatter(name: string, raw: string): SourceFrontmatter {
   }
   if (parsed.name !== name) {
     throw new Error(`Source "${name}" frontmatter has name "${parsed.name}"; it must match the filename.`);
-  }
-  for (const file of parsed.files ?? []) {
-    const abs = resolve(STARTER_SRC, file);
-    if (!existsSync(abs) || !statSync(abs).isFile()) {
-      throw new Error(`Source "${name}" installs "${file}", but ${relative(ROOT, abs)} is missing.`);
-    }
   }
   return parsed as SourceFrontmatter;
 }
@@ -522,21 +508,7 @@ function main(): void {
       title: source.title,
       description: source.description,
       ...(source.aliases ? { aliases: source.aliases } : {}),
-      ...(source.files?.length ? { installs: true } : {}),
     };
-    if (source.files?.length) {
-      const item: RegistryItem = {
-        name: source.name,
-        type: "registry:source",
-        title: source.title,
-        description: source.description,
-        version: REGISTRY_VERSION,
-        dependencies: source.dependencies ?? [],
-        registryDependencies: [],
-        files: [...source.files].sort().map((file) => ({ path: file, content: readFileSync(resolve(STARTER_SRC, file), "utf8") })),
-      };
-      writeFileSync(resolve(COMPONENTS_OUT, `${source.name}.json`), JSON.stringify(item, null, 2) + "\n");
-    }
   }
   for (const kind of ADD_KINDS) {
     if (kind in indexItems) {

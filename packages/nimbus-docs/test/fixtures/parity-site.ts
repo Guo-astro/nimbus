@@ -23,6 +23,7 @@ export interface MemoryPage {
   id: string;
   title: string;
   body: string;
+  draft?: boolean;
 }
 
 export interface ParitySiteOptions {
@@ -101,7 +102,7 @@ export async function paritySite(options: ParitySiteOptions = {}): Promise<Parit
       `  async load({ store, parseData, renderMarkdown, generateDigest }) {`,
       `    store.clear();`,
       `    for (const page of MEMORY) {`,
-      `      const data = await parseData({ id: page.id, data: { title: page.title } });`,
+      `      const data = await parseData({ id: page.id, data: { title: page.title, ...(page.draft ? { draft: true } : {}) } });`,
       `      store.set({ id: page.id, data, body: page.body, rendered: await renderMarkdown(page.body), digest: generateDigest(page.body) });`,
       `    }`,
       `  },`,

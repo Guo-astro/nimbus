@@ -18,8 +18,6 @@ export interface RegistryIndexEntry {
   description: string;
   /** `registry:source` only: other names for the entry, each with the host it names. */
   aliases?: Record<string, string>;
-  /** `registry:source` only: the entry installs files (`components/<name>.json`). */
-  installs?: boolean;
 }
 
 export interface BundledIndex {
@@ -391,8 +389,7 @@ export const BUNDLED_INDEX: BundledIndex = {
       "name": "notion",
       "type": "registry:source",
       "title": "Notion database",
-      "description": "Pages from a Notion database: title, description, slug, order and publishing from its properties.",
-      "installs": true
+      "description": "Pages from a Notion database: title, description, slug, order and publishing from its properties."
     }
   }
 };

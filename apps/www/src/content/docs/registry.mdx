@@ -12,7 +12,7 @@ The registry is what `nimbus-docs add` reads from. Four types of entries: compon
 - **`registry:ui`** — UI components. Copied into `src/components/ui/<slug>/`. Examples: Badge, Card, Steps.
 - **`registry:lib`** — Standalone utilities. Copied to specific paths. Example: `cn` → `src/lib/cn.ts`.
 - **`registry:feature`** — Agent-handoff recipes. Nothing copies; the CLI prints markdown the agent reads, adapts to your project, and applies. Example: 404-page.
-- **`registry:source`** — Content sources, added with `nimbus-docs add source <name>`. A guide for the agent, plus files when the source needs code in your site. Examples: `github`, `notion`.
+- **`registry:source`** — Content sources, added with `nimbus-docs add source <name>`. A guide for the agent, which writes any code the source needs into your site. Examples: `github`, `notion`.
 
 ## Anatomy of an entry
 
@@ -63,7 +63,7 @@ A feature is an agent-handoff recipe — nothing copies as files. Install any wi
 A source builds part of the site from somewhere other than `src/content`. Add one with `npx @cloudflare/nimbus-docs add source <name|url>`:
 
 - `git` (also `github`, `gitlab`, `bitbucket`) — pages from another git repository, checked out at build time.
-- `notion` — pages from a Notion database; installs `src/loaders/notion.ts`.
+- `notion` — pages from a Notion database; the agent writes `src/loaders/notion.ts` from the guide.
 - a URL — a guide for writing a loader for any other provider, from its docs.
 
 See [Content from other sources](/writing/content-sources).

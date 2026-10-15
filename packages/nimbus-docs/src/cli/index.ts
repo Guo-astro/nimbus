@@ -143,7 +143,6 @@ const HELP = `
     --to <templates-vX.Y.Z>        \`outdated\`/\`diff\`: compare against a specific tag (default latest)
     --template-dir <path>          \`outdated\`/\`diff\`/\`add\`: compare against a local checkout (offline)
     --print                        \`add\`/\`migrate\`: print an agent task without writing
-                                   (\`add source\`: install its files, then print the guide)
     --force                        \`init\`: rebuild an existing nimbus.json
     --root <dir>                   \`init\`: src dir to scan (monorepo; default src)
     --env, --structure, --lint, --types, --migrations
@@ -328,7 +327,6 @@ async function main(): Promise<void> {
 
   if (command === "add" && slug === "source") {
     await addSourceCommand(rest, {
-      yes: args.yes,
       print: args.print,
       overwrite: args.overwrite,
       adapter: args.adapter,
@@ -515,87 +513,6 @@ async function addCommand(
     process.exit(1);
   }
 
-  await installComponentSlug(slug, entry, flags);
-}
-
-// ---------------------------------------------------------------------------
-// `nimbus-docs add source <name|url>`
-// ---------------------------------------------------------------------------
-
-async function addSourceCommand(
-  positionals: string[],
-  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
-): Promise<void> {
-  const [target, ...extra] = positionals.map(String);
-  if (!target) {
-    listCommand("source");
-    return;
-  }
-  if (extra.length > 0) {
-    p.log.error(`\`add source\` takes one name or URL; got ${positionals.map((name) => `\`${name}\``).join(", ")}.`);
-    process.exit(1);
-  }
-  if (flags.adapter !== undefined) {
-    p.log.error("`--adapter` doesn't apply to `add source`.");
-    process.exit(1);
-  }
-
-  let guide: string;
-  const label = `source ${target}`;
-  if (isSourceUrl(target)) {
-    if (flags.overwrite) {
-      p.log.error("`--overwrite` applies only to a source that installs files; a URL installs nothing.");
-      process.exit(1);
-    }
-    // The URL is the agent's research starting point. It is never part of a
-    // registry request: the generic guide is a fixed file.
-    guide = sourceGuide(await fetchSourceMarkdown("from-url"), `Research start: ${target}`);
-  } else {
-    const source = resolveSource(target);
-    if (!source) {
-      p.log.error(unknownSourceMessage(target));
-      process.exit(1);
-    }
-    if (flags.overwrite && !source.entry.installs) {
-      p.log.error(`\`--overwrite\` applies only to a source that installs files; \`${target}\` installs nothing.`);
-      process.exit(1);
-    }
-    if (source.entry.installs) {
-      // Every install line goes to stderr: stdout carries the guide alone, so
-      // \`add source ${target} --print | <agent>\` pipes nothing else.
-      const write = process.stdout.write;
-      process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write;
-      try {
-        await installComponentSlug(source.entry.name, source.entry, {
-          yes: flags.yes,
-          overwrite: flags.overwrite,
-          templateDir: flags.templateDir,
-          banner: label,
-        });
-      } finally {
-        process.stdout.write = write;
-      }
-    }
-    guide = sourceGuide(await fetchSourceMarkdown(source.entry.name), source.host ? `Host: ${source.host}` : undefined);
-  }
-
-  if (await shouldUseAgentHandoff(flags.print)) {
-    process.stdout.write(guide);
-    return;
-  }
-  process.stderr.write(humanInstructions(invocation(`add ${label}`)));
-}
-
-/**
- * Install a component, utility, or a source's files: resolve the tree,
- * write files (keeping changed ones unless `--overwrite`), install npm
- * dependencies, record the install in nimbus.json.
- */
-async function installComponentSlug(
-  slug: string,
-  entry: { title: string; description: string },
-  flags: { yes: boolean; overwrite: boolean; templateDir?: string; banner?: string },
-): Promise<void> {
   // Component / utility path. Read the record up front so a corrupt one (or a
   // bad install.root) fails before any network or writes.
   const cwd = process.cwd();
@@ -604,7 +521,7 @@ async function installComponentSlug(
 
   // Banner label echoing the action, not a runnable hint — the bare command
   // name reads cleaner here than a full `pnpm dlx …` invocation.
-  p.intro(`nimbus-docs add ${flags.banner ?? slug}`);
+  p.intro(`nimbus-docs add ${slug}`);
   p.log.info(`${entry.title} — ${entry.description}`);
 
   const spinner = progress();
@@ -715,6 +632,57 @@ async function installComponentSlug(
   } else {
     p.outro(lines.join("\n"));
   }
+}
+
+// ---------------------------------------------------------------------------
+// `nimbus-docs add source <name|url>`
+// ---------------------------------------------------------------------------
+
+async function addSourceCommand(
+  positionals: string[],
+  flags: { print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
+): Promise<void> {
+  const [target, ...extra] = positionals.map(String);
+  if (!target) {
+    listCommand("source");
+    return;
+  }
+  if (extra.length > 0) {
+    p.log.error(`\`add source\` takes one name or URL; got ${positionals.map((name) => `\`${name}\``).join(", ")}.`);
+    process.exit(1);
+  }
+  const fileFlags = [
+    ["--adapter", flags.adapter !== undefined],
+    ["--overwrite", flags.overwrite],
+    ["--template-dir", flags.templateDir !== undefined],
+  ] as const;
+  for (const [flag, set] of fileFlags) {
+    if (set) {
+      p.log.error(`\`${flag}\` doesn't apply to \`add source\`: it prints a guide and writes no files.`);
+      process.exit(1);
+    }
+  }
+
+  let guide: string;
+  const label = `source ${target}`;
+  if (isSourceUrl(target)) {
+    // The URL is the agent's research starting point. It is never part of a
+    // registry request: the generic guide is a fixed file.
+    guide = sourceGuide(await fetchSourceMarkdown("from-url"), `Research start: ${target}`);
+  } else {
+    const source = resolveSource(target);
+    if (!source) {
+      p.log.error(unknownSourceMessage(target));
+      process.exit(1);
+    }
+    guide = sourceGuide(await fetchSourceMarkdown(source.entry.name), source.host ? `Host: ${source.host}` : undefined);
+  }
+
+  if (await shouldUseAgentHandoff(flags.print)) {
+    process.stdout.write(guide);
+    return;
+  }
+  process.stderr.write(humanInstructions(invocation(`add ${label}`)));
 }
 
 function parseAdapterFlag(value: string | undefined): AdapterId | null {

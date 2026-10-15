@@ -1,13 +1,10 @@
 // A local stand-in for Notion's API, answering in its recorded response
-// shapes, for the Notion loader's tests. The loader reaches it through the
-// client's `fetch` option, so `@notionhq/client`'s own pagination and retry
-// code runs. Lists page two items at a time, so every list paginates.
+// shapes, for the tests of the loader the Notion guide writes. The loader
+// reaches it through the client's `fetch` option, so `@notionhq/client`'s own
+// pagination and retry code runs. Lists page two items at a time, so every
+// list paginates.
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
-import path from "node:path";
-
-import { sourceRegistry } from "../source-registry.ts";
 
 export interface FakeBlock {
   type: string;
@@ -222,17 +219,4 @@ export async function fakeNotion(initial: FakeData): Promise<FakeNotion> {
     },
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
-}
-
-/** Install the registry's `notion` item into a project, as `add source notion` writes it. */
-export function installNotionLoader(projectRoot: string): string {
-  const registry = sourceRegistry();
-  const item = JSON.parse(readFileSync(path.join(registry, "components/notion.json"), "utf8")) as {
-    files: Array<{ path: string; content: string }>;
-  };
-  rmSync(registry, { recursive: true, force: true });
-  const file = path.join(projectRoot, "src", item.files[0]!.path);
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, item.files[0]!.content);
-  return file;
 }

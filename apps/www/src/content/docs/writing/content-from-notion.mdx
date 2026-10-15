@@ -13,7 +13,7 @@ A Notion database can be a page collection: each row is a page, its blocks the p
 npx nimbus-docs add source notion --print | claude
 ```
 
-This installs `src/loaders/notion.ts`, which is yours to edit, and `@notionhq/client`, then hands your agent the guide. By hand, the result is:
+The guide has your agent install `@notionhq/client` and `notion-to-md`, and write `src/loaders/notion.ts`: a loader that reads the database with the Notion SDK and turns each page into Markdown with notion-to-md. Nimbus holds no Notion code; the loader is yours to edit. The rest is wired like any collection:
 
 ```ts title="src/content.config.ts"
 import { defineCollection } from "astro:content";
@@ -55,13 +55,13 @@ Two rows with one slug fail the build naming both Notion page ids, drafts includ
 
 ## What renders
 
-Headings, paragraphs, lists, to-dos, quotes, code with its language, dividers, tables, images and links become their Markdown. A Notion heading 1 is a `##`, since the page title is the page's `#`. A callout becomes a quote with a bold label. Any other block keeps its plain text, and the build log names its type. Text is escaped, so a `{`, `<` or `*` an editor typed renders as typed.
+notion-to-md turns headings, paragraphs, lists, to-dos, quotes, code with its language, dividers, tables, images and links into their Markdown. A Notion heading 1 is a `##`, since the page title is the page's `#`. A callout becomes a quote, a toggle a `<details>` block. Audio, tables of contents, breadcrumbs and a row's sub-pages, which aren't pages of the collection, are left out, and the build warns naming them; to render one your way, give notion-to-md a custom transformer in the loader. Text is escaped, so a `{`, `<`, `*`, `$` or a line starting `1999.` renders as typed.
 
 Images keep Notion's URL. Files uploaded to Notion get URLs that expire after an hour, so images that must last belong on a host of their own.
 
 ## Syncing
 
-Each build reads the whole database and writes nothing until it has every row and block: a failed request after retries fails the build, and a dev server keeps its last good content. The loader retries rate limits and server errors; a build that still fails can be rerun.
+Each build reads the whole database and writes nothing until it has every row and block: a failed request after retries fails the build, and a dev server keeps its last good content. The loader retries rate limits, and server errors while reading page content; a build that still fails can be rerun.
 
 The site doesn't change when Notion does. Rebuild on a schedule, or point a Notion webhook, through an automation, at your deploy hook.
 

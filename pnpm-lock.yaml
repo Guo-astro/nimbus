@@ -93,6 +93,9 @@ importers:
       '@astrojs/mdx':
         specifier: ~8.0.0
         version: 8.0.1(@astrojs/markdown-remark@7.3.0)(@astrojs/markdown-satteri@0.4.1)(astro@7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
+      '@notionhq/client':
+        specifier: ^5.27.0
+        version: 5.27.0
       '@tailwindcss/vite':
         specifier: ^4.1.4
         version: 4.3.3(vite@8.2.0(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
@@ -105,9 +108,15 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
+      notion-to-md:
+        specifier: ^3.1.9
+        version: 3.1.9
       pagefind:
         specifier: ^1.5.2
         version: 1.5.2
+      satteri:
+        specifier: ^0.10.5
+        version: 0.10.5
       tailwindcss:
         specifier: ^4.1.4
         version: 4.3.0
@@ -302,9 +311,6 @@ importers:
       '@modelcontextprotocol/server':
         specifier: 2.3.0
         version: 2.3.0
-      '@notionhq/client':
-        specifier: ^5.27.0
-        version: 5.27.0
       '@readme/httpsnippet':
         specifier: ^11.4.0
         version: 11.4.0
@@ -359,9 +365,6 @@ importers:
       '@iconify-json/ph':
         specifier: ^1.2.0
         version: 1.2.2
-      '@notionhq/client':
-        specifier: ^5.27.0
-        version: 5.27.0
       astro:
         specifier: 7.3.1
         version: 7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
@@ -3876,6 +3879,9 @@ packages:
     resolution: {integrity: sha512-o5vL7aDWatOTX8LzaS1WMoaoxIiLRQJuIKKe2wAw6IeULDHaqbiqiggmx+pKvZDb1Sj+pE46Sn1T7lCqfFtg1Q==}
     engines: {node: '>=16'}
 
+  markdown-table@2.0.0:
+    resolution: {integrity: sha512-Ezda85ToJUBhM6WGaG6veasyym+Tbs3cMAw/ZhOPqXiYsr0jgocBV3j3nx+4lk47plLlIqjwuTm/ywVI+zjJ/A==}
+
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
 
@@ -4125,6 +4131,10 @@ packages:
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
     engines: {node: '>=0.10.0'}
+
+  notion-to-md@3.1.9:
+    resolution: {integrity: sha512-SsYhhigh+jOv06QOiFynOQATPMl96CspWDIL3Q5klzp4eaZ1dYaPI3ELoly80G1K0jf730u3ItvfwskzPKK41g==}
+    engines: {node: '>=12'}
 
   nth-check@2.1.1:
     resolution: {integrity: sha512-lqjrjmaOoAnWfMmBPL+XNnynZh2+swxiX3WUE0s4yEHI6m+AwrK2UZOimIRl3X/4QctVqS8AiZjFqyOGrMXb/w==}
@@ -4448,6 +4458,10 @@ packages:
 
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
+
+  repeat-string@1.6.1:
+    resolution: {integrity: sha512-PV0dzCYDNfRi1jCDbJzpW7jNNDRuCOG/jI5ctQcGKt/clZD+YcPS3yIlWuTJMmESC8aevCFmWJy5wjAFgNqN6w==}
+    engines: {node: '>=0.10'}
 
   request-light@0.5.8:
     resolution: {integrity: sha512-3Zjgh+8b5fhRJBQZoy+zbVKpAQGLyka0MPgW3zruTF4dFFJ8Fqcfu9YsAvi/rvdcaTeWG3MkbZv4WKxAn/84Lg==}
@@ -8757,6 +8771,10 @@ snapshots:
 
   markdown-extensions@2.0.0: {}
 
+  markdown-table@2.0.0:
+    dependencies:
+      repeat-string: 1.6.1
+
   markdown-table@3.0.4: {}
 
   math-intrinsics@1.1.0: {}
@@ -9272,6 +9290,13 @@ snapshots:
 
   normalize-path@3.0.0: {}
 
+  notion-to-md@3.1.9:
+    dependencies:
+      markdown-table: 2.0.0
+      node-fetch: 2.7.0
+    transitivePeerDependencies:
+      - encoding
+
   nth-check@2.1.1:
     dependencies:
       boolbase: 1.0.0
@@ -9684,6 +9709,8 @@ snapshots:
       '@types/mdast': 4.0.4
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
+
+  repeat-string@1.6.1: {}
 
   request-light@0.5.8: {}
 

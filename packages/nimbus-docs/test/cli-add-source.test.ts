@@ -1,10 +1,10 @@
 // `nimbus-docs add source <name|url>` end to end, against the generated
 // registry served locally: listing, aliases, the URL guide, the Notion
-// install (stdout carries the guide alone), and the errors.
+// guide (printed, nothing written), and the errors.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { after, before, test } from "node:test";
@@ -47,7 +47,7 @@ function project(): string {
   const dir = mkdtempSync(path.join(TEST_TMP, "nimbus-add-source-"));
   writeFileSync(
     path.join(dir, "package.json"),
-    JSON.stringify({ name: "site", type: "module", dependencies: { "@notionhq/client": "^5.27.0" } }),
+    JSON.stringify({ name: "site", type: "module" }),
   );
   mkdirSync(path.join(dir, "src"), { recursive: true });
   return dir;
@@ -125,26 +125,16 @@ test("a URL gets the generic guide under a Research start line and is never requ
   }
 });
 
-test("notion installs its loader on stderr's side and pipes only the guide; a rerun keeps an edit", async () => {
+test("notion prints its guide and writes nothing: the agent writes the loader from it", async () => {
   const dir = project();
   try {
-    const first = await run(dir, "add", "source", "notion", "--print");
-    assert.equal(first.code, 0, first.stderr);
-    assert.equal(first.stdout, guide("sources/notion.md"), "stdout is the guide, byte for byte");
-    assert.match(first.stdout, /^# Add a Notion database/, "no frontmatter");
-    assert.match(first.stderr, /nimbus-docs add source notion/);
-    assert.match(first.stderr, /src\/loaders\/notion\.ts/);
-    const loader = path.join(dir, "src/loaders/notion.ts");
-    assert.ok(existsSync(loader));
-    const item = JSON.parse(served("components/notion.json")) as { files: Array<{ content: string }> };
-    assert.equal(readFileSync(loader, "utf8"), item.files[0]!.content);
-
-    writeFileSync(loader, `${readFileSync(loader, "utf8")}\n// my edit\n`);
-    const rerun = await run(dir, "add", "source", "notion", "--print");
-    assert.equal(rerun.code, 0, rerun.stderr);
-    assert.equal(rerun.stdout, guide("sources/notion.md"));
-    assert.match(readFileSync(loader, "utf8"), /\/\/ my edit/);
-    assert.match(rerun.stderr, /Kept 1 file/);
+    const result = await run(dir, "add", "source", "notion", "--print");
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout, guide("sources/notion.md"), "stdout is the guide, byte for byte");
+    assert.match(result.stdout, /^# Add a Notion database/, "no frontmatter");
+    assert.match(result.stdout, /notion-to-md/);
+    assert.deepEqual(readdirSync(path.join(dir, "src")), [], "nothing written");
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8")), { name: "site", type: "module" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -163,9 +153,9 @@ test("unknown names, extra positionals, wrong flags and a source without its kin
     const adapter = await run(dir, "add", "source", "github", "--adapter", "node");
     assert.equal(adapter.code, 1);
     assert.match(adapter.all, /`--adapter` doesn't apply to `add source`/);
-    const overwrite = await run(dir, "add", "source", "github", "--overwrite");
+    const overwrite = await run(dir, "add", "source", "notion", "--overwrite");
     assert.equal(overwrite.code, 1);
-    assert.match(overwrite.all, /installs nothing/);
+    assert.match(overwrite.all, /`--overwrite` doesn't apply to `add source`: it prints a guide and writes no files/);
     for (const name of ["notion", "github"]) {
       const bare = await run(dir, "add", name);
       assert.equal(bare.code, 1);

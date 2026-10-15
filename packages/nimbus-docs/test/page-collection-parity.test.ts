@@ -58,7 +58,7 @@ function main(html: string): string {
 }
 
 test("Markdown pages render, twin and index the same from a local glob, an external glob and an in-memory loader", async () => {
-  const site = await paritySite({ memory: MEMORY });
+  const site = await paritySite({ memory: [...MEMORY, { id: "drafted", title: "Drafted", body: "Drafted body.\n", draft: true }] });
   try {
     await writeRows(site);
     await build(site.config);
@@ -95,6 +95,45 @@ test("Markdown pages render, twin and index the same from a local glob, an exter
         assert.match(text, new RegExp(`https://docs\\.example\\.test/${section}/${id}/index\\.md`), `${section}/${id} missing`);
       }
     }
+    // A draft from a loader leaves the production build like a local draft.
+    assert.ok(!existsSync(path.join(site.root, "dist/mem/drafted/index.html")), "draft page");
+    assert.ok(!existsSync(path.join(site.root, "dist/mem/drafted/index.md")), "draft twin");
+    assert.doesNotMatch(await site.read("dist/mem/llms.txt"), /drafted/);
+  } finally {
+    await site.remove();
+  }
+});
+
+test("a loader's second sync renames, deletes and unpublishes: the old pages, twins and llms.txt lines go", async () => {
+  const first: MemoryPage[] = [
+    { id: "edited", title: "Edited", body: "Edited first.\n" },
+    { id: "old-name", title: "Old Name", body: "Renamed.\n" },
+    { id: "deleted", title: "Deleted", body: "Deleted.\n" },
+    { id: "unpublished", title: "Unpublished", body: "Unpublished.\n" },
+  ];
+  const site = await paritySite({ memory: first });
+  try {
+    await site.write("src/content/docs/index.md", "---\ntitle: Home\n---\n\nHome.\n");
+    await build(site.config);
+    for (const page of first) assert.ok(existsSync(path.join(site.root, `dist/mem/${page.id}/index.html`)), page.id);
+
+    const second: MemoryPage[] = [
+      { id: "edited", title: "Edited", body: "Edited second.\n" },
+      { id: "new-name", title: "Old Name", body: "Renamed.\n" },
+      { id: "unpublished", title: "Unpublished", body: "Unpublished.\n", draft: true },
+    ];
+    const config = await site.read("src/content.config.ts");
+    await site.write("src/content.config.ts", config.replace(`const MEMORY = ${JSON.stringify(first)};`, `const MEMORY = ${JSON.stringify(second)};`));
+    await build(site.config);
+    assert.match(await site.read("dist/mem/edited/index.html"), /Edited second\./);
+    assert.ok(existsSync(path.join(site.root, "dist/mem/new-name/index.html")));
+    for (const gone of ["old-name", "deleted", "unpublished"]) {
+      assert.ok(!existsSync(path.join(site.root, `dist/mem/${gone}/index.html`)), `${gone} page`);
+      assert.ok(!existsSync(path.join(site.root, `dist/mem/${gone}/index.md`)), `${gone} twin`);
+    }
+    const llms = await site.read("dist/mem/llms.txt");
+    assert.doesNotMatch(llms, /old-name|deleted|unpublished/);
+    assert.match(llms, /new-name/);
   } finally {
     await site.remove();
   }

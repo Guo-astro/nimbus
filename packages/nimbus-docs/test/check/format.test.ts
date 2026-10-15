@@ -399,3 +399,33 @@ test("a scope that skipped some checks is partly checked; a fully run one is ✓
   assert.match(out, /Migrations\s+○ not evaluated — no nimbus\.json/);
   assert.doesNotMatch(out, /✓ ok ·/);
 });
+
+test("without a terminal, the hint is what --fix can do there", () => {
+  const needsInput: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "error",
+    message: "site is still a placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const install: CheckFinding = {
+    scope: "env",
+    code: "nimbus/openapi-parser-missing",
+    severity: "error",
+    message: "the parser is missing",
+    fixable: true,
+    fix: { kind: "install-dep", package: "@scalar/openapi-parser", dev: false },
+  };
+  const deps: CheckFinding = { scope: "env", code: "nimbus/dependencies-missing", severity: "error", message: "install first", fixable: false };
+  const render = (findings: CheckFinding[], interactive: boolean) =>
+    formatCheckPretty(
+      result({ status: "failed", readiness: "blocked", findings, scopes: [scope({ status: "failed", findings })] }),
+      { ...OPTS, interactive },
+    );
+  assert.match(render([needsInput], false), /1 needs input → edit by hand \(it needs a choice only you can make\)/);
+  assert.doesNotMatch(render([needsInput], false), /check --fix/);
+  assert.match(render([install], false), /→ run `nimbus-docs check --fix --yes`/);
+  assert.doesNotMatch(render([install, deps], false), /check --fix/);
+  assert.match(render([needsInput], true), /→ run `nimbus-docs check --fix`$/m);
+});

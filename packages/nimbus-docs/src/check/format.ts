@@ -32,6 +32,11 @@ export interface PrettyOptions {
    * `--yes`. `invocation` is then the `check --fix` command to build on.
    */
   skippedFixes?: ReadonlyArray<"needs-terminal" | "needs-yes">;
+  /**
+   * False without a terminal (an agent, CI, piped output): `--fix` there
+   * skips fixes that need input and installs without `--yes`.
+   */
+  interactive?: boolean;
 }
 
 const SCOPE_LABELS: Record<CheckScope, string> = {
@@ -307,7 +312,11 @@ function problemHeadline(
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
   // Before an install, the next step is the install its finding names; `--fix` can't do it.
   const installFirst = visible.some((f) => f.code === "nimbus/dependencies-missing");
-  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length && !installFirst) head += ` → run \`${opts.invocation}\``;
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length && !installFirst) {
+    if (opts.interactive !== false) head += ` → run \`${opts.invocation}\``;
+    else if (autoFixable > 0) head += ` → run \`${opts.invocation} --yes\``;
+    else head += ` → edit by hand (${needsInput === 1 ? "it needs a choice" : "each needs a choice"} only you can make)`;
+  }
   return [paint(COLORS.red, head), checkedIn];
 }
 

@@ -47,3 +47,13 @@ export default defineConfig({
 ```
 
 On static hosts these compile to redirect files; on Cloudflare and other adapters they become native redirect rules.
+
+When you move a collection to another folder ([Collection URLs](/writing/pages-and-routing#collection-urls)), redirect its old URLs with one dynamic entry:
+
+```ts title="astro.config.ts"
+export default defineConfig({
+  redirects: {
+    "/sdk/[...slug]": "/products/sdk/[...slug]",
+  },
+});
+```

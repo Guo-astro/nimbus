@@ -19,6 +19,7 @@
  */
 
 import fs from "node:fs";
+import { collectionMountPrefix, getMountContext } from "./_internal/collection-mount.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -405,7 +406,7 @@ function sourceGlob(source: string, rawBase: string | undefined, pattern: string
       }
       const rootDir = fileURLToPath(context.config.root);
       const relative = path.relative(rootDir, folder).split(path.sep).join("/");
-      registerSourceCollectionFolder({ collection: context.collection, folder });
+      registerSourceCollectionFolder({ collection: context.collection, folder, root: context.config.root });
       // A repository's docs often have no frontmatter: a page without a
       // `title` takes its first heading, else its file name.
       const parseData = Reflect.get(context, "parseData", context) as typeof context.parseData;
@@ -712,7 +713,7 @@ export function apiCollection(options?: ApiCollectionOptions): {
         extensions,
         routes,
         sidebar,
-      });
+      }, collectionMountPrefix(collection, getMountContext(context.config.root)));
 
       // M4: a non-default version id must not collide with a top-level page
       // slug of the default version (both would claim `/<collection>/<id>`).

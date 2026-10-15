@@ -1,5 +1,7 @@
 /** OpenAPI's consumer of the generic staged-page layer. Build-only, never SSR. */
 import { unusedExtensions, warnUnusedExtensions } from "./extensions.js";
+import { collectionMountPrefix } from "../collection-mount.js";
+import { projectMountContext } from "../project-mount-context.js";
 import {
   readFile,
   writeFile,
@@ -722,7 +724,7 @@ async function prepareApiAssetFamilyNow(
     target: ResolvedApiVersion;
     prepared: PreparedApiAssetVersion;
   }> = [];
-  for (const target of resolveApiFamily(entry)) {
+  for (const target of resolveApiFamily(entry, collectionMountPrefix(entry.collection, projectMountContext(root)))) {
     const prepared = await prepareApiAssetVersion(target, root, writer, environment, warn);
     warnUnusedExtensions(target.family, target.version, prepared.unusedExtensions ?? [], warn);
     versions.push({ target, prepared });

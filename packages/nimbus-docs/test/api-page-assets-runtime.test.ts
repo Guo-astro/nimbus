@@ -36,7 +36,7 @@ const targets = resolveApiFamily({
     { version: "v2", default: true, spec: {} },
     { version: "v1", spec: {} },
   ],
-});
+}, "/api");
 
 test("one immutable record resolves independently across versions and preserves authored content", () => {
   const record = {

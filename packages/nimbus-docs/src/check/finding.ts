@@ -61,10 +61,23 @@ export interface Note {
   requiresInput?: boolean;
 }
 
+/** Where a page collection is served, and why. */
+export interface CollectionUrl {
+  name: string;
+  /** `/` or `/products/sdk`. */
+  url: string;
+  /** The route file that sets it, or why it's the default. */
+  source: string;
+  /** A route serves it away from `/<name>`. */
+  moved: boolean;
+}
+
 export interface ScopeReport {
   scope: CheckScope;
   findings: CheckFinding[];
   notes: Note[];
+  /** `structure` only: where each page collection is served. */
+  collections?: CollectionUrl[];
   /** Did the scope's core actually run? `false` only when it produced no verdict. */
   evaluated: boolean;
   /** Whole-scope not-evaluated reason (types pre-build); omitted otherwise. */

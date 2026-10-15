@@ -72,12 +72,14 @@ if the user only has a URL, have them save it into the repo first.
 
 ### Q2. Confirm the collection name + URL prefix (default: `api`).
 
-The collection name doubles as the URL prefix, so `api` mounts the reference at
-`/api`. It **must** be lowercase letters, digits, and dashes (`a-z0-9-`), must
-not collide with an existing collection, and must not be `docs` or `partials`
-(reserved). This recipe writes
-its routes under `src/pages/<collection>/` — substitute your chosen name for
-`api` everywhere below if it differs.
+The name must be lowercase letters, digits, and dashes (`a-z0-9-`), must not
+collide with an existing collection, and must not be `docs` or `partials`
+(reserved). The reference is served where its route file is: by default
+`src/pages/<collection>/`, so `api` serves at `/api`. If the user wants another
+URL (`/reference/api`), put the routes in that folder instead; it can be
+nested, and every URL Nimbus builds for the reference follows. Substitute the
+chosen folder for `api` in the route paths below, and the chosen name in the
+config and collection key.
 
 ## 3. Plan
 

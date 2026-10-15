@@ -855,6 +855,22 @@
         "Run astro dev, then npx @modelcontextprotocol/inspector --cli http://localhost:4321/mcp --transport http --method tools/list (with the base path, and /mcp/ under trailingSlash: \"always\"), and confirm it lists get_page and list_pages.",
         "Open a docs page, click Copy MCP URL, and confirm it copies the /mcp URL and briefly shows Copied."
       ]
+    },
+    {
+      "id": "collection-urls-from-routes",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "collection-urls-from-routes",
+      "summary": "Collections are served where their route files are; routes that built broken URLs now fail the build.",
+      "affected": "Sites with a collection route away from /<collection> and none at it, or a collection served only from dynamic [locale] folders.",
+      "instructions": [
+        "No action is needed when each collection's route file is at src/pages/<collection>/ (or the site root for docs): output is unchanged.",
+        "If the build or nimbus-docs check names a collection route, follow its message (every error is listed at https://nimbus-docs.com/writing/pages-and-routing/#collection-url-errors): keep one route per collection, move a docs or version route to its URL, give a collection served only from a dynamic folder its own static route, or move a page out from under another collection's URL.",
+        "When a route moves a collection to a new folder, add a redirect from its old URLs, such as \"/sdk/[...slug]\": \"/products/sdk/[...slug]\", and remove a sidebar autogenerate prefix that repeats the route's URL."
+      ],
+      "verify": [
+        "Run nimbus-docs check and astro build; with a moved collection, confirm check lists its URL and nimbus-docs lint reports no links to the old URLs."
+      ]
     }
   ]
 }

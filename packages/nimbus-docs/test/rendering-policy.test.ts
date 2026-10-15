@@ -40,6 +40,7 @@ import {
 import { validateNimbusConfig } from "../src/_internal/validate.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
 import type { NimbusConfig, RenderingConfig } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
 
 const baseConfig = (rendering?: RenderingConfig): NimbusConfig => ({
   site: "https://example.test",
@@ -247,15 +248,15 @@ test("canonical route keys respect collection mounts and custom srcDir", () => {
   const versions = { others: ["v1"] };
 
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "docs", versions),
+    canonicalCollectionRouteComponent(srcDir, "docs", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "[...slug].astro"),
   );
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "docs-v1", versions),
+    canonicalCollectionRouteComponent(srcDir, "docs-v1", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "v1", "[...slug].astro"),
   );
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "api", versions),
+    canonicalCollectionRouteComponent(srcDir, "api", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "api", "[...slug].astro"),
   );
   assert.deepEqual(

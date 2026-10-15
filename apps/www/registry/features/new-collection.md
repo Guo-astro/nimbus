@@ -116,18 +116,19 @@ versioning.
 
 ### Q3. Confirm the URL prefix.
 
-The URL prefix is the path segment the collection mounts under. For a `blog`
-collection with prefix `/blog`, pages at `src/content/blog/foo.mdx` render at
-`/blog/foo`. For a `docs-v1` collection with prefix `/v1`, pages render at
-`/v1/foo`.
+The URL prefix is where the collection is served, and the route file goes
+there: `src/pages/<prefix>/[...slug].astro`. For a `blog` collection with
+prefix `/blog`, pages at `src/content/blog/foo.mdx` render at `/blog/foo`.
+The prefix can be nested (`/products/sdk`) and doesn't have to match the
+collection name; Nimbus reads it from the route file's folder, so every URL it
+builds (sidebar, Markdown versions, `llms.txt`, sitemap) follows. Default to
+`/<collection>`.
 
-**Important convention:** when the collection name starts with `docs-`, the
-URL prefix defaults to the part after `docs-`. This matches the versioning
-URL convention — a `docs-v1` collection always mounts at `/v1/`, never at
-`/docs-v1/`.
-
-For every other collection, the URL prefix must match the collection name.
-Alternate Markdown versions and the collection's `llms.txt` index use that identity as their mount prefix.
+**Docs versions:** a collection named in the `versions` config
+(`versions.others` includes `v1` for `docs-v1`) is always served at the part
+after `docs-` (`/v1`), so its route goes in `src/pages/v1/`. A `docs-*`
+collection that isn't listed there (`docs-es`, a translation) is an ordinary
+collection: default its prefix to `/<collection>`, and ask.
 
 ### Q4. Add a starter entry?
 

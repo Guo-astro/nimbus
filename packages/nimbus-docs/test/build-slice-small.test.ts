@@ -30,6 +30,9 @@ import {
   type SliceSite,
 } from "./fixtures/slice-site.ts";
 import { TEST_TMP } from "./fixtures/temp-root.ts";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 const CLI = fileURLToPath(new URL("../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
@@ -83,26 +86,34 @@ test("the variable parses as a list and the slice checks name the site's collect
   // The search bundles are served URLs: the base goes in front of each, even
   // when it repeats a collection's mount.
   const collections = ["docs", "docs-es", "api"];
-  const es = buildSliceLayout(["docs-es"], null);
-  assert.deepEqual(searchIndexLayout(null, collections, null, "/"), {
+  const es = buildSliceLayout(["docs-es"], DEFAULT_URLS);
+  assert.deepEqual(searchIndexLayout(null, collections, DEFAULT_URLS, "/"), {
     bundle: "/pagefind/",
     merge: [],
   });
-  assert.deepEqual(searchIndexLayout(es, collections, null, "/"), {
+  assert.deepEqual(searchIndexLayout(es, collections, DEFAULT_URLS, "/"), {
     bundle: "/docs-es/pagefind/",
     merge: ["/pagefind/", "/api/pagefind/"],
   });
-  assert.deepEqual(searchIndexLayout(null, collections, null, "/docs/"), {
+  assert.deepEqual(searchIndexLayout(null, collections, DEFAULT_URLS, "/docs/"), {
     bundle: "/docs/pagefind/",
     merge: [],
   });
-  assert.deepEqual(searchIndexLayout(es, collections, null, "/docs"), {
+  assert.deepEqual(searchIndexLayout(es, collections, DEFAULT_URLS, "/docs"), {
     bundle: "/docs/docs-es/pagefind/",
     merge: ["/docs/pagefind/", "/docs/api/pagefind/"],
   });
-  assert.deepEqual(searchIndexLayout(buildSliceLayout(["api"], null), collections, null, "/api"), {
+  assert.deepEqual(searchIndexLayout(buildSliceLayout(["api"], DEFAULT_URLS), collections, DEFAULT_URLS, "/api"), {
     bundle: "/api/api/pagefind/",
     merge: ["/api/pagefind/", "/api/docs-es/pagefind/"],
+  });
+
+  // A slice of a collection its route moved lives under the route's folder.
+  const moved = { versions: null, routes: new Map([["sdk", { mount: "/products/kit", file: "src/pages/products/kit/[...slug].astro", aliases: [] }]]) };
+  assert.equal(buildSliceLayout(["sdk"], moved).prefix, "/products/kit");
+  assert.deepEqual(searchIndexLayout(buildSliceLayout(["sdk"], moved), ["docs", "sdk"], moved, "/"), {
+    bundle: "/products/kit/pagefind/",
+    merge: ["/pagefind/"],
   });
 });
 

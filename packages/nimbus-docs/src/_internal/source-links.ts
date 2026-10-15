@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { canonicalEntryUrl, entryRouteUrl } from "./astro-slug.js";
-import { collectionMountPrefix } from "./collection-mount.js";
+import { collectionMountPrefix, getMountContext } from "./collection-mount.js";
 import { frontmatterSlug } from "./scan-version-frontmatter.js";
 import { toDocumentHref } from "./url.js";
 
@@ -18,6 +18,8 @@ export interface SourceCollectionFolder {
   collection: string;
   /** Absolute folder the collection's glob reads. */
   folder: string;
+  /** Astro's `root`, to find where the collection is served. */
+  root: URL;
 }
 
 const REGISTRY_KEY = Symbol.for("@cloudflare/nimbus-docs/source-collection-folders/v1");
@@ -50,7 +52,7 @@ const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 function pageUrl(owner: SourceCollectionFolder, target: string): string | undefined {
   if (!inside(owner.folder, target) || !PAGE_EXTENSION.test(target) || !fs.existsSync(target)) return undefined;
-  const prefix = collectionMountPrefix(owner.collection, null);
+  const prefix = collectionMountPrefix(owner.collection, getMountContext(owner.root));
   let slug: string | undefined;
   try {
     slug = frontmatterSlug(fs.readFileSync(target, "utf8").slice(0, 4096));

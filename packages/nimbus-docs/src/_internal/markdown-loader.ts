@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { collectionUrlsKey, getMountContext } from "./collection-mount.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +24,11 @@ export const NIMBUS_MARKDOWN_META_KEY = "nimbus-markdown-capability";
 export interface NimbusMarkdownCapability {
   generation: number;
   base: string;
+  /**
+   * Where each collection is served (`collectionUrlsKey`). Links between
+   * pages are rewritten with it, so a moved route re-prepares the bodies.
+   */
+  urls?: string;
 }
 
 export interface PrepareMarkdownLoaderOptions extends NimbusMarkdownCapability {
@@ -408,13 +414,18 @@ export function prepareMarkdownLoader<T extends Loader>(
   if (!options.base.startsWith("/")) {
     throw new TypeError("Nimbus Markdown base must be an absolute pathname");
   }
-  const capability = Object.freeze({
+  const preparedCapability = {
     generation: options.generation,
     base: options.base,
-  } satisfies NimbusMarkdownCapability);
+  };
   const load = Reflect.get(loader, "load", loader) as Loader["load"];
   const preparedLoad: Loader["load"] = async (context) => {
     const root = preparedMarkdownRootKey(context.config.root);
+    const urls = collectionUrlsKey(getMountContext(context.config.root));
+    const capability = Object.freeze({
+      ...preparedCapability,
+      ...(urls === undefined ? {} : { urls }),
+    } satisfies NimbusMarkdownCapability);
     if (options.empty) {
       await runPreparedMarkdownTransaction(root, context.collection, async () => {
         const epoch = beginPreparedMarkdownLoad(root, context.collection, true);

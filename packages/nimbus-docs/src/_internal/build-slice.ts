@@ -12,7 +12,7 @@
  * and the integration reach this module through different package entries.
  */
 
-import { collectionMountPrefix, type VersionInfo } from "./collection-mount.js";
+import { collectionMountPrefix, type MountContext } from "./collection-mount.js";
 import { preparedMarkdownRootKey } from "./prepared-markdown-registry.js";
 import { withBase } from "./url.js";
 
@@ -138,9 +138,9 @@ export interface BuildSliceLayout {
 
 export function buildSliceLayout(
   slice: readonly string[],
-  versions: VersionInfo | null,
+  context: MountContext,
 ): BuildSliceLayout {
-  const mounts = slice.map((name) => collectionMountPrefix(name, versions));
+  const mounts = slice.map((name) => collectionMountPrefix(name, context));
   const root = mounts.includes("");
   return { collections: [...slice], prefix: root ? "" : mounts[0]!, root };
 }
@@ -177,7 +177,7 @@ export function pagefindBundlePath(mount: string): string {
 export function searchIndexLayout(
   layout: BuildSliceLayout | null,
   pageCollections: readonly string[],
-  versions: VersionInfo | null,
+  context: MountContext,
   base: string,
 ): { bundle: string; merge: string[] } {
   const served = (mount: string) => withBase(pagefindBundlePath(mount), base);
@@ -186,7 +186,7 @@ export function searchIndexLayout(
     ...new Set(
       pageCollections
         .filter((name) => !layout.collections.includes(name))
-        .map((name) => served(collectionMountPrefix(name, versions))),
+        .map((name) => served(collectionMountPrefix(name, context))),
     ),
   ];
   return { bundle: served(layout.prefix), merge };

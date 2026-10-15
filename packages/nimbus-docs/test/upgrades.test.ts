@@ -44,6 +44,7 @@ test("only universally skippable entries are optional", () => {
       "api-sidebar-filter",
       "api-version-picker",
       "browser-documentation-search",
+      "collection-urls-from-routes",
       "connect-mcp",
       "homepage-renders-on-request",
       "image-zoom",

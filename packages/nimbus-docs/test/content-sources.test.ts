@@ -265,6 +265,7 @@ test("a source editPattern needs {path}, and the page bundle gets only ref and e
     base: "/",
     versionAlternates: {},
     apiCollections: [],
+    collectionRoutes: new Map(),
     headDefaults: {
       favicon: { file: "/favicon.ico", type: "image/x-icon" },
       socialImage: "/opengraph.png",

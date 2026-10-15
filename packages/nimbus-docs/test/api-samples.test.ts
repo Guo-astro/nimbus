@@ -1888,7 +1888,7 @@ describe("samples.keepGenerated", () => {
         { version: "v2", spec: "./v2.yaml", default: true },
         { version: "v1", spec: "./v1.yaml" },
       ],
-    });
+    }, "/api");
     assert.deepEqual(targets.map((t) => t.samples), [{ keepGenerated: ["curl"] }, { keepGenerated: ["curl"] }]);
   });
 

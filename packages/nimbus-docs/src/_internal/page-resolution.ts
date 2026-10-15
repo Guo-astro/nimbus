@@ -4,6 +4,7 @@ import type { AstroComponentFactory } from "astro/runtime/server/index.js";
 import type { ApiNav, ApiPageProps } from "../api/index.js";
 import {
   collectionMountPrefix,
+  NO_ROUTES,
   PRIMARY_COLLECTION,
   type VersionInfo,
 } from "./collection-mount.js";
@@ -149,7 +150,9 @@ async function requestProseIdentity(
   const candidate = versions?.others.includes(mount)
     ? `${PRIMARY_COLLECTION}-${mount}`
     : mount;
-  return collectionMountPrefix(candidate, versions) === `/${mount}`
+  // Request rendering serves collections at their default URL: setup refuses
+  // a request-rendered collection routed anywhere else.
+  return collectionMountPrefix(candidate, { versions, routes: NO_ROUTES }) === `/${mount}`
     ? { collection: candidate, id }
     : null;
 }

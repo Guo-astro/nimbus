@@ -5,7 +5,8 @@ import {
   type ParsedPageAssetIndex,
 } from "../page-assets.js";
 import { readStagedAsset } from "../staged-asset-reader.js";
-import { loadNimbusConfig } from "../runtime-config.js";
+import { loadMountContext, loadNimbusConfig } from "../runtime-config.js";
+import { collectionMountPrefix } from "../collection-mount.js";
 import {
   apiPageRoute,
   pageUrl,
@@ -51,11 +52,11 @@ export function apiAssetTargets(
 ): Promise<ResolvedApiVersion[]> {
   let targets = targetsByCollection.get(collection);
   if (!targets) {
-    targets = loadNimbusConfig().then((config) => {
+    targets = Promise.all([loadNimbusConfig(), loadMountContext()]).then(([config, context]) => {
       const entry = config.api?.find(
         (entry) => entry.collection === collection,
       );
-      return entry ? resolveApiFamily(entry) : [];
+      return entry ? resolveApiFamily(entry, collectionMountPrefix(collection, context)) : [];
     });
     targetsByCollection.set(collection, targets);
   }

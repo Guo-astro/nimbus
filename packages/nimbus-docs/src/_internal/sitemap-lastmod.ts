@@ -4,7 +4,7 @@
 
 import type { SitemapItem, SitemapSerialize } from "./sitemap-types.js";
 import { entryRouteUrl } from "./astro-slug.js";
-import { collectionMountPrefix, type VersionInfo } from "./collection-mount.js";
+import { collectionMountPrefix, type MountContext } from "./collection-mount.js";
 import type { PreparedMarkdownSnapshot } from "./prepared-markdown-registry.js";
 import { safeDecode, toRouteKey, withBase, withoutHtmlExtension } from "./url.js";
 
@@ -17,12 +17,12 @@ export interface SitemapSource {
 export function sitemapSources(options: {
   snapshot: PreparedMarkdownSnapshot | null | undefined;
   base: string;
-  versions?: VersionInfo | null;
+  context: MountContext;
 }): Map<string, SitemapSource> {
   const sources = new Map<string, SitemapSource>();
   for (const [collection, value] of options.snapshot?.collections ?? []) {
     if (value.role !== "page") continue;
-    const prefix = collectionMountPrefix(collection, options.versions);
+    const prefix = collectionMountPrefix(collection, options.context);
     for (const entry of value.entries.values()) {
       const route = entryRouteUrl(prefix, entry.id);
       const key = toRouteKey(withBase(route, options.base));

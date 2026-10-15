@@ -18,8 +18,12 @@ import { expandPreparedPartials } from "./build-partials.js";
 import {
   collectionLabel,
   collectionMountPrefix,
+  collectionUrlsKey,
+  NO_ROUTES,
   PRIMARY_COLLECTION,
+  type MountContext,
 } from "./collection-mount.js";
+import type { CollectionRoutes } from "./collection-routes.js";
 import { llmsAssetUrl } from "./agent-endpoint-coverage.js";
 import {
   buildLlmsFullMarkdown,
@@ -131,6 +135,8 @@ export interface BakeAgentEndpointAssetsOptions {
     deprecated?: readonly string[];
     hidden?: readonly string[];
   };
+  /** Collections served by a route helper, by where the route file is. None by default. */
+  routes?: CollectionRoutes;
   /** The remote MCP endpoint, when the site serves one; `llms.txt` names it. */
   mcpUrl?: string;
   citationIndex?: ReadonlyMap<string, string>;
@@ -475,19 +481,26 @@ async function publishManifest(
   return published;
 }
 
+function urlsField(context: MountContext): { urls?: string } {
+  const urls = collectionUrlsKey(context);
+  return urls === undefined ? {} : { urls };
+}
+
 function assertPreparedCollection(
   name: string,
   collection: PreparedMarkdownCollection,
   base: string,
+  context: MountContext,
 ): void {
   const expected = preparedMarkdownCollectionCapability(
     name,
     collection.entries.values(),
-    { generation: AGENT_ENDPOINT_ASSET_GENERATION, base },
+    { generation: AGENT_ENDPOINT_ASSET_GENERATION, base, ...urlsField(context) },
   );
   if (
     collection.capability.generation !== expected.generation ||
     collection.capability.base !== expected.base ||
+    collection.capability.urls !== expected.urls ||
     collection.capability.digest !== expected.digest
   ) {
     throw new Error(
@@ -556,7 +569,7 @@ function preparedMarkdownUrls(
   options: BakeAgentEndpointAssetsOptions,
 ) {
   const route = entryRouteUrl(
-    collectionMountPrefix(entry.collection, options.versions),
+    collectionMountPrefix(entry.collection, mountContext(options)),
     entry.id,
   );
   return {
@@ -710,7 +723,7 @@ function preparedLlmsPage(
   options: BakeAgentEndpointAssetsOptions,
 ): PreparedLlmsPage {
   const route = entryRouteUrl(
-    collectionMountPrefix(entry.collection, options.versions),
+    collectionMountPrefix(entry.collection, mountContext(options)),
     entry.id,
   );
   return {
@@ -732,13 +745,25 @@ function preparedLlmsPage(
   };
 }
 
+/**
+ * A page's `llms.txt` section: a docs page's top-level group, otherwise its
+ * collection's URL without the leading `/` (`products/sdk`).
+ */
 function llmsSection(
   page: Pick<PreparedLlmsPage, "collection" | "id">,
-  versions: BakeAgentEndpointAssetsOptions["versions"],
+  options: BakeAgentEndpointAssetsOptions,
 ): string {
-  return page.collection === PRIMARY_COLLECTION
-    ? page.id.split("/")[0]!
-    : collectionLabel(page.collection, versions);
+  const mount = collectionMountPrefix(page.collection, mountContext(options));
+  return mount ? mount.slice(1) : page.id.split("/")[0]!;
+}
+
+/** Whether a page's collection is served at the root, like `docs`. */
+function atRoot(page: Pick<PreparedLlmsPage, "collection">, options: BakeAgentEndpointAssetsOptions): boolean {
+  return collectionMountPrefix(page.collection, mountContext(options)) === "";
+}
+
+function mountContext(options: BakeAgentEndpointAssetsOptions): MountContext {
+  return { versions: options.versions ?? null, routes: options.routes ?? NO_ROUTES };
 }
 
 /**
@@ -760,7 +785,7 @@ function mcpPageRecord(
     url: absoluteUrl(options.site, options.base, page.url),
     markdownUrl: absoluteUrl(options.site, options.base, page.markdownUrl),
     markdownPath: page.markdownUrl,
-    section: llmsSection(page, options.versions),
+    section: llmsSection(page, options),
     ...(version ? { version } : {}),
     ...(deprecated ? { deprecated: true as const } : {}),
     searchable: isSearchable(entry),
@@ -813,9 +838,8 @@ function groupPreparedLlmsPages(
   const secondary = new Map<string, PreparedLlmsPage[]>();
   const versionSlugs = new Set(options.versions?.others ?? []);
   for (const page of pages) {
-    const slug = llmsSection(page, options.versions);
-    const buckets =
-      page.collection === PRIMARY_COLLECTION ? primary : secondary;
+    const slug = llmsSection(page, options);
+    const buckets = atRoot(page, options) ? primary : secondary;
     const bucket = buckets.get(slug);
     if (bucket) bucket.push(page);
     else buckets.set(slug, [page]);
@@ -902,26 +926,37 @@ function groupLabel(slug: string, members: readonly PreparedLlmsPage[]): string 
   return index?.groupLabel ?? index?.title ?? formatLabel(slug.split("/").at(-1)!);
 }
 
+/**
+ * A `[section]` route serves one-segment sections only: a section at a nested
+ * URL (`products/sdk`) gets no `llms.txt`, and the site index lists its pages.
+ */
+function servesSectionIndex(group: PreparedLlmsGroup, options: BakeAgentEndpointAssetsOptions): boolean {
+  return options.nestedSections === true || !group.slug.includes("/");
+}
+
 function siteIndexAsset(
   leaves: readonly PreparedLlmsPage[],
   groups: readonly PreparedLlmsGroup[],
   options: BakeAgentEndpointAssetsOptions,
   fullSplit: boolean,
 ): string {
+  const served = (group: PreparedLlmsGroup) => servesSectionIndex(group, options);
+  const listed = groups.filter((group) => group.kind !== "version");
   const rows = [
-    ...leaves.map((page) => ({
+    ...[...leaves, ...listed.filter((group) => !served(group)).flatMap((group) => group.members)].map((page) => ({
       key: page.url,
       line: `- [${page.title}](${absoluteUrl(options.site, options.base, page.markdownUrl)})${page.description ? ` — ${page.description}` : ""}`,
     })),
-    ...groups
-      .filter((group) => group.kind !== "version")
+    ...listed
+      .filter(served)
       .map((group) => ({
         key: `/${group.slug}`,
         line: `- [${group.label}](${absoluteUrl(options.site, options.base, `/${group.slug}/llms.txt`)})`,
       })),
     ...(options.absentSections ?? []).map((section) => ({
       key: `/${section.slug}`,
-      line: `- [${section.label}](${absoluteUrl(options.site, options.base, `/${section.slug}/llms.txt`)})`,
+      // The slice holding a nested section serves its llms-full.txt, not an llms.txt.
+      line: `- [${section.label}](${absoluteUrl(options.site, options.base, `/${section.slug}/${options.nestedSections === true || !section.slug.includes("/") ? "llms.txt" : "llms-full.txt"}`)})`,
     })),
   ].sort((a, b) => compare(a.key, b.key));
   return [
@@ -1633,7 +1668,7 @@ export async function bakeAgentEndpointAssets(
   })) {
     const collection = snapshot.collections.get(collectionName);
     if (!collection) continue;
-    assertPreparedCollection(collectionName, collection, base);
+    assertPreparedCollection(collectionName, collection, base, mountContext(options));
     candidates.push(...collection.entries.values());
   }
 
@@ -1676,7 +1711,7 @@ export async function bakeAgentEndpointAssets(
       throw new Error(`nimbus-docs: missing prepared partial "${id}".`);
     }
     if (!partialsPrepared) {
-      assertPreparedCollection("partials", partials, base);
+      assertPreparedCollection("partials", partials, base, mountContext(options));
       partialsPrepared = true;
     }
     const partial = partials.entries.get(id);
@@ -1918,7 +1953,7 @@ export async function bakeAgentEndpointAssets(
       body: siteIndexAsset(leaves, groups, options, full.split),
     },
     ...full.bodies,
-    ...flattenLlmsGroups(groups).map((group) => ({
+    ...flattenLlmsGroups(groups).filter((group) => servesSectionIndex(group, options)).map((group) => ({
       reference: {
         scope: "section" as const,
         surface: "index" as const,

@@ -97,7 +97,7 @@ export default defineConfig({
 });
 ```
 
-The collection name is also its URL prefix: `api` mounts the reference at `/api`.
+The reference is served where its route file is: `src/pages/api/[...slug].astro` serves `api` at `/api`, and `src/pages/reference/api/[...slug].astro` at `/reference/api`, with versions, `openapi.json` and the API catalog under it. See [Collection URLs](/writing/pages-and-routing#collection-urls).
 
 The recipe then registers a loader-backed collection under the same key, preserving existing collections and custom schema fields:
 

@@ -183,7 +183,7 @@ export async function fakeNotion(initial: FakeData): Promise<FakeNotion> {
       let match: RegExpMatchArray | null;
       if ((match = url.pathname.match(/^\/v1\/databases\/([^/]+)$/)) && request.method === "GET") {
         if (match[1] !== data.databaseId) return send(404, { object: "error", status: 404, code: "object_not_found", message: "not found" });
-        return send(200, { object: "database", id: data.databaseId, data_sources: data.dataSources.map(({ id, name, in_trash }) => ({ id, name, in_trash: !!in_trash })) });
+        return send(200, { object: "database", id: data.databaseId, data_sources: data.dataSources.map(({ id, name }) => ({ id, name })) });
       }
       if ((match = url.pathname.match(/^\/v1\/data_sources\/([^/]+)$/)) && request.method === "GET") {
         const source = data.dataSources.find((s) => s.id === match![1]);
@@ -191,7 +191,7 @@ export async function fakeNotion(initial: FakeData): Promise<FakeNotion> {
         const properties = Object.fromEntries(
           Object.entries(source.properties ?? DEFAULT_PROPERTIES).map(([name, type]) => [name, { id: name.slice(0, 4), name, type }]),
         );
-        return send(200, { object: "data_source", id: source.id, parent: { type: "database_id", database_id: data.databaseId }, properties });
+        return send(200, { object: "data_source", id: source.id, in_trash: !!source.in_trash, parent: { type: "database_id", database_id: data.databaseId }, properties });
       }
       if ((match = url.pathname.match(/^\/v1\/data_sources\/([^/]+)\/query$/)) && request.method === "POST") {
         const source = data.dataSources.find((s) => s.id === match![1]);

@@ -233,7 +233,7 @@ test("blocks become Markdown: headings move down a level, text an editor typed r
   assert.match(body, /- \[x\] done/);
   assert.match(body, /\| Key \| Value \|/);
   assert.match(body, /!\[Logo\]\(https:\/\/example\.test\/logo\.png\)/);
-  assert.match(body, /\[https:\/\/example\.test\/a_b\]\(https:\/\/example\.test\/a_b\)/, "a bookmark links with its URL");
+  assert.match(body, /\[https\\:\/\/example\.test\/a\\_b\]\(https:\/\/example\.test\/a_b\)/, "a bookmark links with its URL, as text");
   assert.ok(loaded.logs.some((line) => /warn notionLoader: audio, table_of_contents, child_page blocks were left out \(no Markdown form, and a row's sub-pages aren't pages of the collection\)/.test(line)), loaded.logs.join("\n"));
 });
 

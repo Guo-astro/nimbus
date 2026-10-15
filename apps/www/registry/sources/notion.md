@@ -147,7 +147,7 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
       n2m.setCustomTransformer("bookmark", (block) => {
         if (!("type" in block) || block.type !== "bookmark") return false;
         const caption = block.bookmark.caption.map((t) => t.plain_text).join("").trim();
-        return `[${caption ? escapeTyped(caption) : block.bookmark.url}](${block.bookmark.url})`;
+        return `[${escapeTyped(caption || block.bookmark.url)}](${block.bookmark.url})`;
       });
 
       // Read everything before writing anything: a failed request fails the
@@ -158,9 +158,16 @@ export function notionLoader(options: NotionLoaderOptions): Loader {
         if (!dataSource) {
           if (!options.database) fail("set `database` (or `dataSource`).");
           const database = (await notion.databases.retrieve({ database_id: options.database! })) as {
-            data_sources?: Array<{ id: string; name: string; in_trash?: boolean }>;
+            data_sources?: Array<{ id: string; name: string }>;
           };
-          const sources = (database.data_sources ?? []).filter((s) => !s.in_trash);
+          let sources = database.data_sources ?? [];
+          if (sources.length > 1) {
+            // The database lists trashed data sources too; only retrieving one says so.
+            const trashed = await Promise.all(
+              sources.map(async (s) => ((await notion.dataSources.retrieve({ data_source_id: s.id })) as { in_trash?: boolean }).in_trash),
+            );
+            sources = sources.filter((_, i) => !trashed[i]);
+          }
           if (sources.length !== 1) {
             fail(`database ${options.database} has ${sources.length} data sources; set \`dataSource\` to one of: ${sources.map((s) => `${s.name} (${s.id})`).join(", ")}.`);
           }

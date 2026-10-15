@@ -17,6 +17,7 @@ import {
   loadMountContext,
   loadNestedLlmsSections,
   loadNimbusConfig,
+  loadUnreadCollectionRoutes,
   loadVersionAlternates,
 } from "./_internal/runtime-config.js";
 import { notAPageCollectionMessage } from "./_internal/page-collection-error.js";
@@ -56,6 +57,7 @@ import {
   withoutHtmlExtension,
 } from "./_internal/url.js";
 import {
+  NO_ROUTES,
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
   collectionMountPrefix as resolveCollectionPrefix,
@@ -1426,14 +1428,20 @@ async function assertRouteServesCollection(
   const served = resolveCollectionPrefix(collection, context);
   const allowed = new Set([
     served,
-    resolveCollectionPrefix(collection, { versions: context.versions, routes: new Map() }),
+    resolveCollectionPrefix(collection, { versions: context.versions, routes: NO_ROUTES }),
     ...(record?.aliases ?? []),
   ]);
   if (allowed.has(folder)) return;
+  const unread = (await loadUnreadCollectionRoutes()).find((route) => route.folder === folder);
+  const servedFrom = record?.file ?? (served || "/");
   throw new Error(
-    `nimbus-docs: ${helper}("${collection}") runs in a route under ${folder || "/"}, but "${collection}" is served from ` +
-      `${record?.file ?? `${served || "/"}`} (or the build didn't see this call: a wrapper in another module?). ` +
-      `Call it in the route file's frontmatter.` +
+    (unread
+      ? `nimbus-docs: Nimbus couldn't read the getStaticPaths in ${unread.file}, so "${collection}" is still served from ` +
+        `${servedFrom}. Export it as \`export const getStaticPaths = ${helper}("${collection}")\`, or return the helper's ` +
+        `paths from a function in the same file, passing the name as a string literal.`
+      : `nimbus-docs: ${helper}("${collection}") runs in a route under ${folder || "/"}, but "${collection}" is served from ` +
+        `${servedFrom} (or the build didn't see this call: a wrapper in another module?). ` +
+        `Call it in the route file's frontmatter.`) +
       (import.meta.env?.DEV ? " If you just moved the route, restart the dev server." : "") +
       ` See https://nimbus-docs.com/writing/pages-and-routing/#collection-urls.`,
   );
@@ -2190,7 +2198,7 @@ export async function getCollectionLlmsUrl(
  * ```
  */
 export async function getCollectionUrl(
-  collection: import("astro:content").CollectionKey,
+  collection: import("astro:content").CollectionKey | (string & {}),
 ): Promise<string> {
   await loadNimbusConfig();
   return toDocumentHref(resolveCollectionPrefix(collection, await loadMountContext()) || "/");

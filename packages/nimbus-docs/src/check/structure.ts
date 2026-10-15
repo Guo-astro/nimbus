@@ -61,6 +61,7 @@ import {
   decideCollectionMounts,
   findCollectionRoutes,
   movedRequestRouteMessage,
+  unreadRouteWarnings,
 } from "../_internal/collection-routes.js";
 
 export async function checkStructure(
@@ -291,7 +292,8 @@ function checkCollectionUrls(
             : [],
         )
       : [];
-  const { mounts, errors } = decideCollectionMounts(findCollectionRoutes(srcDir, cwd), versions, apiCollections);
+  const { found, unread } = findCollectionRoutes(srcDir, cwd);
+  const { mounts, errors, warnings } = decideCollectionMounts(found, versions, apiCollections);
   for (const error of errors)
     findings.push({
       scope: "structure",
@@ -300,13 +302,23 @@ function checkCollectionUrls(
       message: `${error.message} See ${COLLECTION_URLS_DOCS}.`,
       fixable: false,
     });
+  for (const warning of [...warnings, ...unreadRouteWarnings(unread)])
+    findings.push({
+      scope: "structure",
+      code: warning.code,
+      severity: "warn",
+      message: `${warning.message} See ${COLLECTION_URLS_DOCS}.`,
+      fixable: false,
+    });
   const context = { versions, routes: mounts };
+  const built = readPageCollectionsFile(cwd)?.collections;
+  const hasDocs = built ? built.includes("docs") : mounts.has("docs") || existsSync(path.join(srcDir, "content", "docs"));
   const names = [
     ...new Set([
-      "docs",
+      ...(hasDocs ? ["docs"] : []),
       ...(versions?.others ?? []).map((version) => `docs-${version}`),
       ...apiCollections,
-      ...(readPageCollectionsFile(cwd)?.collections ?? []),
+      ...(built ?? []),
       ...mounts.keys(),
     ]),
   ];

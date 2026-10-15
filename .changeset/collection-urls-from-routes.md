@@ -7,3 +7,5 @@
 - `nimbus-docs check` lists where each collection is served when a route moves one; `check --json` always includes it.
 - Sites that build broken URLs today now fail with an error naming the file and the fix: several routes for one collection with none at its default URL, two collections on one URL, a collection served only from dynamic folders, a docs or version route away from its URL, a page under another collection's moved URL, a request-rendered collection away from `/<name>`, an API collection at the site root, or a route helper running in a route its collection isn't served from.
 - A sidebar `prefix` for a collection served by a route helper is deprecated: the route sets the URL.
+- `getIndexedTopLevel()` groups a moved collection under its URL: a group's `slug` and `label` can contain `/` (`products/sdk`). Components that build `/${slug}/llms.txt` or show `label` should expect it.
+- Two new warnings, from the build and `check`: a second static route for a collection that's already served elsewhere (its pages duplicate the collection's), and a helper route in a nested folder whose `getStaticPaths` Nimbus can't read.

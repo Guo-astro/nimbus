@@ -105,6 +105,7 @@ export async function runChecks(
   const findings = sortFindings(reports.flatMap((r) => r.findings));
   const noteCount = reports.reduce((n, r) => n + r.notes.length, 0);
   const durationMs = Math.round(performance.now() - started);
+  const collections = reports.find((r) => r.collections)?.collections;
 
   const summary = summarize(findings, noteCount, durationMs);
   const scopeResults: ScopeResult[] = reports.map((r) => ({
@@ -122,8 +123,6 @@ export async function runChecks(
     requested: scopes,
     parsed,
     location: parsed.ok ? parsed.location : null,
-    ...(reports.find((r) => r.collections)?.collections
-      ? { collections: reports.find((r) => r.collections)!.collections }
-      : {}),
+    ...(collections ? { collections } : {}),
   };
 }

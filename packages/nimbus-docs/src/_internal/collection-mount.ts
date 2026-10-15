@@ -100,7 +100,7 @@ export function collectionUrlsKey(context: MountContext): string | undefined {
   const defaults = { versions: context.versions, routes: NO_ROUTES };
   const moved = [...context.routes]
     .filter(([name, { mount }]) => mount !== collectionMountPrefix(name, defaults))
-    .map(([name, { mount }]) => [name, mount])
-    .sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0));
+    .map(([name, { mount }]) => [name, mount] as const)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return moved.length === 0 ? undefined : JSON.stringify(moved);
 }

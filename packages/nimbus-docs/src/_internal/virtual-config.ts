@@ -22,7 +22,7 @@
 import type { NimbusConfig, RuntimeContentSource, RuntimeNimbusConfig } from "../types.js";
 import { searchIndexLayout } from "./build-slice.js";
 import { NO_ROUTES } from "./collection-mount.js";
-import type { CollectionRoutes } from "./collection-routes.js";
+import type { CollectionRoutes, UnreadRoute } from "./collection-routes.js";
 import type { VersionAlternatesTable } from "./version-alternates.js";
 
 const VIRTUAL_ID = "virtual:nimbus/config";
@@ -89,6 +89,8 @@ export interface VirtualConfigExtras {
   apiCollections: string[];
   /** Collections served by a route helper, by where the route file is. */
   collectionRoutes: CollectionRoutes;
+  /** Static-folder routes that import a route helper in a shape the build couldn't read. */
+  unreadCollectionRoutes: readonly UnreadRoute[];
   /** Whether the section `llms.txt` route serves nested sections, once routes are resolved. */
   getNestedLlmsSections?: () => boolean;
   headDefaults: {
@@ -167,6 +169,7 @@ export function virtualConfigPlugin(
           `export const versionAlternates = ${JSON.stringify(extras.versionAlternates)};\n` +
           `export const apiCollections = ${JSON.stringify(extras.apiCollections)};\n` +
           `export const collectionRoutes = ${JSON.stringify([...extras.collectionRoutes])};\n` +
+          `export const unreadCollectionRoutes = ${JSON.stringify(extras.unreadCollectionRoutes)};\n` +
           `export const nestedLlmsSections = ${JSON.stringify(extras.getNestedLlmsSections?.() ?? false)};\n` +
           `export const headDefaults = ${JSON.stringify(extras.headDefaults)};\n`
         );

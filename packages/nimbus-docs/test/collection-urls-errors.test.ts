@@ -91,6 +91,25 @@ test("the guard stops a helper the build didn't see from serving a collection at
   assert.ok(existsSync(path.join(root, "dist/sdk/setup/index.html")));
 });
 
+test("a helper route the build couldn't read is named at render", async () => {
+  const files = {
+    ...base,
+    "src/lib/wrap.ts": `export const wrap = (paths) => (options) => paths(options);\n`,
+    "src/pages/products/kit/[...slug].astro": sdkRoute(
+      `export const getStaticPaths = wrap(getCollectionStaticPaths("sdk"));`,
+      `import { getCollectionStaticPaths, getCollectionPage } from ${runtime};\nimport { wrap } from "../../../lib/wrap";`,
+    ),
+  };
+  await assert.rejects(sites.buildSite(files, { packageImports: true }), (error: Error) => {
+    assert.match(
+      error.message,
+      /couldn't read the getStaticPaths in src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro, so "sdk" is still served from \/sdk/,
+    );
+    assert.match(error.message, DOCS_LINK);
+    return true;
+  });
+});
+
 test("a moved collection rendered on request fails at setup until request rendering supports it", async () => {
   await assert.rejects(
     sites.buildSite(

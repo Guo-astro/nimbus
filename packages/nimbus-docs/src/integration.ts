@@ -61,6 +61,9 @@ import {
   movedRequestRouteMessage,
   routePattern,
   sidebarPrefixWarnings,
+  unreadRouteWarnings,
+  type MountWarning,
+  type UnreadRoute,
 } from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
 import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
@@ -647,6 +650,8 @@ export function nimbus(
   let sliceLayoutForBuild: BuildSliceLayout | null = null;
   // Where each collection is served, read from its route file at setup.
   let mountContextForBuild: MountContext = { versions: null, routes: NO_ROUTES };
+  // Helper routes the reader couldn't follow, named when one renders in the wrong place.
+  let unreadRoutesForBuild: UnreadRoute[] = [];
   let buildOnlyNoticePrinted = false;
   // The previous build's route truth, read before `config:setup` invalidates
   // it, so a slice build can check links into the other slices.
@@ -654,6 +659,8 @@ export function nimbus(
   // What `astro:build:setup` hashes into the sidebar's build id.
   let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
+  // Set in dev: re-evaluates every module, so `virtual:nimbus/config` reads the routes again.
+  let reloadDevModules: (() => void) | undefined;
   let apiCollectionsForBuild: string[] = [];
   // The before-sync rendering policy, kept for the post-sync page checks.
   let compiledPolicyForBuild: CompiledRenderingPolicy | null = null;
@@ -1190,8 +1197,10 @@ export function nimbus(
         const projectRoot = fileURLToPath(astroConfig.root);
         // Collection URLs come from route files; resolved first, since every
         // URL built below depends on them.
+        const routeScan = findCollectionRoutes(srcDir, projectRoot);
+        unreadRoutesForBuild = routeScan.unread;
         const mountDecision = decideCollectionMounts(
-          findCollectionRoutes(srcDir, projectRoot),
+          routeScan.found,
           versionMounts(),
           (config.api ?? []).map((entry) => entry.collection),
         );
@@ -1200,6 +1209,7 @@ export function nimbus(
             `${mountDecision.errors.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`,
           );
         mountContextForBuild = { versions: versionMounts(), routes: mountDecision.mounts };
+        const routeWarnings: MountWarning[] = [...mountDecision.warnings, ...unreadRouteWarnings(routeScan.unread)];
         setMountContext(astroConfig.root, mountContextForBuild);
         // `NIMBUS_BUILD_ONLY`: build one collection or a set. Only a build
         // honours it; dev, sync and check serve the full site, with one
@@ -1927,7 +1937,11 @@ export function nimbus(
               .map(({ collection, file }) => movedRequestRouteMessage(collection, file))
               .join("\n\n") + `\n\nSee ${COLLECTION_URLS_DOCS}.`,
           );
-        for (const warning of sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild)) logger.warn(warning);
+        for (const warning of [
+          ...routeWarnings.map((warning) => warning.message),
+          ...sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild),
+        ])
+          logger.warn(warning);
         requestRenderingConfigured = Object.values(policy.collections).includes(
           "request",
         );
@@ -2981,6 +2995,7 @@ export function nimbus(
                 versionAlternates,
                 apiCollections,
                 collectionRoutes: mountContextForBuild.routes,
+                unreadCollectionRoutes: unreadRoutesForBuild,
                 getNestedLlmsSections: () => nestedLlmsSections ?? false,
                 headDefaults: {
                   favicon,
@@ -3255,6 +3270,7 @@ export function nimbus(
             "  export const apiCollections: readonly string[];",
             "  /** [collection, where it's served] for collections served by a route helper. */",
             "  export const collectionRoutes: ReadonlyArray<[string, { mount: string; file?: string; aliases: string[] }]>;",
+            "  export const unreadCollectionRoutes: ReadonlyArray<{ folder: string; file: string }>;",
             "  export const nestedLlmsSections: boolean;",
             "  /** Build-time defaults derived from Astro's public directory. */",
             "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string; ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } }; imageSizes: Record<string, { width: number; height: number }> };",
@@ -3277,6 +3293,16 @@ export function nimbus(
         });
       },
       "astro:server:setup": async ({ server, refreshContent }) => {
+        reloadDevModules = () => {
+          server.moduleGraph.invalidateAll();
+          // workerd executes in a separate Vite module runner. Invalidating
+          // only Node's compatibility graph leaves its virtual modules and
+          // memoized inventories on the previous snapshot.
+          for (const environment of Object.values(server.environments)) {
+            environment.moduleGraph.invalidateAll();
+            environment.hot.send({ type: "full-reload" });
+          }
+        };
         if (!restartedDevServer) {
           initialDevWatchers.set(
             preparedMarkdownRootKey(projectRootForBuild),
@@ -3401,14 +3427,7 @@ export function nimbus(
               (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(
                 projectRootForBuild,
               );
-              server.moduleGraph.invalidateAll();
-              // workerd executes in a separate Vite module runner. Invalidating
-              // only Node's compatibility graph leaves its virtual version
-              // index and memoized inventories on the previous spec snapshot.
-              for (const environment of Object.values(server.environments)) {
-                environment.moduleGraph.invalidateAll();
-                environment.hot.send({ type: "full-reload" });
-              }
+              reloadDevModules!();
             } catch (err) {
               server.config.logger.error(
                 `nimbus-docs: failed to re-bake citation index after a spec change: ${(err as Error).message}`,
@@ -3598,15 +3617,15 @@ export function nimbus(
           );
         }
         // Dev re-resolves routes when a page file is added or removed.
-        if (
-          (servesFullDocument !== undefined && serves !== servesFullDocument) ||
-          (nestedLlmsSections !== undefined && nested !== nestedLlmsSections)
-        )
+        const nestedChanged = nestedLlmsSections !== undefined && nested !== nestedLlmsSections;
+        if ((servesFullDocument !== undefined && serves !== servesFullDocument) || nestedChanged)
           void loadAgentEndpointAssets().then((assets) =>
             assets.invalidateAgentEndpointAssets(projectRootForBuild),
           );
         servesFullDocument = serves;
         nestedLlmsSections = nested;
+        // `getCollectionLlmsUrl` reads it from the virtual config.
+        if (nestedChanged) reloadDevModules?.();
         resolvedRoutesForBuild = routes.map((r) => ({
           pattern: r.pattern,
           type: r.type,

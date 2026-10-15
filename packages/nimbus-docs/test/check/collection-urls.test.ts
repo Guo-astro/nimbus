@@ -32,7 +32,10 @@ export default { integrations: [nimbus({ site: "https://docs.example.com", title
 }
 
 test("check lists each collection's URL and where it comes from, in pretty output and --json", async () => {
-  const dir = project({ "src/pages/products/kit/[...slug].astro": "sdk" });
+  const dir = project(
+    { "src/pages/products/kit/[...slug].astro": "sdk" },
+    { files: { "src/content/docs/index.mdx": "---\ntitle: Home\n---\n" } },
+  );
   try {
     const result = await runChecks(dir, STRUCTURE);
     assert.equal(result.summary.errors, 0);
@@ -59,7 +62,25 @@ test("check prints no table when every collection is at its default URL, and --j
   try {
     const result = await runChecks(dir, STRUCTURE);
     assert.doesNotMatch(formatCheckPretty(result, OPTS), /Collection URLs/);
-    assert.ok((JSON.parse(formatCheckJson(result)) as { collections: unknown[] }).collections.length > 0);
+    const { collections } = JSON.parse(formatCheckJson(result)) as { collections: Array<{ name: string }> };
+    assert.deepEqual(collections.map(({ name }) => name), ["api", "sdk"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("check warns about a helper route it can't read, away from any default URL", async () => {
+  const dir = project({}, {
+    files: {
+      "src/pages/products/kit/[...slug].astro":
+        '---\nimport { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport { wrap } from "../../../lib/wrap";\nexport const getStaticPaths = wrap(getCollectionStaticPaths("sdk"));\n---\n',
+    },
+  });
+  try {
+    const result = await runChecks(dir, STRUCTURE);
+    const finding = result.findings.find((f) => f.code === "nimbus/collection-unread-route");
+    assert.equal(finding?.severity, "warn");
+    assert.match(finding!.message, /src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro.*#collection-urls/s);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

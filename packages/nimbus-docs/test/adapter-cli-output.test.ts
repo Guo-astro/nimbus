@@ -166,8 +166,10 @@ function runAdapter(files: Record<string, string>, env: Record<string, string>, 
       config: fs.readFileSync(path.join(dir, "astro.config.ts"), "utf8"),
       wrangler: fs.existsSync(path.join(dir, "wrangler.jsonc")),
       // Every file the run left, with its contents, for whole-project comparisons.
+      // Not `node_modules`: a failed install can leave links to missing packages.
       files: Object.fromEntries(
         (fs.readdirSync(dir, { recursive: true }) as string[])
+          .filter((file) => file.split(path.sep)[0] !== "node_modules")
           .filter((file) => fs.statSync(path.join(dir, file)).isFile())
           .sort()
           .map((file) => [file, fs.readFileSync(path.join(dir, file), "utf8")]),

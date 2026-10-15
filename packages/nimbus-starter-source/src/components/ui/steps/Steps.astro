@@ -13,9 +13,13 @@ interface Props extends HTMLAttributes<"div"> {
 
 const { start, class: className, ...attrs } = Astro.props;
 
-// <Step> children are list items; give them their list on the server.
+// <Step> children are list items; give them their list on the server. Content
+// before the first Step (an introduction) stays outside the list.
 const content = await Astro.slots.render("default");
-const stepMode = /^\s*<li\b(?:[^>"']|"[^"]*"|'[^']*')*\sdata-step\b/.test(content);
+const firstStep = content.search(/<li\b(?:[^>"']|"[^"]*"|'[^']*')*\sdata-step\b/);
+const stepMode = firstStep !== -1;
+const lead = stepMode ? content.slice(0, firstStep) : "";
+const steps = stepMode ? content.slice(firstStep) : content;
 ---
 
 <div
@@ -25,7 +29,8 @@ const stepMode = /^\s*<li\b(?:[^>"']|"[^"]*"|'[^']*')*\sdata-step\b/.test(conten
   style={start !== undefined ? `--steps-start: ${start};` : undefined}
   {...attrs}
 >
-  {stepMode ? <ol role="list" data-slot="steps-list" set:html={content} /> : <Fragment set:html={content} />}
+  {lead.trim() && <div data-slot="steps-intro" class="mb-4" set:html={lead} />}
+  {stepMode ? <ol role="list" data-slot="steps-list" set:html={steps} /> : <Fragment set:html={steps} />}
 </div>
 
 <script>

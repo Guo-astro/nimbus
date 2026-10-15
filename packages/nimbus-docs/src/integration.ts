@@ -2406,10 +2406,6 @@ export function nimbus(
             throw authorError(
               `Nimbus publishes /.well-known/agent-skills/ from the skills/ folder. Move your existing file at ${path.relative(projectRoot, collision)}, or remove skills/ to keep publishing it yourself.`,
             );
-          if (discoveryOff && skills?.index)
-            logger.warn(
-              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
-            );
         }
         params.addMiddleware?.({
           entrypoint: new URL(
@@ -3828,6 +3824,10 @@ export function nimbus(
         // Skills live at the origin root: the root slice's to write.
         if (discovery.skills && !sliceOutput) {
           for (const warning of discovery.skills.warnings) logger.warn(warning);
+          if (discoveryOff && (assetRoot !== distDir || !baseSegments.length))
+            logger.warn(
+              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
+            );
           for (const artifact of discovery.skills.artifacts) {
             const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
             fs.mkdirSync(path.dirname(target), { recursive: true });

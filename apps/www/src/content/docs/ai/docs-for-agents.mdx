@@ -70,7 +70,7 @@ nimbus({ /* … */ agents: { discovery: false } })
 
 Nimbus then publishes no `/.well-known/ard.json`, `ai-catalog.json` or `api-catalog`, adds no `rel="ard"` or `rel="api-catalog"` homepage `Link`, and writes no `_headers` rules for them. Your own files in `public/.well-known/` are kept, and `astro dev` serves them. Under a base, your own files are served there (`/docs/.well-known/ard.json`); the root ones are the owning site's. After switching, purge the cached homepage, whose `Link` header still lists the old files, and remove them from hosts that keep files from earlier deploys, such as an S3 sync without `--delete`.
 
-Everything else stays on: `llms.txt`, Markdown versions and their links, the API reference and spec links, Markdown negotiation, and the remote MCP server, which agents still find through `llms.txt`. Agent Skills still publish at `/.well-known/agent-skills/`, so leave out the `skills/` folder unless this site owns that path. A site serving its own `api-catalog` sets its `Content-Type` in its own `_headers`, since the file has no extension.
+Everything else stays on: `llms.txt`, Markdown versions and their links, the API reference and spec links, Markdown negotiation, and the remote MCP server, which agents still find through `llms.txt`. Agent Skills still publish, and with the Cloudflare adapter or without a base they land at the origin root's `/.well-known/agent-skills/`, so leave out the `skills/` folder there unless this site owns that path. A site serving its own `api-catalog` sets its `Content-Type` in its own `_headers`, since the file has no extension.
 
 ### Content Signals
 

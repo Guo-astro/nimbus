@@ -121,14 +121,28 @@ test("the Cloudflare adapter's root copies follow the switch", async () => {
   }
 });
 
-test("off with a skills/ folder: the build says the skills still publish at the origin root", async () => {
+test("off with a skills/ folder: the build warns only when the skills land at the origin root", async () => {
   const skills = { "deploy/SKILL.md": "---\nname: deploy\ndescription: Deploy with Wrangler.\n---\nSteps.\n" };
-  const notice = /agents\.discovery is false, but skills\/ still publishes \/\.well-known\/agent-skills\/ at the origin root/;
-  for (const off of [true, false]) {
+  const warning = /agents\.discovery is false, but skills\/ still publishes \/\.well-known\/agent-skills\/ at the origin root/;
+  const cases = [
+    { name: "off, Cloudflare under a base", off: true, cloudflare: true, warns: true },
+    { name: "off, other host under a base", off: true, cloudflare: false, warns: false },
+    { name: "on, Cloudflare under a base", off: false, cloudflare: true, warns: false },
+  ];
+  for (const { name, off, cloudflare, warns } of cases) {
     const site = await discoveryFixture(undefined, "docs", false, skills, off ? OFF : {});
     try {
-      const log = await captured(() => build({ ...site.config, logLevel: "info" }));
-      assert.equal(notice.test(log), off, log);
+      await site.write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
+      const config = cloudflare
+        ? {
+            ...site.config,
+            output: "server",
+            adapter: cloudflareNamed(path.join(site.root, "server-entry.mjs")),
+            build: { client: path.join(site.root, "out/docs"), server: path.join(site.root, ".server") },
+          }
+        : site.config;
+      const log = await captured(() => build({ ...config, logLevel: "info" } as never));
+      assert.equal(warning.test(log), warns, `${name}\n${log}`);
     } finally {
       await rm(site.root, { recursive: true, force: true });
     }

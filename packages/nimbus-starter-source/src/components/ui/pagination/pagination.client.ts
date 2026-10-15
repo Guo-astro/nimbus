@@ -64,10 +64,12 @@ function initPagination(root: HTMLElement): () => void {
   });
   resize.observe(root);
 
-  // [ and ] press the matching key, then go. Ignored while typing or with a
-  // modifier held, so it never fights the browser or a text field.
+  // [ and ] press the matching key, then go. Ignored while typing, with a
+  // modifier held, or while a dialog is open (search, the drawer, a zoomed
+  // image), so it never fights the browser, a text field or a modal.
   const onKey = (e: KeyboardEvent) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+    if (document.querySelector("dialog[open]")) return;
     const target = e.target;
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return;
     const item = items.find((i) => i.dataset.nbPaginationKey === e.key);

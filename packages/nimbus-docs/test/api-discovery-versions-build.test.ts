@@ -3,7 +3,6 @@
 // whose spec isn't published. One real server build; the assertions read the
 // discovery files it writes.
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -211,6 +210,23 @@ test("the catalog lists every visible version at an absolute URL under the base"
   assert.doesNotMatch(JSON.stringify(catalog), /v0/);
 });
 
+test("every advertised Markdown URL is served", async () => {
+  const catalog = JSON.parse(await output(".well-known/api-catalog")) as { linkset: Entry[] };
+  const manifest = JSON.parse(await output(".astro/nimbus/agent-endpoint-assets/manifest.json")) as {
+    markdownAssets: Array<{ url: string; path: string }>;
+  };
+  const served = new Map(manifest.markdownAssets.map((asset) => [asset.url, asset.path]));
+  const advertised = catalog.linkset.flatMap((entry) =>
+    entry["service-doc"].filter((doc) => doc.type === "text/markdown").map((doc) => doc.href),
+  );
+  assert.equal(advertised.length, 4);
+  for (const href of advertised) {
+    const asset = served.get(href.slice(ORIGIN.length));
+    assert.ok(asset, `${href} has no Markdown asset`);
+    assert.ok(published(`dist/_nimbus/agent-endpoint-assets/${asset}`), `${href} asset not in dist`);
+  }
+});
+
 test("specs publish for every version that allows it, hidden ones included, with no discovery for hidden", async () => {
   for (const family of ["qv", "big"]) {
     for (const version of ["v1", "v0"])
@@ -244,5 +260,4 @@ test("the homepage Link header advertises only defaults and the complete catalog
   assert.doesNotMatch(headers, /v0\/>|v0\/openapi\.json>|\?v=v0/);
   // Hidden specs keep their media-type rule.
   assert.match(headers, /\/qv\/v0\/openapi\.json\n {2}Content-Type: application\/vnd\.oai\.openapi\+json/);
-  assert.ok(existsSync(root));
 });

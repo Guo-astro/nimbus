@@ -116,7 +116,6 @@ test("a version without Markdown gets an HTML-only service-doc and a versioned A
   assert.doesNotMatch(links.join("\n"), /rel="service-(?:doc|desc)"/);
 });
 
-
 test("homepage links stay fixed as version inventory grows; catalog, ARD and spec headers remain complete", () => {
   const publication = (version: string, isDefault: boolean) => ({
     collection: "pets",

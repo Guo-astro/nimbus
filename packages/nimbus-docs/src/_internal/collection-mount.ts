@@ -14,6 +14,9 @@ import type { CollectionRoutes } from "./collection-routes.js";
 /** Primary collection name — mounted at the site root with no prefix. */
 export const PRIMARY_COLLECTION = "docs";
 
+/** The docs section every collection-URL error links to. */
+export const COLLECTION_URLS_DOCS = "https://nimbus-docs.com/writing/pages-and-routing/#collection-urls";
+
 export interface VersionInfo {
   /** Non-current version slugs (`docs-<slug>` collections mount at `/<slug>`). */
   others: readonly string[];
@@ -90,6 +93,43 @@ export function collectionLabel(
     if (versions.others.includes(slug)) return slug;
   }
   return collection;
+}
+
+/**
+ * The folder a collection route serves from its Astro pattern, base-free:
+ * `/products/sdk` for `/products/sdk/[...slug]`, `""` for `/[...slug]`.
+ * Undefined for a route that isn't a collection route, or whose folder is
+ * dynamic (`/[locale]/[...slug]`).
+ */
+export function routeFolder(routePattern: string): string | undefined {
+  const segments = routePattern.split("/").filter(Boolean);
+  const last = segments.at(-1);
+  if (last !== "[slug]" && last !== "[...slug]") return undefined;
+  const folder = segments.slice(0, -1);
+  if (folder.some((segment) => segment.includes("["))) return undefined;
+  return folder.length ? `/${folder.join("/")}` : "";
+}
+
+/**
+ * The collection each route folder serves: every collection's URL, then its
+ * kept alias folders, then its default URL, so one collection's URL wins
+ * over another's default.
+ */
+export function collectionsByFolder(
+  collections: readonly string[],
+  context: MountContext,
+): Map<string, string> {
+  const defaults = { versions: context.versions, routes: NO_ROUTES };
+  const byFolder = new Map<string, string>();
+  for (const folders of [
+    (collection: string) => [collectionMountPrefix(collection, context)],
+    (collection: string) => context.routes.get(collection)?.aliases ?? [],
+    (collection: string) => [collectionMountPrefix(collection, defaults)],
+  ]) {
+    for (const collection of collections)
+      for (const folder of folders(collection)) if (!byFolder.has(folder)) byFolder.set(folder, collection);
+  }
+  return byFolder;
 }
 
 /**

@@ -188,6 +188,30 @@ test("every URL the agent files and the page link to is a route the build serves
   assert.deepEqual(missing, []);
 });
 
+test("a nested collection is linked from the enclosing section's llms.txt, a collection's or a docs group's", async () => {
+  const kit = await read("products/kit/llms.txt");
+  assert.match(kit, /## Sections\n\n- \[[^\]]+\]\(https:\/\/example\.test\/docs\/products\/kit\/cli\/llms\.txt\)/);
+  assert.ok(exists("products/kit/cli/llms.txt"));
+  assert.doesNotMatch(await read("products/kit/cli/llms.txt"), /## Sections/);
+
+  // Under a docs group: the group's index links the collection beside its own pages.
+  const { root: grouped } = await sites.buildSite(
+    {
+      ...FILES,
+      "src/content.config.ts": FILES["src/content.config.ts"]!.replace("};", `  dbt: defineCollection(docsCollection({ base: "dbt" })),\n};`),
+      "src/content/docs/integrations/index.mdx": "---\ntitle: Integrations\n---\nIntegrations.\n",
+      "src/content/docs/integrations/overview.mdx": "---\ntitle: Overview\n---\nOverview.\n",
+      "src/content/dbt/setup.mdx": "---\ntitle: dbt setup\n---\nSet up dbt.\n",
+      "src/pages/integrations/dbt/[...slug].astro": FILES["src/pages/products/kit/cli/[...slug].astro"]!.replace('"cli"', '"dbt"'),
+    },
+    { packageImports: true, api: [{ collection: "api", spec: "./specs/v2.json" }] },
+  );
+  const integrations = await readFile(path.join(grouped, "dist/integrations/llms.txt"), "utf8");
+  assert.match(integrations, /\[Overview\]\(https:\/\/example\.test\/docs\/integrations\/overview\/index\.md\)/);
+  assert.match(integrations, /## Sections\n\n- \[[^\]]+\]\(https:\/\/example\.test\/docs\/integrations\/dbt\/llms\.txt\)/);
+  assert.ok(existsSync(path.join(grouped, "dist/integrations/dbt/llms.txt")));
+});
+
 test("with a [section] llms.txt route, the root index lists a nested collection's pages instead of its llms.txt", async () => {
   const { "src/pages/[...section]/llms.txt.ts": nested, ...rest } = FILES;
   const { root: single } = await sites.buildSite(

@@ -90,17 +90,3 @@ test("the guard stops a helper the build didn't see from serving a collection at
   const { root } = await sites.buildSite({ ...rest, "src/pages/sdk/[...slug].astro": route }, { packageImports: true });
   assert.ok(existsSync(path.join(root, "dist/sdk/setup/index.html")));
 });
-
-test("a moved collection rendered on request fails at setup until request rendering supports it", async () => {
-  await assert.rejects(
-    sites.buildSite(
-      { ...base, "src/pages/products/kit/[...slug].astro": routed },
-      { packageImports: true, server: true, rendering: { default: "build", collections: { sdk: "request" } } },
-    ),
-    (error: Error) => {
-      assert.match(error.message, /collection "sdk" renders on request from src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro/);
-      assert.match(error.message, DOCS_LINK);
-      return true;
-    },
-  );
-});

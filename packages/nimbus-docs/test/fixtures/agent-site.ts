@@ -31,6 +31,8 @@ export interface AgentSiteOptions {
   root?: string;
   /** Resolve `@cloudflare/nimbus-docs` imports in fixture files to the package source, as a site imports it. */
   packageImports?: boolean;
+  /** Astro's `base`; `/docs` by default. */
+  base?: string;
 }
 
 /** Import specifier for a package source module, usable from fixture files. */
@@ -125,7 +127,7 @@ export function agentSites() {
               }
             : {}),
         },
-        base: "/docs",
+        base: options.base ?? "/docs",
         prerenderConflictBehavior: options.conflict ?? "error",
         ...(adapter ? { output: "server" as const, adapter } : {}),
         logLevel: options.logLevel ?? "silent",

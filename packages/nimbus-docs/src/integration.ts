@@ -54,12 +54,13 @@ import {
 } from "./_internal/build-report.js";
 import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
 import {
-  COLLECTION_URLS_DOCS,
+  collectionMoveMessages,
   collectionOwnershipErrors,
   decideCollectionMounts,
   findCollectionRoutes,
-  movedRequestRouteMessage,
+  mountDecisionStamp,
   routePattern,
+  routeSegments,
   sidebarPrefixWarnings,
 } from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
@@ -207,6 +208,7 @@ import {
 import {
   collectionLabel,
   collectionMountPrefix,
+  COLLECTION_URLS_DOCS,
   NO_ROUTES,
   PRIMARY_COLLECTION,
   setMountContext,
@@ -647,6 +649,20 @@ export function nimbus(
   let sliceLayoutForBuild: BuildSliceLayout | null = null;
   // Where each collection is served, read from its route file at setup.
   let mountContextForBuild: MountContext = { versions: null, routes: NO_ROUTES };
+  // What that map was resolved from, so the dev server can tell when a route
+  // file change moves a collection.
+  let mountStampForSetup = "";
+  let collectionRoutesTimer: ReturnType<typeof setTimeout> | undefined;
+  const decideMounts = (srcDir: string, projectRoot: string) =>
+    decideCollectionMounts(
+      findCollectionRoutes(srcDir, projectRoot),
+      versionMounts(),
+      (config.api ?? []).map((entry) => entry.collection),
+    );
+  // Written by the dev server when a route file change moves a collection;
+  // setup watches it, so Astro restarts and setup declares the new routes.
+  const collectionRoutesSentinel = (projectRoot: string) =>
+    path.join(projectRoot, ".astro", "nimbus", "collection-routes.json");
   let buildOnlyNoticePrinted = false;
   // The previous build's route truth, read before `config:setup` invalidates
   // it, so a slice build can check links into the other slices.
@@ -1180,6 +1196,7 @@ export function nimbus(
           logger,
           command,
           isRestart,
+          addWatchFile,
         } = params;
         building = command === "build";
         restartedDevServer = command === "dev" && isRestart;
@@ -1190,16 +1207,14 @@ export function nimbus(
         const projectRoot = fileURLToPath(astroConfig.root);
         // Collection URLs come from route files; resolved first, since every
         // URL built below depends on them.
-        const mountDecision = decideCollectionMounts(
-          findCollectionRoutes(srcDir, projectRoot),
-          versionMounts(),
-          (config.api ?? []).map((entry) => entry.collection),
-        );
+        if (command === "dev") addWatchFile(collectionRoutesSentinel(projectRoot));
+        const mountDecision = decideMounts(srcDir, projectRoot);
         if (mountDecision.errors.length > 0)
           throw authorError(
             `${mountDecision.errors.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`,
           );
         mountContextForBuild = { versions: versionMounts(), routes: mountDecision.mounts };
+        mountStampForSetup = mountDecisionStamp(mountDecision);
         setMountContext(astroConfig.root, mountContextForBuild);
         // `NIMBUS_BUILD_ONLY`: build one collection or a set. Only a build
         // honours it; dev, sync and check serve the full site, with one
@@ -1913,20 +1928,6 @@ export function nimbus(
           canonicalCollections,
         );
         compiledPolicyForBuild = policy;
-        // Request rendering resolves a collection by its default URL, so a
-        // request-rendered collection can't be served from another folder yet.
-        const movedRequestRoutes = Object.entries(policy.collections)
-          .filter(([, mode]) => mode === "request")
-          .flatMap(([collection]) => {
-            const moved = movedCollectionRoute(collection, mountContextForBuild);
-            return moved ? [{ collection, ...moved }] : [];
-          });
-        if (movedRequestRoutes.length > 0)
-          throw authorError(
-            movedRequestRoutes
-              .map(({ collection, file }) => movedRequestRouteMessage(collection, file))
-              .join("\n\n") + `\n\nSee ${COLLECTION_URLS_DOCS}.`,
-          );
         for (const warning of sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild)) logger.warn(warning);
         requestRenderingConfigured = Object.values(policy.collections).includes(
           "request",
@@ -3276,13 +3277,53 @@ export function nimbus(
           ].join("\n"),
         });
       },
-      "astro:server:setup": async ({ server, refreshContent }) => {
+      "astro:server:setup": async ({ server, refreshContent, logger }) => {
         if (!restartedDevServer) {
           initialDevWatchers.set(
             preparedMarkdownRootKey(projectRootForBuild),
             server.watcher,
           );
         }
+
+        // Moving, adding or removing a route file can move a collection, and
+        // only setup declares routes. Once a burst of changes settles (a
+        // folder rename, a branch switch), re-resolve, and when the map
+        // differs, write the sentinel setup watches so Astro re-runs setup.
+        // Astro drops changes made during a restart, so a restarted server
+        // checks once on start. When setup fails, Astro keeps this server, and
+        // the next fix writes the sentinel again.
+        const pagesDir = path.join(srcDirForBuild, "pages");
+        const watcher = server.watcher;
+        let lastStamp = mountStampForSetup;
+        const recheckCollectionRoutes = () => {
+          collectionRoutesTimer = undefined;
+          // Vite swaps in a new watcher on restart; this server is gone.
+          if (server.watcher !== watcher) return;
+          const decision = decideMounts(srcDirForBuild, projectRootForBuild);
+          const stamp = mountDecisionStamp(decision);
+          if (stamp === lastStamp) return;
+          lastStamp = stamp;
+          if (decision.errors.length === 0) {
+            const next = { versions: mountContextForBuild.versions, routes: decision.mounts };
+            for (const message of collectionMoveMessages(mountContextForBuild, next)) logger.info(message);
+          }
+          const sentinel = collectionRoutesSentinel(projectRootForBuild);
+          fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+          fs.writeFileSync(sentinel, `${stamp}\n`);
+        };
+        const onPagesChange = (file: string) => {
+          const relative = path.relative(pagesDir, file);
+          if (relative.startsWith("..") || path.isAbsolute(relative) || !relative.endsWith(".astro")) return;
+          const last = routeSegments(relative).at(-1);
+          if (last !== "[slug]" && last !== "[...slug]") return;
+          clearTimeout(collectionRoutesTimer);
+          collectionRoutesTimer = setTimeout(recheckCollectionRoutes, 200);
+          collectionRoutesTimer.unref?.();
+        };
+        watcher.on("add", onPagesChange);
+        watcher.on("change", onPagesChange);
+        watcher.on("unlink", onPagesChange);
+        if (restartedDevServer) recheckCollectionRoutes();
         // Astro re-runs `astro:config:setup` after an astro.config edit, which
         // begins a new prepared session and re-registers `api` entries, but it
         // does not re-run loaders. Re-sync every collection so prepared data
@@ -3421,6 +3462,7 @@ export function nimbus(
         }
       },
       "astro:server:done": async () => {
+        clearTimeout(collectionRoutesTimer);
         releaseContentSourceLeases(projectRootForBuild);
         // The restart refresh re-runs loaders against the first server's
         // watcher (see `initialDevWatchers`); close it again so a stopped dev

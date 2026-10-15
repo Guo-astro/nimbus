@@ -336,6 +336,7 @@ async function setupIntegration(
       return {} as never;
     },
     injectRoute: (route: unknown) => injectedRoutes.push(route),
+    addWatchFile: () => {},
     config: {
       root: pathToFileURL(`${root}${path.sep}`),
       srcDir: pathToFileURL(`${path.join(root, "src")}${path.sep}`),

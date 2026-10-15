@@ -78,7 +78,7 @@ test("a route that breaks a collection's URL is a check error with its code and 
   }
 });
 
-test("check reports a page under a moved collection's URL, and a moved collection rendered on request", async () => {
+test("check reports a page under a moved collection's URL, rendered at build or on request", async () => {
   const dir = project(
     { "src/pages/products/kit/[...slug].astro": "sdk" },
     {
@@ -89,10 +89,7 @@ test("check reports a page under a moved collection's URL, and a moved collectio
   try {
     const result = await runChecks(dir, STRUCTURE);
     const codes = result.findings.filter((f) => f.severity === "error").map((f) => f.code);
-    assert.ok(codes.includes("nimbus/collection-owns-url"), codes.join(", "));
-    assert.ok(codes.includes("nimbus/collection-request-rendered"), codes.join(", "));
-    const finding = result.findings.find((f) => f.code === "nimbus/collection-request-rendered")!;
-    assert.match(finding.message, /renders on request from src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro/);
+    assert.deepEqual(codes.filter((code) => code.startsWith("nimbus/collection-")), ["nimbus/collection-owns-url"]);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

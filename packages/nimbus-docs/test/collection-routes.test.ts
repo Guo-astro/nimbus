@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import { collectionMountPrefix, collectionUrlsKey, NO_ROUTES } from "../src/_internal/collection-mount.js";
 import {
+  collectionMoveMessages,
   collectionOwnershipErrors,
   decideCollectionMounts,
   findCollectionRoutes,
@@ -197,4 +198,13 @@ test("the cache key names only collections a route moved, so sites that move not
   assert.equal(collectionUrlsKey({ versions, routes: NO_ROUTES }), undefined);
   const moved = new Map([...unmoved, ["sdk", record("/products/kit")]]);
   assert.equal(collectionUrlsKey({ versions, routes: moved }), JSON.stringify([["sdk", "/products/kit"]]));
+});
+
+test("a dev move logs the redirect to add, except away from the root, where it would catch the whole site", () => {
+  const at = (mount: string) => ({ versions: null, routes: new Map([["guides", { mount, file: `src/pages${mount}/[...slug].astro`, aliases: [] }]]) });
+  assert.deepEqual(collectionMoveMessages(at("/guides"), at("/products/guides")), [
+    'collection "guides" moved from /guides to /products/guides. Redirect its old URLs in astro.config: "/guides/[...slug]": "/products/guides/[...slug]".',
+  ]);
+  assert.deepEqual(collectionMoveMessages(at(""), at("/guides")), ['collection "guides" moved from / to /guides.']);
+  assert.deepEqual(collectionMoveMessages(at("/guides"), at("/guides")), []);
 });

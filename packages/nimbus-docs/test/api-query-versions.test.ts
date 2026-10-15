@@ -387,10 +387,13 @@ describe("query-mode route resolution — (version, slug) → entry", () => {
     pathname: string,
     slug: string | undefined,
   ): PageResolutionContext {
+    const url = new URL(pathname, "https://example.com");
+    const [family] = url.pathname.split("/").filter(Boolean);
     return {
       props: {},
       params: { slug },
-      url: new URL(pathname, "https://example.com"),
+      url,
+      routePattern: `/${family}/[...slug]`,
       projection: { audience: { key: "test" } },
     };
   }
@@ -435,6 +438,10 @@ describe("query-mode route resolution — (version, slug) → entry", () => {
   ]);
 
   const dependencies = {
+    async getCollectionAt(folder: string) {
+      return { "/qv": "qv", "/core": "core" }[folder];
+    },
+    warn() {},
     async getApiCollections() {
       return ["qv", "core"];
     },

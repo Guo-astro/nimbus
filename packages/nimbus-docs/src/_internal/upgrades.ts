@@ -307,7 +307,7 @@ export function dependenciesMissing(projectRoot: string): boolean {
 // Yarn's project is the nearest directory with a `yarn.lock`: a workspace
 // package reaches its root's `.pnp.cjs`, but a separate project (a scaffold
 // has its own lockfile) never borrows an ancestor's.
-function hasPnpInstall(projectRoot: string): boolean {
+export function hasPnpInstall(projectRoot: string): boolean {
   for (let dir = path.resolve(projectRoot); ; dir = path.dirname(dir)) {
     if (fs.existsSync(path.join(dir, ".pnp.cjs"))) return true;
     if (fs.existsSync(path.join(dir, "yarn.lock")) || path.dirname(dir) === dir) return false;

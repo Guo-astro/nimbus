@@ -5,6 +5,18 @@ export function mcpSdkMessage(root: string): string {
   return `nimbus-docs: agents.mcp needs the MCP server SDK in this project. Run \`${bin} ${args.map(quoteForDisplay).join(" ")}\`, or set agents.mcp to false.`;
 }
 
+export function openApiParserMessage(root: string): string {
+  const command = (packages: string[]) => {
+    const { bin, args } = addCommand(detectPackageManager(root), packages);
+    return `${bin} ${args.map(quoteForDisplay).join(" ")}`;
+  };
+  return (
+    `The API reference needs the OpenAPI parser. Install it in your project: \`${command(["@scalar/openapi-parser"])}\`. ` +
+    `For code samples, also install the optional generators: \`${command(["openapi-sampler", "@readme/httpsnippet"])}\` ` +
+    `(installing the api-layout registry recipe pulls all three).`
+  );
+}
+
 export type ServerFeature = "MCP" | "request rendering" | "api bundle: false";
 
 /** The feature an adapter error names: the strictest one, so its advice covers the others. */

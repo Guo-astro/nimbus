@@ -22,6 +22,7 @@ import {
   tagRouteSegment,
   type Diagnostic,
 } from "./coordinates.js";
+import { openApiParserMissing } from "./parser-missing.js";
 import {
   HTTP_METHODS,
   type OpenApiDocument,
@@ -113,11 +114,7 @@ async function loadParser(): Promise<ScalarParserModule> {
   try {
     return (await import(/* @vite-ignore */ specifier)) as unknown as ScalarParserModule;
   } catch {
-    throw new Error(
-      `The API reference needs the OpenAPI parser. Install it in your project:\n\n  npm install @scalar/openapi-parser\n\n` +
-        `For code samples, also install the optional generators:\n\n  npm install openapi-sampler @readme/httpsnippet\n\n` +
-        `(Installing the api-layout registry recipe pulls all three automatically.)\n`,
-    );
+    throw new Error(await openApiParserMissing());
   }
 }
 

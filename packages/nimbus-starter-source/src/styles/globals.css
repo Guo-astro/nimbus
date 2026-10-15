@@ -427,11 +427,13 @@ pre.astro-code span {
 /* ---- Premium code chrome ---- */
 
 /* Code reads left to right in every language, so a code surface keeps its
-   title bar, copy button, badge and tabs in LTR order on an RTL page. */
+   title bar, copy button, badge and tabs in LTR order on an RTL page. A
+   diagram's flow is drawn left to right too. */
 .nb-code-figure,
 [data-slot="code-group"],
 [data-slot="package-managers"],
-[data-nb-api-coderail] {
+[data-nb-api-coderail],
+.diagram-stage {
 	direction: ltr;
 }
 

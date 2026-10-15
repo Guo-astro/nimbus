@@ -539,6 +539,7 @@ export function nimbus(
   options: NimbusIntegrationOptions = {},
 ): AstroIntegration {
   const config = validateNimbusConfig(rawConfig);
+  const discoveryOff = config.agents?.discovery === false;
   for (const [name, transform] of Object.entries(
     options.markdown?.componentMap ?? {},
   )) {
@@ -869,6 +870,7 @@ export function nimbus(
         base: astroBaseForBuild,
         output: outputModeForBuild,
         homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
+        ...(discoveryOff ? { discovery: false as const } : {}),
         ...(mcpServerForBuild ? { mcp: mcpServerForBuild } : {}),
       },
       capabilities: createAgentCapabilities({
@@ -2321,7 +2323,9 @@ export function nimbus(
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw authorError(outdatedSidebar);
         const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-        for (const [pattern, name] of [
+        // `agents.discovery: false` leaves these paths to the site: no routes,
+        // and its own files there are kept.
+        for (const [pattern, name] of discoveryOff ? [] : [
           ["/.well-known/ard.json", "agent-discovery-route"],
           ["/.well-known/ai-catalog.json", "agent-discovery-route"],
           // Only sites with API collections get a catalog.
@@ -3808,7 +3812,7 @@ export function nimbus(
           fs.mkdirSync(path.dirname(target), { recursive: true });
           fs.writeFileSync(target, spec.contents);
         }
-        if (assetRoot !== distDir && !sliceOutput) {
+        if (assetRoot !== distDir && !sliceOutput && !discoveryOff) {
           for (const filename of ["ard.json", "ai-catalog.json", "api-catalog"]) {
             const source = path.join(distDir, ".well-known", filename);
             if (fs.existsSync(source)) {
@@ -3820,6 +3824,10 @@ export function nimbus(
         // Skills live at the origin root: the root slice's to write.
         if (discovery.skills && !sliceOutput) {
           for (const warning of discovery.skills.warnings) logger.warn(warning);
+          if (discoveryOff && (assetRoot !== distDir || !baseSegments.length))
+            logger.warn(
+              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
+            );
           for (const artifact of discovery.skills.artifacts) {
             const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
             fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -3861,9 +3869,15 @@ export function nimbus(
           // Also support hook ordering where the adapter moves this file later.
           fs.copyFileSync(headersPath, path.join(distDir, "_headers"));
         }
-        if (assetRoot === distDir && astroBaseForBuild && astroBaseForBuild !== "/") {
+        if (
+          assetRoot === distDir &&
+          astroBaseForBuild &&
+          astroBaseForBuild !== "/" &&
+          !discoveryOff
+        ) {
+          const wellKnown = `${astroBaseForBuild.replace(/\/+$/, "")}/.well-known/`;
           logger.info(
-            "Agent discovery uses origin-root /.well-known URLs. Mount the emitted .well-known directory at the origin root when deploying this site under a base.",
+            `Agent discovery files are under ${wellKnown}, but agents only read /.well-known/ at the origin root. Serve this directory there, or set agents: { discovery: false } if another site owns it.`,
           );
         }
 

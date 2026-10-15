@@ -35,11 +35,11 @@ A way to build documentation sites on top of Astro.
 
 ## Agent discovery
 
-Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt`, the homepage Markdown at `/index.md` and, when the site runs one, the [remote MCP server](/ai/remote-mcp)'s card. Request-rendered homepages advertise these files and each visible API reference through HTTP `Link` headers. Static builds emit `_headers` rules for hosts that support that format, including Cloudflare. Your own `_headers` wins: a header a site rule already sets for a path, with an exact path or a wildcard such as `/*`, is left out of the generated rule for it, since hosts join repeated values and `Access-Control-Allow-Origin: *, *` is refused by browsers. A `Link` header is the exception, as joined `Link` values are valid. A site rule that covers only some of the files under a generated wildcard, such as one skills file, wins for the whole wildcard; the build warns and says which paths to cover. On other static hosts, configure equivalent HTTP headers in the host's native configuration.
+Every site serves `/.well-known/ard.json` and `/.well-known/ai-catalog.json` (same content), listing `/llms.txt`, the homepage Markdown at `/index.md` and, when the site runs one, the [remote MCP server](/ai/remote-mcp)'s card. A site on a domain another site owns can turn them off ([Shared domains](#shared-domains)). Request-rendered homepages advertise these files and each visible API reference through HTTP `Link` headers. Static builds emit `_headers` rules for hosts that support that format, including Cloudflare. Your own `_headers` wins: a header a site rule already sets for a path, with an exact path or a wildcard such as `/*`, is left out of the generated rule for it, since hosts join repeated values and `Access-Control-Allow-Origin: *, *` is refused by browsers. A `Link` header is the exception, as joined `Link` values are valid. A site rule that covers only some of the files under a generated wildcard, such as one skills file, wins for the whole wildcard; the build warns and says which paths to cover. On other static hosts, configure equivalent HTTP headers in the host's native configuration.
 
 `/index.md` is the root content entry when there is one, otherwise the `llms.txt` content. A root entry with `noindex: true` is served but left out of discovery.
 
-If your site already has a file or route at either `.well-known` path, the build fails so you can move your entries first.
+If your site already has a file or route at either `.well-known` path, the build fails so you can move your entries first, unless discovery is off.
 
 Discovery files belong at the origin root. With a `base`, the Cloudflare adapter puts them there for you; on other hosts, deploy the emitted `.well-known` directory at the root alongside the site. Static output with the Cloudflare adapter and a `base` needs `wrangler deploy --assets ./dist/client`.
 
@@ -60,13 +60,25 @@ curl -I https://docs.example.com/docs/
 curl -I https://docs.example.com/docs/index.md
 ```
 
+### Shared domains
+
+When another site owns the domain, such as docs at `example.com/docs` beside a main site at `example.com`, the root `.well-known` files belong to that site. Turn Nimbus's off:
+
+```ts title="astro.config.ts"
+nimbus({ /* … */ agents: { discovery: false } })
+```
+
+Nimbus then publishes no `/.well-known/ard.json`, `ai-catalog.json` or `api-catalog`, adds no `rel="ard"` or `rel="api-catalog"` homepage `Link`, and writes no `_headers` rules for them. Your own files in `public/.well-known/` are kept, and `astro dev` serves them. Under a base, your own files are served there (`/docs/.well-known/ard.json`); the root ones are the owning site's. After switching, purge the cached homepage, whose `Link` header still lists the old files, and remove them from hosts that keep files from earlier deploys, such as an S3 sync without `--delete`.
+
+Everything else stays on: `llms.txt`, Markdown versions and their links, the API reference and spec links, Markdown negotiation, and the remote MCP server, which agents still find through `llms.txt`. Agent Skills still publish, and with the Cloudflare adapter or without a base they land at the origin root's `/.well-known/agent-skills/`, so leave out the `skills/` folder there unless this site owns that path. A site serving its own `api-catalog` sets its `Content-Type` in its own `_headers`, since the file has no extension.
+
 ### Content Signals
 
 The starter's `src/pages/robots.txt.ts` declares `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. Change the values to match your policy; if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Existing sites keep their `robots.txt`; `nimbus-docs migrate` describes the change. Content Signals and `robots.txt` are requests to crawlers, not access control. Private docs need authentication.
 
 ## API catalog and published specs
 
-Sites with API collections serve an [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727) catalog at `/.well-known/api-catalog`, one entry per visible collection and version, linking the reference page, its Markdown, and the published spec. A query-addressed version's entry is its query URL (`/pets/?version=v1`); non-default versions in query mode or with `bundle: false` have no Markdown, so their entry links the reference page and the spec. Each spec is published as one self-contained JSON file at its mount path, for example `/pets/openapi.json`; files it references are embedded under an `x-ext` extension. The discovery manifest lists all visible published specs. The homepage `Link` header points to the complete API catalog and advertises only each family’s default reference and published spec.
+Sites with API collections serve an [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727) catalog at `/.well-known/api-catalog`, unless `agents.discovery` is `false`, one entry per visible collection and version, linking the reference page, its Markdown, and the published spec. A query-addressed version's entry is its query URL (`/pets/?version=v1`); non-default versions in query mode or with `bundle: false` have no Markdown, so their entry links the reference page and the spec. Each spec is published as one self-contained JSON file at its mount path, for example `/pets/openapi.json`; files it references are embedded under an `x-ext` extension. The discovery manifest lists all visible published specs. The homepage `Link` header advertises only each family’s default reference and published spec, and points to the complete API catalog while discovery is on.
 
 Set `publishSpec: false` on a collection, or on one version, to keep that spec unpublished; its catalog entry keeps the documentation links. A spec that can't be bundled is skipped with a build warning naming the reference. Hidden versions still publish their file but appear in no catalog, manifest, or header. The catalog file has no extension, so a host that ignores `_headers` needs its own rule for the media type and the `api-catalog` Link on HEAD.
 
@@ -105,7 +117,7 @@ Prerendered pages and static sites return HTML: the host serves the file before 
 
 ## Agent Skills
 
-Add `skills/<name>/SKILL.md` folders at the project root, in the [Agent Skills](https://agentskills.io/specification) format, and Nimbus publishes them at `/.well-known/agent-skills/`: an index per the discovery RFC v0.2.0, each single-file skill as its `SKILL.md`, and each multi-file skill as a `.tar.gz` with `SKILL.md` at the root, every entry with a SHA-256 digest. The index is listed in the discovery manifest.
+Add `skills/<name>/SKILL.md` folders at the project root, in the [Agent Skills](https://agentskills.io/specification) format, and Nimbus publishes them at `/.well-known/agent-skills/`: an index per the discovery RFC v0.2.0, each single-file skill as its `SKILL.md`, and each multi-file skill as a `.tar.gz` with `SKILL.md` at the root, every entry with a SHA-256 digest. The index is listed in the discovery manifest, unless `agents.discovery` is `false`.
 
 A skill whose frontmatter breaks the spec is skipped with a build warning that names the folder and the rule. Dotfiles are left out of archives and symlinks are skipped. Without a `skills/` folder nothing is published.
 

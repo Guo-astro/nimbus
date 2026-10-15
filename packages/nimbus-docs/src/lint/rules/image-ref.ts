@@ -16,6 +16,13 @@
  * Resolution:
  *   - `/foo.png` → `<root>/public/foo.png` (Astro serves `public/` at the
  *     site root).
+ *   - Under a deployment base (`ctx.base`, e.g. `/docs`), Astro serves
+ *     `public/` only under the base and leaves inline image paths as written,
+ *     while Nimbus adds the base to reference definitions. So an inline image
+ *     or `<img src>` needs the base written (`/docs/foo.png`) and a definition
+ *     must not repeat it; the rule reports both, with a fix for inline images
+ *     and definitions when the file exists in `public/`. Component attributes
+ *     accept either form (a component may add the base itself).
  *   - `./shot.png` / `../img.png` → relative to the MDX file (Astro's image
  *     pipeline resolves these as imports — they're valid and checkable).
  *   - `aliases: { "~/assets/": "src/assets/" }` maps prefix → root-relative
@@ -36,9 +43,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { destinationOffset } from "../../_internal/authored-links.js";
 import { matchesAnyIgnore } from "../../_internal/ignore-glob.js";
 import { suggest } from "../../_internal/levenshtein.js";
 import { collect, startOf, visit, type MdNode } from "../parse.js";
+import type { DiagnosticFix } from "../diagnostic.js";
 import type { Rule } from "../rule.js";
 
 export const imageRef: Rule = {
@@ -51,13 +60,12 @@ export const imageRef: Rule = {
     // break that cache (new array per file).
     const ignore = ctx.options.ignore;
     const extraComponents = readExtraComponents(ctx.options.components);
-    const definitions = collectDefinitions(ctx.file.tree);
+    const base = ctx.base ?? "";
+    // URLs are compared decoded (`cleanUrl`), so the base is too; messages and
+    // edits keep the base as written.
+    const decodedBase = cleanUrl(base);
 
-    for (const occ of collectImageOccurrences(
-      ctx.file.tree,
-      definitions,
-      extraComponents,
-    )) {
+    for (const occ of collectImageOccurrences(ctx.file.tree, extraComponents)) {
       const url = occ.url;
       if (!url) continue;
       if (isExternal(url)) continue;
@@ -66,30 +74,153 @@ export const imageRef: Rule = {
       if (cleaned === "") continue;
       if (matchesAnyIgnore(cleaned, ignore)) continue;
 
-      const resolved = resolveToDisk(cleaned, root, ctx.file.absPath, aliases);
-      if (resolved === null) continue; // unrecognised shape — silence beats false-positive
-      if (fileExists(resolved.fullPath)) continue;
+      const at = startOf(occ.node);
+      const report = (message: string, fix?: DiagnosticFix) =>
+        ctx.report({ message, line: at.line, column: at.column, ...(fix ? { fix } : {}) });
 
-      const hint = suggestSibling(resolved.fullPath);
-      ctx.report({
-        message: hint
-          ? `missing image "${url}" — expected at ${resolved.display}; did you mean "${hint}"?`
-          : `missing image "${url}" — expected at ${resolved.display}.`,
-        line: occ.line,
-        column: occ.column,
-      });
+      const aliased = aliases.some(([prefix]) => cleaned.startsWith(prefix));
+      if (base === "" || aliased || !cleaned.startsWith("/")) {
+        const resolved = resolveToDisk(cleaned, root, ctx.file.absPath, aliases);
+        if (resolved === null) continue; // unrecognised shape — silence beats false-positive
+        if (!fileExists(resolved.fullPath)) report(missing(url, resolved));
+        continue;
+      }
+
+      const based = cleaned === decodedBase || cleaned.startsWith(`${decodedBase}/`);
+      const unbased = based ? cleaned.slice(decodedBase.length) || "/" : cleaned;
+
+      if (occ.kind === "component") {
+        const resolved = inPublic(root, unbased);
+        if (!fileExists(resolved.fullPath)) report(missing(url, resolved));
+        continue;
+      }
+
+      if (occ.kind === "definition") {
+        // Nimbus adds the base when rendering, so the definition is served
+        // from `public/` exactly as written.
+        const served = inPublic(root, cleaned);
+        if (fileExists(served.fullPath)) continue;
+        if (!based) {
+          report(missing(url, served));
+          continue;
+        }
+        const intended = inPublic(root, unbased);
+        if (!fileExists(intended.fullPath)) {
+          report(missing(url, served, ` Nimbus adds the site base "${base}" to definitions, so write it without the base.`));
+          continue;
+        }
+        // An encoded base (`/%64ocs/…`) can't be sliced off the URL as written.
+        const written = url.startsWith(`${base}/`) ? url.slice(base.length) : undefined;
+        report(
+          `definition "${url}" repeats the site base "${base}"; Nimbus adds it, so it renders as "${base}${url}". ` +
+            (written ? `Write "${written}".` : "Write it without the base."),
+          written ? definitionFix(ctx.file.source, occ.node, base, written) : undefined,
+        );
+        continue;
+      }
+
+      const intended = inPublic(root, unbased);
+      if (based) {
+        if (!fileExists(intended.fullPath)) report(missing(url, intended));
+        continue;
+      }
+      const written = `${base}${url}`;
+      if (!fileExists(intended.fullPath)) {
+        report(missing(url, intended, ` Under the site base "${base}", write "${written}" once it exists.`));
+        continue;
+      }
+      report(
+        `image "${url}" skips the site base "${base}" and won't load. Write "${written}".`,
+        occ.kind === "image" ? imageFix(ctx.file.source, occ.node, base, written) : undefined,
+      );
     }
   },
 };
+
+function missing(url: string, resolved: ResolvedRef, note = ""): string {
+  const hint = suggestSibling(resolved.fullPath);
+  return hint
+    ? `missing image "${url}" — expected at ${resolved.display}; did you mean "${hint}"?${note}`
+    : `missing image "${url}" — expected at ${resolved.display}.${note}`;
+}
+
+function inPublic(root: string, url: string): ResolvedRef {
+  const rel = path.join("public", url.slice(1));
+  return { fullPath: path.join(root, rel), display: rel };
+}
+
+// ---------------------------------------------------------------------------
+// Fixes
+// ---------------------------------------------------------------------------
+
+/**
+ * Insert the base before an inline image's destination. Only when the
+ * node's source has exactly one `](` (so alt text can't hold a look-alike)
+ * and the URL follows it exactly as parsed: an escaped or encoded
+ * destination gets no fix.
+ */
+function imageFix(
+  source: string,
+  node: MdNode,
+  base: string,
+  written: string,
+): DiagnosticFix | undefined {
+  const range = offsets(node);
+  if (!range) return undefined;
+  const raw = source.slice(range[0], range[1]);
+  const opening = raw.indexOf("](");
+  if (opening === -1 || raw.indexOf("](", opening + 1) !== -1) return undefined;
+  let at = opening + 2;
+  while (/\s/.test(raw[at] ?? "")) at += 1;
+  if (raw[at] === "<") at += 1;
+  const url = typeof node.url === "string" ? node.url : "";
+  if (!raw.startsWith(url, at) || !/^[\s>)]/.test(raw.slice(at + url.length))) return undefined;
+  const offset = range[0] + at;
+  return {
+    description: `Write "${written}"`,
+    edits: [{ range: [offset, offset], text: base }],
+  };
+}
+
+/** Remove the base from a definition's destination when the source spells it literally. */
+function definitionFix(
+  source: string,
+  node: MdNode,
+  base: string,
+  written: string,
+): DiagnosticFix | undefined {
+  let offset: number;
+  try {
+    offset = destinationOffset(source, node, undefined);
+  } catch {
+    return undefined;
+  }
+  const next = source[offset + base.length];
+  if (!source.startsWith(base, offset) || (next !== "/" && next !== undefined && !/[\s>]/.test(next))) {
+    return undefined;
+  }
+  return {
+    description: `Write "${written}"`,
+    edits: [{ range: [offset, offset + base.length], text: "" }],
+  };
+}
+
+function offsets(node: MdNode): [number, number] | null {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  return typeof start === "number" && typeof end === "number" ? [start, end] : null;
+}
 
 // ---------------------------------------------------------------------------
 // AST traversal
 // ---------------------------------------------------------------------------
 
 interface ImageOccurrence {
+  /** `definition` stands for every `imageReference` that resolves to it, reported once. */
+  kind: "image" | "img" | "definition" | "component";
   url: string;
-  line: number;
-  column: number;
+  /** Where the finding is reported (and fixed). */
+  node: MdNode;
 }
 
 interface ComponentSpec {
@@ -116,27 +247,23 @@ function readExtraComponents(value: unknown): ComponentSpec[] {
 
 function collectImageOccurrences(
   root: MdNode,
-  definitions: Map<string, string>,
   extraComponents: ComponentSpec[],
 ): ImageOccurrence[] {
+  const definitions = collectDefinitions(root);
+  const reported = new Set<MdNode>();
   const out: ImageOccurrence[] = [];
   visit(root, (node) => {
     if (node.type === "image") {
-      const at = startOf(node);
-      out.push({
-        url: typeof node.url === "string" ? node.url : "",
-        line: at.line,
-        column: at.column,
-      });
+      out.push({ kind: "image", url: typeof node.url === "string" ? node.url : "", node });
       return;
     }
     if (node.type === "imageReference") {
       const identifier =
         typeof node.identifier === "string" ? node.identifier : "";
-      const url = definitions.get(identifier);
-      if (!url) return;
-      const at = startOf(node);
-      out.push({ url, line: at.line, column: at.column });
+      const definition = definitions.get(identifier);
+      if (!definition || reported.has(definition)) return;
+      reported.add(definition);
+      out.push({ kind: "definition", url: definition.url as string, node: definition });
       return;
     }
     if (
@@ -146,16 +273,14 @@ function collectImageOccurrences(
       if (node.name === "img") {
         const src = readJsxStringAttr(node, "src");
         if (src === null) return;
-        const at = startOf(node);
-        out.push({ url: src, line: at.line, column: at.column });
+        out.push({ kind: "img", url: src, node });
         return;
       }
       for (const spec of extraComponents) {
         if (node.name !== spec.name) continue;
         const src = readJsxStringAttr(node, spec.attr);
         if (src === null) return;
-        const at = startOf(node);
-        out.push({ url: src, line: at.line, column: at.column });
+        out.push({ kind: "component", url: src, node });
         return;
       }
     }
@@ -163,12 +288,13 @@ function collectImageOccurrences(
   return out;
 }
 
-function collectDefinitions(root: MdNode): Map<string, string> {
-  const out = new Map<string, string>();
+/** First definition per identifier wins, as CommonMark resolves them. */
+function collectDefinitions(root: MdNode): Map<string, MdNode> {
+  const out = new Map<string, MdNode>();
   for (const def of collect(root, "definition")) {
     const id = typeof def.identifier === "string" ? def.identifier : "";
     const url = typeof def.url === "string" ? def.url : "";
-    if (id && url && !out.has(id)) out.set(id, url);
+    if (id && url && !out.has(id)) out.set(id, def);
   }
   return out;
 }

@@ -1682,12 +1682,20 @@ export function nimbus(
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded
         // — a write failure must never break the build.
+        let lintBase: string | undefined;
+        try {
+          const { basePrefix } = await import("./_internal/authored-links.js");
+          lintBase = basePrefix(astroConfig.base || "/");
+        } catch {
+          // An invalid base fails the build where Markdown is prepared.
+        }
         materializeLintConfig(
           projectRoot,
           lintOptions.rules,
           lintOptions.collections,
           config.site,
           features,
+          lintBase,
         );
 
         // Pre-build MDX validation. Runs as a content pass against
@@ -3921,8 +3929,9 @@ export function nimbus(
  *
  * `site` is materialized alongside the rules so site-aware rules
  * (`no-self-host-url`) get the project's deploy host without making the
- * user duplicate it in their lint config, and `markdownFeatures` so lint
- * reads Markdown the way the site renders it.
+ * user duplicate it in their lint config, `markdownFeatures` so lint
+ * reads Markdown the way the site renders it, and `base` exactly as the
+ * renderer applies it, so `image-ref` checks the path the browser requests.
  */
 function materializeLintConfig(
   projectRoot: string,
@@ -3930,13 +3939,14 @@ function materializeLintConfig(
   collections: CollectionsConfig,
   site: string,
   markdownFeatures: SatteriFeatures,
+  base: string | undefined,
 ): void {
   try {
     const dir = path.join(projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "lint.json"),
-      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures }, null, 2) + "\n",
+      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures, base }, null, 2) + "\n",
       "utf8",
     );
   } catch {

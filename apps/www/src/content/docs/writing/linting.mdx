@@ -57,6 +57,8 @@ Run `astro build` before `nimbus-docs lint`. When the rule is on and `.nimbus/ro
 
 Write links without Astro's `base`. Nimbus adds the base when the page renders, so with `base: "/docs"` the link `[Guide](/guide)` goes to `/docs/guide`. Writing `[Guide](/docs/guide)` renders as `/docs/docs/guide`, and lint reports it with the path to use instead. Patterns in the rule's `ignore` option are written the same way, without the base.
 
+Images are the exception: an inline image under a base is written with it, and `nimbus/image-ref` reports one that leaves it out. See [Images under a deployment base](/writing/markdown-and-mdx/#images-under-a-deployment-base).
+
 Files written by an integration that finishes after Nimbus aren't in the list. Add them to `ignore`.
 
 ### Redirects

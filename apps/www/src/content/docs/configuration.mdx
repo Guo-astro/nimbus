@@ -49,7 +49,7 @@ export default defineConfig({
 | `search`                         | object \| `false` | Search backend. See [Search](/navigation/search).                             |
 | `versions`                       | object            | Versioning manifest — each version is its own content collection.             |
 | `rendering`                      | object            | Build or request rendering policy for canonical content collection routes.    |
-| `agents`                         | object            | Agent services the site runs itself. `agents.mcp` serves a remote MCP server. |
+| `agents`                         | object            | Agent services and discovery. `agents.mcp` serves a remote MCP server; `agents.discovery: false` leaves origin-root discovery to another site. |
 | `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/writing/content-sources). |
 
 ### Content sources
@@ -173,11 +173,12 @@ For prose collections, use the official [Node](https://docs.astro.build/en/guide
 
 ### Agents
 
-`agents` turns on services the site runs for agents, as opposed to the files it publishes for them. There is one key:
+`agents` turns on services the site runs for agents, and controls the discovery files it publishes for them:
 
 | Key | Type | Notes |
 | --- | --- | --- |
 | `mcp` | boolean | Serve a remote MCP server at `/mcp` with `list_pages` and `get_page`. Needs a server adapter and the `@modelcontextprotocol/server` package. Default `false`. |
+| `discovery` | boolean | `false` publishes no origin-root discovery files (`/.well-known/ard.json`, `ai-catalog.json`, `api-catalog`) or homepage links to them, for a site on a domain another site owns. See [Shared domains](/ai/docs-for-agents#shared-domains). Default `true`. |
 
 ```ts
 agents: { mcp: true },

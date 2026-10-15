@@ -177,6 +177,7 @@ export function parseAstroConfigFields(cwd: string): {
   adapter: boolean;
   trailingSlash?: string;
   buildFormat?: string;
+  base?: string;
   unresolved: string[];
 } | null {
   const found = findConfigFile(cwd);
@@ -224,6 +225,7 @@ export function parseAstroConfigFields(cwd: string): {
     adapter: hasAdapter,
     trailingSlash: text("trailingSlash", field(config, "trailingSlash")),
     buildFormat: text("build.format", build && ts.isObjectLiteralExpression(build) ? field(build, "format") : undefined),
+    base: text("base", field(config, "base")),
     unresolved,
   };
 }

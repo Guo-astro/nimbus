@@ -25,6 +25,7 @@ import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { leaseCurrentSources } from "../_internal/content-sources.js";
 import { materializedFeatures } from "../check/authoring.js";
 import { isBuildValidator } from "../lint/diagnostic.js";
+import { BASE_FROM_ROUTES_MESSAGE, resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
 import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import {
   findMdxFiles,
@@ -35,6 +36,7 @@ import {
   IMPLEMENTED_CODES,
   isRuleCode,
   lintPaths,
+  ruleEnabledAnywhere,
   summarize,
   validateLintOptions,
   type CollectionsConfig,
@@ -120,7 +122,8 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     process.exit(1);
   }
 
-  const { rules, collections, site, markdownFeatures, found } = loadMaterializedConfig(cwd);
+  const { rules, collections, site, markdownFeatures, base: materializedBase, found } =
+    loadMaterializedConfig(cwd);
   if (markdownFeatures) setMarkdownFeatures(markdownFeatures);
   else if (found) {
     process.stderr.write(
@@ -128,7 +131,16 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
         "Run `astro build` to use the site's `markdown.features`.\n",
     );
   }
-  if (found && lintConfigIsStale(cwd, { rules, collections })) {
+  const { base, known: baseKnown } = resolveLintBase(cwd, materializedBase);
+  const imageRefRuns = flags.rule
+    ? flags.rule === "nimbus/image-ref"
+    : ruleEnabledAnywhere("nimbus/image-ref", rules, collections);
+  if (imageRefRuns && !baseKnown) {
+    process.stderr.write(`nimbus-docs: ${UNKNOWN_SITE_BASE_MESSAGE}\n`);
+  } else if (imageRefRuns && found && materializedBase === undefined) {
+    process.stderr.write(`nimbus-docs: ${BASE_FROM_ROUTES_MESSAGE}\n`);
+  }
+  if (found && lintConfigIsStale(cwd, { rules, collections, base: materializedBase })) {
     process.stderr.write(`nimbus-docs: ${STALE_LINT_CONFIG_MESSAGE}\n`);
   }
   if (!found && !flags.rule) {
@@ -148,6 +160,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     rules,
     collections,
     site,
+    base,
     // `flags.rule` already passed through validation that rejects build
     // validators; the cast here is the type-level reflection of that runtime
     // narrowing (LintOptions.only is `AuthoringRuleCode` because `--rule`
@@ -248,6 +261,8 @@ interface MaterializedConfig {
   collections: CollectionsConfig;
   site?: string;
   markdownFeatures?: Features;
+  /** The site base as the renderer applies it; absent in a file from an older version. */
+  base?: string;
   /** False when `.nimbus/lint.json` doesn't exist. */
   found: boolean;
 }
@@ -273,7 +288,13 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
     return { rules: {}, collections: {}, found: false };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown; markdownFeatures?: unknown };
+  let parsed: {
+    rules?: unknown;
+    collections?: unknown;
+    site?: unknown;
+    markdownFeatures?: unknown;
+    base?: unknown;
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -307,6 +328,7 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
     collections: validated.collections,
     site,
     markdownFeatures: materializedFeatures(parsed.markdownFeatures),
+    base: typeof parsed.base === "string" ? parsed.base : undefined,
     found: true,
   };
 }

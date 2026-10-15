@@ -147,7 +147,7 @@ import {
   AGENT_SKILLS_INDEX_PATH,
   publishAgentSkills,
 } from "./_internal/agent-skills.js";
-import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
+import { pageUrl, resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
@@ -223,7 +223,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, stripBase, toDocumentHref, toRouteKey, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, stripBase, toRouteKey, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
 import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
@@ -555,6 +555,7 @@ export function nimbus(
   options: NimbusIntegrationOptions = {},
 ): AstroIntegration {
   const config = validateNimbusConfig(rawConfig);
+  const discoveryOff = config.agents?.discovery === false;
   for (const [name, transform] of Object.entries(
     options.markdown?.componentMap ?? {},
   )) {
@@ -842,7 +843,6 @@ export function nimbus(
     const specWarnings: string[] = [];
     const apis: (AgentApiPublication & { hidden: boolean })[] = [];
     for (const api of resolveAllApiCollections(config.api, mountContextForBuild)) {
-      if (pageAssetCollections.includes(api.family) && !api.isDefault) continue;
       let spec: { url: string; type: string } | undefined;
       if (api.publishSpec) {
         const published = await publishSpec(api);
@@ -862,18 +862,19 @@ export function nimbus(
           });
         }
       }
+      // Markdown references exist only for the default version of a
+      // query-addressed or `bundle: false` collection.
+      const hasMarkdown =
+        api.isDefault ||
+        (api.versionMode !== "query" && !pageAssetCollections.includes(api.family));
       apis.push({
         collection: api.family,
         ...(api.version ? { version: api.version } : {}),
-        docsUrl: absolute(toDocumentHref(api.mountPath)),
-        markdownUrl: absolute(`${api.mountPath}/index.md`),
+        ...(!api.isDefault ? { isDefault: false } : {}),
+        docsUrl: absolute(pageUrl(api, "")),
+        ...(hasMarkdown ? { markdownUrl: absolute(`${api.mountPath}/index.md`) } : {}),
         ...(spec ? { spec } : {}),
-        // Discovery is default-only for query-addressed versions: a
-        // non-default version has no version-free docs or Markdown URL, so
-        // it drops off every discovery surface the way hidden versions do
-        // (its spec file still publishes above).
-        hidden:
-          api.hidden || (api.versionMode === "query" && !api.isDefault),
+        hidden: api.hidden,
       });
     }
     // Skills live at the origin root like the rest of .well-known, so their
@@ -889,6 +890,7 @@ export function nimbus(
         base: astroBaseForBuild,
         output: outputModeForBuild,
         homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
+        ...(discoveryOff ? { discovery: false as const } : {}),
         ...(mcpServerForBuild ? { mcp: mcpServerForBuild } : {}),
       },
       capabilities: createAgentCapabilities({
@@ -1726,12 +1728,16 @@ export function nimbus(
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded
         // — a write failure must never break the build.
+        // An invalid base is left out here; it fails the build where Markdown is prepared.
+        const { normalizeBase } = await import("./lint/site-base.js");
+        const lintBase = normalizeBase(astroConfig.base || "/");
         materializeLintConfig(
           projectRoot,
           lintOptions.rules,
           lintOptions.collections,
           config.site,
           features,
+          lintBase,
         );
 
         // Pre-build MDX validation. Runs as a content pass against
@@ -2382,7 +2388,9 @@ export function nimbus(
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw authorError(outdatedSidebar);
         const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-        for (const [pattern, name] of [
+        // `agents.discovery: false` leaves these paths to the site: no routes,
+        // and its own files there are kept.
+        for (const [pattern, name] of discoveryOff ? [] : [
           ["/.well-known/ard.json", "agent-discovery-route"],
           ["/.well-known/ai-catalog.json", "agent-discovery-route"],
           // Only sites with API collections get a catalog.
@@ -3880,7 +3888,7 @@ export function nimbus(
           fs.mkdirSync(path.dirname(target), { recursive: true });
           fs.writeFileSync(target, spec.contents);
         }
-        if (assetRoot !== distDir && !sliceOutput) {
+        if (assetRoot !== distDir && !sliceOutput && !discoveryOff) {
           for (const filename of ["ard.json", "ai-catalog.json", "api-catalog"]) {
             const source = path.join(distDir, ".well-known", filename);
             if (fs.existsSync(source)) {
@@ -3892,6 +3900,10 @@ export function nimbus(
         // Skills live at the origin root: the root slice's to write.
         if (discovery.skills && !sliceOutput) {
           for (const warning of discovery.skills.warnings) logger.warn(warning);
+          if (discoveryOff && (assetRoot !== distDir || !baseSegments.length))
+            logger.warn(
+              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
+            );
           for (const artifact of discovery.skills.artifacts) {
             const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
             fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -3933,9 +3945,15 @@ export function nimbus(
           // Also support hook ordering where the adapter moves this file later.
           fs.copyFileSync(headersPath, path.join(distDir, "_headers"));
         }
-        if (assetRoot === distDir && astroBaseForBuild && astroBaseForBuild !== "/") {
+        if (
+          assetRoot === distDir &&
+          astroBaseForBuild &&
+          astroBaseForBuild !== "/" &&
+          !discoveryOff
+        ) {
+          const wellKnown = `${astroBaseForBuild.replace(/\/+$/, "")}/.well-known/`;
           logger.info(
-            "Agent discovery uses origin-root /.well-known URLs. Mount the emitted .well-known directory at the origin root when deploying this site under a base.",
+            `Agent discovery files are under ${wellKnown}, but agents only read /.well-known/ at the origin root. Serve this directory there, or set agents: { discovery: false } if another site owns it.`,
           );
         }
 
@@ -3994,8 +4012,9 @@ export function nimbus(
  *
  * `site` is materialized alongside the rules so site-aware rules
  * (`no-self-host-url`) get the project's deploy host without making the
- * user duplicate it in their lint config, and `markdownFeatures` so lint
- * reads Markdown the way the site renders it.
+ * user duplicate it in their lint config, `markdownFeatures` so lint
+ * reads Markdown the way the site renders it, and `base` exactly as the
+ * renderer applies it, so `image-ref` checks the path the browser requests.
  */
 function materializeLintConfig(
   projectRoot: string,
@@ -4003,13 +4022,14 @@ function materializeLintConfig(
   collections: CollectionsConfig,
   site: string,
   markdownFeatures: SatteriFeatures,
+  base: string | undefined,
 ): void {
   try {
     const dir = path.join(projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "lint.json"),
-      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures }, null, 2) + "\n",
+      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures, base }, null, 2) + "\n",
       "utf8",
     );
   } catch {

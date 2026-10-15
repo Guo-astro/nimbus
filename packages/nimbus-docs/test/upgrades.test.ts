@@ -35,6 +35,7 @@ test("only universally skippable entries are optional", () => {
       .sort(),
     [
       "agent-discovery-content-signals",
+      "agent-discovery-opt-out",
       "agent-files-follow-rendering",
       "api-code-sample-ids",
       "api-collections-from-config",

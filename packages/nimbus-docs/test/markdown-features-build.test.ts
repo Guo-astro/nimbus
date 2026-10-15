@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { test } from "node:test";
-import { build } from "astro";
+import { build, sync } from "astro";
 
 import nimbus from "../src/index.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
@@ -20,7 +20,7 @@ title: Setup
 😀 Read [the guide](/guide#install) first. {/* reviewers: keep this */}
 `;
 
-async function site(page: string, markdown?: Record<string, unknown>) {
+async function site(page: string, markdown?: Record<string, unknown>, base = "/docs") {
   const root = await mkdtemp(path.join(TEST_TMP, "nimbus-markdown-features-"));
   const write = async (file: string, body: string) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
@@ -56,24 +56,25 @@ export const prerender = true;
 export const { GET, getStaticPaths } = markdownRoute();
 `,
   );
+  const config = () => ({
+    root: root + path.sep,
+    configFile: false as const,
+    cacheDir: path.join(root, ".astro"),
+    vite: { cacheDir: path.join(root, ".vite") },
+    logLevel: "silent" as const,
+    base,
+    integrations: [
+      nimbus(
+        { site: "https://example.test", title: "Example", search: false },
+        { sitemap: false, icons: false, ...(markdown ? { markdown } : {}) },
+      ),
+    ],
+  });
   return {
     root,
     read: (file: string) => readFile(path.join(root, file), "utf8"),
-    build: () =>
-      build({
-        root: pathToFileURL(root + path.sep),
-        configFile: false,
-        cacheDir: path.join(root, ".astro"),
-        vite: { cacheDir: path.join(root, ".vite") },
-        logLevel: "silent",
-        base: "/docs",
-        integrations: [
-          nimbus(
-            { site: "https://example.test", title: "Example", search: false },
-            { sitemap: false, icons: false, ...(markdown ? { markdown } : {}) },
-          ),
-        ],
-      }),
+    build: () => build(config()),
+    sync: () => sync(config()),
   };
 }
 
@@ -104,6 +105,39 @@ test("markdown.features turns math on for the page, generated Markdown and lint"
     const lint = JSON.parse(await s.read(".nimbus/lint.json"));
     assert.equal(lint.markdownFeatures.math, true);
     assert.equal(lint.markdownFeatures.headingAttributes, true);
+    assert.equal(lint.base, "/docs");
+  } finally {
+    await rm(s.root, { recursive: true, force: true });
+  }
+});
+
+test("astro sync writes the site base to lint.json as the renderer applies it", async () => {
+  for (const [base, expected] of [["/docs/", "/docs"], ["/", ""]] as const) {
+    const s = await site("---\ntitle: Setup\n---\n\nHello.\n", undefined, base);
+    try {
+      await s.sync();
+      assert.equal(JSON.parse(await s.read(".nimbus/lint.json")).base, expected, base);
+    } finally {
+      await rm(s.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("lint.json records a computed base as Astro evaluates it", async () => {
+  const s = await site("---\ntitle: Setup\n---\n\nHello.\n");
+  try {
+    await writeFile(
+      path.join(s.root, "astro.config.mjs"),
+      `import nimbus from ${module("index.ts")};
+const section = ["gui", "de"].join("");
+export default {
+  base: \`/\${section}/\`,
+  integrations: [nimbus({ site: "https://example.test", title: "Example", search: false }, { sitemap: false, icons: false })],
+};
+`,
+    );
+    await sync({ root: s.root + path.sep, logLevel: "silent" });
+    assert.equal(JSON.parse(await s.read(".nimbus/lint.json")).base, "/guide");
   } finally {
     await rm(s.root, { recursive: true, force: true });
   }

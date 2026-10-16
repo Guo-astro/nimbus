@@ -335,18 +335,13 @@ describe("nesting", () => {
     ]);
   });
 
-  test("the outer collection's index hides, collapses or demotes it", () => {
+  test("the outer collection's index hides, collapses or demotes it, and a hidden one takes it along", () => {
     assert.deepEqual(outline(build(docs, [cli, sdk({ sidebar: { hideChildren: true } })])), [
       "[Products]",
       "  SDK /products/sdk/",
       "  X /products/x/",
     ]);
-    assert.deepEqual(outline(build(docs, [cli, sdk({ sidebar: { hidden: true } })])), [
-      "[Products]",
-      "  [CLI] /products/sdk/cli/",
-      "    Run /products/sdk/cli/run/",
-      "  X /products/x/",
-    ]);
+    assert.deepEqual(outline(build(docs, [cli, sdk({ sidebar: { hidden: true } })])), ["[Products]", "  X /products/x/"]);
     assert.deepEqual(outline(build(docs, [cli, sdk({ sidebar: { group: { hideIndex: true } } }, [])])), [
       "[Products]",
       "  [SDK]",
@@ -354,6 +349,44 @@ describe("nesting", () => {
       "      Run /products/sdk/cli/run/",
       "  X /products/x/",
     ]);
+  });
+});
+
+describe("inside a collection placed by hand", () => {
+  const docs = [page("products/x")];
+  const cli = nested("cli", "/products/sdk/cli", [page("index", { title: "CLI" }), page("run")]);
+  const entries = { docs, sdk: [page("index", { title: "SDK" }), page("y")] } as never;
+  const mount = (c: string) => (c === "sdk" ? "/products/sdk" : `/${c}`);
+  const tree = (items: SidebarConfig["items"], path = "/x") =>
+    outline(buildSidebarTree(entries, "docs", path, { items } as SidebarConfig, "", new Set(), mount, [cli]));
+  const docsItems = { autogenerate: { collection: "docs" } } as const;
+
+  test("a labeled group links the landing and holds the collections inside it", () => {
+    assert.deepEqual(tree([{ label: "Tools", autogenerate: { collection: "sdk" } }, docsItems]), [
+      "[Tools] /products/sdk/",
+      "  [CLI] /products/sdk/cli/",
+      "    Run /products/sdk/cli/run/",
+      "  Y /products/sdk/y/",
+      "[Products]",
+      "  X /products/x/",
+    ]);
+  });
+
+  test("an inline expansion holds the collections inside it", () => {
+    assert.deepEqual(tree([{ label: "Tools", items: [{ autogenerate: { collection: "sdk" } }] }, docsItems]), [
+      "[Tools]",
+      "  [CLI] /products/sdk/cli/",
+      "    Run /products/sdk/cli/run/",
+      "  Y /products/sdk/y/",
+      "[Products]",
+      "  X /products/x/",
+    ]);
+  });
+
+  test("a link to the outer collection keeps the inner one out", () => {
+    const sdk = nested("sdk", "/products/sdk", [page("index", { title: "SDK" }), page("y")]);
+    const config = { items: [{ label: "SDK", link: "/products/sdk/" }, docsItems] } as SidebarConfig;
+    assert.deepEqual(outline(build(docs, [cli, sdk], config)), ["SDK /products/sdk/", "[Products]", "  X /products/x/"]);
   });
 });
 

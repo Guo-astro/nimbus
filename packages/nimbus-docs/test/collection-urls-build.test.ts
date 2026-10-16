@@ -134,8 +134,8 @@ test("a prose collection is served at its route's folder, on every surface", asy
   assert.ok(sidebar.length > 0);
   assert.ok(sidebar.every((href) => href.startsWith("/products/kit")), sidebar.join(", "));
   const links = JSON.parse(/data-links="([^"]*)"/.exec(html)![1]!.replaceAll("&quot;", '"')) as string[];
-  // Breadcrumbs (after Home), previous and next, and the social card.
-  assert.deepEqual(links, ["/", "/products/kit/setup/", "/products/kit/usage/", "/og/products/kit/setup.png"]);
+  // Breadcrumbs (after Home), previous (the cli collection inside sdk's group) and next, and the social card.
+  assert.deepEqual(links, ["/", "/products/kit/setup/", "/products/kit/cli/install/", "/products/kit/usage/", "/og/products/kit/setup.png"]);
   const groups = JSON.parse(/data-groups="([^"]*)"/.exec(html)![1]!.replaceAll("&quot;", '"')) as string[];
   assert.ok(groups.includes("products/kit") && groups.includes("products/kit/cli") && !groups.includes("sdk"), groups.join(", "));
 

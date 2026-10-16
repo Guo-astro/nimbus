@@ -564,6 +564,7 @@ function resolveConfigItems(
       // Boundary key for a labeled `{ autogenerate }` wrapper (see `_routeKey`).
       let autoRouteKey: string | undefined;
       let folderKey: string | undefined;
+      let landing: { entries: CollectionEntry[]; prefix: string } | undefined;
       if ("collection" in item.autogenerate) {
         const collectionName = item.autogenerate.collection;
         const collectionEntries = entriesByCollection[collectionName];
@@ -593,6 +594,8 @@ function resolveConfigItems(
           if (!isPrimary && prefix !== "") {
             groupPrefix = prefix;
             autoRouteKey = toDocumentHref(prefix);
+            folderKey = toRouteKey(prefix);
+            if (depth(folderKey) >= 2) landing = { entries: collectionEntries, prefix };
           }
         }
       } else {
@@ -610,6 +613,7 @@ function resolveConfigItems(
       // If the config item has a label, wrap in a group
       if (item.label) {
         const group: SidebarGroupItem = {
+          ...(landing && landingOf(landing.entries, currentPath, landing.prefix)),
           type: "group",
           label: item.label,
           order,
@@ -621,6 +625,7 @@ function resolveConfigItems(
           _routeKey: autoRouteKey,
         };
         if (folderKey !== undefined) folderKeyByGroup.set(group, folderKey);
+        if (landing) ownAll([group], landing.entries);
         result.push(group);
       } else {
         // Inline autogenerate (inside a manual group's items)
@@ -1259,20 +1264,28 @@ function hasVisibleContent(nested: NestedCollection): boolean {
 }
 
 function buildNestedGroup(nested: NestedCollection, key: string, currentPath: string): SidebarGroupItem {
-  const byId = new Map(nested.entries.map((e) => [e.id, e]));
-  const group = createGroupFromEntry(key.slice(1), byId.get("index"), currentPath, key, toDocumentHref(key));
+  const index = nested.entries.find((e) => e.id === "index");
+  const group = createGroupFromEntry(key.slice(1), index, currentPath, key, toDocumentHref(key));
   group.children = buildFilesystemTree(nested.entries, currentPath, undefined, key);
   if (inheritsOrder.has(group) && group.children.length > 0) {
     group.order = Math.min(...group.children.map((item) => item.order));
   }
-  const own = (items: SidebarItem[]): void => {
-    for (const item of items) {
-      ownerEntries.set(item, byId);
-      if (item.type === "group") own(item.children);
-    }
-  };
-  own([group]);
+  ownAll([group], nested.entries);
   return group;
+}
+
+function landingOf(entries: CollectionEntry[], currentPath: string, prefix: string) {
+  const index = entries.find((e) => e.id === "index");
+  const { _indexId, _indexLabel, indexHref, indexIsCurrent, indexIsExternal, _indexNeverActive } =
+    createGroupFromEntry(prefix.slice(1), index, currentPath, prefix, toDocumentHref(prefix));
+  return { _indexId, _indexLabel, indexHref, indexIsCurrent, indexIsExternal, _indexNeverActive };
+}
+
+function ownAll(items: SidebarItem[], entries: CollectionEntry[], byId = new Map(entries.map((e) => [e.id, e]))): void {
+  for (const item of items) {
+    ownerEntries.set(item, byId);
+    if (item.type === "group") ownAll(item.children, entries, byId);
+  }
 }
 
 function insertIntoRange(container: Container, item: SidebarItem): void {
@@ -1340,14 +1353,15 @@ function placeNestedCollections(
   topSortable: boolean,
 ): void {
   const linked = handLinkedKeys(items);
-  const candidates = nested
-    .map((n) => ({ nested: n, key: toRouteKey(n.mount) }))
-    .filter(({ key }) => !linked.has(key))
+  const all = nested.map((n) => ({ nested: n, key: toRouteKey(n.mount) }));
+  const blocked = all
+    .filter(({ nested: n, key }) => linked.has(key) || n.entries.find((e) => e.id === "index")?.data.sidebar?.hidden)
+    .map(({ key }) => key);
+  const candidates = all
+    .filter(({ key }) => !blocked.some((b) => key === b || key.startsWith(`${b}/`)))
     .sort((a, b) => depth(b.key) - depth(a.key));
   const survivors: typeof candidates = [];
   for (const candidate of candidates) {
-    const index = candidate.nested.entries.find((e) => e.id === "index");
-    if (index?.data.sidebar?.hidden) continue;
     if (hasVisibleContent(candidate.nested) || survivors.some((s) => s.key.startsWith(`${candidate.key}/`))) {
       survivors.push(candidate);
     }

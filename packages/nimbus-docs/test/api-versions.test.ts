@@ -23,6 +23,9 @@ import {
   getApiPageSlugs,
 } from "../src/api/index.js";
 import type { ApiSpec } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 const FIXTURE_ROOT = fileURLToPath(new URL("./fixtures/api/", import.meta.url));
 function fixtureText(rel: string): string {
@@ -88,7 +91,7 @@ describe("apiPageRoute (loader store-id ↔ route param, single source)", () => 
 
 describe("resolveApiFamily", () => {
   test("unversioned collection resolves byte-identical to the pre-versioning shape", () => {
-    const [target] = resolveApiFamily({ collection: "api", spec: "openapi.yaml" });
+    const [target] = resolveApiFamily({ collection: "api", spec: "openapi.yaml" }, "/api");
     assert.equal(target!.family, "api");
     assert.equal(target!.version, null);
     assert.equal(target!.isDefault, true);
@@ -105,7 +108,7 @@ describe("resolveApiFamily", () => {
         { version: "v3", spec: "v3.yaml", status: "deprecated" },
         { version: "v2", spec: "v2.yaml", hidden: true },
       ],
-    });
+    }, "/core");
     const byVersion = Object.fromEntries(targets.map((t) => [t.version, t]));
 
     assert.equal(byVersion.v4!.isDefault, true);
@@ -128,7 +131,7 @@ describe("resolveApiFamily", () => {
         { version: "v2", spec: "v2.yaml", default: true },
         { version: "v1", spec: "v1.yaml" },
       ],
-    });
+    }, "/core");
     for (const t of targets) assert.equal(t.namespace, "core");
   });
 
@@ -139,7 +142,7 @@ describe("resolveApiFamily", () => {
         { version: "v2", spec: "v2.yaml" },
         { version: "v1", spec: "v1.yaml" },
       ],
-    });
+    }, "/core");
     assert.equal(targets.find((t) => t.isDefault)!.version, "v2");
   });
 });
@@ -221,17 +224,17 @@ describe("resolveApiVersion", () => {
   ];
 
   test("omitting the version selects the default", () => {
-    assert.equal(resolveApiVersion(api, "core")!.version, "v2");
-    assert.equal(resolveApiVersion(api, "core", null)!.version, "v2");
+    assert.equal(resolveApiVersion(api, "core", undefined, DEFAULT_URLS)!.version, "v2");
+    assert.equal(resolveApiVersion(api, "core", null, DEFAULT_URLS)!.version, "v2");
   });
 
   test("a named version selects that version", () => {
-    assert.equal(resolveApiVersion(api, "core", "v1")!.mountPath, "/core/v1");
+    assert.equal(resolveApiVersion(api, "core", "v1", DEFAULT_URLS)!.mountPath, "/core/v1");
   });
 
   test("unknown collection or version resolves to undefined", () => {
-    assert.equal(resolveApiVersion(api, "nope"), undefined);
-    assert.equal(resolveApiVersion(api, "core", "v9"), undefined);
+    assert.equal(resolveApiVersion(api, "nope", undefined, DEFAULT_URLS), undefined);
+    assert.equal(resolveApiVersion(api, "core", "v9", DEFAULT_URLS), undefined);
   });
 });
 

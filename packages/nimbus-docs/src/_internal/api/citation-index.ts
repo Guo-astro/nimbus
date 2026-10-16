@@ -7,6 +7,7 @@
  */
 
 import { apiVersionQuery, targetUrlFields } from "./resolve-versions.js";
+import { projectMountContext } from "../project-mount-context.js";
 import {
   buildApiModel,
   type ApiModel,
@@ -70,7 +71,7 @@ function pagelessSchemaCoordinates(model: DocsModel): Map<Coordinate, string> {
 
 function pageUrl(
   target: {
-    family: string;
+    familyPath: string;
     mountPath: string;
     versionMode: "path" | "query";
     versionParam: string;
@@ -83,7 +84,7 @@ function pageUrl(
   // citations carry its version query (`resolveCitation` shapes only the
   // pathname, so the query survives `toDocumentHref`).
   const base =
-    target.versionMode === "query" ? `/${target.family}` : target.mountPath;
+    target.versionMode === "query" ? target.familyPath : target.mountPath;
   const path = slug === "" ? base : `${base}/${slug}`;
   return `${path}${apiVersionQuery(target)}`;
 }
@@ -213,7 +214,7 @@ export async function buildCitationIndex(
   // must land as plain own properties, never mutate a prototype.
   const manifest: CoordinatesManifest = { version: 2, collections: Object.create(null) };
 
-  for (const target of resolveAllApiCollections(api)) {
+  for (const target of resolveAllApiCollections(api, projectMountContext(root))) {
     const prepared = options.preparedVersions?.get(target.versionKey);
     if (prepared && !target.isDefault) {
       historical.set(target.versionKey, { target, source: prepared });

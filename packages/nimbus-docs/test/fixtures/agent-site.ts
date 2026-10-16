@@ -24,6 +24,13 @@ export interface AgentSiteOptions {
   versions?: { current: string; others: string[] };
   api?: unknown[];
   rendering?: unknown;
+  sidebar?: unknown;
+  /** Build the sitemap, which is off by default. */
+  sitemap?: boolean;
+  /** Rebuild an earlier site in place, with its caches; a `null` file is deleted. */
+  root?: string;
+  /** Resolve `@cloudflare/nimbus-docs` imports in fixture files to the package source, as a site imports it. */
+  packageImports?: boolean;
 }
 
 /** Import specifier for a package source module, usable from fixture files. */
@@ -56,26 +63,29 @@ export function agentSites() {
   const roots: string[] = [];
 
   async function buildSite(
-    files: Record<string, string>,
+    files: Record<string, string | null>,
     options: AgentSiteOptions = {},
   ): Promise<AgentSite> {
-    const root = await mkdtemp(path.join(TEST_TMP, "nimbus-agent-site-"));
-    roots.push(root);
+    const root = options.root ?? (await mkdtemp(path.join(TEST_TMP, "nimbus-agent-site-")));
     const write = async (relative: string, contents: string) => {
       await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
       await writeFile(path.join(root, relative), contents, "utf8");
     };
-    await write(
-      "nimbus.json",
-      `${JSON.stringify({ lastReviewedNimbusVersion: runningNimbusVersion() })}\n`,
-    );
-    await symlink(
-      path.resolve(import.meta.dirname, "../../node_modules"),
-      path.join(root, "node_modules"),
-      process.platform === "win32" ? "junction" : "dir",
-    );
+    if (!options.root) {
+      roots.push(root);
+      await write(
+        "nimbus.json",
+        `${JSON.stringify({ lastReviewedNimbusVersion: runningNimbusVersion() })}\n`,
+      );
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(root, "node_modules"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+    }
     for (const [relative, contents] of Object.entries(files)) {
-      await write(relative, contents);
+      if (contents === null) await rm(path.join(root, relative), { force: true });
+      else await write(relative, contents);
     }
     let adapter: AstroIntegration | undefined;
     if (options.server) {
@@ -102,7 +112,19 @@ export function agentSites() {
         cacheDir: path.join(root, ".astro"),
         outDir: "./dist",
         build: { server: path.join(root, ".server"), client: path.join(root, "dist") },
-        vite: { cacheDir: path.join(root, ".vite") },
+        vite: {
+          cacheDir: path.join(root, ".vite"),
+          ...(options.packageImports
+            ? {
+                resolve: {
+                  alias: [
+                    { find: /^@cloudflare\/nimbus-docs$/, replacement: path.resolve(import.meta.dirname, "../../src/index.ts") },
+                    { find: /^@cloudflare\/nimbus-docs\//, replacement: `${path.resolve(import.meta.dirname, "../../src")}/` },
+                  ],
+                },
+              }
+            : {}),
+        },
         base: "/docs",
         prerenderConflictBehavior: options.conflict ?? "error",
         ...(adapter ? { output: "server" as const, adapter } : {}),
@@ -117,8 +139,9 @@ export function agentSites() {
               ...(options.versions ? { versions: options.versions } : {}),
               ...(options.api ? { api: options.api } : {}),
               ...(options.rendering ? { rendering: options.rendering } : {}),
+              ...(options.sidebar ? { sidebar: options.sidebar } : {}),
             } as Parameters<typeof nimbus>[0],
-            { admonitions: false, sitemap: false, validateMdx: false },
+            { admonitions: false, sitemap: options.sitemap === true, validateMdx: false },
           ),
         ],
       });

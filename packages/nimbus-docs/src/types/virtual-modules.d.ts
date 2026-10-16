@@ -43,6 +43,12 @@ declare module "virtual:nimbus/config" {
   export const requestRenderingCollections: readonly string[];
   export const versionAlternates: import("../_internal/version-alternates.js").VersionAlternatesTable;
   export const apiCollections: readonly string[];
+  /** [collection, where it's served] for collections served by a route helper. */
+  export const collectionRoutes: ReadonlyArray<[string, import("../_internal/collection-routes.js").CollectionMount]>;
+  /** Static-folder routes that import a route helper in a shape the build couldn't read. */
+  export const unreadCollectionRoutes: ReadonlyArray<import("../_internal/collection-routes.js").UnreadRoute>;
+  /** Whether the section `llms.txt` route serves nested sections (`[...section]`). */
+  export const nestedLlmsSections: boolean;
   export const pageAssets: import("../_internal/api/page-assets-runtime.js").ApiPageAssetManifest;
   /** collection → version ("" when unversioned) → sidebar filter list filename. */
   export const navLists: Record<string, Record<string, string>>;

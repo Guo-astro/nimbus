@@ -35,6 +35,9 @@ import {
 } from "../src/api/index.js";
 import type { ApiNav, ApiPageProps } from "../src/api/index.js";
 import type { ApiSpec, NimbusConfig } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 const FIXTURE_ROOT = fileURLToPath(new URL("./fixtures/api/", import.meta.url));
 
@@ -177,7 +180,7 @@ describe("pageUrl — the one URL builder", () => {
       { version: "2026-11-30.air", spec: "v1.yaml" },
     ],
   };
-  const targets = resolveApiFamily(family);
+  const targets = resolveApiFamily(family, `/${family.collection}`);
   const def = targets.find((t) => t.isDefault)!;
   const old = targets.find((t) => !t.isDefault)!;
 
@@ -199,7 +202,7 @@ describe("pageUrl — the one URL builder", () => {
         { version: "v2", spec: "v2.yaml", default: true },
         { version: "v1", spec: "v1.yaml" },
       ],
-    });
+    }, "/core");
     for (const t of pathTargets) {
       assert.equal(t.versionMode, "path");
       assert.equal(apiVersionQuery(t), "");
@@ -208,7 +211,7 @@ describe("pageUrl — the one URL builder", () => {
         `${t.mountPath}/charges/create/`,
       );
     }
-    const single = resolveApiFamily({ collection: "solo", spec: "a.yaml" })[0]!;
+    const single = resolveApiFamily({ collection: "solo", spec: "a.yaml" }, "/solo")[0]!;
     assert.equal(single.versionMode, "path");
     assert.equal(pageUrl(single, ""), "/solo/");
   });
@@ -217,7 +220,7 @@ describe("pageUrl — the one URL builder", () => {
     const renamed = resolveApiFamily({
       ...family,
       versionUrl: { in: "query", param: "api-version" },
-    });
+    }, `/${family.collection}`);
     const old = renamed.find((t) => !t.isDefault)!;
     assert.equal(
       pageUrl(old, "charges/create"),
@@ -359,7 +362,7 @@ describe("hidden versions and the sitemap", () => {
         },
       ],
     } as unknown as NimbusConfig;
-    assert.deepEqual(hiddenVersionPrefixes(config), []);
+    assert.deepEqual(hiddenVersionPrefixes(config, "/", DEFAULT_URLS), []);
   });
 
   test("a path-mode hidden version still excludes its mount prefix", () => {
@@ -375,7 +378,7 @@ describe("hidden versions and the sitemap", () => {
         },
       ],
     } as unknown as NimbusConfig;
-    assert.deepEqual(hiddenVersionPrefixes(config), ["/core/v0"]);
+    assert.deepEqual(hiddenVersionPrefixes(config, "/", DEFAULT_URLS), ["/core/v0"]);
   });
 });
 

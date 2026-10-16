@@ -3,7 +3,8 @@ import path from "node:path";
 import type { RenderingConfig, RenderingMode } from "../types.js";
 import {
   collectionMountPrefix,
-  type VersionInfo,
+  NO_ROUTES,
+  type MountContext,
 } from "./collection-mount.js";
 
 export interface CompiledRenderingPolicy {
@@ -40,13 +41,32 @@ export function compileRenderingPolicy(
   };
 }
 
+/**
+ * A collection's canonical route file. A collection a route moved away from
+ * its default URL uses that route's file; otherwise the file at the default
+ * URL, as before routes could move collections.
+ */
 export function canonicalCollectionRouteComponent(
   srcDir: string,
   collection: string,
-  versions?: VersionInfo | null,
+  context: MountContext,
+  projectRoot: string,
 ): string {
-  const mount = collectionMountPrefix(collection, versions).slice(1);
+  const moved = movedCollectionRoute(collection, context);
+  if (moved) return path.join(projectRoot, moved.file);
+  const mount = collectionMountPrefix(collection, { versions: context.versions, routes: NO_ROUTES }).slice(1);
   return path.join(srcDir, "pages", mount, "[...slug].astro");
+}
+
+/** The route that serves a collection away from its default URL, if one does. */
+export function movedCollectionRoute(
+  collection: string,
+  context: MountContext,
+): { mount: string; file: string } | undefined {
+  const routed = context.routes.get(collection);
+  if (!routed?.file) return undefined;
+  const fallback = collectionMountPrefix(collection, { versions: context.versions, routes: NO_ROUTES });
+  return routed.mount === fallback ? undefined : { mount: routed.mount, file: routed.file };
 }
 
 export function routeComponentKeys(

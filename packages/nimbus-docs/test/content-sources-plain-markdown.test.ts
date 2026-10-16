@@ -99,3 +99,53 @@ test("a title comes from the first heading outside code, else the file name", as
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a source collection's links follow its route when it moves, on a warm cache", async () => {
+  // The route imports the package by name, as a site does, so the build reads which collection it serves.
+  const movedRoute = route
+    .replace(src("runtime.ts"), JSON.stringify("@cloudflare/nimbus-docs/runtime"))
+    .replace("getSidebar(Astro.url.pathname, ", "getSidebar(Astro.url.pathname.replace(import.meta.env.BASE_URL.replace(/[/]$/, ''), ''), ");
+  const site = await paritySite({
+    extraCollections: [`sdk: defineCollection(docsCollection({ source: "sdk" }))`],
+    routes: { "src/pages/sdk/[...slug].astro": movedRoute },
+    nimbus: { sidebar: { items: [{ label: "SDK", autogenerate: { collection: "sdk" } }] } },
+  });
+  try {
+    await site.write("src/content/docs/index.md", "---\ntitle: Home\n---\n\nHome.\n");
+    const remote = await gitRemote(path.join(site.root, "remotes"), {
+      "docs/1-promise.md": "## Promise API\n\nSee [the options](2-options.md#signal).\n",
+      "docs/2-options.md": "## Options\n\nBack to [promises](1-promise.md).\n",
+    });
+    const config = site.configure({ sources: { sdk: { repo: remote.bare, ref: "main", path: "docs" } } });
+    const pkg = path.resolve(import.meta.dirname, "../src");
+    const run = () =>
+      build({
+        ...config,
+        vite: {
+          ...config.vite,
+          resolve: {
+            alias: [
+              { find: /^@cloudflare\/nimbus-docs$/, replacement: path.join(pkg, "index.ts") },
+              { find: /^@cloudflare\/nimbus-docs\//, replacement: `${pkg}/` },
+            ],
+          },
+        },
+      });
+    const links = async (url: string) =>
+      [...new JSDOM(await site.read(`dist${url}1-promise/index.html`)).window.document.querySelectorAll("main a")].map((a) => a.getAttribute("href"));
+
+    await run();
+    assert.deepEqual(await links("/sdk/"), ["/sdk/2-options/#signal"]);
+
+    const { rm } = await import("node:fs/promises");
+    await rm(path.join(site.root, "src/pages/sdk"), { recursive: true });
+    await site.write("src/pages/integrations/dbt/[...slug].astro", movedRoute);
+    await run();
+    assert.deepEqual(await links("/integrations/dbt/"), ["/integrations/dbt/2-options/#signal"]);
+    assert.match(await site.read("dist/integrations/dbt/1-promise/index.md"), /\[the options\]\(\/integrations\/dbt\/2-options\/#signal\)/);
+    const { existsSync } = await import("node:fs");
+    assert.ok(!existsSync(path.join(site.root, "dist/sdk")));
+  } finally {
+    await site.remove();
+  }
+});

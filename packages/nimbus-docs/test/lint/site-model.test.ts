@@ -15,6 +15,9 @@ import {
   type ContentEntry,
   type RouteOwner,
 } from "../../src/lint/site-model.js";
+import { NO_ROUTES } from "../../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 function entry(collection: string, id: string): ContentEntry {
   return { collection, id, relPath: `${collection}/${id}.mdx` };
@@ -28,7 +31,7 @@ function contentOwner(
 ): RouteOwner {
   const e = entry(collection, id);
   return {
-    url: contentEntryUrl(e, versions),
+    url: contentEntryUrl(e, { versions: versions ?? null, routes: NO_ROUTES }),
     source: `src/content/${e.relPath}`,
   };
 }
@@ -391,9 +394,9 @@ test("a frontmatter slug decides the entry's route, so it collides with the page
     fs.writeFileSync(path.join(root, "docs/long.mdx"), `---\ndescription: "${"x".repeat(5000)}"\nslug: far\n---\n`);
 
     const entries = enumerateEntriesByBase(root, new Map([["docs", "docs"]]));
-    const urls = entries.map((e) => contentEntryUrl(e)).sort();
+    const urls = entries.map((e) => contentEntryUrl(e, DEFAULT_URLS)).sort();
     assert.deepEqual(urls, ["/1.2.3/notes", "/b", "/b", "/far"]);
-    const dups = findDuplicateRoutes(entries.map((e) => ({ url: contentEntryUrl(e), source: e.relPath })));
+    const dups = findDuplicateRoutes(entries.map((e) => ({ url: contentEntryUrl(e, DEFAULT_URLS), source: e.relPath })));
     assert.deepEqual(dups.map((d) => [d.url, [...d.sources].sort()]), [["/b", ["docs/a.mdx", "docs/b.mdx"]]]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

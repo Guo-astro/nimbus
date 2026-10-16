@@ -436,6 +436,8 @@ function buildFilesystemTree(
 // Config-driven builder
 // ---------------------------------------------------------------------------
 
+const defaultMount = (collection: string) => `/${collection}`;
+
 function resolveConfigItems(
   configItems: ConfigItem[],
   entriesByCollection: Record<string, CollectionEntry[]>,
@@ -444,6 +446,7 @@ function resolveConfigItems(
   orderStart: number = 0,
   primaryPrefix: string = "",
   knownRoots: ReadonlySet<string> = new Set(),
+  mountOf: (collection: string) => string = defaultMount,
 ): SidebarItem[] {
   const primaryEntries = entriesByCollection[primaryCollection] ?? [];
   const { byId } = buildEntryIndex(primaryEntries);
@@ -543,11 +546,12 @@ function resolveConfigItems(
           // Resolve the mount prefix. The primary collection uses the
           // caller-supplied `primaryPrefix` (`""` for the default `docs`
           // collection; `/<v>` when versioning rewrites the primary to
-          // a version collection). Other collections default to
-          // `/<name>` unless explicitly overridden.
+          // a version collection). Other collections default to where
+          // they're served (`/<name>`, or their route's folder) unless
+          // explicitly overridden.
           const explicit = item.autogenerate.prefix;
           const isPrimary = collectionName === primaryCollection;
-          const prefix = explicit ?? (isPrimary ? primaryPrefix : `/${collectionName}`);
+          const prefix = explicit ?? (isPrimary ? primaryPrefix : mountOf(collectionName));
           autoItems = buildFilesystemTree(
             collectionEntries,
             currentPath,
@@ -607,6 +611,7 @@ function resolveConfigItems(
         0,
         primaryPrefix,
         knownRoots,
+        mountOf,
       );
       const group: SidebarGroupItem = {
         type: "group",
@@ -1092,6 +1097,8 @@ export function buildSidebarTree(
    * no page there.
    */
   knownRoots: ReadonlySet<string> = new Set(),
+  /** Where a collection is served; `/<name>` unless a route serves it elsewhere. */
+  mountOf: (collection: string) => string = defaultMount,
 ): SidebarItem[] {
   const primaryEntries = entriesByCollection[primaryCollection] ?? [];
   let items: SidebarItem[];
@@ -1106,6 +1113,7 @@ export function buildSidebarTree(
       0,
       primaryPrefix,
       knownRoots,
+      mountOf,
     );
   } else {
     // Filesystem fallback — primary collection only. Cross-collection

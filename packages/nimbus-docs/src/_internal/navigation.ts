@@ -100,15 +100,23 @@ export function composeRouteBreadcrumbs(
  * URL-segment fallback for pages with no node in the tree, so a stray
  * page still gets a root-anchored trail.
  */
-export function breadcrumbsFromUrl(slug: string, homeLabel = "Home"): Breadcrumb[] {
+export function breadcrumbsFromUrl(slug: string, homeLabel = "Home", mount = ""): Breadcrumb[] {
   const parts = slug.split("/").filter(Boolean);
   const crumbs: Breadcrumb[] = [{ label: homeLabel, href: "/" }];
+  const label = (part: string) => safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+  // A collection served at a nested URL (`/products/sdk`) starts at its own
+  // root: `/products` is no page.
+  const mountParts = mount.split("/").filter(Boolean);
+  const inMount = mountParts.length > 0 && mountParts.every((part, index) => parts[index] === part);
   let path = "";
-  for (const part of parts) {
+  if (inMount) {
+    path = `/${mountParts.join("/")}`;
+    crumbs.push({ label: label(mountParts.at(-1)!), href: toDocumentHref(path) });
+  }
+  for (const part of inMount ? parts.slice(mountParts.length) : parts) {
     path += `/${part}`;
-    const label = safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    crumbs.push({ label, href: toDocumentHref(path) });
+    crumbs.push({ label: label(part), href: toDocumentHref(path) });
   }
 
   return crumbs;

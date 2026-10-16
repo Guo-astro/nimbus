@@ -14,7 +14,10 @@ import {
   loadApiCollections,
   loadEmptyCollections,
   loadIndexedCollections,
+  loadMountContext,
+  loadNestedLlmsSections,
   loadNimbusConfig,
+  loadUnreadCollectionRoutes,
   loadVersionAlternates,
 } from "./_internal/runtime-config.js";
 import { notAPageCollectionMessage } from "./_internal/page-collection-error.js";
@@ -54,6 +57,7 @@ import {
   withoutHtmlExtension,
 } from "./_internal/url.js";
 import {
+  NO_ROUTES,
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
   collectionMountPrefix as resolveCollectionPrefix,
@@ -349,7 +353,6 @@ export async function getIndexedEntries(
   // A partial build's empty collections: skipped here rather than asked of
   // Astro, which would warn "does not exist or is empty" per call.
   const empty = new Set(await loadEmptyCollections());
-  const versions = await getVersions();
   // Query-mode API families: discovery is default-only. Non-default entries
   // have no URLs of their own (their store ids are not routes), so they stay
   // out of llms indexes, social images, previous/next, and negotiation.
@@ -376,7 +379,7 @@ export async function getIndexedEntries(
       import("astro:content").CollectionEntry<string>
     >(name, (n) => getCollection(n as any));
     if (warning) runtimeWarn(warning);
-    const prefix = resolveCollectionPrefix(name, versions);
+    const prefix = resolveCollectionPrefix(name, await loadMountContext());
     const collectionVersion = await getCurrentVersion(name);
     for (const entry of entries) {
       const data = (entry.data ?? {}) as Record<string, unknown>;
@@ -458,6 +461,7 @@ export async function getIndexedTopLevel(): Promise<IndexedTopLevel> {
     isDiscoverable(item.entry),
   );
   const versions = await getVersions();
+  const mountContext = await loadMountContext();
 
   // Build two buckets keyed by their URL-facing slug:
   //   - primary: top-level slug under the `docs` collection
@@ -469,16 +473,17 @@ export async function getIndexedTopLevel(): Promise<IndexedTopLevel> {
   const hiddenSlugs = new Set<string>(versions?.hidden ?? []);
 
   for (const item of items) {
-    if (item.collection === PRIMARY_COLLECTION) {
+    const prefix = resolveCollectionPrefix(item.collection, mountContext);
+    if (prefix === "") {
       const top = item.entry.id.split("/")[0]!;
       const bucket = primaryBuckets.get(top);
       if (bucket) bucket.push(item);
       else primaryBuckets.set(top, [item]);
     } else {
-      // Bucket secondary collections by their URL-facing slug (version
-      // slug for `docs-<v>` collections, raw collection ID otherwise) so
-      // the emitted group label and URL prefix match the route shape.
-      const slug = resolveCollectionSlug(item.collection, versions);
+      // Bucket secondary collections by where they're served (`v1` for
+      // `docs-v1`, the route's folder for a moved collection) so the
+      // emitted group label and URL prefix match the route shape.
+      const slug = prefix.slice(1);
       const bucket = secondaryBuckets.get(slug);
       if (bucket) bucket.push(item);
       else secondaryBuckets.set(slug, [item]);
@@ -783,6 +788,7 @@ async function buildStructuralTree(
 ): Promise<SidebarItem[]> {
   const runtimeConfig = await loadNimbusConfig();
   const versions = await getVersions();
+  const mountContext = await loadMountContext();
 
   // Resolve the effective "primary" collection for THIS sidebar build.
   // For pages in a non-current version collection, the primary IS that
@@ -796,7 +802,7 @@ async function buildStructuralTree(
     versions.others.includes(pageCollection.slice("docs-".length))
   ) {
     effectivePrimary = pageCollection;
-    primaryPrefix = resolveCollectionPrefix(pageCollection, versions);
+    primaryPrefix = resolveCollectionPrefix(pageCollection, mountContext);
   }
 
   const cached = structuralTreeCache.get(effectivePrimary);
@@ -839,10 +845,11 @@ async function buildStructuralTree(
       : undefined,
     primaryPrefix,
     new Set([
-      ...(runtimeConfig.api ?? []).map((api) => `/${api.collection}`),
+      ...(runtimeConfig.api ?? []).map((api) => resolveCollectionPrefix(api.collection, mountContext)).filter(Boolean),
       ...(versions?.others ?? []).map((version) => `/${version}`),
-      ...collections.map((collection) => resolveCollectionPrefix(collection, versions)).filter(Boolean),
+      ...collections.map((collection) => resolveCollectionPrefix(collection, mountContext)).filter(Boolean),
     ]),
+    (collection) => resolveCollectionPrefix(collection, mountContext),
   );
 
   // Frozen because it's shared across pages and its nodes reach user
@@ -957,7 +964,8 @@ export async function getBreadcrumbs(
     return assembleBreadcrumbs(root, path, labels);
   }
 
-  return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home");
+  const mount = options?.collection ? resolveCollectionPrefix(options.collection, await loadMountContext()) : "";
+  return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home", mount);
 }
 
 /** Resolves a section's display titles. May be async. */
@@ -1236,8 +1244,9 @@ async function resolveProseRoute<C extends string>(
   if (result.status !== "found") return proseResolutionResponse(astro, result);
   const { entry: found, Content, headings } = result.page;
   await assertPageCollection(found.collection);
+  await assertRouteServesCollection(found.collection, astro.routePattern);
   const { markdownUrl, sourceUrl, ogImageUrl } = pageUrls(
-    resolveCollectionPrefix(found.collection, await getVersions()),
+    resolveCollectionPrefix(found.collection, await loadMountContext()),
     found,
   );
   return {
@@ -1380,13 +1389,14 @@ export async function getRouteFlags(entry: {
  *   export const prerender = true;
  *   export const getStaticPaths = getCollectionStaticPaths("api");
  *
- * Why a sibling helper instead of an option on `getDocsStaticPaths`: the
- * `Docs` name carries the "primary collection mounted at root" semantic.
- * Non-primary collections mount under their own URL namespace
- * (`/<collection>/...`) by convention; the helper name reflects that.
+ * The collection is served where the route file is: this route at
+ * `src/pages/products/sdk/[...slug].astro` serves it at `/products/sdk`, and
+ * every URL Nimbus builds for it follows. Pass the name as a string literal
+ * in the route's exported `getStaticPaths`, so the build can read it.
  */
-export function getCollectionStaticPaths(collection: string): GetStaticPaths {
-  return async () => {
+export function getCollectionStaticPaths(collection: import("astro:content").CollectionKey | (string & {})): GetStaticPaths {
+  return async (options) => {
+    await assertRouteServesCollection(collection, options?.routePattern);
     await assertPageCollection(collection);
     const entries = await getVisibleEntries([collection]);
     return entries.map((entry) => ({
@@ -1395,6 +1405,50 @@ export function getCollectionStaticPaths(collection: string): GetStaticPaths {
       cacheKey: String(entry.digest),
     }));
   };
+}
+
+/**
+ * A route serving a collection from a folder it isn't served from builds
+ * pages that nothing links to. Checked from `getStaticPaths`, whose options
+ * carry the route's pattern (without `base`), and again when the page
+ * renders, from `Astro.routePattern`, which a wrapper can't drop. A route
+ * whose folder is dynamic isn't checked.
+ */
+async function assertRouteServesCollection(
+  collection: string,
+  routePattern: string | undefined,
+  helper = "getCollectionStaticPaths",
+): Promise<void> {
+  if (!routePattern) return;
+  const segments = routePattern.split("/").filter(Boolean);
+  const last = segments.at(-1);
+  if (last !== "[slug]" && last !== "[...slug]") return;
+  const folderSegments = segments.slice(0, -1);
+  if (folderSegments.some((segment) => segment.includes("["))) return;
+  const folder = folderSegments.length ? `/${folderSegments.join("/")}` : "";
+  const context = await loadMountContext();
+  const record = context.routes.get(collection);
+  const served = resolveCollectionPrefix(collection, context);
+  const allowed = new Set([
+    served,
+    resolveCollectionPrefix(collection, { versions: context.versions, routes: NO_ROUTES }),
+    ...(record?.aliases ?? []),
+  ]);
+  // Request rendering serves a docs version's `/v1/…` pages through the root route.
+  if (context.versions?.others.some((version) => collection === `${PRIMARY_COLLECTION}-${version}`)) allowed.add("");
+  if (allowed.has(folder)) return;
+  const unread = (await loadUnreadCollectionRoutes()).find((route) => route.folder === folder);
+  const servedFrom = record?.file ?? (served || "/");
+  throw new Error(
+    (unread
+      ? `nimbus-docs: Nimbus couldn't read the getStaticPaths in ${unread.file}, so "${collection}" is still served from ` +
+        `${servedFrom}. Export it as \`export const getStaticPaths = ${helper}("${collection}")\`, or return the helper's ` +
+        `paths from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`
+      : `nimbus-docs: the route under ${folder || "/"} serves collection "${collection}", but "${collection}" is served from ` +
+        `${servedFrom}. Call ${helper}("${collection}") in the route file's exported getStaticPaths, or move the route.`) +
+      (import.meta.env?.DEV ? " If you just moved the route, restart the dev server." : "") +
+      ` See https://nimbus-docs.com/writing/pages-and-routing/#collection-urls.`,
+  );
 }
 
 /**
@@ -1491,8 +1545,9 @@ export interface ApiVersionInfo {
  *   export const prerender = true;
  *   export const getStaticPaths = getApiStaticPaths("api");
  */
-export function getApiStaticPaths(collection: string): GetStaticPaths {
-  return async () => {
+export function getApiStaticPaths(collection: import("astro:content").CollectionKey | (string & {})): GetStaticPaths {
+  return async (options) => {
+    await assertRouteServesCollection(collection, options?.routePattern, "getApiStaticPaths");
     const apiCollections = await loadApiCollections();
     if (!apiCollections.includes(collection)) {
       throw new Error(
@@ -1723,7 +1778,7 @@ async function resolveApiRoute(
           import("./_internal/api/resolve-versions.js"),
           loadNimbusConfig(),
         ]);
-        const target = resolveApiVersion(config.api, collection, version);
+        const target = resolveApiVersion(config.api, collection, version, await loadMountContext());
         const nav = activatePreparedApiNav(preparedNav, coordinate);
         return {
           page: prepared.page,
@@ -1742,6 +1797,7 @@ async function resolveApiRoute(
   if (result.status !== "found") {
     return proseResolutionResponse(astro, result);
   }
+  await assertRouteServesCollection(result.page.collection, astro.routePattern, "getApiStaticPaths");
   // An on-demand sidebar's filter reads this version's page list.
   const { navLists } = await import("virtual:nimbus/config");
   const list = navLists?.[result.page.collection]?.[result.page.version ?? ""];
@@ -1798,7 +1854,7 @@ export async function getApiVersions(
   const { resolveApiFamily } =
     await import("./_internal/api/resolve-versions.js");
   const { pageUrl } = await import("./_internal/api/resolve-versions.js");
-  return resolveApiFamily(entry).map((t) => ({
+  return resolveApiFamily(entry, resolveCollectionPrefix(collection, await loadMountContext())).map((t) => ({
     version: t.version!,
     label: t.label,
     isDefault: t.isDefault,
@@ -1943,7 +1999,7 @@ export async function getApiVersionAlternates(
   const config = await loadNimbusConfig();
   const { resolveApiVersion } =
     await import("./_internal/api/resolve-versions.js");
-  const target = resolveApiVersion(config.api, collection, version);
+  const target = resolveApiVersion(config.api, collection, version, await loadMountContext());
   if (!target) return null;
   const table = await loadVersionAlternates();
   return table[`${target.versionKey}:${coordinate}`] ?? null;
@@ -1979,12 +2035,13 @@ export async function getVersionSwitchUrl(
   if (config.api?.some((entry) => entry.collection === collection)) {
     const { apiPageSlug, resolveApiVersion, pageUrl } =
       await import("./_internal/api/resolve-versions.js");
-    const target = resolveApiVersion(config.api, collection, targetVersion);
+    const mountContext = await loadMountContext();
+    const target = resolveApiVersion(config.api, collection, targetVersion, mountContext);
     if (!target)
       throw new Error(
         `Unknown target version ${targetVersion} for ${collection}.`,
       );
-    if (!resolveApiVersion(config.api, collection, sourceVersion))
+    if (!resolveApiVersion(config.api, collection, sourceVersion, mountContext))
       throw new Error(
         `Unknown source version ${sourceVersion} for ${collection}.`,
       );
@@ -2113,7 +2170,7 @@ export async function getCanonicalUrl(
  * the wrong section.
  */
 export async function getCollectionLlmsUrl(
-  collectionId: string,
+  collectionId: import("astro:content").CollectionKey | (string & {}),
 ): Promise<string> {
   if (collectionId === PRIMARY_COLLECTION) return "/llms.txt";
   const versions = await getVersions();
@@ -2128,7 +2185,37 @@ export async function getCollectionLlmsUrl(
       return `/${slug}/llms.txt`;
     }
   }
-  return `/${collectionId}/llms.txt`;
+  const prefix = resolveCollectionPrefix(collectionId, await loadMountContext());
+  // A `[section]` route serves one-segment sections only; the root index
+  // lists a nested collection's pages instead.
+  if (prefix.lastIndexOf("/") > 0 && !(await loadNestedLlmsSections())) return "/llms.txt";
+  return `${prefix}/llms.txt`;
+}
+
+/**
+ * Where a collection is served, as a link without `base`, like the other URL
+ * helpers: `"/products/sdk"` for a collection whose route file is
+ * `src/pages/products/sdk/[...slug].astro`, `"/"` for one at the root. Follows
+ * `trailingSlash`. Apply `withBase` before rendering it.
+ *
+ * ```astro
+ * const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL);
+ * ```
+ *
+ * Throws for a name that isn't a page collection, so a typo fails the build
+ * rather than linking nowhere.
+ */
+export async function getCollectionUrl(
+  collection: import("astro:content").CollectionKey | (string & {}),
+): Promise<string> {
+  await loadNimbusConfig();
+  const pageCollections = await loadIndexedCollections();
+  if (!pageCollections.includes(collection))
+    throw new Error(
+      `nimbus-docs: getCollectionUrl("${collection}"): no page collection is named "${collection}". ` +
+        `Page collections: ${pageCollections.join(", ") || "none"}.`,
+    );
+  return toDocumentHref(resolveCollectionPrefix(collection, await loadMountContext()) || "/");
 }
 
 /**

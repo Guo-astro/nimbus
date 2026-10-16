@@ -44,7 +44,7 @@ sidebar: {
     },
     {
       label: "API",
-      autogenerate: { collection: "api", prefix: "/reference" },
+      autogenerate: { collection: "api" },
       icon: "ph:code",
     },
     {
@@ -65,7 +65,7 @@ sidebar: {
 | `"slug"` | Link one page from the primary collection. |
 | `{ label, link }` | Add a labeled internal or external link. |
 | `{ autogenerate: { directory } }` | Generate a group from one content directory. |
-| `{ autogenerate: { collection, prefix? } }` | Mount another registered collection, optionally at a custom URL prefix. |
+| `{ autogenerate: { collection, prefix? } }` | Mount another registered collection, linked where it's served ([Collection URLs](/writing/pages-and-routing#collection-urls)). `prefix` sets the URL for a collection served by your own route, not a Nimbus route helper; for one that is, the route sets the URL and `prefix` is deprecated. |
 | `{ label, items }` | Build a recursive manual group. Groups support `collapsed`, `badge`, and `icon`. |
 | `{ segment, landing }` | Give a manual group ownership of a URL segment while linking its label and breadcrumbs to a real landing page. |
 

@@ -28,6 +28,8 @@
  */
 
 import type { ApiSpec } from "../../types.js";
+import { collectionMountPrefix } from "../collection-mount.js";
+import { projectMountContext } from "../project-mount-context.js";
 import {
   matchApiVersions,
   type ApiVersionMatchSummary,
@@ -56,7 +58,7 @@ export async function buildApiVersionAlternates(
   const table: VersionAlternatesTable = {};
 
   for (const entry of families) {
-    const targets = resolveApiFamily(entry);
+    const targets = resolveApiFamily(entry, collectionMountPrefix(entry.collection, projectMountContext(projectRoot)));
     const defaultVersion = targets.find((t) => t.isDefault)!.version!;
     const hiddenVersions = new Set(
       targets.filter((t) => t.hidden).map((t) => t.version!),

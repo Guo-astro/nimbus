@@ -5,15 +5,17 @@
 
 import type { NimbusConfig } from "../types.js";
 import { resolveAllApiCollections } from "./api/resolve-versions.js";
+import type { MountContext } from "./collection-mount.js";
 
 export function hiddenVersionPrefixes(
   config: NimbusConfig,
-  base = "/",
+  base: string,
+  context: MountContext,
 ): string[] {
   const b = base.replace(/\/$/, "");
   const out: string[] = [];
   for (const slug of config.versions?.hidden ?? []) out.push(`${b}/${slug}`);
-  for (const target of resolveAllApiCollections(config.api)) {
+  for (const target of resolveAllApiCollections(config.api, context)) {
     // A query-mode hidden version has no version-free URLs to exclude —
     // every version shares `/<family>`, so its mount prefix would remove
     // the whole visible family from the sitemap.
@@ -26,9 +28,10 @@ export function hiddenVersionPrefixes(
 
 export function makeHiddenSitemapFilter(
   config: NimbusConfig,
-  base = "/",
+  base: string,
+  context: MountContext,
 ): (url: string) => boolean {
-  const prefixes = hiddenVersionPrefixes(config, base);
+  const prefixes = hiddenVersionPrefixes(config, base, context);
   return (url: string): boolean => {
     let pathname: string;
     try {

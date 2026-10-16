@@ -21,6 +21,8 @@
 
 import type { NimbusConfig, RuntimeContentSource, RuntimeNimbusConfig } from "../types.js";
 import { searchIndexLayout } from "./build-slice.js";
+import { NO_ROUTES } from "./collection-mount.js";
+import type { CollectionRoutes, UnreadRoute } from "./collection-routes.js";
 import type { VersionAlternatesTable } from "./version-alternates.js";
 
 const VIRTUAL_ID = "virtual:nimbus/config";
@@ -85,6 +87,12 @@ export interface VirtualConfigExtras {
    * server endpoints — never a client component.
    */
   apiCollections: string[];
+  /** Collections served by a route helper, by where the route file is. */
+  collectionRoutes: CollectionRoutes;
+  /** Static-folder routes that import a route helper in a shape the build couldn't read. */
+  unreadCollectionRoutes: readonly UnreadRoute[];
+  /** Whether the section `llms.txt` route serves nested sections, once routes are resolved. */
+  getNestedLlmsSections?: () => boolean;
   headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
@@ -156,10 +164,13 @@ export function virtualConfigPlugin(
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
           `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
           `export const buildSlice = ${JSON.stringify(buildSlice)};\n` +
-          `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? searchIndexLayout(null, [], null, extras.base))};\n` +
+          `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? searchIndexLayout(null, [], { versions: null, routes: NO_ROUTES }, extras.base))};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +
           `export const versionAlternates = ${JSON.stringify(extras.versionAlternates)};\n` +
           `export const apiCollections = ${JSON.stringify(extras.apiCollections)};\n` +
+          `export const collectionRoutes = ${JSON.stringify([...extras.collectionRoutes])};\n` +
+          `export const unreadCollectionRoutes = ${JSON.stringify(extras.unreadCollectionRoutes)};\n` +
+          `export const nestedLlmsSections = ${JSON.stringify(extras.getNestedLlmsSections?.() ?? false)};\n` +
           `export const headDefaults = ${JSON.stringify(extras.headDefaults)};\n`
         );
       }

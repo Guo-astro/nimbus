@@ -14,6 +14,8 @@
 
 import type { RuntimeNimbusConfig } from "../types.js";
 import type { VersionAlternatesTable } from "./version-alternates.js";
+import type { MountContext } from "./collection-mount.js";
+import type { UnreadRoute } from "./collection-routes.js";
 import { setLinkPolicy } from "./url.js";
 
 // `virtual:nimbus/config` declarations live at
@@ -37,6 +39,30 @@ async function virtualConfig(): Promise<typeof import("virtual:nimbus/config")> 
   ]);
   setLinkPolicy({ trailingSlash: astroConfig.trailingSlash, format: astroConfig.build.format });
   return mod;
+}
+
+let _cachedMountContext: MountContext | null = null;
+
+/** What collection URLs depend on: the configured versions and the route map the build resolved. */
+export async function loadMountContext(): Promise<MountContext> {
+  if (_cachedMountContext) return _cachedMountContext;
+  const mod = await virtualConfig();
+  const versions = mod.config.versions;
+  _cachedMountContext = {
+    versions: versions ? { others: versions.others ?? [] } : null,
+    routes: new Map(mod.collectionRoutes ?? []),
+  };
+  return _cachedMountContext;
+}
+
+/** Static-folder routes that import a route helper in a shape the build couldn't read. */
+export async function loadUnreadCollectionRoutes(): Promise<readonly UnreadRoute[]> {
+  return (await virtualConfig()).unreadCollectionRoutes ?? [];
+}
+
+/** Whether the section `llms.txt` route serves nested sections (`[...section]`). */
+export async function loadNestedLlmsSections(): Promise<boolean> {
+  return (await virtualConfig()).nestedLlmsSections ?? false;
 }
 
 export async function loadNimbusConfig(): Promise<RuntimeNimbusConfig> {

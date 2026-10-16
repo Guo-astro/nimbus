@@ -56,7 +56,7 @@ conventions:
   tell the user this isn't a Nimbus project.
 - `src/content.config.ts` — read it in full. Note: (1) which collections
   already exist (you must not collide with them), (2) whether they use
-  `docsCollection({ base: "..." })` from `nimbus-docs/content` so you can
+  `docsCollection({ base: "..." })` from `@cloudflare/nimbus-docs/content` so you can
   match their shape, (3) the `defineCollection`/`docsCollection` import
   layout already in place.
 - `astro.config.ts` (or `nimbus.config.ts` if separate) — read the Nimbus
@@ -116,18 +116,19 @@ versioning.
 
 ### Q3. Confirm the URL prefix.
 
-The URL prefix is the path segment the collection mounts under. For a `blog`
-collection with prefix `/blog`, pages at `src/content/blog/foo.mdx` render at
-`/blog/foo`. For a `docs-v1` collection with prefix `/v1`, pages render at
-`/v1/foo`.
+The URL prefix is where the collection is served, and the route file goes
+there: `src/pages/<prefix>/[...slug].astro`. For a `blog` collection with
+prefix `/blog`, pages at `src/content/blog/foo.mdx` render at `/blog/foo`.
+The prefix can be nested (`/products/sdk`) and doesn't have to match the
+collection name; Nimbus reads it from the route file's folder, so every URL it
+builds (sidebar, Markdown versions, `llms.txt`, sitemap) follows. Default to
+`/<collection>`.
 
-**Important convention:** when the collection name starts with `docs-`, the
-URL prefix defaults to the part after `docs-`. This matches the versioning
-URL convention — a `docs-v1` collection always mounts at `/v1/`, never at
-`/docs-v1/`.
-
-For every other collection, the URL prefix must match the collection name.
-Alternate Markdown versions and the collection's `llms.txt` index use that identity as their mount prefix.
+**Docs versions:** a collection named in the `versions` config
+(`versions.others` includes `v1` for `docs-v1`) is always served at the part
+after `docs-` (`/v1`), so its route goes in `src/pages/v1/`. A `docs-*`
+collection that isn't listed there (`docs-es`, a translation) is an ordinary
+collection: default its prefix to `/<collection>`, and ask.
 
 ### Q4. Add a starter entry?
 
@@ -267,6 +268,9 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 </DocsLayout>
 ```
 
+The relative imports are for a one-segment prefix (`/blog`); add one `../` per
+extra segment (`/products/sdk` needs `../../../layouts/DocsLayout.astro`).
+
 **The `collection` and `entryId` props are required, not optional.**
 They drive cross-version `<link rel="alternate">`, `<link rel="canonical">`,
 deprecation banner rendering, Pagefind facet emission, hidden-version
@@ -372,10 +376,11 @@ Ask the user whether to replace, skip, or show a diff first. The
   `getCollectionPage<C>(astro)` are sibling functions to
   `getDocsStaticPaths`/`getDocsPageProps`. Use the `Collection` variants in
   scaffolded routes; the `Docs` variants stay for the primary route only.
-- The URL convention is intentional: primary `docs` mounts at root, every
-  other collection mounts at `/<collection>/` or `/<version-slug>/` for
-  version collections. The `getIndexedEntries()` / `getIndexedTopLevel()`
-  helpers already know this convention; the routes you scaffold consume it.
+- The route file's folder sets the URL: primary `docs` is served at the root,
+  a docs version at `/<version-slug>/`, and every other collection where its
+  route is (`/<collection>/` by default). Every URL helper follows it, so
+  keep `getStaticPaths` as `export const getStaticPaths =
+  getCollectionStaticPaths("<collection>")` with a string literal.
 - Do not try to register the collection automatically without the user's
   go-ahead in step 3 (the plan). The plan-then-confirm step is what turns
   this from an opaque codegen into a transparent edit.

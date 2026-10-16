@@ -26,6 +26,8 @@ test("runtime config strips inline API specs", async () => {
     base: "/docs",
     versionAlternates: {},
     apiCollections: ["api"],
+    collectionRoutes: new Map(),
+    unreadCollectionRoutes: [],
     headDefaults: {
       favicon: { file: "/favicon.ico", type: "image/x-icon" },
       socialImage: "/opengraph.png",
@@ -82,6 +84,8 @@ test("a content.config.ts edit invalidates the virtual config in dev", async () 
     base: "/",
     versionAlternates: {},
     apiCollections: [],
+    collectionRoutes: new Map(),
+    unreadCollectionRoutes: [],
     headDefaults: {
       favicon: { file: "/favicon.ico", type: "image/x-icon" },
       socialImage: "/opengraph.png",

@@ -23,6 +23,9 @@ import { validateNimbusConfig } from "../src/_internal/validate.js";
 import { resolveApiFamily, resolveApiVersion } from "../src/_internal/api/resolve-versions.js";
 import { resolveSpecSource } from "../src/_internal/api/resolve-spec.js";
 import type { ApiSpec } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 const LISTED = ["x-acme-plans", "x-acme-confirm", "x-acme-sensitive", "x-acme-meta"];
 
@@ -206,13 +209,13 @@ describe("api[].extensions resolution", () => {
         { version: "v1", spec, extensions: ["x-acme-plans"] },
       ],
     };
-    assert.deepEqual(resolveApiFamily(entry).map((t) => t.extensions), [["x-acme-confirm"], ["x-acme-plans"]]);
-    const v1 = resolveApiVersion([entry], "acme", "v1")!;
+    assert.deepEqual(resolveApiFamily(entry, `/${entry.collection}`).map((t) => t.extensions), [["x-acme-confirm"], ["x-acme-plans"]]);
+    const v1 = resolveApiVersion([entry], "acme", "v1", DEFAULT_URLS)!;
     const source = await resolveSpecSource({ collection: v1.namespace, spec: v1.spec, extensions: v1.extensions }, tmpdir());
     assert.deepEqual(source.extensions, ["x-acme-plans"]);
     const page = getApiPageProps(await buildApiModel(source), "deleteProject") as ApiOperationPage;
     assert.deepEqual(page.extensions, { "x-acme-plans": ["pro", "enterprise"] });
-    assert.equal(resolveApiFamily({ collection: "acme", spec })[0]!.extensions, undefined);
+    assert.equal(resolveApiFamily({ collection: "acme", spec }, "/acme")[0]!.extensions, undefined);
   });
 });
 

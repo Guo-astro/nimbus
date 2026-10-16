@@ -7,6 +7,7 @@ import {
 } from "./request-route-url.js";
 import {
   loadApiCollections,
+  loadMountContext,
   loadRequestRenderingCollections,
   loadNimbusConfig,
 } from "./runtime-config.js";
@@ -30,14 +31,12 @@ export async function GET() {
   const requestCollections = new Set(await loadRequestRenderingCollections());
   const apiCollections = new Set(await loadApiCollections());
   const entries = await getIndexedEntries();
-  const versions = config.versions
-    ? { others: config.versions.others ?? [] }
-    : null;
+  const mountContext = await loadMountContext();
   const routes: RequestRouteInventoryEntry[] = [];
 
   for (const item of entries) {
     const collection = item.collection;
-    const prefix = collectionMountPrefix(collection, versions);
+    const prefix = collectionMountPrefix(collection, mountContext);
     const data = (item.entry.data ?? {}) as Record<string, unknown>;
     const request = requestCollections.has(collection);
     const versionStatus = await getVersionStatus(

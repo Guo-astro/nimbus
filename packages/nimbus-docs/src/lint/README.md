@@ -28,8 +28,9 @@ src/_internal/
   astro-slug.ts          canonicalSlug + canonicalEntryUrl — mirror of Astro's content-layer
                          slug normalization (github-slugger + trailing-/index strip).
   collection-mount.ts    PRIMARY_COLLECTION + collectionMountPrefix — single source of truth
-                         for "where does collection X mount?". Shared by index.ts and
-                         site-model.ts so duplicate-slug can't drift from real routing.
+                         for "where does collection X mount?", from the versions and the
+                         route map (`collection-routes.ts` reads route files). Shared by
+                         index.ts and site-model.ts so duplicate-slug can't drift.
 ```
 
 Parsing uses Sätteri's own `mdxToMdast` — the same parser that renders the
@@ -117,7 +118,7 @@ Three design calls hold this rule together:
   per source, groups by URL.
 
   - **Content entries** use `collectionMountPrefix(entry.collection,
-    versions) + canonicalEntryUrl(prefix, entry.id)` — the same logic
+    context) + canonicalEntryUrl(prefix, entry.id)` — the same logic
     the framework uses in `getIndexedTopLevel`, sidebar hrefs, etc.
     (shared from `_internal/collection-mount.ts` + `_internal/astro-slug.ts`).
     This catches cross-collection (`docs/blog/post.mdx` vs

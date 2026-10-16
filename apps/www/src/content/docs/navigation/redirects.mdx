@@ -47,3 +47,21 @@ export default defineConfig({
 ```
 
 On static hosts these compile to redirect files; on Cloudflare and other adapters they become native redirect rules.
+
+When you move a collection to another folder ([Collection URLs](/writing/pages-and-routing#collection-urls)), redirect its old URLs with one dynamic entry:
+
+```ts title="astro.config.ts"
+export default defineConfig({
+  redirects: {
+    "/sdk/[...slug]": "/products/sdk/[...slug]",
+  },
+});
+```
+
+Astro writes a redirect page for each old page URL. It doesn't redirect the old Markdown and `llms.txt` URLs, and with a `base` it can't redirect the pages either. For those, add a host rule to `public/_redirects` (Cloudflare or Netlify), with the `base` in both paths:
+
+```text title="public/_redirects"
+/docs/sdk/* /docs/products/sdk/:splat 301
+```
+
+When you move the collection again, point the existing entry at the new folder too; Astro rejects a redirect to a folder no route serves.

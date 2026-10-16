@@ -31,6 +31,7 @@ import type {
 } from "../../types.js";
 import type { RoutePolicy } from "./route-policy.js";
 import { toDocumentHref } from "../url.js";
+import { collectionMountPrefix, type MountContext } from "../collection-mount.js";
 
 /** One fully-resolved render target — a single version of one API family. */
 export interface ResolvedApiVersion {
@@ -44,8 +45,10 @@ export interface ResolvedApiVersion {
   namespace: string;
   /** Cache + alternates-table + head key: `family` or `family@version`. */
   versionKey: string;
-  /** URL base: `/family` (default) or `/family/version`. */
+  /** URL base: the family's URL (default) or that plus `/version`. */
   mountPath: string;
+  /** The family's URL, `/family` unless a route serves it elsewhere (`/reference/api`). */
+  familyPath: string;
   /** Spec source for this version (path or inline object). */
   spec: string | Record<string, unknown>;
   /** Maturity status, or `null` when unset. */
@@ -112,8 +115,11 @@ export function apiPageSlug(
     : storeId.slice(`${target.version}/`.length);
 }
 
-/** Resolve one family into its render targets (one per version). */
-export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
+/**
+ * Resolve one family into its render targets (one per version). `familyPath`
+ * is where the family is served: `collectionMountPrefix(entry.collection, …)`.
+ */
+export function resolveApiFamily(entry: ApiSpec, familyPath: string): ResolvedApiVersion[] {
   const family = entry.collection;
 
   if (!entry.versions || entry.versions.length === 0) {
@@ -124,7 +130,8 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
         isDefault: true,
         namespace: family,
         versionKey: family,
-        mountPath: `/${family}`,
+        mountPath: familyPath,
+        familyPath,
         spec: entry.spec as string | Record<string, unknown>,
         status: null,
         hidden: false,
@@ -151,7 +158,8 @@ export function resolveApiFamily(entry: ApiSpec): ResolvedApiVersion[] {
       isDefault,
       namespace: family,
       versionKey: `${family}${VERSION_KEY_SEP}${v.version}`,
-      mountPath: isDefault ? `/${family}` : `/${family}/${v.version}`,
+      mountPath: isDefault ? familyPath : `${familyPath}/${v.version}`,
+      familyPath,
       spec: v.spec,
       status: v.status ?? null,
       hidden: v.hidden ?? false,
@@ -190,13 +198,13 @@ export function versionQueryParam(entry: Pick<ApiSpec, "versionUrl">): string {
 export function pageUrl(
   target: Pick<
     ResolvedApiVersion,
-    "family" | "mountPath" | "versionMode" | "isDefault" | "version"
+    "familyPath" | "mountPath" | "versionMode" | "isDefault" | "version"
     | "versionParam"
   >,
   slug: string,
 ): string {
   const base =
-    target.versionMode === "query" ? `/${target.family}` : target.mountPath;
+    target.versionMode === "query" ? target.familyPath : target.mountPath;
   const path = slug === "" ? base : `${base}/${slug}`;
   return `${toDocumentHref(path)}${apiVersionQuery(target)}`;
 }
@@ -221,13 +229,13 @@ export function apiVersionQuery(
 export function targetUrlFields(
   target: Pick<
     ResolvedApiVersion,
-    "family" | "versionMode" | "isDefault" | "version" | "versionParam"
+    "familyPath" | "versionMode" | "isDefault" | "version" | "versionParam"
   >,
 ): { urlBasePath?: string; urlQuery?: string } {
   if (target.versionMode !== "query") return {};
   const query = apiVersionQuery(target);
   return {
-    urlBasePath: `/${target.family}`,
+    urlBasePath: target.familyPath,
     ...(query ? { urlQuery: query } : {}),
   };
 }
@@ -278,8 +286,11 @@ export function selectApiVersion(
 /** Every render target across every declared family. */
 export function resolveAllApiCollections(
   api: ApiSpec[] | undefined,
+  context: MountContext,
 ): ResolvedApiVersion[] {
-  return (api ?? []).flatMap(resolveApiFamily);
+  return (api ?? []).flatMap((entry) =>
+    resolveApiFamily(entry, collectionMountPrefix(entry.collection, context)),
+  );
 }
 
 /**
@@ -290,11 +301,12 @@ export function resolveAllApiCollections(
 export function resolveApiVersion(
   api: ApiSpec[] | undefined,
   collection: string,
-  version?: string | null,
+  version: string | null | undefined,
+  context: MountContext,
 ): ResolvedApiVersion | undefined {
   const entry = (api ?? []).find((a) => a.collection === collection);
   if (!entry) return undefined;
-  const resolved = resolveApiFamily(entry);
+  const resolved = resolveApiFamily(entry, collectionMountPrefix(collection, context));
   if (version == null) return resolved.find((r) => r.isDefault);
   return resolved.find((r) => r.version === version);
 }

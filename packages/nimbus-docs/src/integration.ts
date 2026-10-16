@@ -53,6 +53,18 @@ import {
   type UserRouteDeclaration,
 } from "./_internal/build-report.js";
 import { authorError, withApiErrorsAsAuthorErrors } from "./_internal/author-error.js";
+import {
+  COLLECTION_URLS_DOCS,
+  collectionOwnershipErrors,
+  decideCollectionMounts,
+  findCollectionRoutes,
+  movedRequestRouteMessage,
+  routePattern,
+  sidebarPrefixWarnings,
+  unreadRouteWarnings,
+  type MountWarning,
+  type UnreadRoute,
+} from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
 import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
@@ -179,6 +191,7 @@ import {
 } from "./_internal/version-alternates.js";
 import {
   detectDeploySignals,
+  expandDynamicRedirects,
   formatRedirectsFile,
   normalizeRedirects,
   shouldEmitRedirects,
@@ -190,6 +203,7 @@ import { resolveSite } from "./_internal/site-detect.js";
 import {
   canonicalCollectionRouteComponent,
   compileRenderingPolicy,
+  movedCollectionRoute,
   type CompiledRenderingPolicy,
   normalizeRouteComponent,
   routeComponentKeys,
@@ -197,7 +211,10 @@ import {
 import {
   collectionLabel,
   collectionMountPrefix,
+  NO_ROUTES,
   PRIMARY_COLLECTION,
+  setMountContext,
+  type MountContext,
 } from "./_internal/collection-mount.js";
 import { entryRouteUrl } from "./_internal/astro-slug.js";
 import {
@@ -633,6 +650,10 @@ export function nimbus(
   let buildSliceForBuild: string[] | null = null;
   // Where the slice writes (`build-slice.ts`): null for a full build.
   let sliceLayoutForBuild: BuildSliceLayout | null = null;
+  // Where each collection is served, read from its route file at setup.
+  let mountContextForBuild: MountContext = { versions: null, routes: NO_ROUTES };
+  // Helper routes the reader couldn't follow, named when one renders in the wrong place.
+  let unreadRoutesForBuild: UnreadRoute[] = [];
   let buildOnlyNoticePrinted = false;
   // The previous build's route truth, read before `config:setup` invalidates
   // it, so a slice build can check links into the other slices.
@@ -640,6 +661,8 @@ export function nimbus(
   // What `astro:build:setup` hashes into the sidebar's build id.
   let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
+  // Set in dev: re-evaluates every module, so `virtual:nimbus/config` reads the routes again.
+  let reloadDevModules: (() => void) | undefined;
   let apiCollectionsForBuild: string[] = [];
   // The before-sync rendering policy, kept for the post-sync page checks.
   let compiledPolicyForBuild: CompiledRenderingPolicy | null = null;
@@ -678,6 +701,9 @@ export function nimbus(
   // writes `llms-full.txt` per collection it holds instead of the site
   // document; a root slice lists the absent collections' `llms.txt` in the
   // site index, so agents still find every slice.
+  // A collection's llms.txt section: where it's served, without the `/`.
+  const sliceSection = (name: string) =>
+    collectionMountPrefix(name, mountContextForBuild).slice(1) || collectionLabel(name, versionMounts());
   const sliceLlmsOptions = async (): Promise<{
     sectionDocuments?: readonly string[];
     absentSections?: ReadonlyArray<{ slug: string; label: string }>;
@@ -686,24 +712,19 @@ export function nimbus(
     if (!layout) return {};
     if (!layout.root) {
       return {
-        sectionDocuments: layout.collections.map((name) =>
-          collectionLabel(name, versionMounts()),
-        ),
+        sectionDocuments: layout.collections.map((name) => sliceSection(name)),
       };
     }
     const outside = (await getPageCollectionsForBuild()).filter(
       (name) => !layout.collections.includes(name),
     );
     return {
-      absentSections: outside.map((name) => {
-        const slug = collectionLabel(name, versionMounts());
-        return {
-          slug,
-          label:
-            config.api?.find((entry) => entry.collection === name)?.label ??
-            formatLabel(slug),
-        };
-      }),
+      absentSections: outside.map((name) => ({
+        slug: sliceSection(name),
+        label:
+          config.api?.find((entry) => entry.collection === name)?.label ??
+          formatLabel(collectionLabel(name, versionMounts())),
+      })),
     };
   };
   // Project-relative `.mdx` paths of every page- and partials-role entry the
@@ -822,7 +843,7 @@ export function nimbus(
     const specFiles: { collection: string; file: string; url: string; type: string; contents: string }[] = [];
     const specWarnings: string[] = [];
     const apis: (AgentApiPublication & { hidden: boolean })[] = [];
-    for (const api of resolveAllApiCollections(config.api)) {
+    for (const api of resolveAllApiCollections(config.api, mountContextForBuild)) {
       let spec: { url: string; type: string } | undefined;
       if (api.publishSpec) {
         const published = await publishSpec(api);
@@ -915,9 +936,6 @@ export function nimbus(
     if (!snapshot) return;
     const pageCollections = await getPageCollectionsForBuild();
     const pageSet = new Set(pageCollections);
-    const versionInfo = config.versions
-      ? { others: config.versions.others ?? [] }
-      : null;
 
     // Every `docs-<v>` in `versions.others` must be a page collection.
     const missingVersions = (config.versions?.others ?? []).filter(
@@ -960,7 +978,8 @@ export function nimbus(
           canonicalCollectionRouteComponent(
             srcDirForBuild,
             collection,
-            versionInfo,
+            mountContextForBuild,
+            projectRootForBuild,
           ),
         );
       });
@@ -1020,6 +1039,7 @@ export function nimbus(
     // page) then meet in `findDuplicateRoutes`.
     const preparedSnapshot = getPreparedMarkdownSnapshot(projectRootForBuild);
     const contentOwners: RouteOwner[] = [];
+    const collectionEntries: { collection: string; url: string; source: string }[] = [];
     for (const key of pageCollections) {
       const record = preparedSnapshot?.collections.get(key);
       if (!record || record.role !== "page") continue;
@@ -1030,21 +1050,20 @@ export function nimbus(
           record.files.pattern,
           projectRootForBuild,
         )) {
-          contentOwners.push({
-            url: contentEntryUrl(entry, versionInfo),
-            source: entry.relPath,
-            kind: "content",
-          });
+          const url = contentEntryUrl(entry, mountContextForBuild);
+          contentOwners.push({ url, source: entry.relPath, kind: "content" });
+          collectionEntries.push({ collection: key, url, source: entry.relPath });
         }
         continue;
       }
-      const prefix = collectionMountPrefix(key, versionInfo);
+      const prefix = collectionMountPrefix(key, mountContextForBuild);
       const owned = new Set<string>();
       const own = (id: string, source: string) => {
         const url = entryRouteUrl(prefix, id);
         if (owned.has(`${url}\0${source}`)) return;
         owned.add(`${url}\0${source}`);
         contentOwners.push({ url, source, kind: "content" });
+        collectionEntries.push({ collection: key, url, source });
       };
       for (const entry of record.entries.values()) {
         own(entry.id, entry.filePath ?? `${key}:${entry.id}`);
@@ -1061,7 +1080,7 @@ export function nimbus(
       // Every synced entry, `.md` included, at the URL its collection mounts it.
       const entryOwners = pageCollections.flatMap((collection) =>
         [...(snapshot.collections.get(collection)?.entries.values() ?? [])].map((entry) => ({
-          url: entryRouteUrl(collectionMountPrefix(collection, versionInfo), entry.id),
+          url: entryRouteUrl(collectionMountPrefix(collection, mountContextForBuild), entry.id),
           source: entry.filePath ?? `${collection}:${entry.id}`,
         })),
       );
@@ -1073,6 +1092,11 @@ export function nimbus(
           `Nimbus serves ${toRouteKey(owner.url)} when agents.mcp is on. Move ${owner.source}, or set agents.mcp to false.`,
         );
     }
+    const ownership = collectionOwnershipErrors(collectionEntries, pageCollections, mountContextForBuild);
+    if (ownership.length > 0)
+      throw authorError(
+        `${ownership.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`,
+      );
     const duplicateRoutes = findDuplicateRoutes([
       ...contentOwners,
       ...pageOwners,
@@ -1174,6 +1198,22 @@ export function nimbus(
         // content/assets stay root-relative via their collection bases.
         const srcDir = fileURLToPath(astroConfig.srcDir);
         const projectRoot = fileURLToPath(astroConfig.root);
+        // Collection URLs come from route files; resolved first, since every
+        // URL built below depends on them.
+        const routeScan = findCollectionRoutes(srcDir, projectRoot);
+        unreadRoutesForBuild = routeScan.unread;
+        const mountDecision = decideCollectionMounts(
+          routeScan.found,
+          versionMounts(),
+          (config.api ?? []).map((entry) => entry.collection),
+        );
+        if (mountDecision.errors.length > 0)
+          throw authorError(
+            `${mountDecision.errors.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`,
+          );
+        mountContextForBuild = { versions: versionMounts(), routes: mountDecision.mounts };
+        const routeWarnings: MountWarning[] = [...mountDecision.warnings, ...unreadRouteWarnings(routeScan.unread)];
+        setMountContext(astroConfig.root, mountContextForBuild);
         // `NIMBUS_BUILD_ONLY`: build one collection or a set. Only a build
         // honours it; dev, sync and check serve the full site, with one
         // notice so a job-level variable doesn't silently change what they do.
@@ -1187,7 +1227,7 @@ export function nimbus(
         }
         setBuildSlice(astroConfig.root, buildSliceForBuild);
         sliceLayoutForBuild = buildSliceForBuild
-          ? buildSliceLayout(buildSliceForBuild, versionMounts())
+          ? buildSliceLayout(buildSliceForBuild, mountContextForBuild)
           : null;
         if (sliceLayoutForBuild && !sliceLayoutForBuild.root) {
           // The slice's pages load their bundled CSS and JS from the assets
@@ -1355,6 +1395,7 @@ export function nimbus(
             );
             return agentEndpointAssets.bakeAgentEndpointAssets({
               root: projectRoot,
+              routes: mountContextForBuild.routes,
               base: astroConfig.base || "/",
               site: config.site,
               title: config.title,
@@ -1412,6 +1453,7 @@ export function nimbus(
                       config.api!.find(
                         (entry) => entry.collection === collection,
                       )!,
+                      collectionMountPrefix(collection, mountContextForBuild),
                     ).find((target) => target.isDefault)!;
                     const index =
                       await pageAssetsBuild.readApiAssetIndexForBuild(
@@ -1491,7 +1533,10 @@ export function nimbus(
                   typeof entry.data.version === "string"
                     ? entry.data.version
                     : null;
-                const targets = apiLoader.resolveApiFamily(declaration);
+                const targets = apiLoader.resolveApiFamily(
+                  declaration,
+                  collectionMountPrefix(declaration.collection, mountContextForBuild),
+                );
                 const target = version
                   ? targets.find((candidate) => candidate.version === version)
                   : targets.find((candidate) => candidate.isDefault);
@@ -1849,9 +1894,6 @@ export function nimbus(
             route.entrypoint,
           )!,
         }));
-        const versions = config.versions
-          ? { others: config.versions.others ?? [] }
-          : null;
         // Anything decided before content sync comes only from config:
         // `rendering` covers `docs`, version collections, API collections,
         // and every key in `rendering.collections`. `rendering.default`
@@ -1870,7 +1912,8 @@ export function nimbus(
           const component = canonicalCollectionRouteComponent(
             srcDir,
             collection,
-            versions,
+            mountContextForBuild,
+            projectRoot,
           );
           return (
             (config.rendering !== undefined &&
@@ -1887,6 +1930,25 @@ export function nimbus(
           canonicalCollections,
         );
         compiledPolicyForBuild = policy;
+        // Request rendering resolves a collection by its default URL, so a
+        // request-rendered collection can't be served from another folder yet.
+        const movedRequestRoutes = Object.entries(policy.collections)
+          .filter(([, mode]) => mode === "request")
+          .flatMap(([collection]) => {
+            const moved = movedCollectionRoute(collection, mountContextForBuild);
+            return moved ? [{ collection, ...moved }] : [];
+          });
+        if (movedRequestRoutes.length > 0)
+          throw authorError(
+            movedRequestRoutes
+              .map(({ collection, file }) => movedRequestRouteMessage(collection, file))
+              .join("\n\n") + `\n\nSee ${COLLECTION_URLS_DOCS}.`,
+          );
+        for (const warning of [
+          ...routeWarnings.map((warning) => `${warning.message} See ${COLLECTION_URLS_DOCS}.`),
+          ...sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild),
+        ])
+          logger.warn(warning);
         requestRenderingConfigured = Object.values(policy.collections).includes(
           "request",
         );
@@ -1899,16 +1961,20 @@ export function nimbus(
           const component = canonicalCollectionRouteComponent(
             srcDir,
             collection,
-            versions,
+            mountContextForBuild,
+            projectRoot,
           );
           if (config.rendering) {
             for (const key of routeComponentKeys(projectRoot, component)) {
               renderingRoutes.set(key, mode);
             }
           }
-          const mount = collectionMountPrefix(collection, versions);
+          const mount = collectionMountPrefix(collection, mountContextForBuild);
+          const moved = movedCollectionRoute(collection, mountContextForBuild);
           managedRoutesForBuild.push({
-            pattern: mount === "/" ? "/[...slug]" : `${mount}/[...slug]`,
+            pattern: moved
+              ? routePattern(moved.mount, moved.file)
+              : mount === "/" ? "/[...slug]" : `${mount}/[...slug]`,
             entrypoint: normalizeRouteEntrypoint(projectRoot, component)!,
             owner: "canonical",
             rendering: mode,
@@ -1960,7 +2026,7 @@ export function nimbus(
         if (config.rendering) {
           const mountModes = new Map<string, RenderingMode>();
           for (const [collection, mode] of Object.entries(policy.collections)) {
-            const mount = collectionMountPrefix(collection, versions);
+            const mount = collectionMountPrefix(collection, mountContextForBuild);
             // The root collection's agent routes are the project's own root
             // route files, handled through `astro:route:setup`.
             if (mount && mount !== "/") mountModes.set(mount, mode);
@@ -2382,7 +2448,7 @@ export function nimbus(
             });
           }
         }
-        for (const api of resolveAllApiCollections(config.api)) {
+        for (const api of resolveAllApiCollections(config.api, mountContextForBuild)) {
           const owned = path.join(publicDir, api.mountPath, "openapi.json");
           if (api.publishSpec && fs.existsSync(owned))
             throw authorError(
@@ -2523,6 +2589,7 @@ export function nimbus(
           const hiddenFilter = makeHiddenSitemapFilter(
             config,
             astroConfig.base,
+            mountContextForBuild,
           );
           const deploymentRoot = new URL(
             astroConfig.base || "/",
@@ -2545,7 +2612,7 @@ export function nimbus(
                 sitemapSources({
                   snapshot: getPreparedMarkdownSnapshot(projectRoot),
                   base: astroConfig.base || "/",
-                  versions: config.versions ?? null,
+                  context: mountContextForBuild,
                 }),
               dates: () => lastUpdatedByPath,
               serialize: sitemapOpts?.serialize,
@@ -2915,7 +2982,7 @@ export function nimbus(
                     search: searchIndexLayout(
                       layout,
                       await getPageCollectionsForBuild(),
-                      versionMounts(),
+                      mountContextForBuild,
                       astroConfig.base,
                     ),
                   };
@@ -2936,6 +3003,9 @@ export function nimbus(
                 base: astroConfig.base,
                 versionAlternates,
                 apiCollections,
+                collectionRoutes: mountContextForBuild.routes,
+                unreadCollectionRoutes: unreadRoutesForBuild,
+                getNestedLlmsSections: () => nestedLlmsSections ?? false,
                 headDefaults: {
                   favicon,
                   socialImage: defaultSocialImage,
@@ -3207,6 +3277,10 @@ export function nimbus(
             "  export const versionAlternates: VersionAlternatesTable;",
             "  /** Subset of `indexedCollections` that are OpenAPI reference collections. Server-only. */",
             "  export const apiCollections: readonly string[];",
+            "  /** [collection, where it's served] for collections served by a route helper. */",
+            "  export const collectionRoutes: ReadonlyArray<[string, { mount: string; file?: string; aliases: string[] }]>;",
+            "  export const unreadCollectionRoutes: ReadonlyArray<{ folder: string; file: string }>;",
+            "  export const nestedLlmsSections: boolean;",
             "  /** Build-time defaults derived from Astro's public directory. */",
             "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string; ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } }; imageSizes: Record<string, { width: number; height: number }> };",
             "}",
@@ -3228,6 +3302,16 @@ export function nimbus(
         });
       },
       "astro:server:setup": async ({ server, refreshContent }) => {
+        reloadDevModules = () => {
+          server.moduleGraph.invalidateAll();
+          // workerd executes in a separate Vite module runner. Invalidating
+          // only Node's compatibility graph leaves its virtual modules and
+          // memoized inventories on the previous snapshot.
+          for (const environment of Object.values(server.environments)) {
+            environment.moduleGraph.invalidateAll();
+            environment.hot.send({ type: "full-reload" });
+          }
+        };
         if (!restartedDevServer) {
           initialDevWatchers.set(
             preparedMarkdownRootKey(projectRootForBuild),
@@ -3352,14 +3436,7 @@ export function nimbus(
               (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(
                 projectRootForBuild,
               );
-              server.moduleGraph.invalidateAll();
-              // workerd executes in a separate Vite module runner. Invalidating
-              // only Node's compatibility graph leaves its virtual version
-              // index and memoized inventories on the previous spec snapshot.
-              for (const environment of Object.values(server.environments)) {
-                environment.moduleGraph.invalidateAll();
-                environment.hot.send({ type: "full-reload" });
-              }
+              reloadDevModules!();
             } catch (err) {
               server.config.logger.error(
                 `nimbus-docs: failed to re-bake citation index after a spec change: ${(err as Error).message}`,
@@ -3549,15 +3626,15 @@ export function nimbus(
           );
         }
         // Dev re-resolves routes when a page file is added or removed.
-        if (
-          (servesFullDocument !== undefined && serves !== servesFullDocument) ||
-          (nestedLlmsSections !== undefined && nested !== nestedLlmsSections)
-        )
+        const nestedChanged = nestedLlmsSections !== undefined && nested !== nestedLlmsSections;
+        if ((servesFullDocument !== undefined && serves !== servesFullDocument) || nestedChanged)
           void loadAgentEndpointAssets().then((assets) =>
             assets.invalidateAgentEndpointAssets(projectRootForBuild),
           );
         servesFullDocument = serves;
         nestedLlmsSections = nested;
+        // `getCollectionLlmsUrl` reads it from the virtual config.
+        if (nestedChanged) reloadDevModules?.();
         resolvedRoutesForBuild = routes.map((r) => ({
           pattern: r.pattern,
           type: r.type,
@@ -3900,20 +3977,14 @@ export function nimbus(
             ...requestRoutes,
             ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
           ],
+          mounts: Object.fromEntries(
+            (await getPageCollectionsForBuild()).map((name) => [
+              name,
+              collectionMountPrefix(name, mountContextForBuild),
+            ]),
+          ),
           slice: buildSliceForBuild
-            ? {
-                collections: buildSliceForBuild,
-                mounts: Object.fromEntries(
-                  (await getPageCollectionsForBuild()).map((name) => [
-                    name,
-                    collectionMountPrefix(
-                      name,
-                      config.versions ? { others: config.versions.others ?? [] } : null,
-                    ),
-                  ]),
-                ),
-                prior: priorRouteTruthForBuild,
-              }
+            ? { collections: buildSliceForBuild, prior: priorRouteTruthForBuild }
             : null,
           logger,
         });
@@ -3998,15 +4069,16 @@ function materializeRouteTruth(input: {
     rules: RouteTruth["redirectRules"];
   };
   onDemandRoutes: readonly string[];
+  /** Every page collection's mount (`""` for the root collection). */
+  mounts: Record<string, string>;
   /**
-   * A partial build: what it held, every page collection's mount, and the
-   * previous build's truth (null when there was none). The file then records
-   * the slice, and holds the previous build's routes for the collections
-   * outside it, so lint can still check links into the other slices.
+   * A partial build: what it held, and the previous build's truth (null when
+   * there was none). The file then records the slice, and holds the previous
+   * build's routes for the collections outside it, so lint can still check
+   * links into the other slices.
    */
   slice: {
     collections: readonly string[];
-    mounts: Record<string, string>;
     prior: RouteTruth | null;
   } | null;
   logger: { warn: (msg: string) => void; info: (msg: string) => void };
@@ -4027,11 +4099,15 @@ function materializeRouteTruth(input: {
       defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
       logger: input.logger,
     });
-    const redirectPages = normalizeRedirects(input.redirects.astro, input.base).redirects;
+    const redirectPages = [
+      ...normalizeRedirects(input.redirects.astro, input.base).redirects,
+      ...expandDynamicRedirects(input.redirects.astro, routes, input.base),
+    ];
 
     let sliceRecord: RouteTruth["slice"];
     if (input.slice) {
-      const { collections, mounts, prior } = input.slice;
+      const { collections, prior } = input.slice;
+      const { mounts } = input;
       // Which collections' routes the file holds: the slice's own, plus
       // whatever the previous file covered (everything, for a full build).
       const covered = new Set(collections);
@@ -4091,6 +4167,7 @@ function materializeRouteTruth(input: {
       redirects,
       redirectPages,
       redirectRules: input.redirects.rules,
+      mounts: input.mounts,
       // Nimbus collections remain enumerable even when their HTML is rendered
       // on request, so broad opaque namespaces would only hide broken links.
       opaqueNamespaces: [],

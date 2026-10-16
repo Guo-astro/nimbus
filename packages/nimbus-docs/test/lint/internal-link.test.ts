@@ -141,6 +141,58 @@ Read about [Workers](/worker) — typo.
   }
 });
 
+test("internal-link suggests where a moved path now lives, never the root", () => {
+  const setup = setupProject(
+    baseTruth({ knownRoutes: ["/", "/products/sdk", "/products/sdk/setup", "/products/cli/setup", "/products/sdk/setup/index.md"] }),
+  );
+  try {
+    const diags = lint(setup, `${FM}\n[a](/sdk) [b](/sdk/setup/) [c](/setup) [d](/abc)\n`);
+    assert.deepEqual(
+      diags.map((d) => d.message),
+      [
+        'broken link "/sdk" — did you mean "/products/sdk"?',
+        'broken link "/sdk/setup/" — did you mean "/products/sdk/setup"?',
+        'broken link "/setup" — no page resolves to this path.',
+        'broken link "/abc" — no page resolves to this path.',
+      ],
+    );
+  } finally {
+    cleanup(setup.root);
+  }
+  const based = setupProject(baseTruth({ base: "/docs/", knownRoutes: ["/", "/products/sdk/setup"] }));
+  try {
+    assert.match(
+      lint(based, `${FM}\n[a](/docs/sdk/setup)\n`)[0]!.message,
+      /^broken link "\/docs\/sdk\/setup" — did you mean "\/products\/sdk\/setup"\? Write links without the base "\/docs"/,
+    );
+  } finally {
+    cleanup(based.root);
+  }
+});
+
+test("internal-link maps a link into a collection to the folder its route moved it to", () => {
+  const setup = setupProject(
+    baseTruth({
+      knownRoutes: ["/", "/404", "/guide", "/products/kit", "/products/kit/setup"],
+      mounts: { docs: "", sdk: "/products/kit" },
+    }),
+  );
+  try {
+    const diags = lint(setup, `${FM}\n[a](/sdk) [b](/sdk/setup) [c](/abc) [d](/sdk/gone)\n`);
+    assert.deepEqual(
+      diags.map((d) => d.message),
+      [
+        'broken link "/sdk" — did you mean "/products/kit"?',
+        'broken link "/sdk/setup" — did you mean "/products/kit/setup"?',
+        'broken link "/abc" — no page resolves to this path.',
+        'broken link "/sdk/gone" — no page resolves to this path.',
+      ],
+    );
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
 test("internal-link flags a broken link with no near-match plainly", () => {
   const setup = setupProject(baseTruth());
   try {

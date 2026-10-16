@@ -162,6 +162,7 @@ export function preparedMarkdownCollectionCapability(
         version: 2,
         generation: capability.generation,
         base: capability.base,
+        ...(capability.urls === undefined ? {} : { urls: capability.urls }),
         collection,
         entries: identities,
       }),

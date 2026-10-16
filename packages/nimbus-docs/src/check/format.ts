@@ -76,6 +76,7 @@ export function formatCheckJson(result: CheckResult): string {
           ...(n.requiresInput ? { requiresInput: true } : {}),
         })),
       })),
+      ...(result.collections ? { collections: result.collections.map(({ name, url, source }) => ({ name, url, source })) } : {}),
       findings: result.findings.map((f) => ({
         scope: f.scope,
         code: f.code,
@@ -101,6 +102,13 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
   const lines: string[] = [""];
   for (const scope of result.scopes) {
     lines.push(...renderScope(scope, opts, paint));
+  }
+  // Only when a route moves a collection: otherwise every URL is `/<name>`.
+  if (!opts.quiet && result.collections?.some((collection) => collection.moved)) {
+    const width = (key: "name" | "url") => Math.max(...result.collections!.map((collection) => collection[key].length));
+    lines.push("", "  Collection URLs");
+    for (const collection of result.collections)
+      lines.push(`    ${collection.name.padEnd(width("name"))}  ${collection.url.padEnd(width("url"))}  ${paint(COLORS.dim, collection.source)}`);
   }
 
   lines.push("");

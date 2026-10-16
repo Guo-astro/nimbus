@@ -180,7 +180,8 @@ export async function getApiModel(
   const { resolveApiVersion, targetUrlFields } =
     await import("../_internal/api/resolve-versions.js");
   const { api, root } = await loadApiBuildConfig();
-  const resolved = resolveApiVersion(api, collection, version ?? null);
+  const { loadMountContext } = await import("../_internal/runtime-config.js");
+  const resolved = resolveApiVersion(api, collection, version ?? null, await loadMountContext());
   if (!resolved) {
     const suffix = version ? ` version "${version}"` : "";
     throw new Error(

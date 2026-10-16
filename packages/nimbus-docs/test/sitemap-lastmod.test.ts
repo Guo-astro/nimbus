@@ -10,6 +10,9 @@ import {
   sitemapRouteKey,
   sitemapSources,
 } from "../src/_internal/sitemap-lastmod.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 function snapshot(
   collections: Record<
@@ -66,7 +69,7 @@ test("sitemapSources: page entries keyed by their base-aware route", () => {
   const sources = sitemapSources({
     snapshot: site,
     base: "/docs/",
-    versions: { current: "v2", others: ["v1"] },
+    context: { versions: { others: ["v1"] }, routes: NO_ROUTES },
   });
   assert.deepEqual([...sources.keys()].sort(), [
     "/docs",
@@ -90,7 +93,7 @@ test("sitemapRouteKey: trailing slash, .html, encoding and base all normalise", 
 
 test("serialize: frontmatter wins, git is the fallback, no source means no lastmod", async () => {
   const serialize = createSitemapSerialize({
-    sources: () => sitemapSources({ snapshot: site, base: "/" }),
+    sources: () => sitemapSources({ snapshot: site, base: "/", context: DEFAULT_URLS }),
     dates: () => dates,
   });
   const at = async (url: string) => (await serialize({ url }))?.lastmod;
@@ -104,7 +107,7 @@ test("serialize: frontmatter wins, git is the fallback, no source means no lastm
 
 test("serialize: a shallow clone (empty index) sets no git lastmod but keeps frontmatter", async () => {
   const serialize = createSitemapSerialize({
-    sources: () => sitemapSources({ snapshot: site, base: "/" }),
+    sources: () => sitemapSources({ snapshot: site, base: "/", context: DEFAULT_URLS }),
     dates: () => ({}),
   });
   assert.equal((await serialize({ url: "https://x.test/guides/setup/" }))?.lastmod, undefined);
@@ -114,7 +117,7 @@ test("serialize: a shallow clone (empty index) sets no git lastmod but keeps fro
 test("serialize: the site's serialize runs after Nimbus's and can override or drop", async () => {
   const seen: string[] = [];
   const serialize = createSitemapSerialize({
-    sources: () => sitemapSources({ snapshot: site, base: "/" }),
+    sources: () => sitemapSources({ snapshot: site, base: "/", context: DEFAULT_URLS }),
     dates: () => dates,
     serialize: (item) => {
       seen.push(item.lastmod ?? "none");
@@ -146,4 +149,11 @@ test("serialize: a failing lookup leaves the entry alone instead of throwing", a
   assert.deepEqual(await serialize({ url: "https://x.test/guides/setup/" }), {
     url: "https://x.test/guides/setup/",
   });
+});
+
+test("sitemapSources: a collection a route moved is keyed by the route's folder", () => {
+  const moved = snapshot({ sdk: { role: "page", entries: [{ id: "setup", filePath: "src/content/sdk/setup.mdx" }] } });
+  const routes = new Map([["sdk", { mount: "/products/kit", file: "src/pages/products/kit/[...slug].astro", aliases: [] }]]);
+  const sources = sitemapSources({ snapshot: moved, base: "/", context: { versions: null, routes } });
+  assert.deepEqual([...sources.keys()], ["/products/kit/setup"]);
 });

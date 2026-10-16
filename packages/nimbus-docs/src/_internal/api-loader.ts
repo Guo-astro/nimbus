@@ -1,4 +1,6 @@
 import { codeToHtml } from "shiki";
+import { collectionMountPrefix } from "./collection-mount.js";
+import { projectMountContext } from "./project-mount-context.js";
 import { usesPageAssets } from "./page-assets-config.js";
 
 import { defaultCodeTransformers } from "./code-transformers.js";
@@ -261,7 +263,7 @@ export async function projectApiModelPage(
 }
 
 function configuredTarget(collection: string, version: string | null) {
-  const target = resolveApiVersion(configuredApi, collection, version);
+  const target = resolveApiVersion(configuredApi, collection, version, projectMountContext(configuredRoot));
   if (!target || !configuredRoot) {
     throw new Error(
       `nimbus-docs: API model for collection "${collection}"${version ? ` version "${version}"` : ""} was not configured by the Nimbus integration.`,
@@ -333,7 +335,7 @@ export async function configuredApiNavs(): Promise<
   const navs: Array<{ nav: ApiNav } & ApiNavBounds> = [];
   for (const entry of configuredApi) {
     if (usesPageAssets(configuredRoot, entry.collection)) continue;
-    for (const target of resolveApiFamily(entry)) {
+    for (const target of resolveApiFamily(entry, collectionMountPrefix(entry.collection, projectMountContext(configuredRoot)))) {
       const model = await configuredApiModel(entry.collection, target.version);
       navs.push({ nav: getApiNav(model), sidebar: target.sidebar, mountPath: target.mountPath });
     }

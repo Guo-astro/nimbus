@@ -8,7 +8,7 @@
 // mode, through Nimbus's routes or the site's own.
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { after, test } from "node:test";
 
@@ -121,3 +121,23 @@ for (const ownRoute of [false, true]) {
     }
   });
 }
+
+test("a request-rendered collection's index is listed at the collection's URL, not /index", async () => {
+  const site = await sites.buildSite(
+    {
+      "src/content.config.ts": FILES["src/content.config.ts"]!,
+      "src/content/docs/index.mdx": FILES["src/content/docs/index.mdx"]!,
+      "src/content/sdk/index.mdx": "---\ntitle: SDK\n---\nThe SDK.\n",
+      "src/content/sdk/setup.mdx": FILES["src/content/sdk/setup.mdx"]!,
+      "src/pages/[...slug].astro": FILES["src/pages/[...slug].astro"]!,
+      "src/pages/products/kit/[...slug].astro": FILES["src/pages/products/kit/[...slug].astro"]!,
+    },
+    { packageImports: true, server: true, sitemap: true, rendering: { default: "request", collections: { sdk: "request" } } },
+  );
+  const sitemapFile = readdirSync(path.join(site.root, "dist"), { recursive: true, encoding: "utf8" }).find((file) => file.endsWith("sitemap-0.xml"))!;
+  const sitemap = readFileSync(path.join(site.root, "dist", sitemapFile), "utf8");
+  const locs = [...sitemap.matchAll(/<loc>([^<]*)<\/loc>/g)].map((match) => new URL(match[1]!).pathname);
+  assert.ok(locs.includes("/docs/products/kit/") && !locs.some((loc) => loc.endsWith("/index/")), locs.join(", "));
+  const { knownRoutes } = JSON.parse(readFileSync(path.join(site.root, ".nimbus/routes.json"), "utf8")) as { knownRoutes: string[] };
+  assert.ok(knownRoutes.includes("/products/kit") && !knownRoutes.includes("/products/kit/index"), knownRoutes.join(", "));
+});

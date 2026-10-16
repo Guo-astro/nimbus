@@ -370,6 +370,19 @@ describe("not placed", () => {
       "  Usage /integrations/connectors/dbt/usage/",
     ]);
   });
+
+  test("a link to the collection, or a hand-made group landing on it, places it by hand", () => {
+    const docsItems = { autogenerate: { collection: "docs" } } as const;
+    for (const config of [
+      { items: [{ label: "dbt", link: "/integrations/connectors/dbt/" }, docsItems] },
+      { items: [{ label: "dbt", link: "/integrations/connectors/dbt" }, docsItems] },
+      { items: [{ label: "Tools", landing: "/integrations/connectors/dbt/", items: [{ label: "Kafka", link: "/kafka" }] }, docsItems] },
+    ] as SidebarConfig[]) {
+      const tree = build(integrations, [dbt()], config, "/integrations/connectors/dbt/");
+      assert.ok(!outline(tree).some((line) => line.includes("[dbt]")), JSON.stringify(config));
+      assert.equal(outline(tree).filter((line) => line.includes("/integrations/connectors/dbt/setup/")).length, 0);
+    }
+  });
 });
 
 describe("the rest of navigation follows the tree", () => {

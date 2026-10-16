@@ -1319,14 +1319,28 @@ function reorderFrom(container: Container | undefined, containerOf: Map<SidebarG
   }
 }
 
+/** URLs the config links to by hand: a `{ label, link }`, or a hand-made group's landing. */
+function handLinkedKeys(items: readonly SidebarItem[], keys = new Set<string>()): Set<string> {
+  for (const item of items) {
+    if (item.type === "link" && !entryLeaves.has(item)) keys.add(toRouteKey(item.href));
+    if (item.type === "group") {
+      if (manualGroups.has(item) && item.indexHref) keys.add(toRouteKey(item.indexHref));
+      handLinkedKeys(item.children, keys);
+    }
+  }
+  return keys;
+}
+
 function placeNestedCollections(
   items: SidebarItem[],
   nested: readonly NestedCollection[],
   currentPath: string,
   topSortable: boolean,
 ): void {
+  const linked = handLinkedKeys(items);
   const candidates = nested
     .map((n) => ({ nested: n, key: toRouteKey(n.mount) }))
+    .filter(({ key }) => !linked.has(key))
     .sort((a, b) => depth(b.key) - depth(a.key));
   const survivors: typeof candidates = [];
   for (const candidate of candidates) {

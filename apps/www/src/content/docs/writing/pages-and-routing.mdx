@@ -169,7 +169,7 @@ The build and `nimbus-docs check` report each of these with the file and the fix
 | `nimbus/collection-route-param` | A route helper in a route whose parameter isn't `slug` (`[...path].astro`). Rename it to `[...slug].astro`. |
 | `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
 
-A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read. A request-rendered route under a folder no collection is served from returns not found and logs the same advice.
+A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read. A request-rendered route under a folder no collection is served from returns not found and logs the same advice; one under a dynamic folder (`src/pages/[locale]/kit/[...slug].astro`) isn't reported, since its folder depends on the URL.
 
 ## Custom route helpers
 

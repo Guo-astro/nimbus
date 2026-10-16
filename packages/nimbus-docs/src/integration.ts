@@ -3338,7 +3338,7 @@ export function nimbus(
             const redirects = Object.entries(redirectsForBuild).map(
               ([source, config]) => [source, typeof config === "string" ? config : config.destination] as const,
             );
-            for (const message of collectionMoveMessages(mountContextForBuild, next, redirects)) logger.info(message);
+            for (const message of collectionMoveMessages(mountContextForBuild, next, redirects)) logger.warn(message);
           }
           const sentinel = collectionRoutesSentinel(projectRootForBuild);
           fs.mkdirSync(path.dirname(sentinel), { recursive: true });

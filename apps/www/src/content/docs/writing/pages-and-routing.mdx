@@ -152,7 +152,7 @@ const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL
 ---
 ```
 
-Moving a route moves every URL in that collection. Add a redirect from the old URLs (see [Redirects](/navigation/redirects)). Until you do, `nimbus-docs lint` reports links to them as broken; after, turn on [`nimbus/redirected-link`](/writing/linting) to find the links still going through the redirect. A nested collection's sidebar, breadcrumbs and previous and next links start at its own root. A collection's own `llms.txt` at a nested URL needs the starter's nested section route, `src/pages/[...section]/llms.txt.ts`; with a `[section]` route, the root `llms.txt` lists that collection's pages instead.
+Moving a route moves every URL in that collection. Add a redirect from the old URLs (see [Redirects](/navigation/redirects)). Until you do, `nimbus-docs lint` reports links to them as broken and suggests their new URL; after, turn on [`nimbus/redirected-link`](/writing/linting) to find the links still going through the redirect. A nested collection's sidebar, breadcrumbs and previous and next links start at its own root. A collection's own `llms.txt` at a nested URL needs the starter's nested section route, `src/pages/[...section]/llms.txt.ts`; with a `[section]` route, the root `llms.txt` lists that collection's pages instead.
 
 ### Collection URL errors
 

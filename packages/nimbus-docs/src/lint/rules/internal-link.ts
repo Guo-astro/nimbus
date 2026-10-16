@@ -156,10 +156,11 @@ function missingRouteReport(
   // non-empty base, and too far from the right route for Levenshtein
   // to find it. Suggest from the path after the base instead.
   const afterBase = withoutBase(key, env.base);
+  const target = afterBase ?? key;
   const hint =
     afterBase !== null && env.knownRoutes.has(afterBase)
       ? afterBase
-      : suggest(afterBase ?? key, env.knownRoutes, 3);
+      : (movedTo(target, env.knownRoutes) ?? suggest(target, nonRoot(env.knownRoutes), 3));
   const baseNote =
     afterBase !== null
       ? ` Write links without the base "${env.base}"; it's added when the page renders.`
@@ -172,6 +173,26 @@ function missingRouteReport(
       ? { fix: { description: `replace "${url}" with "${hint}"`, edits: [] } }
       : {}),
   };
+}
+
+/**
+ * The one route that ends with the link's whole path, as when a collection
+ * moved from `/sdk` to `/products/sdk`, or null when none or several do.
+ */
+function movedTo(key: string, routes: ReadonlySet<string>): string | null {
+  if (key === "/") return null;
+  let found: string | null = null;
+  for (const route of routes) {
+    if (!route.endsWith(key) || route === key) continue;
+    if (found) return null;
+    found = route;
+  }
+  return found;
+}
+
+/** The site root is a few edits from any short path, so it's never a near-match. */
+function* nonRoot(routes: ReadonlySet<string>): Iterable<string> {
+  for (const route of routes) if (route !== "/") yield route;
 }
 
 /**

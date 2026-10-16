@@ -141,6 +141,26 @@ Read about [Workers](/worker) — typo.
   }
 });
 
+test("internal-link suggests where a moved path now lives, never the root", () => {
+  const setup = setupProject(
+    baseTruth({ knownRoutes: ["/", "/products/sdk", "/products/sdk/setup", "/products/cli/setup", "/products/sdk/setup/index.md"] }),
+  );
+  try {
+    const diags = lint(setup, `${FM}\n[a](/sdk) [b](/sdk/setup/) [c](/setup) [d](/abc)\n`);
+    assert.deepEqual(
+      diags.map((d) => d.message),
+      [
+        'broken link "/sdk" — did you mean "/products/sdk"?',
+        'broken link "/sdk/setup/" — did you mean "/products/sdk/setup"?',
+        'broken link "/setup" — no page resolves to this path.',
+        'broken link "/abc" — no page resolves to this path.',
+      ],
+    );
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
 test("internal-link flags a broken link with no near-match plainly", () => {
   const setup = setupProject(baseTruth());
   try {

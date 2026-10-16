@@ -16,6 +16,11 @@ export interface AgentDiscoveryOptions {
   homepageMarkdownFallback?: boolean;
   /** The remote MCP server's identity, when `agents.mcp` is on. */
   mcp?: McpServerIdentity;
+  /**
+   * `false` when `agents.discovery` is off: no origin-root discovery files
+   * and no links or header rules for them. Absent otherwise.
+   */
+  discovery?: false;
 }
 export interface ArdEntry {
   identifier: string;
@@ -151,9 +156,10 @@ export function agentHomepageLinks(
   capabilities: AgentCapabilities,
   options: AgentDiscoveryOptions,
 ): string[] {
-  const links = [
-    link(new URL("/.well-known/ard.json", options.site).href, "ard"),
-  ];
+  const discovery = options.discovery !== false;
+  const links = discovery
+    ? [link(new URL("/.well-known/ard.json", options.site).href, "ard")]
+    : [];
   if (capabilities.llmsUrl)
     links.push(link(capabilities.llmsUrl, "describedby", "text/plain"));
   if (
@@ -163,11 +169,14 @@ export function agentHomepageLinks(
     links.push(
       link(capabilities.homepageMarkdownUrl, "alternate", "text/markdown"),
     );
-  if (capabilities.apis.length)
+  if (discovery && capabilities.apis.length)
     links.push(link(apiCatalogUrl(options.site), "api-catalog"));
-  for (const api of capabilities.apis)
+  // The catalog and ARD carry the full version inventory. Homepage headers
+  // advertise only family defaults, so adding versions doesn't grow responses.
+  const defaults = capabilities.apis.filter((api) => api.isDefault !== false);
+  for (const api of defaults)
     links.push(link(api.docsUrl, "service-doc", "text/html"));
-  for (const api of capabilities.apis)
+  for (const api of defaults)
     if (api.spec) links.push(link(api.spec.url, "service-desc", api.spec.type));
   return links;
 }
@@ -197,6 +206,7 @@ export function agentDiscoveryHeaderRules(
   } = {},
 ): string {
   const originRoot = text.originRoot !== false;
+  const discoveryFiles = originRoot && options.discovery !== false;
   const home = withBase("/", options.base).replace(/\/$/, "");
   const homePaths = new Set([home || "/", `${home}/`]);
   const owner = ownerHeaderPolicies(text.ownerHeaders ?? "");
@@ -207,7 +217,7 @@ export function agentDiscoveryHeaderRules(
     (value) => ["Link", value] as const,
   );
   for (const path of originRoot ? homePaths : []) rules.push({ pattern: path, headers: [...links] });
-  for (const path of originRoot
+  for (const path of discoveryFiles
     ? ["/.well-known/ard.json", "/.well-known/ai-catalog.json"]
     : []) {
     rules.push({
@@ -270,7 +280,7 @@ export function agentDiscoveryHeaderRules(
       members,
     );
   }
-  if (originRoot && capabilities.apis.length) {
+  if (discoveryFiles && capabilities.apis.length) {
     // Extensionless, so no host can infer its type; HEAD carries the Link too.
     rules.push({
       pattern: API_CATALOG_PATH,

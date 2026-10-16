@@ -58,9 +58,10 @@ const walk = (items) => { for (const item of items) { if (item.href) hrefs.push(
 walk(sidebar);
 const crumbs = await getBreadcrumbs(slug, { collection: "sdk" });
 const { prev, next } = await getPrevNext(slug, { sidebarTree: sidebar });
+const typo = await getCollectionUrl("skd").then(() => "", (error) => error.message);
 const links = [...crumbs.map((crumb) => crumb.href), prev?.href, next?.href, page.ogImageUrl].filter(Boolean);
 ---
-<html><body><main data-links={JSON.stringify(links)} data-groups={JSON.stringify((await getIndexedTopLevel()).groups.map((group) => group.slug))} data-url={await getCollectionUrl("sdk")} data-md={page.markdownUrl} data-sidebar={JSON.stringify(hrefs)}>sdk</main></body></html>
+<html><body><main data-links={JSON.stringify(links)} data-groups={JSON.stringify((await getIndexedTopLevel()).groups.map((group) => group.slug))} data-url={await getCollectionUrl("sdk")} data-typo={typo} data-md={page.markdownUrl} data-sidebar={JSON.stringify(hrefs)}>sdk</main></body></html>
 `,
   "src/pages/products/kit/cli/[...slug].astro": `---
 import { getCollectionStaticPaths, getCollectionPage } from ${runtime};
@@ -127,6 +128,7 @@ test("a prose collection is served at its route's folder, on every surface", asy
   assert.ok(!exists("sdk"), "nothing at the default URL");
   const html = await read("products/kit/setup/index.html");
   assert.match(html, /data-url="\/products\/kit\/"/);
+  assert.match(html, /data-typo="nimbus-docs: getCollectionUrl\(&quot;skd&quot;\): no page collection is named &quot;skd&quot;\. Page collections: [^"]*sdk/);
   assert.match(html, /data-md="\/products\/kit\/setup\/index\.md"/);
   const sidebar = JSON.parse(/data-sidebar="([^"]*)"/.exec(html)![1]!.replaceAll("&quot;", '"')) as string[];
   assert.ok(sidebar.length > 0);

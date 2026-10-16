@@ -579,12 +579,15 @@ test("markdown negotiation never substitutes another version's twin", async () =
   );
 });
 
-test("the homepage advertises only version-free API documentation", async () => {
+test("the homepage advertises only default API references and links to the complete catalog", async () => {
   const home = await app.render(new Request("https://example.test/"));
   assert.equal(home.status, 200);
   const links = home.headers.get("Link") ?? "";
-  assert.ok(links.includes("/qv/"), "the family's version-free docs URL is advertised");
-  assert.ok(!links.includes("/qv/v1"), "no non-default query-version URLs");
-  assert.ok(!links.includes("/qv/v0"), "no hidden-version URLs");
-  assert.ok(!links.includes("/qx/v1"), "none on the explicit family either");
+  assert.ok(links.includes("<https://example.test/qv/>; rel=\"service-doc\""), links);
+  assert.ok(links.includes('<https://example.test/.well-known/api-catalog>; rel="api-catalog"'), links);
+  assert.ok(!links.includes("?version=v1"), "non-default query URLs stay in the catalog");
+  assert.ok(!links.includes("/v1/openapi.json>"), "non-default specs stay in the catalog and ARD");
+  assert.ok(!links.includes("/qv/v1/>"), "no version-prefixed page URL");
+  assert.ok(!links.includes("v0"), "no hidden-version URLs");
+  assert.ok(links.includes("<https://example.test/qx/>; rel=\"service-doc\""), links);
 });

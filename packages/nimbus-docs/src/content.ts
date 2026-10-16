@@ -19,7 +19,6 @@
  */
 
 import fs from "node:fs";
-import { collectionMountPrefix, getMountContext } from "./_internal/collection-mount.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +27,7 @@ import { glob } from "astro/loaders";
 import { ApiBuildError } from "./_internal/api/coordinates.js";
 import { unusedExtensions, warnUnusedExtensions } from "./_internal/api/extensions.js";
 import { authorError } from "./_internal/author-error.js";
+import { collectionMountPrefix, getMountContext } from "./_internal/collection-mount.js";
 import type { Loader } from "astro/loaders";
 import { z } from "astro/zod";
 

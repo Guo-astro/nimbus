@@ -62,6 +62,10 @@ import {
   routePattern,
   routeSegments,
   sidebarPrefixWarnings,
+  unreadRouteWarnings,
+  type FoundRoute,
+  type MountWarning,
+  type UnreadRoute,
 } from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
 import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
@@ -145,7 +149,7 @@ import {
   AGENT_SKILLS_INDEX_PATH,
   publishAgentSkills,
 } from "./_internal/agent-skills.js";
-import { resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
+import { pageUrl, resolveAllApiCollections } from "./_internal/api/resolve-versions.js";
 
 import { coalesce } from "./_internal/coalesce.js";
 import { virtualApiBuildConfigPlugin } from "./_internal/virtual-api-build-config.js";
@@ -222,7 +226,7 @@ import {
   STARTER_ROUTE_INVENTORY,
 } from "./_internal/route-ownership.js";
 import type { RequestRouteInventoryEntry } from "./_internal/request-route-url.js";
-import { safeDecode, setLinkPolicy, stripBase, toDocumentHref, toRouteKey, withBase } from "./_internal/url.js";
+import { safeDecode, setLinkPolicy, stripBase, toRouteKey, withBase } from "./_internal/url.js";
 import { OG_CARD } from "./_internal/page-urls.js";
 import { listPublicImages, measureSocialImages } from "./_internal/social-image-size.js";
 import { createSitemapSerialize, sitemapSources } from "./_internal/sitemap-lastmod.js";
@@ -554,6 +558,7 @@ export function nimbus(
   options: NimbusIntegrationOptions = {},
 ): AstroIntegration {
   const config = validateNimbusConfig(rawConfig);
+  const discoveryOff = config.agents?.discovery === false;
   for (const [name, transform] of Object.entries(
     options.markdown?.componentMap ?? {},
   )) {
@@ -653,9 +658,9 @@ export function nimbus(
   // file change moves a collection.
   let mountStampForSetup = "";
   let collectionRoutesTimer: ReturnType<typeof setTimeout> | undefined;
-  const decideMounts = (srcDir: string, projectRoot: string) =>
+  const decideMounts = (found: readonly FoundRoute[]) =>
     decideCollectionMounts(
-      findCollectionRoutes(srcDir, projectRoot),
+      found,
       versionMounts(),
       (config.api ?? []).map((entry) => entry.collection),
     );
@@ -663,6 +668,8 @@ export function nimbus(
   // setup watches it, so Astro restarts and setup declares the new routes.
   const collectionRoutesSentinel = (projectRoot: string) =>
     path.join(projectRoot, ".astro", "nimbus", "collection-routes.json");
+  // Helper routes the reader couldn't follow, named when one renders in the wrong place.
+  let unreadRoutesForBuild: UnreadRoute[] = [];
   let buildOnlyNoticePrinted = false;
   // The previous build's route truth, read before `config:setup` invalidates
   // it, so a slice build can check links into the other slices.
@@ -670,6 +677,8 @@ export function nimbus(
   // What `astro:build:setup` hashes into the sidebar's build id.
   let navBuildInputs = { srcDir: "", base: "", hasApi: false };
   let restartedDevServer = false;
+  // Set in dev: re-evaluates every module, so `virtual:nimbus/config` reads the routes again.
+  let reloadDevModules: (() => void) | undefined;
   let apiCollectionsForBuild: string[] = [];
   // The before-sync rendering policy, kept for the post-sync page checks.
   let compiledPolicyForBuild: CompiledRenderingPolicy | null = null;
@@ -851,7 +860,6 @@ export function nimbus(
     const specWarnings: string[] = [];
     const apis: (AgentApiPublication & { hidden: boolean })[] = [];
     for (const api of resolveAllApiCollections(config.api, mountContextForBuild)) {
-      if (pageAssetCollections.includes(api.family) && !api.isDefault) continue;
       let spec: { url: string; type: string } | undefined;
       if (api.publishSpec) {
         const published = await publishSpec(api);
@@ -871,18 +879,19 @@ export function nimbus(
           });
         }
       }
+      // Markdown references exist only for the default version of a
+      // query-addressed or `bundle: false` collection.
+      const hasMarkdown =
+        api.isDefault ||
+        (api.versionMode !== "query" && !pageAssetCollections.includes(api.family));
       apis.push({
         collection: api.family,
         ...(api.version ? { version: api.version } : {}),
-        docsUrl: absolute(toDocumentHref(api.mountPath)),
-        markdownUrl: absolute(`${api.mountPath}/index.md`),
+        ...(!api.isDefault ? { isDefault: false } : {}),
+        docsUrl: absolute(pageUrl(api, "")),
+        ...(hasMarkdown ? { markdownUrl: absolute(`${api.mountPath}/index.md`) } : {}),
         ...(spec ? { spec } : {}),
-        // Discovery is default-only for query-addressed versions: a
-        // non-default version has no version-free docs or Markdown URL, so
-        // it drops off every discovery surface the way hidden versions do
-        // (its spec file still publishes above).
-        hidden:
-          api.hidden || (api.versionMode === "query" && !api.isDefault),
+        hidden: api.hidden,
       });
     }
     // Skills live at the origin root like the rest of .well-known, so their
@@ -898,6 +907,7 @@ export function nimbus(
         base: astroBaseForBuild,
         output: outputModeForBuild,
         homepageMarkdownFallback: hasLlms && !publicHomepage && !sharedHomepage && (!owner || owner.shared === "markdown"),
+        ...(discoveryOff ? { discovery: false as const } : {}),
         ...(mcpServerForBuild ? { mcp: mcpServerForBuild } : {}),
       },
       capabilities: createAgentCapabilities({
@@ -1208,13 +1218,16 @@ export function nimbus(
         // Collection URLs come from route files; resolved first, since every
         // URL built below depends on them.
         if (command === "dev") addWatchFile(collectionRoutesSentinel(projectRoot));
-        const mountDecision = decideMounts(srcDir, projectRoot);
+        const routeScan = findCollectionRoutes(srcDir, projectRoot);
+        unreadRoutesForBuild = routeScan.unread;
+        const mountDecision = decideMounts(routeScan.found);
         if (mountDecision.errors.length > 0)
           throw authorError(
             `${mountDecision.errors.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`,
           );
         mountContextForBuild = { versions: versionMounts(), routes: mountDecision.mounts };
         mountStampForSetup = mountDecisionStamp(mountDecision);
+        const routeWarnings: MountWarning[] = [...mountDecision.warnings, ...unreadRouteWarnings(routeScan.unread)];
         setMountContext(astroConfig.root, mountContextForBuild);
         // `NIMBUS_BUILD_ONLY`: build one collection or a set. Only a build
         // honours it; dev, sync and check serve the full site, with one
@@ -1731,12 +1744,16 @@ export function nimbus(
         // Materialize the resolved lint config so the standalone
         // `nimbus-docs lint` CLI can read severities authored here. Guarded
         // — a write failure must never break the build.
+        // An invalid base is left out here; it fails the build where Markdown is prepared.
+        const { normalizeBase } = await import("./lint/site-base.js");
+        const lintBase = normalizeBase(astroConfig.base || "/");
         materializeLintConfig(
           projectRoot,
           lintOptions.rules,
           lintOptions.collections,
           config.site,
           features,
+          lintBase,
         );
 
         // Pre-build MDX validation. Runs as a content pass against
@@ -1928,7 +1945,11 @@ export function nimbus(
           canonicalCollections,
         );
         compiledPolicyForBuild = policy;
-        for (const warning of sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild)) logger.warn(warning);
+        for (const warning of [
+          ...routeWarnings.map((warning) => `${warning.message} See ${COLLECTION_URLS_DOCS}.`),
+          ...sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild),
+        ])
+          logger.warn(warning);
         requestRenderingConfigured = Object.values(policy.collections).includes(
           "request",
         );
@@ -2369,7 +2390,9 @@ export function nimbus(
         const outdatedSidebar = outdatedApiSidebarError(config.api ?? [], srcDir, projectRoot);
         if (outdatedSidebar) throw authorError(outdatedSidebar);
         const extension = import.meta.url.endsWith(".ts") ? "ts" : "js";
-        for (const [pattern, name] of [
+        // `agents.discovery: false` leaves these paths to the site: no routes,
+        // and its own files there are kept.
+        for (const [pattern, name] of discoveryOff ? [] : [
           ["/.well-known/ard.json", "agent-discovery-route"],
           ["/.well-known/ai-catalog.json", "agent-discovery-route"],
           // Only sites with API collections get a catalog.
@@ -2982,6 +3005,7 @@ export function nimbus(
                 versionAlternates,
                 apiCollections,
                 collectionRoutes: mountContextForBuild.routes,
+                unreadCollectionRoutes: unreadRoutesForBuild,
                 getNestedLlmsSections: () => nestedLlmsSections ?? false,
                 headDefaults: {
                   favicon,
@@ -3256,6 +3280,7 @@ export function nimbus(
             "  export const apiCollections: readonly string[];",
             "  /** [collection, where it's served] for collections served by a route helper. */",
             "  export const collectionRoutes: ReadonlyArray<[string, { mount: string; file?: string; aliases: string[] }]>;",
+            "  export const unreadCollectionRoutes: ReadonlyArray<{ folder: string; file: string }>;",
             "  export const nestedLlmsSections: boolean;",
             "  /** Build-time defaults derived from Astro's public directory. */",
             "  export const headDefaults: { favicon: { file: string; type: string }; socialImage: string; ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } }; imageSizes: Record<string, { width: number; height: number }> };",
@@ -3278,6 +3303,16 @@ export function nimbus(
         });
       },
       "astro:server:setup": async ({ server, refreshContent, logger }) => {
+        reloadDevModules = () => {
+          server.moduleGraph.invalidateAll();
+          // workerd executes in a separate Vite module runner. Invalidating
+          // only Node's compatibility graph leaves its virtual modules and
+          // memoized inventories on the previous snapshot.
+          for (const environment of Object.values(server.environments)) {
+            environment.moduleGraph.invalidateAll();
+            environment.hot.send({ type: "full-reload" });
+          }
+        };
         if (!restartedDevServer) {
           initialDevWatchers.set(
             preparedMarkdownRootKey(projectRootForBuild),
@@ -3299,7 +3334,7 @@ export function nimbus(
           collectionRoutesTimer = undefined;
           // Vite swaps in a new watcher on restart; this server is gone.
           if (server.watcher !== watcher) return;
-          const decision = decideMounts(srcDirForBuild, projectRootForBuild);
+          const decision = decideMounts(findCollectionRoutes(srcDirForBuild, projectRootForBuild).found);
           const stamp = mountDecisionStamp(decision);
           if (stamp === lastStamp) return;
           lastStamp = stamp;
@@ -3442,14 +3477,7 @@ export function nimbus(
               (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(
                 projectRootForBuild,
               );
-              server.moduleGraph.invalidateAll();
-              // workerd executes in a separate Vite module runner. Invalidating
-              // only Node's compatibility graph leaves its virtual version
-              // index and memoized inventories on the previous spec snapshot.
-              for (const environment of Object.values(server.environments)) {
-                environment.moduleGraph.invalidateAll();
-                environment.hot.send({ type: "full-reload" });
-              }
+              reloadDevModules!();
             } catch (err) {
               server.config.logger.error(
                 `nimbus-docs: failed to re-bake citation index after a spec change: ${(err as Error).message}`,
@@ -3640,15 +3668,15 @@ export function nimbus(
           );
         }
         // Dev re-resolves routes when a page file is added or removed.
-        if (
-          (servesFullDocument !== undefined && serves !== servesFullDocument) ||
-          (nestedLlmsSections !== undefined && nested !== nestedLlmsSections)
-        )
+        const nestedChanged = nestedLlmsSections !== undefined && nested !== nestedLlmsSections;
+        if ((servesFullDocument !== undefined && serves !== servesFullDocument) || nestedChanged)
           void loadAgentEndpointAssets().then((assets) =>
             assets.invalidateAgentEndpointAssets(projectRootForBuild),
           );
         servesFullDocument = serves;
         nestedLlmsSections = nested;
+        // `getCollectionLlmsUrl` reads it from the virtual config.
+        if (nestedChanged) reloadDevModules?.();
         resolvedRoutesForBuild = routes.map((r) => ({
           pattern: r.pattern,
           type: r.type,
@@ -3903,7 +3931,7 @@ export function nimbus(
           fs.mkdirSync(path.dirname(target), { recursive: true });
           fs.writeFileSync(target, spec.contents);
         }
-        if (assetRoot !== distDir && !sliceOutput) {
+        if (assetRoot !== distDir && !sliceOutput && !discoveryOff) {
           for (const filename of ["ard.json", "ai-catalog.json", "api-catalog"]) {
             const source = path.join(distDir, ".well-known", filename);
             if (fs.existsSync(source)) {
@@ -3915,6 +3943,10 @@ export function nimbus(
         // Skills live at the origin root: the root slice's to write.
         if (discovery.skills && !sliceOutput) {
           for (const warning of discovery.skills.warnings) logger.warn(warning);
+          if (discoveryOff && (assetRoot !== distDir || !baseSegments.length))
+            logger.warn(
+              "agents.discovery is false, but skills/ still publishes /.well-known/agent-skills/ at the origin root. Remove skills/ if another site owns that path. See https://nimbus-docs.com/ai/docs-for-agents/#shared-domains",
+            );
           for (const artifact of discovery.skills.artifacts) {
             const target = path.join(assetRoot, ...artifact.pathname.split("/").filter(Boolean));
             fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -3956,9 +3988,15 @@ export function nimbus(
           // Also support hook ordering where the adapter moves this file later.
           fs.copyFileSync(headersPath, path.join(distDir, "_headers"));
         }
-        if (assetRoot === distDir && astroBaseForBuild && astroBaseForBuild !== "/") {
+        if (
+          assetRoot === distDir &&
+          astroBaseForBuild &&
+          astroBaseForBuild !== "/" &&
+          !discoveryOff
+        ) {
+          const wellKnown = `${astroBaseForBuild.replace(/\/+$/, "")}/.well-known/`;
           logger.info(
-            "Agent discovery uses origin-root /.well-known URLs. Mount the emitted .well-known directory at the origin root when deploying this site under a base.",
+            `Agent discovery files are under ${wellKnown}, but agents only read /.well-known/ at the origin root. Serve this directory there, or set agents: { discovery: false } if another site owns it.`,
           );
         }
 
@@ -4017,8 +4055,9 @@ export function nimbus(
  *
  * `site` is materialized alongside the rules so site-aware rules
  * (`no-self-host-url`) get the project's deploy host without making the
- * user duplicate it in their lint config, and `markdownFeatures` so lint
- * reads Markdown the way the site renders it.
+ * user duplicate it in their lint config, `markdownFeatures` so lint
+ * reads Markdown the way the site renders it, and `base` exactly as the
+ * renderer applies it, so `image-ref` checks the path the browser requests.
  */
 function materializeLintConfig(
   projectRoot: string,
@@ -4026,13 +4065,14 @@ function materializeLintConfig(
   collections: CollectionsConfig,
   site: string,
   markdownFeatures: SatteriFeatures,
+  base: string | undefined,
 ): void {
   try {
     const dir = path.join(projectRoot, ".nimbus");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, "lint.json"),
-      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures }, null, 2) + "\n",
+      JSON.stringify({ version: 1, rules, collections, site, markdownFeatures, base }, null, 2) + "\n",
       "utf8",
     );
   } catch {

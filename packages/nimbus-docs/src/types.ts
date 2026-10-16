@@ -6,10 +6,12 @@
 export interface AgentApiPublication {
   collection: string;
   version?: string;
+  /** False for a non-default version; homepage headers link only defaults. Absent means default. */
+  isDefault?: boolean;
   /** The HTML reference. */
   docsUrl: string;
-  /** The reference's Markdown representation. */
-  markdownUrl: string;
+  /** The reference's Markdown representation, when the version has one. */
+  markdownUrl?: string;
   /** The published self-contained spec, when publishing is on and bundling succeeded. */
   spec?: { url: string; type: string };
 }
@@ -179,12 +181,14 @@ export interface NimbusConfig {
    */
   rendering?: RenderingConfig;
   /**
-   * Agent-facing services the site runs itself. Absent means none.
+   * Agent-facing services the site runs, and what it publishes for agents.
    *
    *   - `mcp` — serve a remote MCP server at `/mcp` from the site's own
    *     server, with `get_page` and `list_pages` over the published
    *     Markdown. Needs a server adapter and the
    *     `@modelcontextprotocol/server` package in the project.
+   *   - `discovery` — `false` leaves the origin root's discovery files to
+   *     the site that owns it, on a domain shared with other sites.
    */
   agents?: AgentsConfig;
 }
@@ -192,6 +196,13 @@ export interface NimbusConfig {
 export interface AgentsConfig {
   /** Serve a remote MCP server at `/mcp`. Default `false`. */
   mcp?: boolean;
+  /**
+   * Origin-root discovery: `/.well-known/{ard.json, ai-catalog.json, api-catalog}`
+   * and the homepage `rel="ard"` / `rel="api-catalog"` links. Default `true`.
+   * `false`: none of these; your own `.well-known` files are kept.
+   * `llms.txt`, Markdown links, skills and MCP are unaffected.
+   */
+  discovery?: boolean;
 }
 
 export type RenderingMode = "build" | "request";

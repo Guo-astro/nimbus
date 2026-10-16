@@ -10,10 +10,11 @@ import {
   collectionOwnershipErrors,
   decideCollectionMounts,
   findCollectionRoutes,
-  routeCollection,
+  readRoute,
   routePattern,
   routeSegments,
   sidebarPrefixWarnings,
+  unreadRouteWarnings,
   type FoundRoute,
 } from "../src/_internal/collection-routes.js";
 
@@ -26,13 +27,26 @@ test("a route's collection comes from its exported getStaticPaths, in every supp
     ['import * as nimbus from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = nimbus.getCollectionStaticPaths(`blog`);', "blog"],
     ['import { getDocsStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = getDocsStaticPaths;', "docs"],
     ['import { getDocsStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport async function getStaticPaths() { return getDocsStaticPaths(); }', "docs"],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = async (options) => {\n  const paths = await getCollectionStaticPaths("sdk")(options);\n  return paths;\n};', undefined],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', "changelog"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = async (options) => {\n  const paths = await getCollectionStaticPaths("sdk")(options);\n  return paths;\n};', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const paths = getCollectionStaticPaths("sdk");\nexport const getStaticPaths = paths;', "sdk"],
+    // Astro's compiler rejects these, so they aren't read.
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst getStaticPaths = getCollectionStaticPaths("sdk");\nexport { getStaticPaths };', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst paths = getCollectionStaticPaths("sdk");\nexport { paths as getStaticPaths };', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport type { GetStaticPaths } from "astro";\nexport const getStaticPaths = (async (o) => getCollectionStaticPaths("sdk")(o)) satisfies GetStaticPaths;', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', "changelog"],
+    // Astro can't run a top-level name that isn't exported, so it isn't read.
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nfunction load(o) { return getCollectionStaticPaths("changelog")(o); }\nexport const getStaticPaths = load;', undefined],
     // The changelog recipe's shape.
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport type { GetStaticPaths } from "astro";\nexport const getStaticPaths: GetStaticPaths = async (options) =>\n  (await getCollectionStaticPaths("changelog")(options)).filter(\n    (path) => path.params.slug,\n  );', "changelog"],
     // An unused call elsewhere in the file doesn't decide anything.
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst unused = getCollectionStaticPaths("cli");\nexport const getStaticPaths = getCollectionStaticPaths("sdk");', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const name = "sdk";\nexport const getStaticPaths = getCollectionStaticPaths(name);', "sdk"],
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst name = "sdk";\nexport const getStaticPaths = getCollectionStaticPaths(name);', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nlet name = "sdk";\nname = "cli";\nexport const getStaticPaths = getCollectionStaticPaths(name);', undefined],
+    // A parameter elsewhere named like the import doesn't hide it.
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nfunction x(getCollectionStaticPaths) {}\nexport const getStaticPaths = getCollectionStaticPaths("sdk");', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst load = (o) => load(o);\nexport const getStaticPaths = load;', undefined],
     ['export { getStaticPaths } from "./shared";', undefined],
     // A local that shadows the import isn't the helper.
     ['import { getCollectionStaticPaths as paths } from "@cloudflare/nimbus-docs/runtime";\nexport function getStaticPaths() {\n  const paths = (label) => [{ params: { slug: label } }];\n  return paths("sdk");\n}', undefined],
@@ -42,7 +56,7 @@ test("a route's collection comes from its exported getStaticPaths, in every supp
     ['import { getCollectionStaticPaths } from "./my-helpers";\nexport const getStaticPaths = getCollectionStaticPaths("sdk");', undefined],
   ];
   for (const [frontmatter, expected] of cases) {
-    assert.equal(routeCollection("x.astro", route(frontmatter)), expected, frontmatter);
+    assert.equal(readRoute(route(frontmatter)).collection, expected, frontmatter);
   }
 });
 
@@ -68,7 +82,11 @@ test("findCollectionRoutes reads every slug route under src/pages, skipping _ fi
     write("src/pages/_drafts/[...slug].astro", call("drafts"));
     write("src/pages/[locale]/sdk/[...slug].astro", call("sdk"));
     write("src/pages/v[version]/cli/[...slug].astro", call("cli"));
-    const found = findCollectionRoutes(path.join(root, "src"), root);
+    write("src/pages/tools/[...slug].astro", 'import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport { wrap } from "../wrap";\nexport const getStaticPaths = wrap(getCollectionStaticPaths("tools"));');
+    write("src/pages/[locale]/tools/[...slug].astro", 'import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport { getStaticPaths } from "../shared";');
+    write("src/pages/pages/[slug].astro", 'export function getStaticPaths() { return []; }');
+    const { found, unread } = findCollectionRoutes(path.join(root, "src"), root);
+    assert.deepEqual(unread, [{ folder: "/tools", file: "src/pages/tools/[...slug].astro" }]);
     assert.deepEqual(
       found.map(({ collection, folder, file, dynamic }) => [collection, folder, file, dynamic]),
       [
@@ -92,7 +110,7 @@ const found = (collection: string, folder: string, dynamic = false): FoundRoute 
 
 test("decideCollectionMounts: route folders, defaults, aliases and the errors for broken URLs", () => {
   const versions = { others: ["v1"] };
-  const { mounts, errors } = decideCollectionMounts(
+  const { mounts, errors, warnings } = decideCollectionMounts(
     [
       found("docs", ""),
       found("docs", "/es"),
@@ -112,6 +130,9 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(mounts.get("api"), { mount: "/api", file: "src/pages/api/[...slug].astro", aliases: ["/es/api"] });
   assert.equal(mounts.get("guides")?.mount, "/guides");
   assert.equal(mounts.get("docs-v1")?.mount, "/v1");
+  assert.deepEqual(warnings.map((warning) => warning.code), ["nimbus/collection-alias-route", "nimbus/collection-alias-route"]);
+  assert.match(warnings[0]!.message, /^src\/pages\/es\/\[\.\.\.slug\]\.astro also serves collection "docs", which is served at \/ /);
+  assert.match(warnings[1]!.message, /redirect \/es\/api to \/api\.$/);
 
   const codes = (routes: FoundRoute[]) => decideCollectionMounts(routes, versions, ["api"]).errors.map((error) => error.code);
   assert.deepEqual(codes([found("sdk", "/a"), found("sdk", "/b")]), ["nimbus/collection-two-routes"]);
@@ -123,6 +144,16 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(codes([found("guides", ""), found("docs", "")]), ["nimbus/collection-same-url"]);
   assert.deepEqual(codes([found("api", "")]), ["nimbus/collection-api-root"]);
   assert.deepEqual(codes([found("guides", "")]), []);
+});
+
+test("unread helper routes warn only where no collection is served by default", () => {
+  const warnings = unreadRouteWarnings([
+    { folder: "", file: "src/pages/[...slug].astro" },
+    { folder: "/sdk", file: "src/pages/sdk/[...slug].astro" },
+    { folder: "/products/kit", file: "src/pages/products/kit/[...slug].astro" },
+  ]);
+  assert.deepEqual(warnings.map((warning) => warning.code), ["nimbus/collection-unread-route"]);
+  assert.match(warnings[0]!.message, /couldn't read the getStaticPaths in src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro/);
 });
 
 test("ownership: the deepest mount owns a URL, on whole segments, and only moved collections error", () => {

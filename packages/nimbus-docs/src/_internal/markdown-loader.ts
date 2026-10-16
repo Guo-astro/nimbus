@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { collectionUrlsKey, getMountContext } from "./collection-mount.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Loader, LoaderContext } from "astro/loaders";
+import { collectionUrlsKey, getMountContext } from "./collection-mount.js";
 import { runInPageLoadScope } from "./page-load-scope.js";
 import {
   type PreparedMarkdownCollision,

@@ -758,11 +758,17 @@ const agentsSchema = withStrictKeys(
     mcp: z
       .boolean({ error: '"agents.mcp" must be true or false' })
       .optional(),
+    discovery: z
+      .boolean({ error: '"agents.discovery" must be true or false' })
+      .optional(),
   }),
   {
     removedKeys: {},
     contextLabel: "agents sub-key",
-    unknownHint: (key) => key.toLowerCase() === "mcp" ? "Did you mean `mcp`?" : "",
+    unknownHint: (key) => {
+      const known = ["mcp", "discovery"].find((name) => name === key.toLowerCase());
+      return known ? `Did you mean \`${known}\`?` : "";
+    },
   },
 ).optional();
 

@@ -58,6 +58,14 @@ declare module "virtual:nimbus/headings" {
   export const generation: number;
   export const base: string;
   export const records: import("../_internal/prepared-headings.js").PreparedHeadingRecord[];
+  /** Dev only: the module holding just this page's record. */
+  export const load:
+    | ((collection: string, id: string) => Promise<{
+        generation: number;
+        base: string;
+        records: import("../_internal/prepared-headings.js").PreparedHeadingRecord[];
+      }>)
+    | undefined;
 }
 
 declare module "virtual:nimbus/agent-endpoint-assets" {

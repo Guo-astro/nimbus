@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 
 import { dev } from "astro";
 
+import { lazyPreparedHeadingRecord } from "../src/_internal/lazy-headings.ts";
 import { getPreparedMarkdownSnapshot } from "../src/_internal/prepared-markdown-registry.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
 import { TEST_TMP } from "./fixtures/temp-root.js";
@@ -184,9 +185,11 @@ export function GET() {
   const apiTitle = () =>
     getPreparedMarkdownSnapshot(root)?.collections.get("api")?.entries.get("ping")?.data
       .title;
-  const guideHeadings = () =>
-    (getPreparedMarkdownSnapshot(root)?.collections.get("docs")?.entries.get("guide")
-      ?.headings ?? []).map((heading) => heading.slug);
+  // Dev renders headings on request, not at load.
+  const guideHeadings = async () =>
+    ((await lazyPreparedHeadingRecord({ root, base: "/" }, "docs", "guide"))?.headings ?? []).map(
+      (heading) => heading.slug,
+    );
   const fetchText = async (route: string) => {
     const response = await fetch(`${origin}${route}`);
     return { status: response.status, body: await response.text() };
@@ -196,7 +199,7 @@ export function GET() {
     for (const collection of ["api", "docs", "partials"]) {
       assert.ok(snapshot?.collections.has(collection), `${phase}: ${collection} is prepared`);
     }
-    assert.deepEqual(guideHeadings(), ["own-heading"], `${phase}: prose headings are prepared`);
+    assert.deepEqual(await guideHeadings(), ["own-heading", "partial-heading"], `${phase}: prose headings are prepared`);
     const markdown = await fetchText("/guide/index.md");
     assert.equal(markdown.status, 200, `${phase}: Markdown route: ${markdown.body.slice(0, 300)}`);
     assert.match(markdown.body, /Partial heading/, `${phase}: Markdown route renders the partial`);

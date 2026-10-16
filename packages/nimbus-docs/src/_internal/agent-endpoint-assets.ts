@@ -198,6 +198,10 @@ interface AgentEndpointAssetState {
       bake: () => Promise<AgentEndpointAssetManifest>;
       bakeHeadings?: () => Promise<PreparedHeadingRecord[]>;
       headingsBase?: string;
+      lazyHeading?: (
+        collection: string,
+        id: string,
+      ) => Promise<PreparedHeadingRecord | null>;
       bakedRevision?: number;
       invalidation: number;
       bakedInvalidation?: number;
@@ -1282,16 +1286,22 @@ const ARTIFACTS_RESOLVED_ID = `\0${ARTIFACTS_VIRTUAL_ID}`;
 const ASSET_LOADER_VIRTUAL_ID = "virtual:nimbus/agent-endpoint-asset-loader";
 const ASSET_LOADER_RESOLVED_ID = `\0${ASSET_LOADER_VIRTUAL_ID}`;
 
+const HEADINGS_ENTRY_PREFIX = `${HEADINGS_VIRTUAL_ID}/`;
+
 export function preparedHeadingsPlugin(
   root: URL | string,
 ): PreparedHeadingsPlugin {
+  // Per-entry modules the dev server has loaded, to invalidate on an update.
+  const entryModules = new Set<string>();
   return {
     name: "nimbus-docs:prepared-headings",
     resolveId(id) {
-      return id === HEADINGS_VIRTUAL_ID ? HEADINGS_RESOLVED_ID : undefined;
+      if (id === HEADINGS_VIRTUAL_ID) return HEADINGS_RESOLVED_ID;
+      return id.startsWith(HEADINGS_ENTRY_PREFIX) ? `\0${id}` : undefined;
     },
     async load(id) {
-      if (id !== HEADINGS_RESOLVED_ID) return undefined;
+      const isEntry = id.startsWith(`\0${HEADINGS_ENTRY_PREFIX}`);
+      if (id !== HEADINGS_RESOLVED_ID && !isEntry) return undefined;
       const key = preparedMarkdownRootKey(root);
       const configured = agentEndpointAssetState.roots.get(key);
       if (!configured) {
@@ -1299,6 +1309,35 @@ export function preparedHeadingsPlugin(
           "nimbus-docs: prepared headings are available only during a configured Astro build or dev server.",
         );
       }
+      const lazyHeading = configured.lazyHeading;
+      if (lazyHeading) {
+        // Dev: one module per page, so startup doesn't render every page.
+        const base = JSON.stringify(configured.headingsBase ?? "/");
+        const header = `export const generation = ${PREPARED_HEADINGS_GENERATION};\nexport const base = ${base};\n`;
+        if (!isEntry) {
+          return (
+            header +
+            "export const records = [];\n" +
+            "export function load(collection, id) {\n" +
+            "  const bytes = new TextEncoder().encode(JSON.stringify([collection, id]));\n" +
+            '  const key = btoa(String.fromCharCode(...bytes)).replace(/=+$/, "").replace(/[+]/g, "-").replace(/[/]/g, "_");\n' +
+            // The module runner resolves a computed specifier only as a URL, so
+            // address the virtual module by its served path.
+            `  return import(/* @vite-ignore */ ${JSON.stringify(`/@id/__x00__${HEADINGS_ENTRY_PREFIX}`)} + key);\n` +
+            "}\n"
+          );
+        }
+        entryModules.add(id);
+        const [collection, entryId] = JSON.parse(
+          Buffer.from(
+            id.slice(`\0${HEADINGS_ENTRY_PREFIX}`.length),
+            "base64url",
+          ).toString("utf8"),
+        ) as [string, string];
+        const record = await lazyHeading(collection, entryId);
+        return header + `export const records = ${JSON.stringify(record ? [record] : [])};\n`;
+      }
+      if (isEntry) return undefined;
       const records = configured.bakeHeadings
         ? await configured.bakeHeadings()
         : (await ensureAgentEndpointAssets(root)).headings;
@@ -1309,9 +1348,11 @@ export function preparedHeadingsPlugin(
       );
     },
     handleHotUpdate(context) {
-      const module =
-        context.server.moduleGraph.getModuleById(HEADINGS_RESOLVED_ID);
-      if (module) context.server.moduleGraph.invalidateModule(module);
+      for (const id of [HEADINGS_RESOLVED_ID, ...entryModules]) {
+        const module = context.server.moduleGraph.getModuleById(id);
+        if (module) context.server.moduleGraph.invalidateModule(module);
+      }
+      entryModules.clear();
     },
   };
 }
@@ -1418,6 +1459,10 @@ export function configureAgentEndpointAssetRoot(
   bake: () => Promise<AgentEndpointAssetManifest>,
   bakeHeadings?: () => Promise<PreparedHeadingRecord[]>,
   headingsBase?: string,
+  lazyHeading?: (
+    collection: string,
+    id: string,
+  ) => Promise<PreparedHeadingRecord | null>,
 ): void {
   const key = preparedMarkdownRootKey(root);
   agentEndpointAssetState.demands.delete(key);
@@ -1426,6 +1471,7 @@ export function configureAgentEndpointAssetRoot(
     bake,
     bakeHeadings,
     headingsBase,
+    lazyHeading,
     invalidation: 0,
   });
 }

@@ -85,7 +85,19 @@ interface MutableRoot {
   activeEpochs: Map<string, number>;
   collections: Map<string, MutableCollection>;
   locks: Map<string, Promise<void>>;
+  /** Whether page headings are rendered on request instead of at load. */
+  lazyHeadings: boolean;
+  headingRenderers: Map<string, PreparedHeadingsRenderer>;
 }
+
+/**
+ * Renders one entry's headings with the renderer of the collection that
+ * loaded it, so a lazy heading matches an eager one.
+ */
+export type PreparedHeadingsRenderer = (entry: {
+  body: string;
+  filePath?: string;
+}) => Promise<Array<{ depth: number; text: string; slug: string }>>;
 
 interface RegistryState {
   version: 2;
@@ -119,6 +131,8 @@ function createRoot(): MutableRoot {
     activeEpochs: new Map(),
     collections: new Map(),
     locks: new Map(),
+    lazyHeadings: false,
+    headingRenderers: new Map(),
   };
 }
 
@@ -186,18 +200,25 @@ export function preparedMarkdownRootKey(root: URL | string): string {
   return realpathSync.native(absolute);
 }
 
-export function beginPreparedMarkdownSession(root: URL | string): string {
+export function beginPreparedMarkdownSession(
+  root: URL | string,
+  options: { lazyHeadings?: boolean } = {},
+): string {
   const key = preparedMarkdownRootKey(root);
   const current = state.roots.get(key);
   const session = ++state.nextSession;
+  const lazyHeadings = options.lazyHeadings === true;
   if (current) {
     current.session = session;
+    current.lazyHeadings = lazyHeadings;
+    current.headingRenderers.clear();
     current.activeEpochs.clear();
     if (current.collections.size > 0) current.revision += 1;
     current.collections.clear();
   } else {
     const created = createRoot();
     created.session = session;
+    created.lazyHeadings = lazyHeadings;
     state.roots.set(key, created);
   }
   return key;
@@ -205,6 +226,36 @@ export function beginPreparedMarkdownSession(root: URL | string): string {
 
 export function getPreparedMarkdownSession(root: URL | string): number {
   return state.roots.get(preparedMarkdownRootKey(root))?.session ?? 0;
+}
+
+export function isPreparedMarkdownLazyHeadings(root: string): boolean {
+  return state.roots.get(root)?.lazyHeadings === true;
+}
+
+export function setPreparedHeadingsRenderer(
+  root: string,
+  collection: string,
+  renderer: PreparedHeadingsRenderer,
+): void {
+  rootState(root).headingRenderers.set(collection, renderer);
+}
+
+export function getPreparedHeadingsRenderer(
+  root: URL | string,
+  collection: string,
+): PreparedHeadingsRenderer | undefined {
+  return state.roots
+    .get(preparedMarkdownRootKey(root))
+    ?.headingRenderers.get(collection);
+}
+
+export function getPreparedMarkdownCollectionRole(
+  root: URL | string,
+  collection: string,
+): PreparedMarkdownCollectionRole | undefined {
+  return state.roots
+    .get(preparedMarkdownRootKey(root))
+    ?.collections.get(collection)?.role;
 }
 
 export function beginPreparedMarkdownLoad(

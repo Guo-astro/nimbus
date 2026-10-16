@@ -1308,6 +1308,7 @@ test("configured request routes are explained to the build invariant", async (t)
     redirects: [],
     redirectPages: [],
     redirectRules: "cloudflare",
+    mounts: { docs: "", "docs-v1": "/v1", blog: "/blog" },
     opaqueNamespaces: [],
   });
   assert.equal(

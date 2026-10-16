@@ -10,5 +10,5 @@
 - `getIndexedTopLevel()` groups a moved collection under its URL: a group's `slug` and `label` can contain `/` (`products/sdk`). Components that build `/${slug}/llms.txt` or show `label` should expect it.
 - Two new warnings, from the build and `check`: a second static route for a collection that's already served elsewhere (its pages duplicate the collection's), and a helper route in a nested folder whose `getStaticPaths` Nimbus can't read.
 - `nimbus-docs lint` follows the pages Astro writes for a dynamic redirect (`"/sdk/[...slug]": "/products/sdk/[...slug]"`) instead of taking them for pages, so a redirect to a missing page is reported and `nimbus/redirected-link` finds links through it.
-- `nimbus-docs lint` suggests a broken link's new URL when one page ends with its whole path (`/sdk/setup` → `/products/sdk/setup`), and never suggests the site root as a near-match.
+- `nimbus-docs lint` suggests the new URL for a link into a moved collection (`/sdk/setup` → `/products/kit/setup`), and never suggests the site root or an error page as a near-match. Builds record each collection's URL in `.nimbus/routes.json` for this.
 - `nimbus-docs check` checks collections added since the last build, alongside the ones that build recorded.

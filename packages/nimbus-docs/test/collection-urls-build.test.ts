@@ -173,7 +173,8 @@ test("an API collection is served at its route's folder, versions, spec and cata
 });
 
 test("every URL the agent files and the page link to is a route the build serves", async () => {
-  const truth = JSON.parse(await readFile(path.join(root, ".nimbus/routes.json"), "utf8")) as { knownRoutes: string[] };
+  const truth = JSON.parse(await readFile(path.join(root, ".nimbus/routes.json"), "utf8")) as { knownRoutes: string[]; mounts: Record<string, string> };
+  assert.equal(truth.mounts.sdk, "/products/kit", "lint maps links into a moved collection through the recorded mounts");
   const known = new Set(truth.knownRoutes);
   const llmsFiles = (await readdir(path.join(root, "dist"), { recursive: true })).filter((file) => file.endsWith("llms.txt"));
   assert.ok(llmsFiles.length >= 4, llmsFiles.join(", "));

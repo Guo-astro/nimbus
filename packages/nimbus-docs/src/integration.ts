@@ -3977,17 +3977,14 @@ export function nimbus(
             ...requestRoutes,
             ...report.onDemandDocRoutes.filter(isConcreteRoutePattern),
           ],
+          mounts: Object.fromEntries(
+            (await getPageCollectionsForBuild()).map((name) => [
+              name,
+              collectionMountPrefix(name, mountContextForBuild),
+            ]),
+          ),
           slice: buildSliceForBuild
-            ? {
-                collections: buildSliceForBuild,
-                mounts: Object.fromEntries(
-                  (await getPageCollectionsForBuild()).map((name) => [
-                    name,
-                    collectionMountPrefix(name, mountContextForBuild),
-                  ]),
-                ),
-                prior: priorRouteTruthForBuild,
-              }
+            ? { collections: buildSliceForBuild, prior: priorRouteTruthForBuild }
             : null,
           logger,
         });
@@ -4072,15 +4069,16 @@ function materializeRouteTruth(input: {
     rules: RouteTruth["redirectRules"];
   };
   onDemandRoutes: readonly string[];
+  /** Every page collection's mount (`""` for the root collection). */
+  mounts: Record<string, string>;
   /**
-   * A partial build: what it held, every page collection's mount, and the
-   * previous build's truth (null when there was none). The file then records
-   * the slice, and holds the previous build's routes for the collections
-   * outside it, so lint can still check links into the other slices.
+   * A partial build: what it held, and the previous build's truth (null when
+   * there was none). The file then records the slice, and holds the previous
+   * build's routes for the collections outside it, so lint can still check
+   * links into the other slices.
    */
   slice: {
     collections: readonly string[];
-    mounts: Record<string, string>;
     prior: RouteTruth | null;
   } | null;
   logger: { warn: (msg: string) => void; info: (msg: string) => void };
@@ -4108,7 +4106,8 @@ function materializeRouteTruth(input: {
 
     let sliceRecord: RouteTruth["slice"];
     if (input.slice) {
-      const { collections, mounts, prior } = input.slice;
+      const { collections, prior } = input.slice;
+      const { mounts } = input;
       // Which collections' routes the file holds: the slice's own, plus
       // whatever the previous file covered (everything, for a full build).
       const covered = new Set(collections);
@@ -4168,6 +4167,7 @@ function materializeRouteTruth(input: {
       redirects,
       redirectPages,
       redirectRules: input.redirects.rules,
+      mounts: input.mounts,
       // Nimbus collections remain enumerable even when their HTML is rendered
       // on request, so broad opaque namespaces would only hide broken links.
       opaqueNamespaces: [],

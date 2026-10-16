@@ -402,6 +402,8 @@ export interface RouteTruth {
    * statically enumerated. Empty in the current all-prerendered path.
    */
   opaqueNamespaces: string[];
+  /** Every page collection's mount (`""` for the root collection). Absent in files older builds wrote. */
+  mounts?: Record<string, string>;
   /**
    * Present when the build was partial (`NIMBUS_BUILD_ONLY`). Lint never
    * reads such a file as full truth: a link into a collection outside the

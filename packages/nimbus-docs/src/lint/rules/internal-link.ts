@@ -160,7 +160,7 @@ function missingRouteReport(
   const hint =
     afterBase !== null && env.knownRoutes.has(afterBase)
       ? afterBase
-      : (movedTo(target, env.knownRoutes) ?? suggest(target, nonRoot(env.knownRoutes), 3));
+      : (movedTo(target, env) ?? suggest(target, nearMatchCandidates(env.knownRoutes), 3));
   const baseNote =
     afterBase !== null
       ? ` Write links without the base "${env.base}"; it's added when the page renders.`
@@ -176,13 +176,21 @@ function missingRouteReport(
 }
 
 /**
- * The one route that ends with the link's whole path, as when a collection
- * moved from `/sdk` to `/products/sdk`, or null when none or several do.
+ * Where a link into a moved collection now points: the same path under the
+ * collection's mount when it left `/<name>` (`/sdk/setup` → `/products/kit/setup`),
+ * else the one route that ends with the link's whole path. Null when neither
+ * finds exactly one page.
  */
-function movedTo(key: string, routes: ReadonlySet<string>): string | null {
+function movedTo(key: string, env: LinkEnv): string | null {
   if (key === "/") return null;
+  for (const [name, mount] of Object.entries(env.mounts)) {
+    const from = `/${name}`;
+    if (mount === "" || mount === from || (key !== from && !key.startsWith(`${from}/`))) continue;
+    const to = `${mount}${key.slice(from.length)}`;
+    if (env.knownRoutes.has(to)) return to;
+  }
   let found: string | null = null;
-  for (const route of routes) {
+  for (const route of env.knownRoutes) {
     if (!route.endsWith(key) || route === key) continue;
     if (found) return null;
     found = route;
@@ -190,9 +198,11 @@ function movedTo(key: string, routes: ReadonlySet<string>): string | null {
   return found;
 }
 
-/** The site root is a few edits from any short path, so it's never a near-match. */
-function* nonRoot(routes: ReadonlySet<string>): Iterable<string> {
-  for (const route of routes) if (route !== "/") yield route;
+/** The site root and error pages are a few edits from any short path, so they're never near-matches. */
+const NEVER_NEAR = new Set(["/", "/404", "/500"]);
+
+function* nearMatchCandidates(routes: ReadonlySet<string>): Iterable<string> {
+  for (const route of routes) if (!NEVER_NEAR.has(route)) yield route;
 }
 
 /**

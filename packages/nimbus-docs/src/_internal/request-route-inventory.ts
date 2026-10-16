@@ -53,7 +53,6 @@ export async function GET() {
       url: contentInventoryEntryUrl(
         prefix,
         item.entry.id,
-        apiCollections.has(collection),
         request,
       ),
       request,

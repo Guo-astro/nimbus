@@ -50,6 +50,7 @@ export const collections = {
   dbt: defineCollection(docsCollection({ base: "dbt" })),
   blog: defineCollection(docsCollection({ base: "blog" })),
   tools: defineCollection(docsCollection({ base: "tools" })),
+  vault: defineCollection(docsCollection({ base: "vault" })),
   api: defineCollection(apiCollection()),
 };`,
   "src/content/docs/index.mdx": "---\ntitle: Home\n---\nHome.\n",
@@ -65,12 +66,15 @@ export const collections = {
   "src/content/dbt/internal.mdx": "---\ntitle: Internal\nsidebar:\n  hidden: true\n---\nInternal.\n",
   "src/content/blog/post.mdx": "---\ntitle: Post\n---\nA post.\n",
   "src/content/tools/cli.mdx": "---\ntitle: CLI\n---\nThe CLI.\n",
+  "src/content/vault/index.mdx": "---\ntitle: Vault\nsidebar:\n  hidden: true\n---\nVault.\n",
+  "src/content/vault/keys/rotate.mdx": "---\ntitle: Rotate dbt keys\n---\nRotate.\n",
   "specs/pets.json": SPEC,
   "src/pages/[...slug].astro": route("docs"),
   "src/pages/v0/[...slug].astro": route("docs-v0"),
   "src/pages/integrations/connectors/dbt/[...slug].astro": route("dbt"),
   "src/pages/blog/[...slug].astro": route("blog"),
   "src/pages/tools/[...slug].astro": route("tools"),
+  "src/pages/integrations/connectors/dbt/vault/[...slug].astro": route("vault"),
   "src/pages/integrations/connectors/tools/[...slug].astro": route("tools"),
   "src/pages/reference/api/[...slug].astro": `---
 import { getApiRoute, getApiStaticPaths } from ${runtime};
@@ -131,6 +135,17 @@ test("a page the sidebar leaves out keeps the crumbs of the folders above it", a
     "Connectors /integrations/connectors/",
     "dbt /integrations/connectors/dbt/",
     "Internal /integrations/connectors/dbt/internal/",
+  ]);
+});
+
+test("below the deepest folder in the sidebar, each page above keeps a titled crumb and other folders get none", async () => {
+  assert.deepEqual((await nav("integrations/connectors/dbt/vault/keys/rotate")).crumbs, [
+    "Home /",
+    "Integrations /integrations/",
+    "Connectors /integrations/connectors/",
+    "dbt /integrations/connectors/dbt/",
+    "Vault /integrations/connectors/dbt/vault/",
+    "Rotate dbt keys /integrations/connectors/dbt/vault/keys/rotate/",
   ]);
 });
 

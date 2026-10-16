@@ -54,6 +54,7 @@ import { ogImagePageKey, pageUrls } from "./_internal/page-urls.js";
 import {
   stripBase,
   toDocumentHref,
+  toRouteKey,
   withBase,
   withoutHtmlExtension,
 } from "./_internal/url.js";
@@ -78,7 +79,7 @@ import {
   breadcrumbsFromUrl,
   composeRouteBreadcrumbs,
   getPrevNext as buildPrevNext,
-  urlCrumbs,
+  segmentLabel,
   type BreadcrumbOptions,
 } from "./_internal/navigation.js";
 import { getHeadings } from "./_internal/toc.js";
@@ -981,8 +982,8 @@ export async function getPrevNext(
  * - `resolveLabel` — override a crumb label, or return `null` to drop it.
  *
  * A page with no node in the tree takes the trail of the deepest node above
- * its URL, then a crumb per remaining segment; with no such node, every
- * crumb comes from the URL.
+ * its URL, then a crumb for each page between there and itself, titled like
+ * the page; with no such node, every crumb comes from the URL.
  */
 export async function getBreadcrumbs(
   currentSlug: string,
@@ -1003,13 +1004,32 @@ export async function getBreadcrumbs(
   const path = findActivePath(tree, currentSlug);
   if (path.length > 0) return trail(path);
 
-  const mount = options?.collection ? resolveCollectionPrefix(options.collection, await loadMountContext()) : "";
   const parts = currentSlug.split("/").filter(Boolean);
   for (let depth = parts.length - 1; depth > 0; depth--) {
     const ancestry = findActivePath(tree, `/${parts.slice(0, depth).join("/")}`);
-    if (ancestry.length > 0) return composeRouteBreadcrumbs(await trail(ancestry), urlCrumbs(currentSlug, mount, depth));
+    if (ancestry.length === 0) continue;
+    const titles = pageTitles(await getIndexedEntries());
+    const below = parts.slice(depth).flatMap((part, i) => {
+      const key = `/${parts.slice(0, depth + i + 1).join("/")}`;
+      const last = depth + i + 1 === parts.length;
+      const title = titles.get(key);
+      return title !== undefined || last ? [{ label: title ?? segmentLabel(part), href: toDocumentHref(key) }] : [];
+    });
+    return composeRouteBreadcrumbs(await trail(ancestry), below);
   }
+  const mount = options?.collection ? resolveCollectionPrefix(options.collection, await loadMountContext()) : "";
   return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home", mount);
+}
+
+const pageTitleCache = new WeakMap<readonly IndexedEntry[], Map<string, string>>();
+
+function pageTitles(indexed: readonly IndexedEntry[]): Map<string, string> {
+  let titles = pageTitleCache.get(indexed);
+  if (!titles) {
+    titles = new Map(indexed.map((item) => [toRouteKey(item.url), item.title]));
+    pageTitleCache.set(indexed, titles);
+  }
+  return titles;
 }
 
 /** Resolves a section's display titles. May be async. */

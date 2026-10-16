@@ -173,6 +173,7 @@ test("unread helper routes warn only where no collection is served by default", 
   ]);
   assert.deepEqual(warnings.map((warning) => warning.code), ["nimbus/collection-unread-route"]);
   assert.match(warnings[0]!.message, /couldn't read the getStaticPaths in src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro/);
+  assert.match(warnings[0]!.message, /fails with "<name> is not defined", export that name/);
 });
 
 test("ownership: the deepest mount owns a URL, on whole segments, and only moved collections error", () => {

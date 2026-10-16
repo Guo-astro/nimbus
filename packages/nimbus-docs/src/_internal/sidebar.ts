@@ -225,39 +225,9 @@ function createLink(
   return link;
 }
 
-function createGroupFromEntry(
-  dirPath: string,
-  indexEntry: CollectionEntry | undefined,
-  currentPath: string,
-  hrefPrefix: string,
-  routeKey: string,
-): SidebarGroupItem {
-  const dirSegment = dirPath.split("/").pop()!;
-  // Group-level overrides from `sidebar.group.{label,badge}`
-  // take precedence over the simpler `sidebar.label` / `sidebar.badge`
-  // forms — `sidebar.label` is the LINK label (used when the index
-  // page is rendered as a child link), `sidebar.group.label` is the
-  // GROUP label. The two can differ: a section's index might want to
-  // appear as "Overview" in the sidebar (link label) while the group
-  // itself displays as "Configuration" (group label).
+/** The fields that link a group to its `index` page. */
+function groupLanding(indexEntry: CollectionEntry | undefined, currentPath: string, hrefPrefix: string) {
   const groupConfig = indexEntry?.data.sidebar?.group;
-  // Group label resolution order:
-  //   1. `sidebar.group.label` — explicit group-level override.
-  //   2. The index page's `title` — preferred over the directory name
-  //      so the group reads as authored (e.g. "Binding API" rather than
-  //      "Binding-api").
-  //   3. `formatLabel(dirSegment)` — fallback for directories without
-  //      an index page (the formatLabel-from-dirname rules apply).
-  // `sidebar.label` is intentionally NOT in this chain: it's the LINK
-  // label for the index page's own entry (the "landing"/Overview slot),
-  // not the group label, per the contract
-  // documented above. It's captured as `_indexLabel` and consumed by the
-  // overview-leaf display mode; `sidebar.group.label` is the group rename.
-  const groupLabel =
-    groupConfig?.label ?? indexEntry?.data.title ?? formatLabel(dirSegment);
-  const indexLabel = indexEntry?.data.sidebar?.label;
-  const groupOrder = indexEntry?.data.sidebar?.order ?? Number.MAX_VALUE;
-  const groupBadge = groupConfig?.badge ?? indexEntry?.data.sidebar?.badge;
   // `sidebar.group.hideIndex`: keep the group, but don't expose its index
   // page as a link — the label renders as a non-interactive header (the
   // no-`indexHref` branch below and in the renderer).
@@ -296,6 +266,48 @@ function createGroupFromEntry(
     }
   }
 
+  return {
+    _indexId: indexEntry?.id,
+    _indexLabel: indexEntry?.data.sidebar?.label,
+    indexHref,
+    indexIsCurrent: indexIsCurrent || undefined,
+    indexIsExternal: indexIsExternal || undefined,
+    _indexNeverActive: indexNeverActive || undefined,
+  };
+}
+
+function createGroupFromEntry(
+  dirPath: string,
+  indexEntry: CollectionEntry | undefined,
+  currentPath: string,
+  hrefPrefix: string,
+  routeKey: string,
+): SidebarGroupItem {
+  const dirSegment = dirPath.split("/").pop()!;
+  // Group-level overrides from `sidebar.group.{label,badge}`
+  // take precedence over the simpler `sidebar.label` / `sidebar.badge`
+  // forms — `sidebar.label` is the LINK label (used when the index
+  // page is rendered as a child link), `sidebar.group.label` is the
+  // GROUP label. The two can differ: a section's index might want to
+  // appear as "Overview" in the sidebar (link label) while the group
+  // itself displays as "Configuration" (group label).
+  const groupConfig = indexEntry?.data.sidebar?.group;
+  // Group label resolution order:
+  //   1. `sidebar.group.label` — explicit group-level override.
+  //   2. The index page's `title` — preferred over the directory name
+  //      so the group reads as authored (e.g. "Binding API" rather than
+  //      "Binding-api").
+  //   3. `formatLabel(dirSegment)` — fallback for directories without
+  //      an index page (the formatLabel-from-dirname rules apply).
+  // `sidebar.label` is intentionally NOT in this chain: it's the LINK
+  // label for the index page's own entry (the "landing"/Overview slot),
+  // not the group label, per the contract
+  // documented above. It's captured as `_indexLabel` and consumed by the
+  // overview-leaf display mode; `sidebar.group.label` is the group rename.
+  const groupLabel =
+    groupConfig?.label ?? indexEntry?.data.title ?? formatLabel(dirSegment);
+  const groupOrder = indexEntry?.data.sidebar?.order ?? Number.MAX_VALUE;
+  const groupBadge = groupConfig?.badge ?? indexEntry?.data.sidebar?.badge;
   const group: SidebarGroupItem = {
     type: "group",
     label: groupLabel,
@@ -303,12 +315,7 @@ function createGroupFromEntry(
     badge: groupBadge,
     icon: groupConfig?.icon,
     children: [],
-    _indexId: indexEntry?.id,
-    _indexLabel: indexLabel,
-    indexHref,
-    indexIsCurrent: indexIsCurrent || undefined,
-    indexIsExternal: indexIsExternal || undefined,
-    _indexNeverActive: indexNeverActive || undefined,
+    ...groupLanding(indexEntry, currentPath, hrefPrefix),
     _routeKey: routeKey,
   };
 
@@ -595,7 +602,8 @@ function resolveConfigItems(
             groupPrefix = prefix;
             autoRouteKey = toDocumentHref(prefix);
             folderKey = toRouteKey(prefix);
-            if (depth(folderKey) >= 2) landing = { entries: collectionEntries, prefix };
+            const insideFolder = depth(folderKey) >= 2;
+            if (insideFolder) landing = { entries: collectionEntries, prefix };
           }
         }
       } else {
@@ -613,7 +621,7 @@ function resolveConfigItems(
       // If the config item has a label, wrap in a group
       if (item.label) {
         const group: SidebarGroupItem = {
-          ...(landing && landingOf(landing.entries, currentPath, landing.prefix)),
+          ...(landing && groupLanding(landing.entries.find((e) => e.id === "index"), currentPath, landing.prefix)),
           type: "group",
           label: item.label,
           order,
@@ -1274,18 +1282,15 @@ function buildNestedGroup(nested: NestedCollection, key: string, currentPath: st
   return group;
 }
 
-function landingOf(entries: CollectionEntry[], currentPath: string, prefix: string) {
-  const index = entries.find((e) => e.id === "index");
-  const { _indexId, _indexLabel, indexHref, indexIsCurrent, indexIsExternal, _indexNeverActive } =
-    createGroupFromEntry(prefix.slice(1), index, currentPath, prefix, toDocumentHref(prefix));
-  return { _indexId, _indexLabel, indexHref, indexIsCurrent, indexIsExternal, _indexNeverActive };
-}
-
-function ownAll(items: SidebarItem[], entries: CollectionEntry[], byId = new Map(entries.map((e) => [e.id, e]))): void {
-  for (const item of items) {
-    ownerEntries.set(item, byId);
-    if (item.type === "group") ownAll(item.children, entries, byId);
-  }
+function ownAll(items: SidebarItem[], entries: CollectionEntry[]): void {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const own = (nodes: SidebarItem[]): void => {
+    for (const item of nodes) {
+      ownerEntries.set(item, byId);
+      if (item.type === "group") own(item.children);
+    }
+  };
+  own(items);
 }
 
 function insertIntoRange(container: Container, item: SidebarItem): void {

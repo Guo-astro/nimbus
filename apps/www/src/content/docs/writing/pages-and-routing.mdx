@@ -137,7 +137,7 @@ The rules:
 - `docs` is served at the site root, and a docs version (`docs-v1`) at `/v1`. A docs route away from the root isn't supported yet; for a site that is all docs under one path, set Astro's `base` (`base: "/docs"`).
 - Any other collection with a route is served at the route's folder, the root included. Without one, it's served at `/<name>`, as before.
 - One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error. Rendered on request, such a route finds its collection by the URL segment before the page, so it serves only collections at a one-segment URL (`/sdk`).
-- Several static routes for one collection: the one at its default URL serves it. The others still build their pages, which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
+- Several static routes for one collection: the one at its default URL serves it. The others still build their pages (or serve them, for a collection rendered on request), which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
 - A collection a route moved owns everything below its URL. Another collection's page under `/products/sdk` is an error, except under a collection nested deeper (`/products/sdk/cli` is its own). A collection at its default URL (`/sdk`) leaves pages under it as they were.
 - An API collection needs a folder: one at the site root is an error for now.
 

@@ -1167,22 +1167,16 @@ export function nimbus(
     // The parameter name is the author's choice; only the shape matters.
     const isSpread = (segment: string) => /^\[\.\.\..+\]$/u.test(segment);
     const isParam = (segment: string) => /^\[.+\]$/u.test(segment);
+    const folders = parts.slice(0, -1);
+    const mountMode = (mount: string[]) =>
+      mount.some(isParam) ? undefined : policy.mountModes.get(`/${mount.join("/")}`);
     let mode: RenderingMode | undefined;
-    if (parts.length === 1 && isLlmsFile) {
+    if (folders.length === 0 && isLlmsFile) {
       mode = policy.defaultMode;
-    } else if (parts.length === 2 && isMarkdownFile && isSpread(parts[0]!)) {
-      mode = policy.rootMode;
-    } else if (parts.length === 2 && file.startsWith("llms.txt.")) {
-      mode = isParam(parts[0]!)
-        ? policy.rootMode
-        : policy.mountModes.get(`/${parts[0]}`);
-    } else if (
-      parts.length === 3 &&
-      isMarkdownFile &&
-      isSpread(parts[1]!) &&
-      !isParam(parts[0]!)
-    ) {
-      mode = policy.mountModes.get(`/${parts[0]}`);
+    } else if (isMarkdownFile && folders.length > 0 && isSpread(folders.at(-1)!)) {
+      mode = folders.length === 1 ? policy.rootMode : mountMode(folders.slice(0, -1));
+    } else if (file.startsWith("llms.txt.") && folders.length > 0) {
+      mode = folders.length === 1 && isParam(folders[0]!) ? policy.rootMode : mountMode(folders);
     }
     if (!mode) return undefined;
     let source: string;

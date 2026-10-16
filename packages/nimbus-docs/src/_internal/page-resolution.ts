@@ -144,6 +144,11 @@ function requestFolder(context: PageResolutionContext): { folder: string; exact:
   return segment === null ? null : { folder: `/${segment}`, exact: false };
 }
 
+/** Whether a request route has no folder of its own, like the root route. */
+function isRootRoute(context: PageResolutionContext): boolean {
+  return !requestFolder(context)?.folder;
+}
+
 const reportedRoutes = new Set<string>();
 
 async function requestCollection(
@@ -158,8 +163,9 @@ async function requestCollection(
     reportedRoutes.add(context.routePattern);
     dependencies.warn(
       `nimbus-docs: the route ${context.routePattern} renders on request, but no page collection is served from ` +
-        `${route.folder || "/"}. Page collections come from docsCollection() or withNimbusMarkdown(); a collection ` +
-        `served away from /<name> needs its route helper in the route file's frontmatter. See ${COLLECTION_URLS_DOCS}.`,
+        `${route.folder || "/"}. Page collections come from docsCollection() or withNimbusMarkdown(). To serve one here, ` +
+        `call its route helper in this route's exported getStaticPaths; otherwise move the route to /<name>. ` +
+        `See ${COLLECTION_URLS_DOCS}.`,
     );
   }
   return null;
@@ -176,7 +182,7 @@ async function requestProseIdentity(
   if (
     first &&
     versions?.others.includes(first) &&
-    ((!collection && !requestFolder(context)?.folder) ||
+    ((!collection && isRootRoute(context)) ||
       collection === PRIMARY_COLLECTION ||
       collection === `${PRIMARY_COLLECTION}-${first}`)
   ) {

@@ -133,6 +133,24 @@ export function collectionsByFolder(
 }
 
 /**
+ * The collection whose URL is `url` or contains it, on whole segments; the
+ * deepest wins (`/reference/api/users` is `api`'s at `/reference/api`).
+ */
+export function collectionContaining(
+  collections: readonly string[],
+  url: string,
+  context: MountContext,
+): string | undefined {
+  let found: { collection: string; mount: string } | undefined;
+  for (const collection of collections) {
+    const mount = collectionMountPrefix(collection, context);
+    if ((url === mount || url.startsWith(`${mount}/`)) && mount.length > (found?.mount.length ?? -1))
+      found = { collection, mount };
+  }
+  return found?.collection;
+}
+
+/**
  * A stable key for the collections a route moved off their default URL, for
  * cache stamps; undefined when none moved, so those sites keep their caches.
  */

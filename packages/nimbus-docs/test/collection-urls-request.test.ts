@@ -1,12 +1,15 @@
 // Request rendering serves a collection where its route file is: `sdk` routed
 // at `src/pages/products/kit/`, `cli` at `src/pages/cli/` with a kept copy at
 // `src/pages/es/cli/`, with and without a `base`. (Request-rendered API
-// pages need the Cloudflare adapter; `page-resolution.test.ts` covers their
-// lookup by folder.) Hand-written
-// request routes and the root docs route resolve as before, and a route under
-// a folder no collection is served from is not found and reported.
+// pages at a nested URL are in `api-query-versions-build.test.ts`.)
+// Hand-written request routes and the root docs route resolve as before, a
+// route under a folder no collection is served from is not found and
+// reported, and the nested collection's Markdown and llms.txt follow its
+// mode, through Nimbus's routes or the site's own.
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { after, test } from "node:test";
 
 import { agentSites, siteApp, srcModule } from "./fixtures/agent-site.ts";
@@ -15,6 +18,7 @@ const sites = agentSites();
 after(() => sites.cleanup());
 
 const runtime = JSON.stringify("@cloudflare/nimbus-docs/runtime");
+const endpoints = JSON.stringify("@cloudflare/nimbus-docs/agent-endpoints");
 
 const proseRoute = (getStaticPaths: string, render = "getCollectionPage(Astro)") => `---
 import { getCollectionPage, getCollectionStaticPaths, getDocsPage, getDocsStaticPaths } from ${runtime};
@@ -81,5 +85,39 @@ for (const base of ["/", "/docs"]) {
       warnings.some((message) => /the route \/kits\/\[\.\.\.slug\] renders on request, but no page collection is served from \/kits/.test(message)),
       warnings.join("\n"),
     );
+  });
+}
+
+for (const ownRoute of [false, true]) {
+  test(`a nested request-rendered collection serves its Markdown and llms.txt on request${ownRoute ? ", from its own Markdown route" : ""}`, async () => {
+    const agentRoute = (factory: string, exports: string) =>
+      `import { ${factory} } from ${endpoints};\nexport const prerender = true;\nexport const { ${exports} } = ${factory}();\n`;
+    const site = await sites.buildSite(
+      {
+        "src/content.config.ts": FILES["src/content.config.ts"]!,
+        "src/content/docs/index.mdx": FILES["src/content/docs/index.mdx"]!,
+        "src/content/docs/guide.mdx": FILES["src/content/docs/guide.mdx"]!,
+        "src/content/sdk/setup.mdx": FILES["src/content/sdk/setup.mdx"]!,
+        "src/content/cli/install.mdx": FILES["src/content/cli/install.mdx"]!,
+        "src/content/blog/first.mdx": FILES["src/content/blog/first.mdx"]!,
+        "src/pages/[...slug].astro": FILES["src/pages/[...slug].astro"]!,
+        "src/pages/products/kit/[...slug].astro": FILES["src/pages/products/kit/[...slug].astro"]!,
+        "src/pages/llms.txt.ts": agentRoute("llmsRoute", "GET"),
+        "src/pages/[...section]/llms.txt.ts": agentRoute("llmsSectionRoute", "GET, getStaticPaths"),
+        "src/pages/[...slug]/index.md.ts": agentRoute("markdownRoute", "GET, getStaticPaths"),
+        ...(ownRoute
+          ? { "src/pages/products/kit/[...slug]/index.md.ts": agentRoute("markdownRoute", "GET, getStaticPaths") }
+          : {}),
+      },
+      { packageImports: true, server: true, base: "/", rendering: { default: "build", collections: { sdk: "request" } } },
+    );
+    const app = await siteApp(site);
+    assert.ok(existsSync(path.join(site.root, "dist/guide/index.md")));
+    for (const url of ["/products/kit/setup/index.md", "/products/kit/llms.txt"]) {
+      assert.ok(!existsSync(path.join(site.root, "dist", url)), url);
+      const response = await app.render(new Request(`https://example.test${url}`));
+      assert.equal(response.status, 200, url);
+      assert.match(await response.text(), /Set(up| it up)/, url);
+    }
   });
 }

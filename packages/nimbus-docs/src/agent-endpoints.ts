@@ -100,6 +100,16 @@ async function selectedApiOutputIsDefault(
   );
 }
 
+/** The API collection a section (`reference/api/users`) belongs to, if any. */
+async function sectionApiCollection(section: string): Promise<string | undefined> {
+  const [{ loadMountContext, loadNimbusConfig }, { collectionContaining }] = await Promise.all([
+    import("./_internal/runtime-config.js"),
+    import("./_internal/collection-mount.js"),
+  ]);
+  const [config, context] = await Promise.all([loadNimbusConfig(), loadMountContext()]);
+  return collectionContaining((config.api ?? []).map((entry) => entry.collection), `/${section}`, context);
+}
+
 async function markdownIndexes() {
   const { markdownAssets } = await loadAgentEndpointAssets();
   if (!markdownByIdentity || !markdownByRoute || !markdownByUrl) {
@@ -353,14 +363,10 @@ export async function getLlmsPayload(
   reference: LlmsEndpointReference,
   context: AgentEndpointContext = {},
 ): Promise<LlmsEndpointPayload | null> {
-  if (
-    reference.scope === "section" &&
-    !(await selectedApiOutputIsDefault(
-      reference.section.split("/")[0]!,
-      context.request,
-    ))
-  )
-    return null;
+  if (reference.scope === "section" && context.request && new URL(context.request.url).search) {
+    const api = await sectionApiCollection(reference.section);
+    if (api && !(await selectedApiOutputIsDefault(api, context.request))) return null;
+  }
   const { llmsByIdentity } = await llmsIndex();
   const asset = llmsByIdentity.get(llmsIdentity(reference));
   if (!asset) return null;

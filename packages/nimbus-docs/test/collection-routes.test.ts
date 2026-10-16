@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { collectionMountPrefix, collectionUrlsKey, NO_ROUTES } from "../src/_internal/collection-mount.js";
+import { collectionContaining, collectionMountPrefix, collectionUrlsKey, NO_ROUTES } from "../src/_internal/collection-mount.js";
 import {
   collectionMoveMessages,
   collectionOwnershipErrors,
@@ -219,6 +219,26 @@ test("collectionMountPrefix reads the route map, then the defaults", () => {
   assert.equal(collectionMountPrefix("blog", { versions: null, routes }), "/blog");
   assert.equal(collectionMountPrefix("docs", { versions: null, routes: NO_ROUTES }), "");
   assert.equal(collectionMountPrefix("docs-v1", { versions: { others: ["v1"] }, routes: NO_ROUTES }), "/v1");
+});
+
+test("a URL belongs to the deepest collection whose URL contains it, on whole segments", () => {
+  const context = {
+    versions: null,
+    routes: new Map([
+      ["api", { mount: "/reference/api", file: "src/pages/reference/api/[...slug].astro", aliases: [] }],
+      ["admin", { mount: "/reference/api/admin", file: "src/pages/reference/api/admin/[...slug].astro", aliases: [] }],
+    ]),
+  };
+  const cases: Array<[string, string | undefined]> = [
+    ["/rest", "rest"],
+    ["/rest/users", "rest"],
+    ["/reference/api", "api"],
+    ["/reference/api/users", "api"],
+    ["/reference/api/admin/keys", "admin"],
+    ["/reference/apis", undefined],
+    ["/guides", undefined],
+  ];
+  for (const [url, expected] of cases) assert.equal(collectionContaining(["rest", "api", "admin"], url, context), expected, url);
 });
 
 test("the cache key names only collections a route moved, so sites that move nothing keep their caches", () => {

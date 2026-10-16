@@ -116,6 +116,32 @@ test("check reports a page under a moved collection's URL, rendered at build or 
   }
 });
 
+test("a collection added since the last build is checked: a route onto its default URL is an error", async () => {
+  const dir = project(
+    { "src/pages/tools/[...slug].astro": "sdk" },
+    {
+      files: {
+        ".nimbus/page-collections.json": JSON.stringify({ version: 1, collections: ["docs", "sdk"], mdxFiles: [] }),
+        "src/content.config.ts": `import { defineCollection } from "astro:content";
+import { docsCollection } from "@cloudflare/nimbus-docs/content";
+export const collections = {
+  docs: defineCollection(docsCollection()),
+  sdk: defineCollection(docsCollection({ base: "sdk" })),
+  tools: defineCollection(docsCollection({ base: "tools" })),
+};`,
+        "src/content/tools/intro.mdx": "---\ntitle: Intro\n---\n",
+      },
+    },
+  );
+  try {
+    const result = await runChecks(dir, STRUCTURE);
+    const finding = result.findings.find((f) => f.code === "nimbus/collection-same-url");
+    assert.match(finding?.message ?? "", /"sdk" \(src\/pages\/tools\/\[\.\.\.slug\]\.astro\) and "tools"/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("before a build, a site without docs can serve another collection at the root", async () => {
   const dir = project({ "src/pages/[...slug].astro": "guides" }, { files: { "src/content/guides/intro.mdx": "---\ntitle: Intro\n---\n" } });
   try {

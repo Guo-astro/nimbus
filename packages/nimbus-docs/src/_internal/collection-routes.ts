@@ -28,6 +28,8 @@ export interface FoundRoute {
   file: string;
   /** The folder has a dynamic segment (`/[locale]/sdk`). */
   dynamic: boolean;
+  /** The route's last segment when it isn't `[slug]` or `[...slug]`: the helpers' params can't fill it. */
+  misnamed?: string;
 }
 
 /** Where a collection is served. */
@@ -75,7 +77,7 @@ export function findCollectionRoutes(srcDir: string, projectRoot: string): Colle
       if (!entry.isFile() || !entry.name.endsWith(".astro")) continue;
       const segments = routeSegments(path.relative(pagesDir, full));
       const last = segments.at(-1);
-      if (last !== "[slug]" && last !== "[...slug]") continue;
+      if (!last || !/^\[(?:\.\.\.)?[^\]]+\]$/u.test(last)) continue;
       const folderSegments = segments.slice(0, -1);
       let source: string;
       try {
@@ -87,8 +89,9 @@ export function findCollectionRoutes(srcDir: string, projectRoot: string): Colle
       const folder = folderSegments.length ? `/${folderSegments.join("/")}` : "";
       const file = path.relative(projectRoot, full).split(path.sep).join("/");
       const dynamic = folderSegments.some((segment) => segment.includes("["));
-      if (collection !== undefined) found.push({ collection, folder, file, dynamic });
-      else if (usesHelper && !dynamic) unread.push({ folder, file });
+      const misnamed = last === "[slug]" || last === "[...slug]" ? undefined : last;
+      if (collection !== undefined) found.push({ collection, folder, file, dynamic, ...(misnamed ? { misnamed } : {}) });
+      else if (usesHelper && !dynamic && !misnamed) unread.push({ folder, file });
     }
   };
   walk(pagesDir);
@@ -268,7 +271,8 @@ export interface MountError {
     | "nimbus/collection-version-route"
     | "nimbus/collection-two-routes"
     | "nimbus/collection-same-url"
-    | "nimbus/collection-api-root";
+    | "nimbus/collection-api-root"
+    | "nimbus/collection-route-param";
   /** Names the file and the fix. */
   message: string;
 }
@@ -303,6 +307,20 @@ export function decideCollectionMounts(
   const warnings: MountWarning[] = [];
   const byCollection = new Map<string, FoundRoute[]>();
   for (const route of found) {
+    if (route.misnamed) {
+      const fallback = fixedMount(route.collection, versions) ?? `/${route.collection}`;
+      const helper = route.misnamed.startsWith("[...") ? "[...slug]" : "[slug]";
+      const at = route.file.lastIndexOf(route.misnamed);
+      if (route.dynamic || route.folder !== fallback)
+        errors.push({
+          code: "nimbus/collection-route-param",
+          message:
+            `${route.file} calls the route helper for "${route.collection}", but its parameter is ${route.misnamed}, which the ` +
+            `helper's paths don't fill, so "${route.collection}" stays at ${fallback || "/"}. Rename it to ` +
+            `${route.file.slice(0, at)}${helper}${route.file.slice(at + route.misnamed.length)}.`,
+        });
+      continue;
+    }
     byCollection.set(route.collection, [...(byCollection.get(route.collection) ?? []), route]);
   }
   const mounts = new Map<string, CollectionMount>();
@@ -362,13 +380,18 @@ export function decideCollectionMounts(
     const mount = fixed ?? primary.folder;
     const aliases = staticRoutes.filter((route) => route !== primary);
     mounts.set(collection, { mount, file: primary.file, aliases: aliases.map((route) => route.folder) });
-    for (const alias of aliases)
+    for (const alias of aliases) {
+      // A redirect from a folder above the mount would catch the mount too.
+      const fix = mount.startsWith(`${alias.folder}/`)
+        ? "delete the route"
+        : `delete the route, or redirect ${alias.folder || "/"} to ${mount || "/"}`;
       warnings.push({
         code: "nimbus/collection-alias-route",
         message:
           `${alias.file} also serves collection "${collection}", which is served at ${mount || "/"} (${primary.file}). ` +
-          `Its pages duplicate the collection's, in the sitemap and search too; delete the route, or redirect ${alias.folder || "/"} to ${mount || "/"}.`,
+          `Its pages duplicate the collection's, in the sitemap and search too; ${fix}.`,
       });
+    }
   }
   const byMount = new Map<string, string>();
   for (const [collection, { mount, file }] of mounts) {

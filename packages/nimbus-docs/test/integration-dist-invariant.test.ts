@@ -652,6 +652,16 @@ test("route truth keeps platform rules and Astro's redirect pages apart", async 
   );
 });
 
+test("route truth follows the pages a dynamic Astro redirect writes, so lint reports links to the old URLs", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    signal: "netlify",
+    redirects: { "/sdk/[...slug]": "/products/kit/[...slug]" },
+    seedDist: { "sdk/setup/index.html": "", "products/kit/setup/index.html": "" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.deepEqual(truth.redirectPages, [{ from: "/sdk/setup", to: "/products/kit/setup", status: 301 }]);
+});
+
 test("without a netlify.toml, redirect rules are Cloudflare's", async (t) => {
   const { projectRoot } = await driveBuild(t, { signal: "cloudflare" });
   assert.equal((await readRouteTruthFile(projectRoot)).redirectRules, "cloudflare");

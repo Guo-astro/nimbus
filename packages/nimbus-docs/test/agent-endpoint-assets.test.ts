@@ -37,6 +37,7 @@ import {
   removeAgentEndpointAssets,
   stageAgentEndpointAssets,
 } from "../src/_internal/agent-endpoint-assets.ts";
+import { collectionUrlsKey } from "../src/_internal/collection-mount.ts";
 
 const roots: string[] = [];
 const capability = { generation: 1, base: "/docs" };
@@ -74,6 +75,7 @@ function commit(
     data?: Record<string, unknown>;
     headings?: Array<{ depth: number; text: string; slug: string }>;
   }>,
+  urls?: string,
 ): void {
   const key = preparedMarkdownRootKey(root);
   const epoch = beginPreparedMarkdownLoad(key, collection, false);
@@ -82,7 +84,7 @@ function commit(
       key,
       collection,
       epoch,
-      capability,
+      urls === undefined ? capability : { ...capability, urls },
       entries.map((entry) => ({
         id: entry.id,
         body: entry.body,
@@ -806,6 +808,24 @@ test("rejects page collisions and unsafe section route parameters", async () => 
   await assert.rejects(
     bakeAgentEndpointAssets(options),
     /guide\/llms\.txt.*collides with the generated llms.txt route/s,
+  );
+});
+
+test("a page under another collection's moved URL fails with the ownership error, not a route collision", async () => {
+  const projectRoot = await root();
+  const routes = new Map([["sdk", { mount: "/products/sdk", file: "src/pages/products/sdk/[...slug].astro", aliases: [] }]]);
+  const urls = collectionUrlsKey({ versions: null, routes });
+  commit(projectRoot, "docs", [
+    { id: "index", body: "Home", data: { title: "Home" } },
+    { id: "products/sdk/stray", body: "Stray", filePath: "src/content/docs/products/sdk/stray.mdx", data: { title: "Stray" } },
+  ], urls);
+  commit(projectRoot, "sdk", [
+    { id: "index", body: "SDK", data: { title: "SDK" } },
+    { id: "install", body: "Install", data: { title: "Install" } },
+  ], urls);
+  await assert.rejects(
+    bakeAgentEndpointAssets({ root: projectRoot, base: "/docs", site: "https://example.test", title: "Test", routes }),
+    /docs page src\/content\/docs\/products\/sdk\/stray\.mdx is at \/products\/sdk\/stray, under \/products\/sdk, where collection "sdk" is served/,
   );
 });
 

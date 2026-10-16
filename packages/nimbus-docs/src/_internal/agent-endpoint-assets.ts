@@ -23,7 +23,7 @@ import {
   PRIMARY_COLLECTION,
   type MountContext,
 } from "./collection-mount.js";
-import type { CollectionRoutes } from "./collection-routes.js";
+import { COLLECTION_URLS_DOCS, collectionOwnershipErrors, type CollectionRoutes } from "./collection-routes.js";
 import { llmsAssetUrl } from "./agent-endpoint-coverage.js";
 import {
   buildLlmsFullMarkdown,
@@ -1671,6 +1671,19 @@ export async function bakeAgentEndpointAssets(
     assertPreparedCollection(collectionName, collection, base, mountContext(options));
     candidates.push(...collection.entries.values());
   }
+  // The build checks this after content sync; dev reaches here first when a
+  // page is added under a collection's URL while the server runs.
+  const ownership = collectionOwnershipErrors(
+    candidates.map((entry) => ({
+      collection: entry.collection,
+      url: entryRouteUrl(collectionMountPrefix(entry.collection, mountContext(options)), entry.id),
+      source: entry.filePath ?? `${entry.collection}:${entry.id}`,
+    })),
+    [...new Set(candidates.map((entry) => entry.collection))],
+    mountContext(options),
+  );
+  if (ownership.length > 0)
+    throw new Error(`nimbus-docs: ${ownership.map((error) => error.message).join("\n\n")}\n\nSee ${COLLECTION_URLS_DOCS}.`);
 
   const decide = options.decidePublic ?? defaultDecision;
   const decisions = new Map<string, AgentEndpointVisibilityDecision>();

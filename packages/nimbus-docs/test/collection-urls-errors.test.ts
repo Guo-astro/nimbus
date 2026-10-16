@@ -81,7 +81,7 @@ test("the guard stops a helper the build didn't see from serving a collection at
     ),
   };
   await assert.rejects(sites.buildSite(files, { packageImports: true }), (error: Error) => {
-    assert.match(error.message, /getCollectionStaticPaths\("sdk"\) runs in a route under \/wrong, but "sdk" is served from \/sdk/);
+    assert.match(error.message, /the route under \/wrong serves collection "sdk", but "sdk" is served from \/sdk/);
     assert.match(error.message, DOCS_LINK);
     return true;
   });
@@ -108,6 +108,59 @@ test("a helper route the build couldn't read is named at render", async () => {
     assert.match(error.message, DOCS_LINK);
     return true;
   });
+});
+
+test("a wrapper that drops Astro's options is still caught when its pages render", async () => {
+  const files = {
+    ...base,
+    "src/lib/sdk-paths.ts": `import { getCollectionStaticPaths } from ${runtime};\nexport function sdkPaths() { return getCollectionStaticPaths("sdk")(); }\n`,
+    "src/pages/products/kit/[...slug].astro": sdkRoute(
+      `export const getStaticPaths = sdkPaths;`,
+      `import { getCollectionPage } from ${runtime};\nimport { sdkPaths } from "../../../lib/sdk-paths";`,
+    ),
+  };
+  await assert.rejects(sites.buildSite(files, { packageImports: true }), (error: Error) => {
+    assert.match(error.message, /the route under \/products\/kit serves collection "sdk", but "sdk" is served from \/sdk/);
+    assert.match(error.message, DOCS_LINK);
+    return true;
+  });
+});
+
+test("an API route behind an imported wrapper is caught when its pages render", async () => {
+  const spec = JSON.stringify({
+    openapi: "3.0.0",
+    info: { title: "Pets", version: "1.0.0" },
+    paths: { "/pets": { get: { operationId: "list-pets", responses: { "200": { description: "ok" } } } } },
+  });
+  const files = {
+    "src/content.config.ts": `import { defineCollection } from "astro:content";
+import { apiCollection, docsCollection } from ${srcModule("content.ts")};
+export const collections = {
+  docs: defineCollection(docsCollection()),
+  api: defineCollection(apiCollection()),
+};`,
+    "src/content/docs/index.mdx": "---\ntitle: Home\n---\nHome.\n",
+    "spec.json": spec,
+    "src/lib/api-paths.ts": `import { getApiStaticPaths } from ${runtime};\nexport function apiPaths() { return getApiStaticPaths("api")(); }\n`,
+    "src/pages/reference/api/[...slug].astro": `---
+import { getApiRoute } from ${runtime};
+import { apiPaths } from "../../../lib/api-paths";
+export const prerender = true;
+export const getStaticPaths = apiPaths;
+const result = await getApiRoute(Astro);
+if (result instanceof Response) return result;
+---
+<html><body>{result.page.title}</body></html>
+`,
+  };
+  await assert.rejects(
+    sites.buildSite(files, { packageImports: true, api: [{ collection: "api", spec: "./spec.json" }] }),
+    (error: Error) => {
+      assert.match(error.message, /the route under \/reference\/api serves collection "api", but "api" is served from \/api/);
+      assert.match(error.message, /getApiStaticPaths\("api"\)/);
+      return true;
+    },
+  );
 });
 
 test("a moved collection rendered on request fails at setup until request rendering supports it", async () => {

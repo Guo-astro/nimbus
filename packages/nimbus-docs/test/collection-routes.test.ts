@@ -27,15 +27,21 @@ test("a route's collection comes from its exported getStaticPaths, in every supp
     ['import { getDocsStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = getDocsStaticPaths;', "docs"],
     ['import { getDocsStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport async function getStaticPaths() { return getDocsStaticPaths(); }', "docs"],
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = async (options) => {\n  const paths = await getCollectionStaticPaths("sdk")(options);\n  return paths;\n};', "sdk"],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst getStaticPaths = getCollectionStaticPaths("sdk");\nexport { getStaticPaths };', "sdk"],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst paths = getCollectionStaticPaths("sdk");\nexport { paths as getStaticPaths };', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const paths = getCollectionStaticPaths("sdk");\nexport const getStaticPaths = paths;', "sdk"],
+    // Astro's compiler rejects these, so they aren't read.
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst getStaticPaths = getCollectionStaticPaths("sdk");\nexport { getStaticPaths };', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst paths = getCollectionStaticPaths("sdk");\nexport { paths as getStaticPaths };', undefined],
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport type { GetStaticPaths } from "astro";\nexport const getStaticPaths = (async (o) => getCollectionStaticPaths("sdk")(o)) satisfies GetStaticPaths;', "sdk"],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', "changelog"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', "changelog"],
+    // Astro can't run a top-level name that isn't exported, so it isn't read.
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst load = (o) => getCollectionStaticPaths("changelog")(o);\nexport const getStaticPaths = (o) => load(o);', undefined],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nfunction load(o) { return getCollectionStaticPaths("changelog")(o); }\nexport const getStaticPaths = load;', undefined],
     // The changelog recipe's shape.
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nimport type { GetStaticPaths } from "astro";\nexport const getStaticPaths: GetStaticPaths = async (options) =>\n  (await getCollectionStaticPaths("changelog")(options)).filter(\n    (path) => path.params.slug,\n  );', "changelog"],
     // An unused call elsewhere in the file doesn't decide anything.
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst unused = getCollectionStaticPaths("cli");\nexport const getStaticPaths = getCollectionStaticPaths("sdk");', "sdk"],
-    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst name = "sdk";\nexport const getStaticPaths = getCollectionStaticPaths(name);', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const name = "sdk";\nexport const getStaticPaths = getCollectionStaticPaths(name);', "sdk"],
+    ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nconst name = "sdk";\nexport const getStaticPaths = getCollectionStaticPaths(name);', undefined],
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nlet name = "sdk";\nname = "cli";\nexport const getStaticPaths = getCollectionStaticPaths(name);', undefined],
     // A parameter elsewhere named like the import doesn't hide it.
     ['import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nfunction x(getCollectionStaticPaths) {}\nexport const getStaticPaths = getCollectionStaticPaths("sdk");', "sdk"],

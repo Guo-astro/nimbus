@@ -964,7 +964,8 @@ export async function getBreadcrumbs(
     return assembleBreadcrumbs(root, path, labels);
   }
 
-  return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home");
+  const mount = options?.collection ? resolveCollectionPrefix(options.collection, await loadMountContext()) : "";
+  return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home", mount);
 }
 
 /** Resolves a section's display titles. May be async. */
@@ -1243,6 +1244,7 @@ async function resolveProseRoute<C extends string>(
   if (result.status !== "found") return proseResolutionResponse(astro, result);
   const { entry: found, Content, headings } = result.page;
   await assertPageCollection(found.collection);
+  await assertRouteServesCollection(found.collection, astro.routePattern);
   const { markdownUrl, sourceUrl, ogImageUrl } = pageUrls(
     resolveCollectionPrefix(found.collection, await loadMountContext()),
     found,
@@ -1394,7 +1396,7 @@ export async function getRouteFlags(entry: {
  */
 export function getCollectionStaticPaths(collection: import("astro:content").CollectionKey | (string & {})): GetStaticPaths {
   return async (options) => {
-    await assertRouteServesCollection("getCollectionStaticPaths", collection, options?.routePattern);
+    await assertRouteServesCollection(collection, options?.routePattern);
     await assertPageCollection(collection);
     const entries = await getVisibleEntries([collection]);
     return entries.map((entry) => ({
@@ -1406,15 +1408,16 @@ export function getCollectionStaticPaths(collection: import("astro:content").Col
 }
 
 /**
- * A route helper running in a route its collection isn't served from builds
- * pages that nothing links to. Astro passes the route's pattern (without
- * `base`) to `getStaticPaths`; a route whose folder is dynamic, or a wrapper
- * that doesn't pass it on, isn't checked.
+ * A route serving a collection from a folder it isn't served from builds
+ * pages that nothing links to. Checked from `getStaticPaths`, whose options
+ * carry the route's pattern (without `base`), and again when the page
+ * renders, from `Astro.routePattern`, which a wrapper can't drop. A route
+ * whose folder is dynamic isn't checked.
  */
 async function assertRouteServesCollection(
-  helper: string,
   collection: string,
   routePattern: string | undefined,
+  helper = "getCollectionStaticPaths",
 ): Promise<void> {
   if (!routePattern) return;
   const segments = routePattern.split("/").filter(Boolean);
@@ -1431,6 +1434,8 @@ async function assertRouteServesCollection(
     resolveCollectionPrefix(collection, { versions: context.versions, routes: NO_ROUTES }),
     ...(record?.aliases ?? []),
   ]);
+  // Request rendering serves a docs version's `/v1/…` pages through the root route.
+  if (context.versions?.others.some((version) => collection === `${PRIMARY_COLLECTION}-${version}`)) allowed.add("");
   if (allowed.has(folder)) return;
   const unread = (await loadUnreadCollectionRoutes()).find((route) => route.folder === folder);
   const servedFrom = record?.file ?? (served || "/");
@@ -1438,10 +1443,9 @@ async function assertRouteServesCollection(
     (unread
       ? `nimbus-docs: Nimbus couldn't read the getStaticPaths in ${unread.file}, so "${collection}" is still served from ` +
         `${servedFrom}. Export it as \`export const getStaticPaths = ${helper}("${collection}")\`, or return the helper's ` +
-        `paths from a function in the same file, passing the name as a string literal.`
-      : `nimbus-docs: ${helper}("${collection}") runs in a route under ${folder || "/"}, but "${collection}" is served from ` +
-        `${servedFrom} (or the build didn't see this call: a wrapper in another module?). ` +
-        `Call it in the route file's frontmatter.`) +
+        `paths from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`
+      : `nimbus-docs: the route under ${folder || "/"} serves collection "${collection}", but "${collection}" is served from ` +
+        `${servedFrom}. Call ${helper}("${collection}") in the route file's exported getStaticPaths, or move the route.`) +
       (import.meta.env?.DEV ? " If you just moved the route, restart the dev server." : "") +
       ` See https://nimbus-docs.com/writing/pages-and-routing/#collection-urls.`,
   );
@@ -1543,7 +1547,7 @@ export interface ApiVersionInfo {
  */
 export function getApiStaticPaths(collection: import("astro:content").CollectionKey | (string & {})): GetStaticPaths {
   return async (options) => {
-    await assertRouteServesCollection("getApiStaticPaths", collection, options?.routePattern);
+    await assertRouteServesCollection(collection, options?.routePattern, "getApiStaticPaths");
     const apiCollections = await loadApiCollections();
     if (!apiCollections.includes(collection)) {
       throw new Error(
@@ -1793,6 +1797,7 @@ async function resolveApiRoute(
   if (result.status !== "found") {
     return proseResolutionResponse(astro, result);
   }
+  await assertRouteServesCollection(result.page.collection, astro.routePattern, "getApiStaticPaths");
   // An on-demand sidebar's filter reads this version's page list.
   const { navLists } = await import("virtual:nimbus/config");
   const list = navLists?.[result.page.collection]?.[result.page.version ?? ""];
@@ -2196,11 +2201,20 @@ export async function getCollectionLlmsUrl(
  * ```astro
  * const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL);
  * ```
+ *
+ * Throws for a name that isn't a page collection, so a typo fails the build
+ * rather than linking nowhere.
  */
 export async function getCollectionUrl(
   collection: import("astro:content").CollectionKey | (string & {}),
 ): Promise<string> {
   await loadNimbusConfig();
+  const pageCollections = await loadIndexedCollections();
+  if (!pageCollections.includes(collection))
+    throw new Error(
+      `nimbus-docs: getCollectionUrl("${collection}"): no page collection is named "${collection}". ` +
+        `Page collections: ${pageCollections.join(", ") || "none"}.`,
+    );
   return toDocumentHref(resolveCollectionPrefix(collection, await loadMountContext()) || "/");
 }
 

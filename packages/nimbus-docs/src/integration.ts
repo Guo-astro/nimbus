@@ -1944,7 +1944,7 @@ export function nimbus(
               .join("\n\n") + `\n\nSee ${COLLECTION_URLS_DOCS}.`,
           );
         for (const warning of [
-          ...routeWarnings.map((warning) => warning.message),
+          ...routeWarnings.map((warning) => `${warning.message} See ${COLLECTION_URLS_DOCS}.`),
           ...sidebarPrefixWarnings(config.sidebar?.items, mountContextForBuild),
         ])
           logger.warn(warning);

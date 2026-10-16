@@ -129,7 +129,8 @@ export interface RouteRead {
  * The collection a route file's exported `getStaticPaths` serves. Names
  * resolve through TypeScript's checker, so scopes are real: a parameter,
  * class or inner declaration that shadows an import or wrapper is followed
- * as itself. Values are followed through `const` declarations only.
+ * as itself. Values are followed through `const` declarations only, and
+ * top-level ones only when exported, as Astro requires.
  */
 export function readRoute(source: string): RouteRead {
   const code = /^\s*---\r?\n([\s\S]*?)\r?\n---/u.exec(source)?.[1];
@@ -171,9 +172,16 @@ export function readRoute(source: string): RouteRead {
   };
   const isConst = (declaration: ts.VariableDeclaration) =>
     ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+  // Astro runs `getStaticPaths` apart from the rest of the frontmatter: a
+  // top-level name it uses must be exported (imports are handled above).
+  const reachable = (declaration: ts.FunctionDeclaration | ts.VariableDeclaration) => {
+    const statement = ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration;
+    return statement.parent !== sourceFile || (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export) !== 0;
+  };
   // What a declaration holds: a function, or a `const`'s value.
   const valueOf = (declaration: ts.Declaration | undefined): ts.Expression | ts.FunctionDeclaration | undefined => {
-    if (!declaration) return undefined;
+    if (!declaration || !(ts.isFunctionDeclaration(declaration) || ts.isVariableDeclaration(declaration)) || !reachable(declaration))
+      return undefined;
     if (ts.isFunctionDeclaration(declaration)) return declaration;
     if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name) && isConst(declaration))
       return declaration.initializer;
@@ -250,12 +258,8 @@ export function readRoute(source: string): RouteRead {
   });
   const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
   const exported = moduleSymbol && checker.getExportsOfModule(moduleSymbol).find((symbol) => symbol.name === "getStaticPaths");
-  let declaration = exported?.declarations?.[0];
-  if (declaration && ts.isExportSpecifier(declaration)) {
-    if (declaration.parent.parent.moduleSpecifier) return { usesHelper };
-    declaration = checker.getExportSpecifierLocalTargetSymbol(declaration)?.declarations?.[0];
-  }
-  const collection = fromDeclaration(declaration);
+  // `export { getStaticPaths }` isn't followed: Astro's compiler rejects it.
+  const collection = fromDeclaration(exported?.declarations?.[0]);
   return collection === undefined ? { usesHelper } : { collection, usesHelper };
 }
 
@@ -281,7 +285,7 @@ export interface MountWarning {
 export interface MountDecision {
   mounts: Map<string, CollectionMount>;
   errors: MountError[];
-  /** Routes that serve a collection already served elsewhere: duplicate pages nothing links to. */
+  /** Routes that serve a collection already served elsewhere: duplicate pages. */
   warnings: MountWarning[];
 }
 
@@ -366,7 +370,7 @@ export function decideCollectionMounts(
         code: "nimbus/collection-alias-route",
         message:
           `${alias.file} also serves collection "${collection}", which is served at ${mount || "/"} (${primary.file}). ` +
-          `Its pages duplicate the collection's and nothing links to them; delete the route, or redirect ${alias.folder || "/"} to ${mount || "/"}.`,
+          `Its pages duplicate the collection's, in the sitemap and search too; delete the route, or redirect ${alias.folder || "/"} to ${mount || "/"}.`,
       });
   }
   const byMount = new Map<string, string>();
@@ -402,7 +406,7 @@ export function unreadRouteWarnings(unread: readonly UnreadRoute[]): MountWarnin
       message:
         `Nimbus couldn't read the getStaticPaths in ${route.file}, so the collection it serves isn't served at ${route.folder}. ` +
         `Export it as \`export const getStaticPaths = getCollectionStaticPaths("<name>")\`, or return the helper's paths ` +
-        `from a function in the same file, passing the name as a string literal.`,
+        `from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`,
     }));
 }
 
@@ -492,7 +496,7 @@ export function collectionOwnershipErrors(
     errors.push({
       code: "nimbus/collection-owns-url",
       message:
-        `${entry.collection} page ${entry.source} is at ${path}, under ${owner.mount}, where collection "${owner.collection}" is served ` +
+        `${entry.collection} page ${entry.source} is at ${path}, ${path === owner.mount ? "" : `under ${owner.mount}, `}where collection "${owner.collection}" is served ` +
         `(${context.routes.get(owner.collection)?.file}). A collection's URL owns everything below it; move the page.`,
     });
   }

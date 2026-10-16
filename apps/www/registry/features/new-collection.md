@@ -56,7 +56,7 @@ conventions:
   tell the user this isn't a Nimbus project.
 - `src/content.config.ts` — read it in full. Note: (1) which collections
   already exist (you must not collide with them), (2) whether they use
-  `docsCollection({ base: "..." })` from `nimbus-docs/content` so you can
+  `docsCollection({ base: "..." })` from `@cloudflare/nimbus-docs/content` so you can
   match their shape, (3) the `defineCollection`/`docsCollection` import
   layout already in place.
 - `astro.config.ts` (or `nimbus.config.ts` if separate) — read the Nimbus
@@ -268,6 +268,9 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 </DocsLayout>
 ```
 
+The relative imports are for a one-segment prefix (`/blog`); add one `../` per
+extra segment (`/products/sdk` needs `../../../layouts/DocsLayout.astro`).
+
 **The `collection` and `entryId` props are required, not optional.**
 They drive cross-version `<link rel="alternate">`, `<link rel="canonical">`,
 deprecation banner rendering, Pagefind facet emission, hidden-version
@@ -373,10 +376,11 @@ Ask the user whether to replace, skip, or show a diff first. The
   `getCollectionPage<C>(astro)` are sibling functions to
   `getDocsStaticPaths`/`getDocsPageProps`. Use the `Collection` variants in
   scaffolded routes; the `Docs` variants stay for the primary route only.
-- The URL convention is intentional: primary `docs` mounts at root, every
-  other collection mounts at `/<collection>/` or `/<version-slug>/` for
-  version collections. The `getIndexedEntries()` / `getIndexedTopLevel()`
-  helpers already know this convention; the routes you scaffold consume it.
+- The route file's folder sets the URL: primary `docs` is served at the root,
+  a docs version at `/<version-slug>/`, and every other collection where its
+  route is (`/<collection>/` by default). Every URL helper follows it, so
+  keep `getStaticPaths` as `export const getStaticPaths =
+  getCollectionStaticPaths("<collection>")` with a string literal.
 - Do not try to register the collection automatically without the user's
   go-ahead in step 3 (the plan). The plan-then-confirm step is what turns
   this from an opaque codegen into a transparent edit.

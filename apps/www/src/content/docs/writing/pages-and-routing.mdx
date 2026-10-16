@@ -83,7 +83,7 @@ draft: true
 
 ## Other collections
 
-`src/content/docs/` is the primary collection, mounted at the site root. Additional collections (a `blog`, an `api`, a versioned `docs-v2`) are served at their own URL: where their route file is, or `/<name>` by default (see [Collection URLs](#collection-urls)). Register them in `src/content.config.ts` with the factories from `nimbus-docs/content`.
+`src/content/docs/` is the primary collection, mounted at the site root. Additional collections (a `blog`, an `api`, a versioned `docs-v2`) are served at their own URL: where their route file is, or `/<name>` by default (see [Collection URLs](#collection-urls)). Register them in `src/content.config.ts` with the factories from `@cloudflare/nimbus-docs/content`.
 
 Nimbus's `docsCollection()`, `partialsCollection()`, and `componentsCollection()` factories prepare content for links, alternate Markdown/MDX versions, `llms-full.txt`, and partial headings automatically. If you register a loader that stores Markdown bodies directly, wrap it with `withNimbusMarkdown()`:
 
@@ -113,26 +113,37 @@ A collection is served where its route file is. Put the route at `src/pages/prod
 
 ```astro title="src/pages/products/sdk/[...slug].astro"
 ---
-import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { getCollectionPage, getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+
+export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("sdk");
-// …
+
+const page = await getCollectionPage(Astro);
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
+// The rest matches your root src/pages/[...slug].astro: sidebar, previous and next, layout.
 ---
 ```
 
-Nimbus reads the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly, held in a `const`, or returned from a function in the same file. Pass the collection name as a string literal or a `const` holding one. A route it can't read, such as a wrapper imported from another module, keeps the collection at its default URL. The build and `check` warn about one in a nested folder (`nimbus/collection-unread-route`), and the build checks that the route serves its collection from the right folder.
+`nimbus-docs add new-collection` writes the whole route for you. Relative imports such as the layout's grow one `../` per folder level.
+
+Nimbus reads the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
+
+A route Nimbus can't read, such as a wrapper imported from another module, keeps the collection at its default URL. The build and `check` warn about one in a nested folder (`nimbus/collection-unread-route`), and its pages fail the build when they render, naming the route.
 
 The rules:
 
 - `docs` is served at the site root, and a docs version (`docs-v1`) at `/v1`. A docs route away from the root isn't supported yet; for a site that is all docs under one path, set Astro's `base` (`base: "/docs"`).
 - Any other collection with a route is served at the route's folder, the root included. Without one, it's served at `/<name>`, as before.
 - One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error.
-- Several static routes for one collection: the one at its default URL serves it, and the others keep building duplicate pages that nothing links to, with a warning (`nimbus/collection-alias-route` in `check`). With none at the default, it's an error.
+- Several static routes for one collection: the one at its default URL serves it. The others still build their pages, which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
 - A collection a route moved owns everything below its URL. Another collection's page under `/products/sdk` is an error, except under a collection nested deeper (`/products/sdk/cli` is its own). A collection at its default URL (`/sdk`) leaves pages under it as they were.
 - A collection that renders on request is served at `/<name>` until request rendering supports other folders, and an API collection needs a folder: one at the site root is an error for now.
 
 `nimbus-docs check` lists where each collection is served when a route moves one, and `check --json` always includes the list as `collections`.
 
-To link to a collection from a component, use `getCollectionUrl`, which returns the URL without `base`:
+To link to a collection from a component, use `getCollectionUrl`, which returns the URL without `base`. A name that isn't a page collection fails the build:
 
 ```astro
 ---
@@ -145,7 +156,7 @@ Moving a route moves every URL in that collection. Add a redirect from the old U
 
 ### Collection URL errors
 
-The build and `nimbus-docs check` report each of these with the file and the fix:
+The build and `nimbus-docs check` report each of these with the file and the fix; `check` shows the code:
 
 | Code | Cause |
 |---|---|
@@ -158,7 +169,7 @@ The build and `nimbus-docs check` report each of these with the file and the fix
 | `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
 | `nimbus/collection-request-rendered` | A collection that renders on request, routed away from `/<name>`. Render it at build, or move the route. |
 
-A route helper running in a route its collection isn't served from fails the build when the page renders, naming the route's folder and the collection's route file, or the route Nimbus couldn't read.
+A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read.
 
 ## Custom route helpers
 

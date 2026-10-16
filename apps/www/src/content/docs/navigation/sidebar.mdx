@@ -71,6 +71,37 @@ sidebar: {
 
 Array position controls manual item order. Nimbus does not re-sort a configured or transformed array.
 
+## Nested collections
+
+A collection served inside a docs folder's URL appears in that folder. With `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/pages-and-routing#collection-urls)), dbt is a group inside Connectors, its label linking to `/integrations/connectors/dbt/`. Breadcrumbs and previous and next links follow, because they read the sidebar.
+
+This works wherever the folder is generated: with no `sidebar.items`, inside `{ autogenerate: { collection: "docs" } }`, or inside `{ autogenerate: { directory } }`. A collection is never placed inside a hand-made `{ label, items }` group. If folders between are missing, the collection goes in the deepest one that exists, and a folder whose only page is its `index` becomes a group to hold it, as it would with a second page.
+
+The collection's own `index` page controls the group, as a folder's does. Set its label and position:
+
+```yaml title="src/content/dbt/index.mdx"
+---
+title: dbt
+sidebar:
+  order: 2              # its position among the folder's pages
+  group:
+    label: dbt Core     # the group label; the title otherwise
+---
+```
+
+Show only its landing link with `sidebar.hideChildren: true`, or leave the whole collection out of the sidebar with `sidebar.hidden: true`.
+
+To place it yourself, name it in `sidebar.items` with `{ autogenerate: { collection: "dbt" } }`; it then appears only there. A `{ label, link }` to the collection is just a link and doesn't count.
+
+Not placed:
+
+- a collection one segment deep (`/blog`), whose parent is the site root;
+- an API collection, which has its own navigation;
+- anything on another docs version's pages;
+- a collection's alias routes (only the URL it's served at counts).
+
+In `astro dev`, edits to a placed collection's pages under `src/content` show on reload. A collection loaded from elsewhere, or from a content source, shows changes to its navigation after a restart.
+
 ## Scope large sidebars
 
 Large sites can progressively narrow the rail:

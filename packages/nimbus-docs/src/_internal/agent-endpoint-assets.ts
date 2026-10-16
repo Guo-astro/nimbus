@@ -16,6 +16,7 @@ import { entryRouteUrl } from "./astro-slug.js";
 import { isPreparedApiPage } from "./api/prepared.js";
 import { expandPreparedPartials } from "./build-partials.js";
 import {
+  COLLECTION_URLS_DOCS,
   collectionLabel,
   collectionMountPrefix,
   collectionUrlsKey,
@@ -23,7 +24,7 @@ import {
   PRIMARY_COLLECTION,
   type MountContext,
 } from "./collection-mount.js";
-import { COLLECTION_URLS_DOCS, collectionOwnershipErrors, type CollectionRoutes } from "./collection-routes.js";
+import { collectionOwnershipErrors, type CollectionRoutes } from "./collection-routes.js";
 import { llmsAssetUrl } from "./agent-endpoint-coverage.js";
 import {
   buildLlmsFullMarkdown,
@@ -990,12 +991,41 @@ function siteIndexAsset(
   ].join("\n");
 }
 
+/**
+ * A collection at a nested URL (`products/sdk`) is a section of its own,
+ * listed from the root. With nested sections, the nearest section above it
+ * that isn't the root links it too, so `/products/llms.txt` still leads to
+ * everything under `/products`.
+ */
+function nestedCollectionLinks(
+  groups: readonly PreparedLlmsGroup[],
+  options: BakeAgentEndpointAssetsOptions,
+): Map<string, Array<{ slug: string; label: string }>> {
+  const links = new Map<string, Array<{ slug: string; label: string }>>();
+  if (options.nestedSections !== true) return links;
+  const sections = flattenLlmsGroups(groups);
+  const nested = [
+    ...groups.filter((group) => group.kind === "secondary"),
+    ...(options.absentSections ?? []),
+  ].filter((section) => section.slug.includes("/"));
+  for (const section of nested) {
+    const parent = sections
+      .filter((candidate) => section.slug.startsWith(`${candidate.slug}/`))
+      .sort((a, b) => b.slug.length - a.slug.length)[0];
+    if (!parent) continue;
+    links.set(parent.slug, [...(links.get(parent.slug) ?? []), { slug: section.slug, label: section.label }]);
+  }
+  return links;
+}
+
 function sectionIndexAsset(
   group: PreparedLlmsGroup,
   options: BakeAgentEndpointAssetsOptions,
+  nestedCollections: ReadonlyArray<{ slug: string; label: string }> = [],
 ): string {
+  const subsections = [...group.children, ...nestedCollections].sort((a, b) => compare(a.slug, b.slug));
   const pages =
-    group.members.length > 0 || group.children.length === 0
+    group.members.length > 0 || subsections.length === 0
       ? [
           "## Pages",
           "",
@@ -1007,11 +1037,11 @@ function sectionIndexAsset(
         ]
       : [];
   const sections =
-    group.children.length > 0
+    subsections.length > 0
       ? [
           "## Sections",
           "",
-          ...group.children.map(
+          ...subsections.map(
             (child) =>
               `- [${child.label}](${absoluteUrl(options.site, options.base, `/${child.slug}/llms.txt`)})`,
           ),
@@ -1957,6 +1987,7 @@ export async function bakeAgentEndpointAssets(
     options.fullDocument === false
       ? { bodies: [], split: false }
       : llmsFullBodies(llmsFullPages, options, base);
+  const nestedLinks = nestedCollectionLinks(groups, options);
   const llmsBodies: Array<{
     reference: LlmsEndpointReference;
     body: string;
@@ -1972,7 +2003,7 @@ export async function bakeAgentEndpointAssets(
         surface: "index" as const,
         section: group.slug,
       },
-      body: sectionIndexAsset(group, options),
+      body: sectionIndexAsset(group, options, nestedLinks.get(group.slug)),
     })),
   ];
   // Every agent file is one static file on most hosts; one over the limit

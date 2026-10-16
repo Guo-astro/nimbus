@@ -49,21 +49,11 @@ const baseConfig = (rendering?: RenderingConfig): NimbusConfig => ({
   ...(rendering ? { rendering } : {}),
 });
 
-test("request inventory preserves prose ids and only collapses the API root", () => {
-  assert.equal(requestInventoryEntryUrl("", "index", false), "/index");
-  assert.equal(
-    requestInventoryEntryUrl("", "guides/index", false),
-    "/guides/index",
-  );
-  assert.equal(
-    requestInventoryEntryUrl("/blog", "index", false),
-    "/blog/index",
-  );
-  assert.equal(requestInventoryEntryUrl("/api", "index", true), "/api");
-  assert.equal(
-    requestInventoryEntryUrl("/api", "guides/index", true),
-    "/api/guides/index",
-  );
+test("request inventory serves an index at its collection's URL and keeps other ids", () => {
+  assert.equal(requestInventoryEntryUrl("", "index"), "/");
+  assert.equal(requestInventoryEntryUrl("", "guides/index"), "/guides/index");
+  assert.equal(requestInventoryEntryUrl("/blog", "index"), "/blog");
+  assert.equal(requestInventoryEntryUrl("/api", "guides/index"), "/api/guides/index");
   assert.equal(
     requestInventoryVersionStatusKey("docs-v1", false, "v1"),
     "docs-v1",
@@ -73,12 +63,12 @@ test("request inventory preserves prose ids and only collapses the API root", ()
 
 test("content inventory uses final IDs and each collection's actual render mode", () => {
   assert.equal(
-    contentInventoryEntryUrl("", "1.1.1.1/encryption", false, false),
+    contentInventoryEntryUrl("", "1.1.1.1/encryption", false),
     "/1.1.1.1/encryption",
   );
-  assert.equal(contentInventoryEntryUrl("", "index", false, false), "/");
-  assert.equal(contentInventoryEntryUrl("", "index", false, true), "/index");
-  assert.equal(contentInventoryEntryUrl("/api", "index", true, true), "/api");
+  assert.equal(contentInventoryEntryUrl("", "index", false), "/");
+  assert.equal(contentInventoryEntryUrl("", "index", true), "/");
+  assert.equal(contentInventoryEntryUrl("/api", "index", true), "/api");
 });
 
 test("request inventory reader removes root and base-prefixed candidates", async (t) => {
@@ -336,6 +326,7 @@ async function setupIntegration(
       return {} as never;
     },
     injectRoute: (route: unknown) => injectedRoutes.push(route),
+    addWatchFile: () => {},
     config: {
       root: pathToFileURL(`${root}${path.sep}`),
       srcDir: pathToFileURL(`${path.join(root, "src")}${path.sep}`),

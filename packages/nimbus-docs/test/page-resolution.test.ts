@@ -12,24 +12,49 @@ import {
   type ProsePage,
 } from "../src/_internal/page-resolution.js";
 import type { ApiSpec } from "../src/types.js";
+import { collectionsByFolder } from "../src/_internal/collection-mount.js";
 import {
   getApiPage,
   getCollectionPageProps,
   getDocsPageProps,
 } from "../src/index.js";
 
+/** A request context; the route pattern defaults to the URL's folder above the page. */
 function context(
   pathname: string,
   slug: string | undefined,
   props: Record<string, unknown> = {},
+  routePattern?: string,
 ): PageResolutionContext {
+  const segments = pathname.split("/").filter(Boolean);
+  const folder = segments.slice(0, segments.length - (slug?.split("/").length ?? 0));
   return {
     props,
     params: { slug },
     url: new URL(pathname, "https://example.com"),
+    routePattern: routePattern ?? `/${[...folder, "[...slug]"].join("/")}`,
     projection: { audience: { key: "test" } },
   };
 }
+
+// `sdk` served from src/pages/products/kit/ with a kept copy at src/pages/es/sdk/,
+// and the API from src/pages/reference/api/.
+const folders = collectionsByFolder(["docs", "docs-v1", "blog", "sdk", "api"], {
+  versions: { others: ["v1"] },
+  routes: new Map([
+    ["sdk", { mount: "/products/kit", file: "src/pages/products/kit/[...slug].astro", aliases: ["/es/sdk"] }],
+    ["api", { mount: "/reference/api", file: "src/pages/reference/api/[...slug].astro", aliases: [] }],
+  ]),
+});
+let warnings: string[] = [];
+const routeDependencies = {
+  async getCollectionAt(folder: string) {
+    return folders.get(folder);
+  },
+  warn(message: string) {
+    warnings.push(message);
+  },
+};
 
 function entry(
   collection: string,
@@ -73,10 +98,12 @@ describe("prose page resolution", () => {
     ["docs-v1:v1", entry("docs-v1", "v1")],
     ["docs-v1:guides/setup", entry("docs-v1", "guides/setup")],
     ["blog:v1", entry("blog", "v1")],
+    ["sdk:setup", entry("sdk", "setup")],
   ]);
   let lookups: Array<{ collection: string; id: string; audience?: string }> =
     [];
   const dependencies = {
+    ...routeDependencies,
     async getVisibleEntry(
       collection: string,
       id: string,
@@ -188,6 +215,34 @@ describe("prose page resolution", () => {
       assert.equal(blogLeaf.page.entry.id, "v1");
     }
   });
+  test("resolves a request route by its folder, nested, under a base, or a kept copy", async () => {
+    for (const [pathname, pattern] of [
+      ["/products/kit/setup/", "/products/kit/[...slug]"],
+      ["/docs/products/kit/setup/", "/products/kit/[...slug]"],
+      ["/es/sdk/setup/", "/es/sdk/[...slug]"],
+    ] as const) {
+      const result = await resolveProsePage(context(pathname, "setup", {}, pattern), {}, dependencies);
+      assert.equal(result.status, "found", pathname);
+      if (result.status === "found") assert.equal(result.page.identity.collection, "sdk");
+    }
+  });
+
+  test("a request route under a folder no collection is served from is not found, reported once", async () => {
+    warnings = [];
+    for (let i = 0; i < 2; i++) {
+      const result = await resolveProsePage(context("/kits/sdk/setup/", "setup"), {}, dependencies);
+      assert.deepEqual(result, { status: "not-found" });
+    }
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /the route \/kits\/sdk\/\[\.\.\.slug\] renders on request, but no page collection is served from \/kits\/sdk/);
+    assert.match(warnings[0]!, /#collection-urls/);
+  });
+
+  test("a request route under a dynamic folder resolves by the URL segment before the page", async () => {
+    const result = await resolveProsePage(context("/es/blog/v1/", "v1", {}, "/[locale]/blog/[...slug]"), {}, dependencies);
+    assert.equal(result.status, "found");
+    if (result.status === "found") assert.equal(result.page.identity.collection, "blog");
+  });
 });
 
 describe("API page resolution", () => {
@@ -222,6 +277,7 @@ describe("API page resolution", () => {
     [];
   let collectionLoads = 0;
   const dependencies = {
+    ...routeDependencies,
     async getApiCollections() {
       collectionLoads++;
       return api.map(({ collection }) => collection);
@@ -283,12 +339,12 @@ describe("API page resolution", () => {
   test("resolves default root and nested API request paths", async () => {
     lookups = [];
     const root = await resolveApiPage(
-      context("/base/api/", undefined),
+      context("/base/reference/api/", undefined, {}, "/reference/api/[...slug]"),
       {},
       dependencies,
     );
     const nested = await resolveApiPage(
-      context("/base/api/charges/create/", "charges/create"),
+      context("/reference/api/charges/create/", "charges/create"),
       {},
       dependencies,
     );
@@ -303,12 +359,12 @@ describe("API page resolution", () => {
 
   test("resolves version roots and leaves from their indexed store IDs", async () => {
     const root = await resolveApiPage(
-      context("/api/v1/", "v1"),
+      context("/reference/api/v1/", "v1"),
       {},
       dependencies,
     );
     const leaf = await resolveApiPage(
-      context("/api/v1/charges/create/", "v1/charges/create"),
+      context("/reference/api/v1/charges/create/", "v1/charges/create"),
       {},
       dependencies,
     );
@@ -322,7 +378,7 @@ describe("API page resolution", () => {
 
   test("returns not-found for missing and unknown API paths", async () => {
     const missing = await resolveApiPage(
-      context("/api/missing/", "missing"),
+      context("/reference/api/missing/", "missing"),
       {},
       dependencies,
     );
@@ -332,7 +388,7 @@ describe("API page resolution", () => {
       dependencies,
     );
     const rootAlias = await resolveApiPage(
-      context("/api/index/", "index"),
+      context("/reference/api/index/", "index"),
       {},
       dependencies,
     );

@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { collectionMountPrefix, collectionUrlsKey, NO_ROUTES } from "../src/_internal/collection-mount.js";
+import { collectionContaining, collectionMountPrefix, collectionUrlsKey, NO_ROUTES } from "../src/_internal/collection-mount.js";
 import {
+  collectionMoveMessages,
   collectionOwnershipErrors,
   decideCollectionMounts,
   findCollectionRoutes,
@@ -241,6 +242,26 @@ test("collectionMountPrefix reads the route map, then the defaults", () => {
   assert.equal(collectionMountPrefix("docs-v1", { versions: { others: ["v1"] }, routes: NO_ROUTES }), "/v1");
 });
 
+test("a URL belongs to the deepest collection whose URL contains it, on whole segments", () => {
+  const context = {
+    versions: null,
+    routes: new Map([
+      ["api", { mount: "/reference/api", file: "src/pages/reference/api/[...slug].astro", aliases: [] }],
+      ["admin", { mount: "/reference/api/admin", file: "src/pages/reference/api/admin/[...slug].astro", aliases: [] }],
+    ]),
+  };
+  const cases: Array<[string, string | undefined]> = [
+    ["/rest", "rest"],
+    ["/rest/users", "rest"],
+    ["/reference/api", "api"],
+    ["/reference/api/users", "api"],
+    ["/reference/api/admin/keys", "admin"],
+    ["/reference/apis", undefined],
+    ["/guides", undefined],
+  ];
+  for (const [url, expected] of cases) assert.equal(collectionContaining(["rest", "api", "admin"], url, context), expected, url);
+});
+
 test("the cache key names only collections a route moved, so sites that move nothing keep their caches", () => {
   const record = (mount: string) => ({ mount, file: `src/pages${mount}/[...slug].astro`, aliases: [] });
   const versions = { others: ["v1"] };
@@ -249,4 +270,25 @@ test("the cache key names only collections a route moved, so sites that move not
   assert.equal(collectionUrlsKey({ versions, routes: NO_ROUTES }), undefined);
   const moved = new Map([...unmoved, ["sdk", record("/products/kit")]]);
   assert.equal(collectionUrlsKey({ versions, routes: moved }), JSON.stringify([["sdk", "/products/kit"]]));
+});
+
+test("a dev move logs the redirect to add, except away from the root, and the existing redirects to repoint", () => {
+  const at = (mount: string) => ({ versions: null, routes: new Map([["guides", { mount, file: `src/pages${mount}/[...slug].astro`, aliases: [] }]]) });
+  assert.deepEqual(collectionMoveMessages(at("/guides"), at("/products/guides")), [
+    'collection "guides" moved from /guides to /products/guides. Redirect its old URLs in astro.config: "/guides/[...slug]": "/products/guides/[...slug]".',
+  ]);
+  assert.deepEqual(collectionMoveMessages(at(""), at("/guides")), ['collection "guides" moved from / to /guides.']);
+  assert.deepEqual(collectionMoveMessages(at("/guides"), at("/guides")), []);
+  assert.deepEqual(
+    collectionMoveMessages(at("/products/guides"), at("/tools/guides"), [
+      ["/guides/[...slug]", "/products/guides/[...slug]"],
+      ["/start", "/products/guides"],
+      ["/other", "/products/guidesx"],
+    ]),
+    [
+      'collection "guides" moved from /products/guides to /tools/guides. Redirect its old URLs in astro.config: ' +
+        '"/products/guides/[...slug]": "/tools/guides/[...slug]". Point "/guides/[...slug]" at "/tools/guides/[...slug]" too. ' +
+        'Point "/start" at "/tools/guides" too.',
+    ],
+  );
 });

@@ -1,7 +1,8 @@
 // Query-addressed API versions, end to end: one real server build with a
 // query-mode family (default + old + hidden version) beside a path-mode
-// family, then requests against the generated app. Covers route resolution
-// (store ids are not routes), the rendered same-version links, the picker,
+// family and a query-mode family at a nested URL, then requests against the
+// generated app. Covers route resolution (store ids are not routes), the
+// rendered same-version links, the picker,
 // the head (noindex / canonical / Markdown alternate / social image),
 // default-only agent assets, and the final sitemap.
 
@@ -112,10 +113,10 @@ walk(nav.items as never);
 </html>
 `;
 
-const CORE_PAGE = `---
+const corePage = (collection: string) => `---
 import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
 export const prerender = true;
-export const getStaticPaths = getApiStaticPaths("core");
+export const getStaticPaths = getApiStaticPaths("${collection}");
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
 const { page, version } = result;
@@ -202,6 +203,8 @@ before(async () => {
   await write("specs/core.json", spec("core", [["get", "/charges", "create-charge"]]));
   await write("specs/qx-v2.json", spec("qx-v2", [["get", "/ping", "ping"]]));
   await write("specs/qx-v1.json", spec("qx-v1", [["get", "/ping", "ping"]]));
+  await write("specs/nq-v2.json", spec("nq-v2", [["get", "/pets", "list-pets"]]));
+  await write("specs/nq-v1.json", spec("nq-v1", [["get", "/pets", "list-pets"]]));
   await write(
     "src/content.config.ts",
     `import { defineCollection } from "astro:content";
@@ -210,6 +213,7 @@ export const collections = {
   docs: defineCollection(docsCollection()),
   qv: defineCollection(apiCollection()),
   core: defineCollection(apiCollection()),
+  nq: defineCollection(apiCollection()),
   qx: defineCollection(apiCollection({
     collection: "qx",
     versionUrl: { in: "path" },
@@ -234,7 +238,8 @@ if (page instanceof Response) return page;
 `,
   );
   await write("src/pages/qv/[...slug].astro", QV_PAGE);
-  await write("src/pages/core/[...slug].astro", CORE_PAGE);
+  await write("src/pages/core/[...slug].astro", corePage("core"));
+  await write("src/pages/reference/nq/[...slug].astro", corePage("nq"));
   await write("src/pages/qx/[...slug].astro", QX_PAGE);
   await write(
     "src/pages/index.astro",
@@ -290,7 +295,7 @@ if (page instanceof Response) return page;
           search: false,
           rendering: {
             default: "build",
-            collections: { qv: "request", core: "request", qx: "request" },
+            collections: { qv: "request", core: "request", qx: "request", nq: "request" },
           },
           api: [
             {
@@ -303,6 +308,14 @@ if (page instanceof Response) return page;
               ],
             },
             { collection: "core", spec: "./specs/core.json" },
+            {
+              collection: "nq",
+              versionUrl: { in: "query" },
+              versions: [
+                { version: "v2", spec: "./specs/nq-v2.json", default: true },
+                { version: "v1", spec: "./specs/nq-v1.json" },
+              ],
+            },
             {
               collection: "qx",
               versionUrl: { in: "query" },
@@ -361,6 +374,11 @@ test("the version comes from the query: default, explicit, empty, unknown, hidde
   const hidden = await page("/qv/list-pets/?version=v0");
   assert.equal(hidden.status, 200);
   assert.match(hidden.html, /data-version="v0"/);
+});
+
+test("a family at a nested URL selects its version by query", async () => {
+  assert.match((await page("/reference/nq/list-pets/")).html, /data-version="v2"/);
+  assert.match((await page("/reference/nq/list-pets/?version=v1")).html, /data-version="v1"/);
 });
 
 test("store ids are not routes: version-prefixed paths 404, hidden included", async () => {

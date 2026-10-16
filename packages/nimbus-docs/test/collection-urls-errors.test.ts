@@ -162,17 +162,3 @@ if (result instanceof Response) return result;
     },
   );
 });
-
-test("a moved collection rendered on request fails at setup until request rendering supports it", async () => {
-  await assert.rejects(
-    sites.buildSite(
-      { ...base, "src/pages/products/kit/[...slug].astro": routed },
-      { packageImports: true, server: true, rendering: { default: "build", collections: { sdk: "request" } } },
-    ),
-    (error: Error) => {
-      assert.match(error.message, /collection "sdk" renders on request from src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro/);
-      assert.match(error.message, DOCS_LINK);
-      return true;
-    },
-  );
-});

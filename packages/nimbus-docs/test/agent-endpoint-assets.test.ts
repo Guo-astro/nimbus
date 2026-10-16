@@ -1407,6 +1407,30 @@ test("nested sections leave a site without sub-folders byte-identical", async ()
   assert.deepEqual(await bake(true), await bake(false));
 });
 
+test("nested sections: a collection in another slice is linked from the section above it", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "reference/overview", body: "Overview", data: { title: "Overview" } },
+    { id: "guide", body: "Guide", data: { title: "Guide" } },
+  ]);
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    nestedSections: true,
+    absentSections: [
+      { slug: "reference/sdk", label: "SDK" },
+      { slug: "cli", label: "CLI" },
+    ],
+  };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  const body = (await readLlmsEndpointPayload(projectRoot, { scope: "section", surface: "index", section: "reference" })).body;
+  assert.match(body, /## Sections\n\n- \[SDK\]\(https:\/\/example\.test\/docs\/reference\/sdk\/llms\.txt\)\n$/);
+  assert.doesNotMatch(body, /cli/);
+});
+
 test("without nested sections, a top-level section lists every page under it", async () => {
   const projectRoot = await root();
   commit(projectRoot, "docs", [

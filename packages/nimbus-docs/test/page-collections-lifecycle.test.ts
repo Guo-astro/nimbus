@@ -55,6 +55,7 @@ for (const [command, kept] of [
     await integration.hooks["astro:config:setup"]!({
       updateConfig: () => ({}) as never,
       injectRoute: () => {},
+      addWatchFile: () => {},
       config: {
         root: pathToFileURL(`${root}${path.sep}`),
         srcDir: pathToFileURL(`${path.join(root, "src")}${path.sep}`),

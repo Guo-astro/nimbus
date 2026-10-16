@@ -3,9 +3,9 @@ import type { AstroComponentFactory } from "astro/runtime/server/index.js";
 
 import type { ApiNav, ApiPageProps } from "../api/index.js";
 import {
-  collectionMountPrefix,
-  NO_ROUTES,
+  COLLECTION_URLS_DOCS,
   PRIMARY_COLLECTION,
+  routeFolder,
   type VersionInfo,
 } from "./collection-mount.js";
 import type { ProjectionContext } from "./projection.js";
@@ -51,10 +51,19 @@ export interface PageResolutionContext {
   props: Record<string, unknown>;
   params: Record<string, string | undefined>;
   url: URL;
+  /** The route's Astro pattern, without `base`: `/products/sdk/[...slug]`. */
+  routePattern: string;
   projection?: ProjectionContext;
 }
 
-interface ProseResolutionDependencies {
+interface RouteResolutionDependencies {
+  /** The page collection a route folder serves (`""` is the root), if any. */
+  getCollectionAt(folder: string): Promise<string | undefined>;
+  /** Reports a route under a folder no collection is served from. */
+  warn(message: string): void;
+}
+
+interface ProseResolutionDependencies extends RouteResolutionDependencies {
   getVisibleEntry(
     collection: string,
     id: string,
@@ -69,7 +78,7 @@ interface ProseResolutionDependencies {
 
 export type { ApiQueryRouting as ApiQueryVersionRouting } from "./api/resolve-versions.js";
 
-interface ApiResolutionDependencies {
+interface ApiResolutionDependencies extends RouteResolutionDependencies {
   getApiCollections(): Promise<readonly string[]>;
   /** Query-mode routing info for a family, or `null` for path mode. */
   getApiQueryRouting?(collection: string): Promise<ApiQueryRouting | null>;
@@ -122,19 +131,58 @@ function mountedCollectionSegment(
   return pathSegments.at(-(paramSegments.length + 1)) ?? null;
 }
 
+/**
+ * The folder a request route serves: from its pattern, which is base-free and
+ * exact, so nested URLs need no prefix matching. A route with a dynamic folder
+ * (`/[locale]/[...slug]`) falls back to the URL segment before the page, and
+ * isn't `exact`.
+ */
+function requestFolder(context: PageResolutionContext): { folder: string; exact: boolean } | null {
+  const folder = routeFolder(context.routePattern);
+  if (folder !== undefined) return { folder, exact: true };
+  const segment = mountedCollectionSegment(context);
+  return segment === null ? null : { folder: `/${segment}`, exact: false };
+}
+
+/** Whether a request route has no folder of its own, like the root route. */
+function isRootRoute(context: PageResolutionContext): boolean {
+  return !requestFolder(context)?.folder;
+}
+
+const reportedRoutes = new Set<string>();
+
+async function requestCollection(
+  context: PageResolutionContext,
+  dependencies: RouteResolutionDependencies,
+): Promise<string | null> {
+  const route = requestFolder(context);
+  if (!route) return null;
+  const collection = await dependencies.getCollectionAt(route.folder);
+  if (collection !== undefined) return collection;
+  if (route.exact && !reportedRoutes.has(context.routePattern)) {
+    reportedRoutes.add(context.routePattern);
+    dependencies.warn(
+      `nimbus-docs: the route ${context.routePattern} renders on request, but no page collection is served from ` +
+        `${route.folder || "/"}. Page collections come from docsCollection() or withNimbusMarkdown(). To serve one here, ` +
+        `call its route helper in this route's exported getStaticPaths; otherwise move the route to /<name>. ` +
+        `See ${COLLECTION_URLS_DOCS}.`,
+    );
+  }
+  return null;
+}
+
 async function requestProseIdentity(
   context: PageResolutionContext,
   collection: string | undefined,
-  getVersions: () => Promise<VersionInfo | null>,
+  dependencies: ProseResolutionDependencies,
 ): Promise<{ collection: string; id: string } | null> {
   const id = normalizedPageId(context.params.slug);
-  const versions = await getVersions();
+  const versions = await dependencies.getVersions();
   const [first, ...rest] = id === "index" ? [] : id.split("/");
-  const mount = mountedCollectionSegment(context);
   if (
     first &&
     versions?.others.includes(first) &&
-    ((!collection && !mount) ||
+    ((!collection && isRootRoute(context)) ||
       collection === PRIMARY_COLLECTION ||
       collection === `${PRIMARY_COLLECTION}-${first}`)
   ) {
@@ -145,16 +193,8 @@ async function requestProseIdentity(
   }
 
   if (collection) return { collection, id };
-  if (!mount) return null;
-
-  const candidate = versions?.others.includes(mount)
-    ? `${PRIMARY_COLLECTION}-${mount}`
-    : mount;
-  // Request rendering serves collections at their default URL: setup refuses
-  // a request-rendered collection routed anywhere else.
-  return collectionMountPrefix(candidate, { versions, routes: NO_ROUTES }) === `/${mount}`
-    ? { collection: candidate, id }
-    : null;
+  const found = await requestCollection(context, dependencies);
+  return found ? { collection: found, id } : null;
 }
 
 export async function resolveProsePage(
@@ -166,11 +206,7 @@ export async function resolveProsePage(
     CollectionEntry<string> | undefined;
   const requestIdentity = staticEntry
     ? null
-    : await requestProseIdentity(
-        context,
-        options.collection,
-        dependencies.getVersions,
-      );
+    : await requestProseIdentity(context, options.collection, dependencies);
   const collection = staticEntry?.collection ?? requestIdentity?.collection;
   if (!collection || (!staticEntry && !requestIdentity)) {
     return { status: "not-found" };
@@ -229,7 +265,7 @@ export async function resolveApiPage(
     if (!entry) return { status: "not-found" };
   } else if (!hasStaticIdentity) {
     const apiCollections = await dependencies.getApiCollections();
-    collection ??= mountedCollectionSegment(context) ?? undefined;
+    collection ??= (await requestCollection(context, dependencies)) ?? undefined;
     if (!collection || !apiCollections.includes(collection)) {
       return { status: "not-found" };
     }

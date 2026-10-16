@@ -19,9 +19,6 @@ const RUNTIME_MODULES = new Set(["@cloudflare/nimbus-docs", "@cloudflare/nimbus-
 const FACTORIES = new Set(["getCollectionStaticPaths", "getApiStaticPaths"]);
 const DOCS_PATHS = "getDocsStaticPaths";
 
-/** The docs section every collection-URL error links to. */
-export const COLLECTION_URLS_DOCS = "https://nimbus-docs.com/writing/pages-and-routing/#collection-urls";
-
 /** A route file found serving a collection. */
 export interface FoundRoute {
   collection: string;
@@ -409,6 +406,40 @@ export function decideCollectionMounts(
   return { mounts, errors, warnings };
 }
 
+/** What a dev server compares to tell whether a route file change moved a collection. */
+export function mountDecisionStamp(decision: MountDecision): string {
+  return JSON.stringify(
+    decision.errors.length > 0
+      ? { errors: decision.errors.map((error) => error.message) }
+      : { mounts: [...decision.mounts] },
+  );
+}
+
+/**
+ * A log line for each collection whose URL differs between two route maps,
+ * with the redirect to add, except from the root, where it would catch the
+ * whole site, and each existing redirect (`[source, destination]`) into the
+ * old URL to repoint: Astro rejects a redirect to a folder no route serves.
+ */
+export function collectionMoveMessages(
+  before: MountContext,
+  after: MountContext,
+  redirects: ReadonlyArray<readonly [string, string]> = [],
+): string[] {
+  const collections = [...new Set([...before.routes.keys(), ...after.routes.keys()])].sort();
+  return collections.flatMap((collection) => {
+    const from = collectionMountPrefix(collection, before);
+    const to = collectionMountPrefix(collection, after);
+    if (from === to) return [];
+    const moved = `collection "${collection}" moved from ${from || "/"} to ${to || "/"}.`;
+    if (from === "") return [moved];
+    const repoint = redirects
+      .filter(([, destination]) => destination === from || destination.startsWith(`${from}/`))
+      .map(([source, destination]) => ` Point "${source}" at "${to}${destination.slice(from.length)}" too.`);
+    return [`${moved} Redirect its old URLs in astro.config: "${from}/[...slug]": "${to}/[...slug]".${repoint.join("")}`];
+  });
+}
+
 /** `docs` and version collections have URLs no route moves (yet). */
 function fixedMount(collection: string, versions: VersionInfo | null): string | undefined {
   const mount = collectionMountPrefix(collection, { versions, routes: NO_ROUTES });
@@ -463,15 +494,6 @@ export function sidebarPrefixWarnings(
   };
   visit(items ?? []);
   return warnings;
-}
-
-/** A request-rendered collection served away from its default URL, which request rendering can't serve yet. */
-export function movedRequestRouteMessage(collection: string, file: string): string {
-  return (
-    `collection "${collection}" renders on request from ${file}. Request rendering serves collections only at ` +
-    `/${collection} until nested URLs are supported for it. Render "${collection}" at build, or move the route to ` +
-    `src/pages/${collection}/[...slug].astro.`
-  );
 }
 
 /**

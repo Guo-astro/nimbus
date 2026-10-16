@@ -136,10 +136,10 @@ The rules:
 
 - `docs` is served at the site root, and a docs version (`docs-v1`) at `/v1`. A docs route away from the root isn't supported yet; for a site that is all docs under one path, set Astro's `base` (`base: "/docs"`).
 - Any other collection with a route is served at the route's folder, the root included. Without one, it's served at `/<name>`, as before.
-- One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error.
-- Several static routes for one collection: the one at its default URL serves it. The others still build their pages, which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
+- One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error. Rendered on request, such a route finds its collection by the URL segment before the page, so it serves only collections at a one-segment URL (`/sdk`).
+- Several static routes for one collection: the one at its default URL serves it. The others still build their pages (or serve them, for a collection rendered on request), which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
 - A collection a route moved owns everything below its URL. Another collection's page under `/products/sdk` is an error, except under a collection nested deeper (`/products/sdk/cli` is its own). A collection at its default URL (`/sdk`) leaves pages under it as they were.
-- A collection that renders on request is served at `/<name>` until request rendering supports other folders, and an API collection needs a folder: one at the site root is an error for now.
+- An API collection needs a folder: one at the site root is an error for now.
 
 `nimbus-docs check` lists where each collection is served when a route moves one, and `check --json` always includes the list as `collections`.
 
@@ -152,7 +152,7 @@ const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL
 ---
 ```
 
-Moving a route moves every URL in that collection. Add a redirect from the old URLs (see [Redirects](/navigation/redirects)). Until you do, `nimbus-docs lint` reports links to them as broken and suggests their new URL; after, turn on [`nimbus/redirected-link`](/writing/linting) to find the links still going through the redirect. A nested collection's sidebar, breadcrumbs and previous and next links start at its own root. A collection's own `llms.txt` at a nested URL needs the starter's nested section route, `src/pages/[...section]/llms.txt.ts`; with a `[section]` route, the root `llms.txt` lists that collection's pages instead.
+Moving a route moves every URL in that collection, whether it renders at build or on request. Add a redirect from the old URLs (see [Redirects](/navigation/redirects)). Until you do, `nimbus-docs lint` reports links to them as broken and suggests their new URL; after, turn on [`nimbus/redirected-link`](/writing/linting) to find the links still going through the redirect. In `astro dev`, moving a route file restarts the server onto the new URLs and logs the redirect to add. After that restart, Astro can stop showing content edits until you restart the dev server yourself; an `astro.config` edit does the same on a plain Astro site. A nested collection's sidebar, breadcrumbs and previous and next links start at its own root. A collection's own `llms.txt` at a nested URL needs the starter's nested section route, `src/pages/[...section]/llms.txt.ts`; the root `llms.txt` and the nearest section above it link to it. With a `[section]` route, the root `llms.txt` lists that collection's pages instead.
 
 ### Collection URL errors
 
@@ -168,9 +168,8 @@ The build and `nimbus-docs check` report each of these with the file and the fix
 | `nimbus/collection-api-root` | An API collection routed at the site root. Move its route into a folder. |
 | `nimbus/collection-route-param` | A route helper in a route whose parameter isn't `slug` (`[...path].astro`). Rename it to `[...slug].astro`. |
 | `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
-| `nimbus/collection-request-rendered` | A collection that renders on request, routed away from `/<name>`. Render it at build, or move the route. |
 
-A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read.
+A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read. A request-rendered route under a folder no collection is served from returns not found and logs the same advice; one under a dynamic folder (`src/pages/[locale]/kit/[...slug].astro`) isn't reported, since its folder depends on the URL.
 
 ## Custom route helpers
 

@@ -57,10 +57,13 @@ import {
   withoutHtmlExtension,
 } from "./_internal/url.js";
 import {
+  COLLECTION_URLS_DOCS,
   NO_ROUTES,
   PRIMARY_COLLECTION,
   collectionLabel as resolveCollectionSlug,
   collectionMountPrefix as resolveCollectionPrefix,
+  collectionsByFolder,
+  routeFolder,
 } from "./_internal/collection-mount.js";
 import {
   renderEntryAsMarkdown,
@@ -1148,8 +1151,19 @@ function pageResolutionContext(astro: AstroGlobal): PageResolutionContext {
     props: astro.props as Record<string, unknown>,
     params: astro.params,
     url: astro.url,
+    routePattern: astro.routePattern,
     projection: audience ? { audience } : undefined,
   };
+}
+
+let collectionsByRouteFolder: Promise<Map<string, string>> | undefined;
+
+/** The page collection a request route's folder serves, from the route map the build resolved. */
+async function getCollectionAt(folder: string): Promise<string | undefined> {
+  collectionsByRouteFolder ??= Promise.all([loadIndexedCollections(), loadMountContext()]).then(
+    ([collections, context]) => collectionsByFolder(collections, context),
+  );
+  return (await collectionsByRouteFolder).get(folder);
 }
 
 async function resolveAstroProsePage(
@@ -1167,6 +1181,8 @@ async function resolveAstroProsePage(
         ctx?: ProjectionContext,
       ) => Promise<import("astro:content").CollectionEntry<string> | null>,
       getVersions,
+      getCollectionAt,
+      warn: runtimeWarn,
       async render(entry) {
         const { render } = await import("astro:content");
         let rendered: Awaited<ReturnType<typeof render>>;
@@ -1419,13 +1435,8 @@ async function assertRouteServesCollection(
   routePattern: string | undefined,
   helper = "getCollectionStaticPaths",
 ): Promise<void> {
-  if (!routePattern) return;
-  const segments = routePattern.split("/").filter(Boolean);
-  const last = segments.at(-1);
-  if (last !== "[slug]" && last !== "[...slug]") return;
-  const folderSegments = segments.slice(0, -1);
-  if (folderSegments.some((segment) => segment.includes("["))) return;
-  const folder = folderSegments.length ? `/${folderSegments.join("/")}` : "";
+  const folder = routePattern === undefined ? undefined : routeFolder(routePattern);
+  if (folder === undefined) return;
   const context = await loadMountContext();
   const record = context.routes.get(collection);
   const served = resolveCollectionPrefix(collection, context);
@@ -1446,8 +1457,7 @@ async function assertRouteServesCollection(
         `paths from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`
       : `nimbus-docs: the route under ${folder || "/"} serves collection "${collection}", but "${collection}" is served from ` +
         `${servedFrom}. Call ${helper}("${collection}") in the route file's exported getStaticPaths, or move the route.`) +
-      (import.meta.env?.DEV ? " If you just moved the route, restart the dev server." : "") +
-      ` See https://nimbus-docs.com/writing/pages-and-routing/#collection-urls.`,
+      ` See ${COLLECTION_URLS_DOCS}.`,
   );
 }
 
@@ -1674,6 +1684,8 @@ async function resolveApiRoute(
     {},
     {
       getApiCollections: loadApiCollections,
+      getCollectionAt,
+      warn: runtimeWarn,
       async getApiQueryRouting(collection) {
         const { apiQueryRouting } = await import("./_internal/api/resolve-versions.js");
         return apiQueryRouting((await loadNimbusConfig()).api, collection);

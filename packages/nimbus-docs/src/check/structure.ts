@@ -35,7 +35,6 @@ import { parseComponentsRegistry } from "../_internal/parse-components-registry.
 import {
   canonicalCollectionRouteComponent,
   compileRenderingPolicy,
-  movedCollectionRoute,
 } from "../_internal/rendering-policy.js";
 import { resolveMigrationSrcDir } from "../_internal/migrations.js";
 import { validateMdxContent } from "../_internal/validate-mdx-content.js";
@@ -54,13 +53,11 @@ import { probeSources, sourceFindings } from "./sources.js";
 import { parseContentSourcePath } from "../_internal/source-paths.js";
 import { lineOf, relFile } from "./loc.js";
 import type { NimbusConfig } from "../types.js";
-import { collectionMountPrefix, NO_ROUTES, type MountContext } from "../_internal/collection-mount.js";
+import { collectionMountPrefix, COLLECTION_URLS_DOCS, NO_ROUTES, type MountContext } from "../_internal/collection-mount.js";
 import {
   collectionOwnershipErrors,
-  COLLECTION_URLS_DOCS,
   decideCollectionMounts,
   findCollectionRoutes,
-  movedRequestRouteMessage,
   unreadRouteWarnings,
 } from "../_internal/collection-routes.js";
 
@@ -453,17 +450,6 @@ async function checkRequestRendering(
     return false;
   }
   if (!hasRequestRoute) return false;
-  for (const [collection, mode] of Object.entries(policy.collections)) {
-    const moved = mode === "request" ? movedCollectionRoute(collection, mountContext) : undefined;
-    if (moved)
-      findings.push({
-        scope: "structure",
-        code: "nimbus/collection-request-rendered",
-        severity: "error",
-        message: `${movedRequestRouteMessage(collection, moved.file)} See ${COLLECTION_URLS_DOCS}.`,
-        fixable: false,
-      });
-  }
 
   // Not `requiresBuild`: check never reads server output, so a build can't
   // clear this note. It stays, and the build is the gate.

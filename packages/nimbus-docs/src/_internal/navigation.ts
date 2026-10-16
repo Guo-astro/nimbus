@@ -101,25 +101,23 @@ export function composeRouteBreadcrumbs(
  * page still gets a root-anchored trail.
  */
 export function breadcrumbsFromUrl(slug: string, homeLabel = "Home", mount = ""): Breadcrumb[] {
-  const parts = slug.split("/").filter(Boolean);
-  const crumbs: Breadcrumb[] = [{ label: homeLabel, href: "/" }];
-  const label = (part: string) => safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return [{ label: homeLabel, href: "/" }, ...urlCrumbs(slug, mount)];
+}
 
-  // A collection served at a nested URL (`/products/sdk`) starts at its own
-  // root: `/products` is no page.
+/**
+ * One crumb per URL segment below the first `after` segments. A collection
+ * served at a nested URL (`/products/sdk`) starts at its own root:
+ * `/products` is no page.
+ */
+export function urlCrumbs(slug: string, mount = "", after = 0): Breadcrumb[] {
+  const parts = slug.split("/").filter(Boolean);
   const mountParts = mount.split("/").filter(Boolean);
   const inMount = mountParts.length > 0 && mountParts.every((part, index) => parts[index] === part);
-  let path = "";
-  if (inMount) {
-    path = `/${mountParts.join("/")}`;
-    crumbs.push({ label: label(mountParts.at(-1)!), href: toDocumentHref(path) });
-  }
-  for (const part of inMount ? parts.slice(mountParts.length) : parts) {
-    path += `/${part}`;
-    crumbs.push({ label: label(part), href: toDocumentHref(path) });
-  }
-
-  return crumbs;
+  const first = Math.max(after, inMount ? mountParts.length - 1 : 0);
+  return parts.slice(first).map((part, i) => ({
+    label: safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    href: toDocumentHref(`/${parts.slice(0, first + i + 1).join("/")}`),
+  }));
 }
 
 type PrevNextOverride = { link?: string; label?: string };

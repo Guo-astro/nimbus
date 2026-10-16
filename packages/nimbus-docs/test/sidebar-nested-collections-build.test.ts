@@ -62,6 +62,7 @@ export const collections = {
   "src/content/dbt/index.mdx": "---\ntitle: dbt\n---\ndbt.\n",
   "src/content/dbt/setup.mdx": "---\ntitle: Setup\n---\nSet it up.\n",
   "src/content/dbt/usage.mdx": "---\ntitle: Usage\n---\nUse it.\n",
+  "src/content/dbt/internal.mdx": "---\ntitle: Internal\nsidebar:\n  hidden: true\n---\nInternal.\n",
   "src/content/blog/post.mdx": "---\ntitle: Post\n---\nA post.\n",
   "src/content/tools/cli.mdx": "---\ntitle: CLI\n---\nThe CLI.\n",
   "specs/pets.json": SPEC,
@@ -121,6 +122,16 @@ test("the collection appears inside the folder its URL is in, and breadcrumbs fo
   ]);
   assert.equal(prev, "/integrations/connectors/dbt/");
   assert.equal(next, "/integrations/connectors/dbt/usage/");
+});
+
+test("a page the sidebar leaves out keeps the crumbs of the folders above it", async () => {
+  assert.deepEqual((await nav("integrations/connectors/dbt/internal")).crumbs, [
+    "Home /",
+    "Integrations /integrations/",
+    "Connectors /integrations/connectors/",
+    "dbt /integrations/connectors/dbt/",
+    "Internal /integrations/connectors/dbt/internal/",
+  ]);
 });
 
 test("previous and next walk between the folder and the collection in sidebar order", async () => {

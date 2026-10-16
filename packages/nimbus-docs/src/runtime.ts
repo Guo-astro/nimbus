@@ -78,6 +78,7 @@ import {
   breadcrumbsFromUrl,
   composeRouteBreadcrumbs,
   getPrevNext as buildPrevNext,
+  urlCrumbs,
   type BreadcrumbOptions,
 } from "./_internal/navigation.js";
 import { getHeadings } from "./_internal/toc.js";
@@ -979,8 +980,9 @@ export async function getPrevNext(
  * - `root` — the leading crumb (default `{ label: "Home", href: "/" }`).
  * - `resolveLabel` — override a crumb label, or return `null` to drop it.
  *
- * Falls back to URL-segment derivation when the page has no node in the
- * tree, so a stray page still gets a root-anchored trail.
+ * A page with no node in the tree takes the trail of the deepest node above
+ * its URL, then a crumb per remaining segment; with no such node, every
+ * crumb comes from the URL.
  */
 export async function getBreadcrumbs(
   currentSlug: string,
@@ -989,19 +991,24 @@ export async function getBreadcrumbs(
   currentSlug = withoutHtmlExtension(currentSlug);
   // `findActivePath` matches by href, so the un-marked tree suffices (no clone).
   const tree = await buildStructuralTree(options?.collection);
-  const path = findActivePath(tree, currentSlug);
-
-  if (path.length > 0) {
-    const root = options?.root ?? { label: "Home", href: "/" };
+  const root = options?.root ?? { label: "Home", href: "/" };
+  const trail = async (path: SidebarItem[]) => {
     const labels = await Promise.all(
       path.map((node) =>
         Promise.resolve(options?.resolveLabel?.({ node, slug: currentSlug })),
       ),
     );
     return assembleBreadcrumbs(root, path, labels);
-  }
+  };
+  const path = findActivePath(tree, currentSlug);
+  if (path.length > 0) return trail(path);
 
   const mount = options?.collection ? resolveCollectionPrefix(options.collection, await loadMountContext()) : "";
+  const parts = currentSlug.split("/").filter(Boolean);
+  for (let depth = parts.length - 1; depth > 0; depth--) {
+    const ancestry = findActivePath(tree, `/${parts.slice(0, depth).join("/")}`);
+    if (ancestry.length > 0) return composeRouteBreadcrumbs(await trail(ancestry), urlCrumbs(currentSlug, mount, depth));
+  }
   return breadcrumbsFromUrl(currentSlug, options?.root?.label ?? "Home", mount);
 }
 

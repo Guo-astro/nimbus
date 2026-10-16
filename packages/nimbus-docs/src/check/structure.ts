@@ -593,19 +593,19 @@ async function checkDuplicateRoutes(
           )
           .filter((name): name is string => typeof name === "string")
       : [];
-  // Without a build record, add the page collections the config shows
-  // statically: a Nimbus factory or `withNimbusMarkdown()` over a folder.
-  const pageCollections =
-    readPageCollectionsFile(cwd)?.collections ?? [
-      ...new Set([
-        "docs",
-        ...(versions?.others ?? []).map((version) => `docs-${version}`),
-        ...apiCollections,
-        ...[...(placed ?? [])]
-          .filter(([, place]) => place.kind === "folder" && place.role === "page")
-          .map(([key]) => key),
-      ]),
-    ];
+  // The build's list, plus the page collections the config shows statically
+  // (a Nimbus factory or `withNimbusMarkdown()` over a folder), so one added
+  // since that build is checked too.
+  const pageCollections = [
+    ...new Set([
+      ...(readPageCollectionsFile(cwd)?.collections ?? ["docs"]),
+      ...(versions?.others ?? []).map((version) => `docs-${version}`),
+      ...apiCollections,
+      ...[...(placed ?? [])]
+        .filter(([, place]) => place.kind === "folder" && place.role === "page")
+        .map(([key]) => key),
+    ]),
+  ];
 
   const indexedBases = new Map<string, string>();
   const contentOwners: RouteOwner[] = [];

@@ -81,6 +81,53 @@ export function normalizeRedirects(
   return { redirects: out, skipped };
 }
 
+/**
+ * The pages Astro writes for a dynamic redirect (`/sdk/[...slug]` →
+ * `/products/kit/[...slug]`): one per built route its source matches, so lint
+ * follows them instead of taking them for pages.
+ */
+export function expandDynamicRedirects(
+  redirects: Record<string, RedirectConfigLike>,
+  routes: Iterable<string>,
+  base: string,
+): NormalizedRedirect[] {
+  const rules = Object.entries(redirects).flatMap(([from, config]) => {
+    const to = typeof config === "string" ? config : config.destination;
+    if (!isDynamic(from) || isExternal(to)) return [];
+    const names: string[] = [];
+    const source = from
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => {
+        const rest = /^\[\.\.\.([^\]]+)\]$/u.exec(segment);
+        if (rest) return names.push(rest[1]!), "(?:/(.+))?";
+        const param = /^\[([^\]]+)\]$/u.exec(segment);
+        if (param) return names.push(param[1]!), "/([^/]+)";
+        return `/${segment.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}`;
+      })
+      .join("");
+    const status = typeof config === "string" ? DEFAULT_STATUS : config.status;
+    return [{ re: new RegExp(`^${source}$`, "u"), names, to, status }];
+  });
+  const out: NormalizedRedirect[] = [];
+  for (const route of routes) {
+    for (const rule of rules) {
+      const match = rule.re.exec(route === "/" ? "" : route);
+      if (!match) continue;
+      let to = rule.to;
+      rule.names.forEach((name, index) => {
+        const value = match[index + 1];
+        to = to.split(`[...${name}]`).join(value ?? "").split(`[${name}]`).join(value ?? "");
+      });
+      to = to.replace(/\/{2,}/gu, "/").replace(/(.)\/$/u, "$1");
+      const page = { from: withBase(base, route), to: withBase(base, to), status: rule.status };
+      if (page.from !== page.to) out.push(page);
+      break;
+    }
+  }
+  return out;
+}
+
 // Existing content is kept verbatim and existing sources win, so re-running over
 // a user's `public/_redirects` (or our own prior output) is idempotent.
 export function formatRedirectsFile(

@@ -66,7 +66,7 @@ test("route segments and patterns follow Astro's file routing", () => {
   assert.equal(routePattern("/products/sdk", "src/pages/products/sdk/[slug].astro"), "/products/sdk/[slug]");
 });
 
-test("findCollectionRoutes reads every slug route under src/pages, skipping _ files and other params", () => {
+test("findCollectionRoutes reads every helper route under src/pages, skipping _ files, and marks a param other than slug", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-collection-routes-"));
   const write = (file: string, frontmatter: string) => {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
@@ -87,12 +87,13 @@ test("findCollectionRoutes reads every slug route under src/pages, skipping _ fi
     const { found, unread } = findCollectionRoutes(path.join(root, "src"), root);
     assert.deepEqual(unread, [{ folder: "/tools", file: "src/pages/tools/[...slug].astro" }]);
     assert.deepEqual(
-      found.map(({ collection, folder, file, dynamic }) => [collection, folder, file, dynamic]),
+      found.map(({ collection, folder, file, dynamic, misnamed }) => [collection, folder, file, dynamic, misnamed]),
       [
-        ["sdk", "/[locale]/sdk", "src/pages/[locale]/sdk/[...slug].astro", true],
-        ["blog", "/blog", "src/pages/blog/[slug]/index.astro", false],
-        ["sdk", "/products/kit", "src/pages/products/kit/[...slug].astro", false],
-        ["cli", "/v[version]/cli", "src/pages/v[version]/cli/[...slug].astro", true],
+        ["sdk", "/[locale]/sdk", "src/pages/[locale]/sdk/[...slug].astro", true, undefined],
+        ["blog", "/blog", "src/pages/blog/[slug]/index.astro", false, undefined],
+        ["blog", "/blog/tags", "src/pages/blog/tags/[tag].astro", false, "[tag]"],
+        ["sdk", "/products/kit", "src/pages/products/kit/[...slug].astro", false, undefined],
+        ["cli", "/v[version]/cli", "src/pages/v[version]/cli/[...slug].astro", true, undefined],
       ],
     );
   } finally {
@@ -132,6 +133,8 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(warnings.map((warning) => warning.code), ["nimbus/collection-alias-route", "nimbus/collection-alias-route"]);
   assert.match(warnings[0]!.message, /^src\/pages\/es\/\[\.\.\.slug\]\.astro also serves collection "docs", which is served at \/ /);
   assert.match(warnings[1]!.message, /redirect \/es\/api to \/api\.$/);
+  const above = decideCollectionMounts([found("sdk", "/sdk"), found("sdk", "")], versions, []).warnings;
+  assert.match(above[0]!.message, /search too; delete the route\.$/);
 
   const codes = (routes: FoundRoute[]) => decideCollectionMounts(routes, versions, ["api"]).errors.map((error) => error.code);
   assert.deepEqual(codes([found("sdk", "/a"), found("sdk", "/b")]), ["nimbus/collection-two-routes"]);
@@ -143,6 +146,23 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(codes([found("guides", ""), found("docs", "")]), ["nimbus/collection-same-url"]);
   assert.deepEqual(codes([found("api", "")]), ["nimbus/collection-api-root"]);
   assert.deepEqual(codes([found("guides", "")]), []);
+
+  const misnamed = (collection: string, folder: string, file: string): FoundRoute => ({
+    ...found(collection, folder),
+    file,
+    misnamed: file.match(/\[[^\]]+\](?=(?:\/index)?\.astro$)/)![0],
+  });
+  const kit = decideCollectionMounts([misnamed("sdk", "/products/kit", "src/pages/products/kit/[...path].astro")], versions, ["api"]);
+  assert.deepEqual(kit.errors.map((error) => error.code), ["nimbus/collection-route-param"]);
+  assert.match(kit.errors[0]!.message, /parameter is \[\.\.\.path\].*stays at \/sdk\. Rename it to src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro\.$/);
+  assert.equal(kit.mounts.size, 0);
+  assert.deepEqual(codes([misnamed("api", "", "src/pages/[...path].astro")]), ["nimbus/collection-route-param"]);
+  assert.match(
+    decideCollectionMounts([misnamed("blog", "/news", "src/pages/news/[id]/index.astro")], versions, []).errors[0]!.message,
+    /Rename it to src\/pages\/news\/\[slug\]\/index\.astro\.$/,
+  );
+  assert.deepEqual(codes([misnamed("sdk", "/sdk", "src/pages/sdk/[...path].astro")]), []);
+  assert.deepEqual(codes([misnamed("docs", "", "src/pages/[...path].astro")]), []);
 });
 
 test("unread helper routes warn only where no collection is served by default", () => {

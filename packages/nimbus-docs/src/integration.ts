@@ -191,6 +191,7 @@ import {
 } from "./_internal/version-alternates.js";
 import {
   detectDeploySignals,
+  expandDynamicRedirects,
   formatRedirectsFile,
   normalizeRedirects,
   shouldEmitRedirects,
@@ -4100,7 +4101,10 @@ function materializeRouteTruth(input: {
       defaultStatus: input.redirects.rules === "netlify" ? 301 : 302,
       logger: input.logger,
     });
-    const redirectPages = normalizeRedirects(input.redirects.astro, input.base).redirects;
+    const redirectPages = [
+      ...normalizeRedirects(input.redirects.astro, input.base).redirects,
+      ...expandDynamicRedirects(input.redirects.astro, routes, input.base),
+    ];
 
     let sliceRecord: RouteTruth["slice"];
     if (input.slice) {

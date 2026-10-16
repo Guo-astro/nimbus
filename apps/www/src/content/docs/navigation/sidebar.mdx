@@ -75,7 +75,7 @@ Array position controls manual item order. Nimbus does not re-sort a configured 
 
 A collection served inside a docs folder's URL appears in that folder. With `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/pages-and-routing#collection-urls)), dbt is a group inside Connectors, its label linking to `/integrations/connectors/dbt/`. Breadcrumbs and previous and next links follow, because they read the sidebar.
 
-This works wherever the folder is generated: with no `sidebar.items`, inside `{ autogenerate: { collection: "docs" } }`, or inside `{ autogenerate: { directory } }`, including one inside a hand-made `{ label, items }` group. It's never placed directly among a hand-made group's own items. If folders between are missing, the collection goes in the deepest one that exists, and a folder whose only page is its `index` becomes a group to hold it, as it would with a second page. That group takes the page's `title` as its label, not its `sidebar.label`, and loses its `Draft` badge, as any folder's group does.
+This works wherever the folder is generated: with no `sidebar.items`, inside `{ autogenerate: { collection: "docs" } }`, or inside `{ autogenerate: { directory } }`, including one inside a hand-made `{ label, items }` group. It's never placed directly among a hand-made group's own items. If folders between are missing, the collection goes in the deepest one that exists, and a folder whose only page is its `index` becomes a group to hold it, as it would with a second page. That group keeps the label the page had as a link, and drops its `Draft` badge, as any folder's group does.
 
 The collection's own `index` page controls the group, as a folder's does. Set its label and position:
 
@@ -91,7 +91,7 @@ sidebar:
 
 Show only its landing link with `sidebar.hideChildren: true`, or leave the whole collection out of the sidebar with `sidebar.hidden: true`.
 
-To place it yourself, name it in `sidebar.items` with `{ autogenerate: { collection: "dbt" } }`, link to its URL with `{ label: "dbt", link: "/integrations/connectors/dbt/" }`, or make it a hand-made group's `landing`; it then appears only there.
+To place it yourself, name it in `sidebar.items` with `{ autogenerate: { collection: "dbt" } }`, link to its URL with `{ label: "dbt", link: "/integrations/connectors/dbt/" }`, or make it a hand-made group's `landing`; it then appears only there. A link or a `landing` shows only the collection's landing page; to show its pages too, use `{ autogenerate: { collection } }`.
 
 Not placed:
 

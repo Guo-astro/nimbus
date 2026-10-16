@@ -1291,6 +1291,8 @@ function insertIntoRange(container: Container, item: SidebarItem): void {
 function promoteLeaf(target: Extract<Target, { kind: "leaf" }>, currentPath: string): SidebarGroupItem {
   const { entry, hrefPrefix } = entryLeaves.get(target.leaf)!;
   const group = createGroupFromEntry(entry.id, entry, currentPath, hrefPrefix, joinHref(hrefPrefix, entry.id));
+  // The page keeps the label it had as a link: nothing about it changed.
+  if (entry.data.sidebar?.group?.label === undefined) group.label = target.leaf.label;
   const owner = ownerEntries.get(target.leaf);
   if (owner) ownerEntries.set(group, owner);
   const { array } = target.container;

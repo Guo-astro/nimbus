@@ -298,21 +298,24 @@ describe("deep mounts and missing folders", () => {
   });
 });
 
-describe("a promoted folder follows folder rules", () => {
-  test("its label is the page title and its order comes from its child, as with a second page", () => {
+describe("a promoted folder", () => {
+  test("keeps the page's link label, and otherwise follows folder rules, as with a second page", () => {
     const lone = [page("products", { title: "Products", sidebar: { label: "All products" } }), page("guide", { sidebar: { order: 2 } })];
     const sdk = nested("sdk", "/products/sdk", [page("x", { sidebar: { order: 1 } })]);
+    assert.deepEqual(outline(build(lone)), ["Guide /guide/", "All products /products/"]);
     assert.deepEqual(outline(build(lone, [sdk])), [
-      "[Products] /products/",
+      "[All products] /products/",
       "  [Sdk]",
       "    X /products/sdk/x/",
       "Guide /guide/",
     ]);
     const twoPages = [...lone, page("products/other", { sidebar: { order: 1 } })];
-    const { children: _promoted, ...promoted } = find(build(lone, [sdk]), "Products")!;
-    const { children: _folder, ...folder } = find(build(twoPages), "Products")!;
+    const { children: _promoted, label: promotedLabel, ...promoted } = find(build(lone, [sdk]), "All products")!;
+    const { children: _folder, label: folderLabel, ...folder } = find(build(twoPages), "Products")!;
     assert.deepEqual(promoted, folder);
-    assert.deepEqual(build(twoPages).map((i) => i.label), ["Products", "Guide"]);
+    assert.deepEqual([promotedLabel, folderLabel], ["All products", "Products"]);
+    const renamed = [page("products", { title: "Products", sidebar: { label: "All products", group: { label: "Catalog" } } })];
+    assert.equal(build(renamed, [sdk])[0]!.label, "Catalog");
   });
 });
 

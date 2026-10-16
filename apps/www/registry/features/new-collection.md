@@ -358,7 +358,11 @@ After writing all files:
 1. Run the user's build command — match their package manager (`pnpm`,
    `npm`, `yarn`).
 2. Confirm the build completes without errors.
-3. Confirm the dist output contains the expected files:
+3. If the collection renders on request (it's listed under
+   `rendering.collections` as `"request"`, or `rendering.default` is
+   `"request"`), its pages aren't written to `dist/`: start the built site
+   (or `astro dev`) and request the URLs in step 4 instead, then skip to it.
+   Otherwise, confirm the dist output contains the expected files:
    - `dist/<prefix>/welcome/index.html` (if a starter entry was created)
    - `dist/<prefix>/welcome/index.md` and `index.mdx` (served by the shared
      Markdown routes)

@@ -71,6 +71,7 @@ export function readRouteTruth(projectRoot: string): RouteTruthResult {
       redirectPages: record.redirectPages,
       redirectRules: record.redirectRules,
       opaqueNamespaces: record.opaqueNamespaces,
+      ...(isMounts(record.mounts) ? { mounts: record.mounts } : {}),
       ...(slice ? { slice } : {}),
       ...(typeof record.builtAt === "string" ? { builtAt: record.builtAt } : {}),
     },
@@ -85,9 +86,15 @@ function isSlice(value: unknown): value is RouteTruthSlice {
     isStringArray(slice.collections) &&
     isStringArray(slice.covered) &&
     (slice.priorBuiltAt === undefined || typeof slice.priorBuiltAt === "string") &&
-    typeof slice.mounts === "object" &&
-    slice.mounts !== null &&
-    Object.values(slice.mounts).every((prefix) => typeof prefix === "string")
+    isMounts(slice.mounts)
+  );
+}
+
+function isMounts(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Object.values(value).every((prefix) => typeof prefix === "string")
   );
 }
 

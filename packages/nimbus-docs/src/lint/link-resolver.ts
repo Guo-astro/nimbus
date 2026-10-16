@@ -40,6 +40,8 @@ export interface LinkEnv {
   patterns: PatternRule[];
   /** Astro's meta-refresh pages, by route key of their source. */
   pages: Map<string, { to: string; status: number }>;
+  /** Every page collection's mount, when the build recorded them. */
+  mounts: Record<string, string>;
   /** Set when the truth is from a partial build. See `RouteTruth.slice`. */
   slice?: RouteTruthSlice;
 }
@@ -105,6 +107,7 @@ export function createLinkEnv(truth: Omit<RouteTruth, "version">): LinkEnv {
     exact,
     patterns,
     pages,
+    mounts: truth.mounts ?? {},
     ...(truth.slice ? { slice: truth.slice } : {}),
   };
 }

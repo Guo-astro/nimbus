@@ -3424,9 +3424,13 @@ export function nimbus(
         // kept in dev too — rebuilding the full tree per request is too slow on
         // large sites. Clear them when a content file changes so nav edits
         // (order/label/new pages) still hot-update. Dev-only (this hook never
-        // runs at build).
+        // runs at build). Astro writes the content store about 500ms after the
+        // edit, so clear again then: a request in between caches the old nav.
+        const dataStore = path.join(projectRootForBuild, ".astro", "data-store");
         const isContentFile = (file: string) =>
-          /[\\/]src[\\/]content[\\/].*\.(?:mdx?|ya?ml|json)$/.test(file);
+          /[\\/]src[\\/]content[\\/].*\.(?:mdx?|ya?ml|json)$/.test(file) ||
+          file === `${dataStore}.json` ||
+          file.startsWith(`${dataStore}${path.sep}`);
         const invalidate = async (file: string) => {
           if (!isContentFile(file)) return;
           const { clearNavCaches } = await import("./index.js");

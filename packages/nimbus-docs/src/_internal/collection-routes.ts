@@ -315,8 +315,8 @@ export function decideCollectionMounts(
         errors.push({
           code: "nimbus/collection-route-param",
           message:
-            `${route.file} calls the route helper for "${route.collection}", but its parameter is ${route.misnamed}, which the ` +
-            `helper's paths don't fill, so "${route.collection}" stays at ${fallback || "/"}. Rename it to ` +
+            `${route.file} calls the route helper for "${route.collection}", but its parameter is ${route.misnamed}, and Nimbus ` +
+            `serves a collection's pages through [slug] or [...slug] only, so "${route.collection}" stays at ${fallback || "/"}. Rename it to ` +
             `${route.file.slice(0, at)}${helper}${route.file.slice(at + route.misnamed.length)}.`,
         });
       continue;
@@ -460,7 +460,8 @@ export function unreadRouteWarnings(unread: readonly UnreadRoute[]): MountWarnin
       message:
         `Nimbus couldn't read the getStaticPaths in ${route.file}, so the collection it serves isn't served at ${route.folder}. ` +
         `Export it as \`export const getStaticPaths = getCollectionStaticPaths("<name>")\`, or return the helper's paths ` +
-        `from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`,
+        `from getStaticPaths itself, passing the name as a string literal or an exported const holding one. ` +
+        `If the build then fails with "<name> is not defined", export that name: Astro runs getStaticPaths apart from the rest of the frontmatter.`,
     }));
 }
 

@@ -159,6 +159,15 @@ test("internal-link suggests where a moved path now lives, never the root", () =
   } finally {
     cleanup(setup.root);
   }
+  const based = setupProject(baseTruth({ base: "/docs/", knownRoutes: ["/", "/products/sdk/setup"] }));
+  try {
+    assert.match(
+      lint(based, `${FM}\n[a](/docs/sdk/setup)\n`)[0]!.message,
+      /^broken link "\/docs\/sdk\/setup" — did you mean "\/products\/sdk\/setup"\? Write links without the base "\/docs"/,
+    );
+  } finally {
+    cleanup(based.root);
+  }
 });
 
 test("internal-link flags a broken link with no near-match plainly", () => {

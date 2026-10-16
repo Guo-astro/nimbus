@@ -130,14 +130,14 @@ If you need framework-side validation/transformation, **use the content-pass pat
 
 ## Commit style
 
-Short imperative phrases, sentence case. Examples from `git log`:
+One lowercase conventional line: `type: summary` or `type(scope): summary`, with `feat`, `fix`, `docs`, `test`, `chore` or `refactor`. Examples from `git log`:
 
-- *Ship MDX PascalCase validator and small polish improvements*
-- *Add starter polish utilities*
-- *Refresh registry output and sidebar collection docs*
-- *Keep static markdown route in Cloudflare scaffolds*
+- *feat: fetch only the sources a build reads*
+- *fix: escape docsCollection aliases like other identifiers*
+- *refactor: move the notion loader into its source guide*
+- *docs: build without a source*
 
-No conventional-commit prefixes (no `feat:`/`fix:`). Each commit targets one cohesive change. Use a body paragraph to explain *why* when non-obvious.
+Each commit targets one cohesive change. Use a body paragraph to explain *why* when it isn't obvious. Changesets go in their own `chore: add changesets` commit.
 
 When committing inside a session where other unrelated WIP exists (the user's working tree may have in-progress changes), use `git commit --only -- <paths>` to commit only the listed files without disturbing other staged work.
 

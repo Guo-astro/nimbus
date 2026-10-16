@@ -102,6 +102,7 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
         invocation: invocation("check --fix", cwd),
         rerun: invocation("check", cwd),
         skippedFixes: [...skipped],
+        interactive: isTTY(),
       }),
     );
   }

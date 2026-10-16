@@ -543,7 +543,11 @@ function renderTask(
   completionOptions: CompletionOptions,
 ): string {
   if (plans.length === 0 && reviews.length === 0 && !baselineNeedsRecording) {
-    return "# Nimbus migration task\n\nNo known Nimbus migrations or upgrade reviews are pending.\n";
+    const status =
+      baseline.source === "preview"
+        ? previewMessage(baseline)
+        : "No known Nimbus migrations or upgrade reviews are pending.";
+    return `# Nimbus migration task\n\n${status}\n`;
   }
   const lines = ["# Nimbus migration task", "", "Review the migrations and upgrade entries below. Do not overwrite customized behavior.", ""];
   if (!baseline.fromVersion && baseline.source !== "preview") {

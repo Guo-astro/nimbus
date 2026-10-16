@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { openApiParserMissing } from "./parser-missing.js";
 
 /**
  * The OpenAPI front-end's half of the publication contract: one self-contained
@@ -59,9 +60,11 @@ export async function publishOpenApiSpec(
   const [{ bundle }, { parseJson, parseYaml, readFiles }, { dereference }] = await Promise.all([
     import("@scalar/json-magic/bundle"),
     import("@scalar/json-magic/bundle/plugins/node"),
-    import(/* @vite-ignore */ parser) as Promise<{
+    (import(/* @vite-ignore */ parser) as Promise<{
       dereference(document: unknown): Promise<{ errors?: { message: string }[] }>;
-    }>,
+    }>).catch(async () => {
+      throw new Error(await openApiParserMissing(rootDir));
+    }),
   ]);
   const rootFile = typeof source === "string" ? path.resolve(rootDir, source) : undefined;
   if (rootFile && !fs.existsSync(rootFile))

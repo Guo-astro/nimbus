@@ -18,8 +18,8 @@ import { ADAPTER_IDS, ADAPTER_RECIPES } from "../_internal/adapters.js";
 import { readBuildEnv } from "../_internal/dotenv.js";
 import { deriveFootprint, type FeatureRecipe } from "../_internal/footprint.js";
 import type { ConfigParseResult } from "../_internal/parse-nimbus-config.js";
-import { mcpSdkMessage } from "../_internal/server-adapter.js";
-import { dependenciesMissing } from "../_internal/upgrades.js";
+import { mcpSdkMessage, openApiParserMessage } from "../_internal/server-adapter.js";
+import { dependenciesMissing, hasPnpInstall } from "../_internal/upgrades.js";
 import { addCommand, detectPackageManager, installCommand, quoteForDisplay } from "../cli/pm.js";
 import type { CheckFinding, Note, ScopeReport } from "./finding.js";
 import { lineOf, relFile } from "./loc.js";
@@ -61,6 +61,7 @@ export function checkEnv(cwd: string, parsed: ConfigParseResult): ScopeReport {
   } else if (hasPackageJson(cwd)) {
     checkPagefind(cwd, findings, parsed);
     checkMcpSdk(cwd, findings, parsed);
+    checkOpenApiParser(cwd, findings, parsed);
     checkWrangler(cwd, findings);
     checkAdapterVersions(cwd, findings);
     const features = deriveFootprint(readDependencyNames(cwd));
@@ -221,6 +222,49 @@ function usesCustomSearchProvider(search: unknown): boolean {
     "provider" in search &&
     (search as { provider?: unknown }).provider === "custom"
   );
+}
+
+function checkOpenApiParser(
+  cwd: string,
+  findings: CheckFinding[],
+  parsed: ConfigParseResult,
+): void {
+  if (!parsed.ok) return;
+  if (parsed.unresolved.includes("api") || parsed.unresolved.includes("...spread")) return;
+  const api = parsed.config.api;
+  if (!Array.isArray(api) || api.length === 0) return;
+  // No node_modules to read; Nimbus doesn't support Plug'n'Play.
+  if (hasPnpInstall(cwd)) return;
+  if (openApiParserResolves(cwd)) return;
+  findings.push({
+    scope: "env",
+    code: "nimbus/openapi-parser-missing",
+    severity: "error",
+    message: openApiParserMessage(cwd),
+    fixable: true,
+    fix: {
+      kind: "install-dep",
+      package: "@scalar/openapi-parser",
+      dev: false,
+      suggestion: "install @scalar/openapi-parser",
+    },
+  });
+}
+
+/**
+ * The build imports the parser from Nimbus's own location, so look for it
+ * from the installed `@cloudflare/nimbus-docs` (through pnpm's links), not
+ * only from the project's `node_modules`. On disk rather than through Node's
+ * resolver, so a parser `check --fix` just installed is found in the same run.
+ */
+function openApiParserResolves(cwd: string): boolean {
+  for (let dir = cwd; ; dir = path.dirname(dir)) {
+    const nimbus = path.join(dir, "node_modules", "@cloudflare", "nimbus-docs");
+    if (fs.existsSync(path.join(nimbus, "package.json"))) {
+      return depInstalled(fs.realpathSync(nimbus), "@scalar/openapi-parser");
+    }
+    if (path.dirname(dir) === dir) return depInstalled(cwd, "@scalar/openapi-parser");
+  }
 }
 
 function checkMcpSdk(

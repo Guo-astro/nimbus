@@ -224,3 +224,100 @@ export default defineConfig({ ${astroFields} integrations: [nimbus({ site: "http
     undefined,
   );
 });
+
+const API = `{ site: "https://docs.example.com", title: "X", search: false, api: [{ collection: "api", spec: "./openapi.yaml" }] }`;
+const ENV_ONLY = { env: true, structure: false, authoring: false, types: false } as const;
+
+function fakePackage(dir: string, name: string, manifest: Record<string, unknown> = { main: "index.js" }): void {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name, ...manifest }));
+  fs.writeFileSync(path.join(dir, "index.js"), "export {};\n");
+}
+
+const parserFinding = async (dir: string) =>
+  (await runChecks(dir, ENV_ONLY)).findings.find((f) => f.code === "nimbus/openapi-parser-missing");
+
+test("an api collection without the OpenAPI parser is a fixable error naming the install line", async () => {
+  const dir = project(API);
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", packageManager: "pnpm@9.0.0" }));
+  try {
+    const finding = await parserFinding(dir);
+    assert.ok(finding);
+    assert.equal(finding.severity, "error");
+    assert.equal(finding.fixable, true);
+    assert.equal(finding.fix?.kind, "install-dep");
+    assert.match(finding.message, /`pnpm add [^`]*@scalar\/openapi-parser`/);
+    assert.match(finding.message, /openapi-sampler @readme\/httpsnippet/);
+    fakePackage(path.join(dir, "node_modules/@scalar/openapi-parser"), "@scalar/openapi-parser");
+    assert.equal(await parserFinding(dir), undefined);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("the parser is found where the build finds it: through Nimbus's own links, with any exports shape", async () => {
+  const dir = project(API);
+  try {
+    // pnpm: the site links Nimbus from the store, and the parser sits beside it there.
+    const store = path.join(dir, "store/node_modules");
+    fakePackage(path.join(store, "@cloudflare/nimbus-docs"), "@cloudflare/nimbus-docs");
+    fakePackage(path.join(store, "@scalar/openapi-parser"), "@scalar/openapi-parser", {
+      type: "module",
+      exports: { ".": { import: "./index.js" } },
+    });
+    fs.mkdirSync(path.join(dir, "node_modules/@cloudflare"), { recursive: true });
+    fs.symlinkSync(path.join(store, "@cloudflare/nimbus-docs"), path.join(dir, "node_modules/@cloudflare/nimbus-docs"), "dir");
+    assert.equal(await parserFinding(dir), undefined);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("a parser installed after a check is found by the next check in the same process", async () => {
+  const dir = project(API);
+  try {
+    // npm: Nimbus and another @scalar package are already installed when `check --fix` adds the parser.
+    fakePackage(path.join(dir, "node_modules/@cloudflare/nimbus-docs"), "@cloudflare/nimbus-docs");
+    fakePackage(path.join(dir, "node_modules/@scalar/json-magic"), "@scalar/json-magic");
+    assert.ok(await parserFinding(dir));
+    // Its entry only in `dist/`, like the real package: Node's resolver remembers the missing package.json.
+    const parser = path.join(dir, "node_modules/@scalar/openapi-parser");
+    fs.mkdirSync(path.join(parser, "dist"), { recursive: true });
+    fs.writeFileSync(
+      path.join(parser, "package.json"),
+      JSON.stringify({ name: "@scalar/openapi-parser", type: "module", exports: { ".": "./dist/index.js" } }),
+    );
+    fs.writeFileSync(path.join(parser, "dist/index.js"), "export {};\n");
+    assert.equal(await parserFinding(dir), undefined);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("no parser finding without api collections or under Plug'n'Play", async () => {
+  const none = project(`{ site: "https://docs.example.com", title: "X", search: false }`);
+  const pnp = project(API);
+  fs.writeFileSync(path.join(pnp, ".pnp.cjs"), "");
+  try {
+    assert.equal(await parserFinding(none), undefined);
+    assert.equal(await parserFinding(pnp), undefined);
+  } finally {
+    cleanup(none);
+    cleanup(pnp);
+  }
+});
+
+test("check and the build name the same install line for a missing parser", async () => {
+  const dir = project(API);
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "fixture", packageManager: "pnpm@9.0.0" }));
+  const cwd = process.cwd();
+  try {
+    const finding = await parserFinding(dir);
+    process.chdir(dir);
+    const { openApiParserMissing } = await import("../../src/_internal/api/parser-missing.js");
+    assert.equal(await openApiParserMissing(), finding?.message);
+  } finally {
+    process.chdir(cwd);
+    cleanup(dir);
+  }
+});

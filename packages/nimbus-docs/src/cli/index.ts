@@ -32,6 +32,7 @@ import { ADAPTER_IDS, type AdapterId } from "../_internal/adapters.js";
 import {
   cloudflareRequestRenderingAgentRecipe,
   installAdapter,
+  type AdapterInstallErrorCode,
 } from "./adapter.js";
 import { BUNDLED_INDEX, type RegistryEntryType } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
@@ -698,10 +699,13 @@ async function runAdapterInstall(
   label: string,
   printRecipe: boolean,
 ): Promise<void> {
-  if (adapter === "cloudflare" && (await shouldUseAgentHandoff(printRecipe))) {
+  if (adapter === "cloudflare" && printRecipe) {
     process.stdout.write(cloudflareRequestRenderingAgentRecipe());
     return;
   }
+  // A coding agent gets the same edits as a shell, and the recipe only where
+  // the installer can't edit safely but the agent can.
+  const agentSession = adapter === "cloudflare" && (await shouldUseAgentHandoff(false));
   if (printRecipe) {
     p.log.error("`--print` is only available for the Cloudflare adapter.");
     process.exit(1);
@@ -733,32 +737,45 @@ async function runAdapterInstall(
   });
 
   if (outcome.status === "error") {
+    if (agentSession && AGENT_FINISHES.has(outcome.code)) {
+      p.log.warn(outcome.message);
+      process.stdout.write(cloudflareRequestRenderingAgentRecipe());
+      return;
+    }
     p.log.error(outcome.message);
     process.exit(1);
   }
 
   for (const warning of outcome.warnings) p.log.warn(warning);
 
-  if (outcome.status === "noop") {
-    const lines = [`✓ ${adapter} is already wired in ${outcome.configPath}`];
-    if (outcome.depsInstalled.length > 0) {
-      lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
-    }
-    appendWranglerWriteLine(lines, outcome.wrangler);
-    appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
-    p.outro(lines.join("\n"));
-    return;
-  }
-
-  const lines = [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
+  const lines =
+    outcome.status === "noop"
+      ? [`✓ ${adapter} is already wired in ${outcome.configPath}`]
+      : [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
   if (outcome.depsInstalled.length > 0) {
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
-  appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
-  lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
+  const handOff = agentSession && outcome.requestRendering === "unresolved";
+  if (handOff) {
+    lines.push("Next: finish the request-rendering configuration with the recipe below.");
+  } else {
+    appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
+  }
+  if (outcome.status === "applied") lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
   p.outro(lines.join("\n"));
+  if (handOff) process.stdout.write(cloudflareRequestRenderingAgentRecipe());
 }
+
+/** Refusals a coding agent can finish with the recipe; the rest stay errors. */
+const AGENT_FINISHES = new Set<AdapterInstallErrorCode>([
+  "missing-marker",
+  "no-output",
+  "dirty-output",
+  "cjs-config",
+  "symlink-config",
+  "write-failed",
+]);
 
 function appendRequestRenderingStatus(
   lines: string[],

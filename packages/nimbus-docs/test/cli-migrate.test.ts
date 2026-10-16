@@ -483,6 +483,10 @@ test("diff exits nonzero while a clean baseline is still pending", () => {
   installNimbus(root);
   const preview = run(root, ["migrate", "--diff"]);
   assert.equal(preview.status, 0, preview.stderr);
+  const printed = run(root, ["migrate", "--print"]);
+  assert.equal(printed.status, 0, printed.stderr);
+  assert.match(printed.stdout, /This site runs a preview build .*Upgrade reviews start once it's on a released version\./);
+  assert.doesNotMatch(printed.stdout, /No known Nimbus migrations/);
 });
 
 test("check and outdated expose the same pending migration", () => {

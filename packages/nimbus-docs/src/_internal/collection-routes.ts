@@ -418,16 +418,25 @@ export function mountDecisionStamp(decision: MountDecision): string {
 /**
  * A log line for each collection whose URL differs between two route maps,
  * with the redirect to add, except from the root, where it would catch the
- * whole site.
+ * whole site, and each existing redirect (`[source, destination]`) into the
+ * old URL to repoint: Astro rejects a redirect to a folder no route serves.
  */
-export function collectionMoveMessages(before: MountContext, after: MountContext): string[] {
+export function collectionMoveMessages(
+  before: MountContext,
+  after: MountContext,
+  redirects: ReadonlyArray<readonly [string, string]> = [],
+): string[] {
   const collections = [...new Set([...before.routes.keys(), ...after.routes.keys()])].sort();
   return collections.flatMap((collection) => {
     const from = collectionMountPrefix(collection, before);
     const to = collectionMountPrefix(collection, after);
     if (from === to) return [];
     const moved = `collection "${collection}" moved from ${from || "/"} to ${to || "/"}.`;
-    return [from === "" ? moved : `${moved} Redirect its old URLs in astro.config: "${from}/[...slug]": "${to}/[...slug]".`];
+    if (from === "") return [moved];
+    const repoint = redirects
+      .filter(([, destination]) => destination === from || destination.startsWith(`${from}/`))
+      .map(([source, destination]) => ` Point "${source}" at "${to}${destination.slice(from.length)}" too.`);
+    return [`${moved} Redirect its old URLs in astro.config: "${from}/[...slug]": "${to}/[...slug]".${repoint.join("")}`];
   });
 }
 

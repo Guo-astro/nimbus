@@ -3335,7 +3335,10 @@ export function nimbus(
           lastStamp = stamp;
           if (decision.errors.length === 0) {
             const next = { versions: mountContextForBuild.versions, routes: decision.mounts };
-            for (const message of collectionMoveMessages(mountContextForBuild, next)) logger.info(message);
+            const redirects = Object.entries(redirectsForBuild).map(
+              ([source, config]) => [source, typeof config === "string" ? config : config.destination] as const,
+            );
+            for (const message of collectionMoveMessages(mountContextForBuild, next, redirects)) logger.info(message);
           }
           const sentinel = collectionRoutesSentinel(projectRootForBuild);
           fs.mkdirSync(path.dirname(sentinel), { recursive: true });
@@ -3345,7 +3348,7 @@ export function nimbus(
           const relative = path.relative(pagesDir, file);
           if (relative.startsWith("..") || path.isAbsolute(relative) || !relative.endsWith(".astro")) return;
           const last = routeSegments(relative).at(-1);
-          if (last !== "[slug]" && last !== "[...slug]") return;
+          if (!last || !/^\[.+\]$/u.test(last)) return;
           clearTimeout(collectionRoutesTimer);
           collectionRoutesTimer = setTimeout(recheckCollectionRoutes, 200);
           collectionRoutesTimer.unref?.();

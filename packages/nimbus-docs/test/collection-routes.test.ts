@@ -271,11 +271,23 @@ test("the cache key names only collections a route moved, so sites that move not
   assert.equal(collectionUrlsKey({ versions, routes: moved }), JSON.stringify([["sdk", "/products/kit"]]));
 });
 
-test("a dev move logs the redirect to add, except away from the root, where it would catch the whole site", () => {
+test("a dev move logs the redirect to add, except away from the root, and the existing redirects to repoint", () => {
   const at = (mount: string) => ({ versions: null, routes: new Map([["guides", { mount, file: `src/pages${mount}/[...slug].astro`, aliases: [] }]]) });
   assert.deepEqual(collectionMoveMessages(at("/guides"), at("/products/guides")), [
     'collection "guides" moved from /guides to /products/guides. Redirect its old URLs in astro.config: "/guides/[...slug]": "/products/guides/[...slug]".',
   ]);
   assert.deepEqual(collectionMoveMessages(at(""), at("/guides")), ['collection "guides" moved from / to /guides.']);
   assert.deepEqual(collectionMoveMessages(at("/guides"), at("/guides")), []);
+  assert.deepEqual(
+    collectionMoveMessages(at("/products/guides"), at("/tools/guides"), [
+      ["/guides/[...slug]", "/products/guides/[...slug]"],
+      ["/start", "/products/guides"],
+      ["/other", "/products/guidesx"],
+    ]),
+    [
+      'collection "guides" moved from /products/guides to /tools/guides. Redirect its old URLs in astro.config: ' +
+        '"/products/guides/[...slug]": "/tools/guides/[...slug]". Point "/guides/[...slug]" at "/tools/guides/[...slug]" too. ' +
+        'Point "/start" at "/tools/guides" too.',
+    ],
+  );
 });

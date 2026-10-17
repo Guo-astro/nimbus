@@ -46,7 +46,7 @@ const { headings, class: className, ...attrs } = Astro.props;
               {goingDeeper && (
                 <svg
                   aria-hidden="true"
-                  class="block h-2 text-border"
+                  class="block h-2 text-border rtl:-scale-x-100"
                   style={`margin-inline-start: calc(${prevDepth - 2}rem - 0.0625rem); width: ${h.depth - prevDepth}rem;`}
                   viewBox="0 0 1 1"
                   preserveAspectRatio="none"
@@ -71,7 +71,7 @@ const { headings, class: className, ...attrs } = Astro.props;
               {goingShallower && (
                 <svg
                   aria-hidden="true"
-                  class="block h-2 text-border"
+                  class="block h-2 text-border rtl:-scale-x-100"
                   style={`margin-inline-start: calc(${nextDepth - 2}rem - 0.0625rem); width: ${h.depth - nextDepth}rem;`}
                   viewBox="0 0 1 1"
                   preserveAspectRatio="none"

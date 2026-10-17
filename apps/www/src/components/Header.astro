@@ -64,6 +64,7 @@ const homeHref = withBase("/", import.meta.env.BASE_URL);
     </div>
 
     <div class="flex items-center gap-2">
+      <a href={withBase("/start-here/quickstart", import.meta.env.BASE_URL)} class="hidden sm:inline-flex h-8 items-center rounded-md px-2.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Get started</a>
       {config.search !== false && <SearchTrigger />}
       {
         config.github && (

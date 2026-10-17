@@ -1,10 +1,11 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { LinkButton } from "@/components/ui/link-button";
+import { SearchTrigger } from "@/components/ui/search";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 
 const homeHref = withBase("/", import.meta.env.BASE_URL);
-const componentsHref = withBase("/components", import.meta.env.BASE_URL);
+const quickstartHref = withBase("/start-here/quickstart", import.meta.env.BASE_URL);
 ---
 
 <BaseLayout
@@ -21,11 +22,12 @@ const componentsHref = withBase("/components", import.meta.env.BASE_URL);
       Page not found
     </h1>
     <p class="text-base text-muted-foreground">
-      The page you are looking for does not exist or has moved.
+      The page you are looking for does not exist or has moved. Search for it, or start from the quickstart.
     </p>
+    <SearchTrigger />
     <div class="mt-2 flex flex-wrap gap-3">
-      <LinkButton href={homeHref} variant="primary" icon>Back to home</LinkButton>
-      <LinkButton href={componentsHref} variant="secondary">Browse components</LinkButton>
+      <LinkButton href={quickstartHref} variant="primary" icon>Quickstart</LinkButton>
+      <LinkButton href={homeHref} variant="secondary">Back to home</LinkButton>
     </div>
   </main>
 </BaseLayout>

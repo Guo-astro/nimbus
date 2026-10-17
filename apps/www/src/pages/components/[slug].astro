@@ -18,6 +18,7 @@ import { components } from "../../components";
 import { Code } from "@/components/ui/code";
 import { Pagination } from "@/components/ui/pagination";
 import { MANIFESTS } from "@/../registry/manifests";
+import { STARTER_MANIFEST } from "../../../../../packages/nimbus-starter-source/starter.manifest.mjs";
 import { getSidebar } from "@cloudflare/nimbus-docs";
 import type { TOCItem } from "@cloudflare/nimbus-docs/types";
 
@@ -36,6 +37,10 @@ if (!entry) return new Response("Not found", { status: 404 });
 
 const manifest = MANIFESTS[slug as keyof typeof MANIFESTS];
 const isBuiltin = !manifest || manifest.type !== "registry:ui";
+// Where the component comes from: the package itself, the starter every new
+// site ships, or the registry, installed with `nimbus-docs add`.
+const registryOnly = (STARTER_MANIFEST.registryOnlyComponents as readonly string[]).includes(slug);
+const installState = isBuiltin ? "builtin" : registryOnly ? "install" : "included";
 
 const { tagline, props } = entry.data;
 const hasProps = props.length > 0;
@@ -94,6 +99,8 @@ const breadcrumbs = [
   >
     <Breadcrumbs items={breadcrumbs} class="pb-2" />
 
+    {/* Search indexes the article: the name, the tagline and everything down to the props. */}
+    <article data-pagefind-body>
     <h1
       class="text-foreground mb-0 leading-tight mt-6"
       style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)"
@@ -116,10 +123,24 @@ const breadcrumbs = [
           <h2 class="text-xl font-semibold text-foreground tracking-tight">
             Installation
           </h2>
-          {isBuiltin
-            ? <Code code={`import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";`} lang="ts" raw />
-            : <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
-        }
+          {installState === "builtin" && (
+            <>
+              <p class="text-sm text-muted-foreground"><strong class="font-medium text-foreground">Built into nimbus-docs.</strong> Import it from the package.</p>
+              <Code code={`import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";`} lang="ts" raw />
+            </>
+          )}
+          {installState === "included" && (
+            <>
+              <p class="text-sm text-muted-foreground"><strong class="font-medium text-foreground">Included in the starter.</strong> Every new site has it in <code>src/components/ui/{slug}/</code>. Import it where you need it, or register it in <code>src/components.ts</code> to use it on every page. If your site predates it, install it:</p>
+              <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
+            </>
+          )}
+          {installState === "install" && (
+            <>
+              <p class="text-sm text-muted-foreground"><strong class="font-medium text-foreground">Install with <code>nimbus-docs add {slug}</code>.</strong> It lands in <code>src/components/ui/{slug}/</code>, yours to edit.</p>
+              <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
+            </>
+          )}
       </section>
 
       <div class="nb-showcase-body flex flex-col gap-10">
@@ -139,9 +160,10 @@ const breadcrumbs = [
           <PropTable props={props} />
         </section>
       )}
-
-      <Pagination prevNext={prevNext} class="mt-12" />
     </div>
+    </article>
+
+    <Pagination prevNext={prevNext} class="mt-24" />
   </div>
 </ShowcaseLayout>
 

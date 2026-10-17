@@ -1810,6 +1810,8 @@ export function getApiHomeStaticPaths(
         `nimbus-docs: getApiHomeStaticPaths("${collection}") found no matching \`api\` entry in the Nimbus config (astro.config.*).`,
       );
     }
+    // A partial build that leaves the collection out has no pages to read.
+    if ((await loadEmptyCollections()).includes(collection)) return [];
     const { chunkApiIndex } = await import("./_internal/api/home-index.js");
     const versions = (await getApiVersions(collection))?.map((v) => v.version) ?? [null];
     const paths: Array<{ params: Record<string, string>; props: Record<string, unknown> }> = [];

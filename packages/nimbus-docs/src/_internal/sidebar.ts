@@ -602,8 +602,7 @@ function resolveConfigItems(
             groupPrefix = prefix;
             autoRouteKey = toDocumentHref(prefix);
             folderKey = toRouteKey(prefix);
-            const insideFolder = depth(folderKey) >= 2;
-            if (insideFolder) landing = { entries: collectionEntries, prefix };
+            landing = { entries: collectionEntries, prefix };
           }
         }
       } else {

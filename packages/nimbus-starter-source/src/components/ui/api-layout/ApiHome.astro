@@ -80,6 +80,8 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
 )}
 
 <script>
+  import { navigate } from "astro:transitions/client";
+
   type Later = { href: string; label: string };
   type Row = [method: string, path: string, label: string, href: string, section: string];
 
@@ -163,7 +165,6 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
         await loadNext();
         if (loaded === before) break;
       }
-      document.getElementById(id)?.scrollIntoView();
     };
     const pendingId = (href: string | null) => {
       if (!href?.startsWith("#") || loaded >= later.length) return null;
@@ -176,13 +177,14 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
         const id = pendingId((e.target as HTMLElement).closest?.("a")?.getAttribute("href") ?? null);
         if (!id) return;
         e.preventDefault();
-        history.pushState(null, "", `#${encodeURIComponent(id)}`);
-        void reveal(id);
+        // Load up to the heading, then let the router make the hash
+        // navigation, so Back and Forward keep working.
+        void reveal(id).then(() => navigate(`#${encodeURIComponent(id)}`));
       },
       { signal: leave.signal },
     );
     const initial = pendingId(location.hash || null);
-    if (initial) void reveal(initial);
+    if (initial) void reveal(initial).then(() => document.getElementById(initial)?.scrollIntoView());
 
     // ---- Back to the page: reload what was loaded, then the scroll ----
     const saved = (() => {

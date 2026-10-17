@@ -25,7 +25,7 @@ const { operations } = Astro.props;
           op.deprecated && "text-muted-foreground line-through",
         ]}>{op.label}</span>
         {op.path && (
-          <span dir="ltr" class="flex min-w-0 items-center gap-2 self-start">
+          <span dir="ltr" class="flex min-w-0 max-w-full items-center gap-2 self-start">
             <ApiMethodChip method={op.method} display="label" />
             <code class="min-w-0 truncate font-mono text-xs text-muted-foreground" title={op.path}>{op.path}</code>
           </span>

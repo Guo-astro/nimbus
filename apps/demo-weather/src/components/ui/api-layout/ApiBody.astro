@@ -122,7 +122,7 @@ const deprecationHtml = page.deprecated
   <h1 class="mb-0 leading-tight text-foreground [text-wrap:balance]" style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)">{title}</h1>
 
   {!homeChunk && page.descriptionHtml && (
-    <div class="nb-md text-muted-foreground" set:html={page.descriptionHtml} />
+    <div class="nb-md text-muted-foreground [overflow-wrap:anywhere]" set:html={page.descriptionHtml} />
   )}
 
   {page.kind === "operation" && (

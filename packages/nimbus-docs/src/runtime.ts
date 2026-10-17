@@ -705,9 +705,15 @@ export async function getSidebar(
 
   // 2. Isolate further to a boundary sub-tree (if configured). Runs after
   //    scope, over the already-materialized (mutable) tree.
+  const overviewLabel =
+    config.sidebar?.indexDisplay === "overview-leaf"
+      ? typeof config.sidebar.overviewLabel === "string"
+        ? config.sidebar.overviewLabel
+        : "Overview"
+      : undefined;
   const boundaries = config.sidebar?.isolate?.boundaries;
   if (boundaries && boundaries.length > 0) {
-    tree = isolateToBoundary(tree, currentSlug, boundaries);
+    tree = isolateToBoundary(tree, currentSlug, boundaries, overviewLabel);
   }
 
   // 3. Consumer transform (call-site). Ctx is derived read-only from the
@@ -720,13 +726,9 @@ export async function getSidebar(
   // 4. Overview-leaf display mode (opt-in) — runs last so it sees the
   //    transform's output (e.g. badges keyed off `indexHref`) and only
   //    reshapes this returned tree, never the cached structural one.
-  if (config.sidebar?.indexDisplay === "overview-leaf") {
-    const label =
-      typeof config.sidebar.overviewLabel === "string"
-        ? config.sidebar.overviewLabel
-        : "Overview";
+  if (overviewLabel !== undefined) {
     const sectionSlug = currentSlug.split("/").filter(Boolean)[0] ?? "";
-    tree = applyOverviewLeaf(tree, sectionSlug, label);
+    tree = applyOverviewLeaf(tree, sectionSlug, overviewLabel);
   }
 
   return tree;

@@ -927,6 +927,7 @@ export function isolateToBoundary(
   items: SidebarItem[],
   currentPath: string,
   boundaries: string[],
+  overviewLabel?: string,
 ): SidebarItem[] {
   const currentKey = toRouteKey(currentPath);
   const segs = currentKey.split("/").filter(Boolean);
@@ -941,10 +942,34 @@ export function isolateToBoundary(
     // means `/a/b` can't collide with `/a/b-c`.
     const prefixKey = toRouteKey("/" + segs.slice(0, globSegs.length).join("/"));
     const group = findBoundaryGroup(items, prefixKey, currentKey);
-    if (group) return group.children;
+    if (group) return withLandingFirst(group, overviewLabel);
   }
 
   return items;
+}
+
+/**
+ * The isolated group's children, led by its landing: the rail replaces the
+ * group, so its heading link would otherwise vanish. Same eligibility as the
+ * overview-leaf lift; `overviewLabel` is set in that mode, which can no
+ * longer see the group.
+ */
+function withLandingFirst(group: SidebarGroupItem, overviewLabel: string | undefined): SidebarItem[] {
+  const href = group.indexHref;
+  if (!href || group.indexIsExternal || group._indexNeverActive) return group.children;
+  const key = toRouteKey(href);
+  if (group.children.some((child) => child.type === "link" && toRouteKey(child.href) === key)) {
+    return group.children;
+  }
+  const landing: SidebarLinkItem = {
+    type: "link",
+    label: overviewLabel === undefined ? group.label : (group._indexLabel ?? overviewLabel),
+    href,
+    isCurrent: group.indexIsCurrent === true,
+    order: Number.NEGATIVE_INFINITY,
+    ...(group.badge ? { badge: group.badge } : {}),
+  };
+  return [landing, ...group.children];
 }
 
 /**

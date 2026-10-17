@@ -6,7 +6,7 @@ interface Props { class?: string; href?: string; body?: string; ctas?: boolean }
 const { class: cls = "", href = "#ship", body = hero.body, ctas = true } = Astro.props;
 ---
 <div class:list={["max-w-3xl", cls]}>
-  <h1 class="text-[28px] leading-9 font-normal md:text-[36px] md:leading-[45px]">
+  <h1 class="text-balance text-[26px] leading-8 font-normal md:text-[32px] md:leading-10">
     <span class="block text-foreground">{hero.line1}</span>
     <span class="block text-muted-foreground">{hero.line2}</span>
   </h1>

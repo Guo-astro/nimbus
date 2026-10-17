@@ -4,8 +4,17 @@
 
 /* The www page is themed the Nimbus way: override tokens, never components. */
 :root {
-  --nb-font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
-  --nb-font-mono: "Geist Mono", ui-monospace, monospace;
+  /* Bricolage for display lines, Inter for reading, JetBrains Mono for code. */
+  --nb-font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --nb-font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --nb-font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+/* Every heading, and the display statements, set in the display face with
+   tighter tracking as it grows. */
+:where(h1, h2, h3), .font-display {
+  font-family: var(--nb-font-display);
+  letter-spacing: -0.015em;
 }
 
 html {

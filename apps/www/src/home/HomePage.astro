@@ -4,6 +4,9 @@
  * `WWW_HOMEPAGE=new` (astro.config.ts). Otherwise `/` is the docs
  * collection's index page, as before.
  */
+import "@fontsource-variable/bricolage-grotesque/opsz.css";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/jetbrains-mono";
 import WwwBody from "./www/WwwBody.astro";
 
 const title = "Nimbus · The documentation framework for the agent era";
@@ -26,10 +29,6 @@ const canonical = new URL("/", Astro.site).href;
     <meta name="theme-color" content="#ffffff" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
-    {/* Geist, as the homepage was reviewed in. Self-host it before the switch flips. */}
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500&display=swap" />
   </head>
   <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
     <WwwBody />

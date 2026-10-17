@@ -6,9 +6,9 @@
 // `bodyShort` replaces `body` below the md breakpoint, where long copy runs to many lines.
 interface Props { id: string; label: string; h1: string; h2?: string; body?: string; bodyShort?: string; layout?: 1 | 2; class?: string }
 const { id, label, h1, h2, body, bodyShort, layout = 1, class: cls = "" } = Astro.props;
-const H = "text-balance text-[26px] leading-8 md:text-[30px] md:leading-10";
-const L = "text-[26px] leading-8 text-foreground md:text-[30px] md:leading-10";
-const P = "text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground md:text-[24px] md:leading-8";
+const H = "text-balance text-[22px] leading-7 md:text-[26px] md:leading-8";
+const L = "font-display text-[22px] leading-7 text-foreground md:text-[26px] md:leading-8";
+const P = "text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground md:text-[18px] md:leading-7";
 ---
 <section id={id} class:list={["border-t border-border pt-20", cls]}>
   {layout === 1 ? (

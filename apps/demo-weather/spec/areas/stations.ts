@@ -40,6 +40,7 @@ export function stations(v: Version): Area {
       owner: v === 1 ? undefined : nullable(str("Your organization id, for private stations.")),
       active: bool("Whether the station reported in the last 24 hours.", true),
       reporting_interval: v === 1 ? undefined : int("Minutes between reports.", 10),
+      public: v === 1 ? undefined : bool("Whether anyone can read the station's observations. Private stations start as false.", true),
       sensors: v === 1 ? undefined : arr(ref("Sensor"), "Instruments fitted to the station."),
     }),
     ["id", "name", "country", "active"],
@@ -63,6 +64,7 @@ export function stations(v: Version): Area {
       longitude: num("", 10.7591),
       elevation: num("Metres above sea level.", 34),
       reporting_interval: int("Minutes between reports.", 5),
+      public: bool("Publish the station's observations to everyone. Defaults to false.", false),
     },
     ["name", "latitude", "longitude"],
   );

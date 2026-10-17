@@ -5732,6 +5732,13 @@ paths:
                     type: string
                     description: ""
                     example: weather:read
+                allowed_origins:
+                  type: array
+                  description: Browser origins allowed to use the key. Leave out for a server-side key.
+                  items:
+                    type: string
+                    description: ""
+                    example: https://example.com
                 expires_at:
                   type: string
                   description: ""
@@ -6878,6 +6885,10 @@ components:
           type: integer
           description: Minutes between reports.
           example: 10
+        public:
+          type: boolean
+          description: Whether anyone can read the station's observations. Private stations start as false.
+          example: true
         sensors:
           type: array
           description: Instruments fitted to the station.
@@ -6952,6 +6963,10 @@ components:
           type: integer
           description: Minutes between reports.
           example: 5
+        public:
+          type: boolean
+          description: Publish the station's observations to everyone. Defaults to false.
+          example: false
     Reading:
       type: object
       description: One reading from a private station, in SI units.

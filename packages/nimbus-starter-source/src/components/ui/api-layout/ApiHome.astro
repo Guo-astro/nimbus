@@ -42,6 +42,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     class="nb-ix"
     data-nb-ix
     data-filter-src={withBase(apiHomeIndexHref(page.collection, version), base)}
+    data-base={base}
     data-later={JSON.stringify(later)}
   >
     <div class="nb-ix-bar">
@@ -91,12 +92,16 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     traversing = (e as Event & { navigationType?: string }).navigationType === "traverse";
   });
 
-  const stateKey = () => `nb-ix:${location.pathname}${location.search}`;
-
   function init() {
     const root = document.querySelector<HTMLElement>("[data-nb-ix]");
     if (!root || root.dataset.ready === "true") return;
     root.dataset.ready = "true";
+    // Fixed now: by the time a back/forward navigation saves, location already
+    // names the next page.
+    const stateKey = `nb-ix:${location.pathname}${location.search}`;
+    // Filter rows carry hrefs before the site's base, as the page's own do.
+    const base = (root.dataset.base ?? "/").replace(/\/$/, "");
+    const based = (href: string) => (href.startsWith("/") ? `${base}${href}` : href);
 
     const input = root.querySelector<HTMLInputElement>("[data-nb-ix-input]")!;
     const feed = root.querySelector<HTMLElement>("[data-nb-ix-feed]")!;
@@ -125,6 +130,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
           if (!chunk) throw new Error("no chunk");
           feed.append(document.adoptNode(chunk));
           loaded++;
+          document.dispatchEvent(new Event("nb:toc-headings"));
           const after = later[loaded];
           if (after && more && moreLabel) {
             more.href = after.href;
@@ -181,7 +187,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     // ---- Back to the page: reload what was loaded, then the scroll ----
     const saved = (() => {
       try {
-        return JSON.parse(sessionStorage.getItem(stateKey()) ?? "null") as { loaded: number; y: number } | null;
+        return JSON.parse(sessionStorage.getItem(stateKey) ?? "null") as { loaded: number; y: number } | null;
       } catch {
         return null;
       }
@@ -198,7 +204,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     }
     const save = () => {
       try {
-        sessionStorage.setItem(stateKey(), JSON.stringify({ loaded, y: window.scrollY }));
+        sessionStorage.setItem(stateKey, JSON.stringify({ loaded, y: window.scrollY }));
       } catch {}
     };
     window.addEventListener("pagehide", save, { signal: leave.signal });
@@ -241,7 +247,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
         const template = templates.get(method.toUpperCase()) ?? fallback;
         const li = template!.content.querySelector("li")!.cloneNode(true) as HTMLLIElement;
         const a = li.querySelector("a")!;
-        a.href = href;
+        a.href = based(href);
         a.querySelector("span")!.textContent = label;
         li.querySelector("code")!.textContent = path;
         ul.append(li);
@@ -260,6 +266,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
       if (more) more.hidden = filtering;
       results.hidden = !filtering;
       if (!filtering) {
+        list.replaceChildren();
         status.textContent = "";
         return;
       }
@@ -287,7 +294,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
         input.value = "";
         void apply();
       }
-      if (e.key === "Enter") list.querySelector<HTMLAnchorElement>("a")?.click();
+      if (e.key === "Enter" && !results.hidden) list.querySelector<HTMLAnchorElement>("a")?.click();
     });
   }
 

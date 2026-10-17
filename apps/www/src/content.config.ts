@@ -1,9 +1,14 @@
 import { defineCollection, z } from "astro:content";
 import { componentsCollection, docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
 
+// With `WWW_HOMEPAGE=new`, `/` is src/home/HomePage.astro (astro.config.ts), so
+// the root index page stays out of the collection.
+const homepage = process.env.WWW_HOMEPAGE === "new";
+
 export const collections = {
   docs: defineCollection(
     docsCollection({
+      ...(homepage && { pattern: "{!(index),*/**/*}.{md,mdx}" }),
       schemaFields: {
         // Nimbus docs are agent-friendly by default. Set `audience: human`
         // to flag a page that's written primarily for human readers.

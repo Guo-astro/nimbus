@@ -48,10 +48,22 @@ const moved = {
   ),
 };
 
+// The new homepage ships behind a switch: built with `WWW_HOMEPAGE=new`, `/` is
+// src/home/HomePage.astro, a route of its own so its styles stay off the docs
+// pages. Otherwise `/` is the docs collection's index page.
+const homepage = {
+  name: "www-homepage",
+  hooks: {
+    "astro:config:setup": ({ injectRoute }: { injectRoute: (route: { pattern: string; entrypoint: string }) => void }) => {
+      if (process.env.WWW_HOMEPAGE === "new") injectRoute({ pattern: "/", entrypoint: "./src/home/HomePage.astro" });
+    },
+  },
+};
+
 export default defineConfig({
   output: "static",
   redirects: Object.fromEntries(Object.entries(moved).map(([from, to]) => [from, { status: 301, destination: to }])),
-  integrations: [react(), nimbus(nimbusConfig, { markdown: { hastPlugins: [tableScroll()] } })],
+  integrations: [homepage, react(), nimbus(nimbusConfig, { markdown: { hastPlugins: [tableScroll()] } })],
   vite: {
     // Tailwind v4 via its Vite plugin (replaces the PostCSS plugin, which
     // doesn't build under Astro 7's Vite 8 bundler).

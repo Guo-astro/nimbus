@@ -18,6 +18,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { ImageZoom } from "@/components/ui/image-zoom";
 import { PageActions } from "@/components/ui/page-actions";
 import ConnectMcp from "@/components/ConnectMcp.astro";
+import { capabilities } from "virtual:nimbus/agent-capabilities";
 import { Badge } from "@/components/ui/badge";
 import type { DocsPageProps } from "@cloudflare/nimbus-docs/types";
 import { getVersionStatus, getVersionAlternates, withBase } from "@cloudflare/nimbus-docs/runtime";
@@ -227,7 +228,7 @@ const showToc = headings !== false && (hasToc || headings.length > 0);
                       <p class="text-base leading-7 sm:text-lg sm:leading-7 text-muted-foreground mt-2 mb-2 [text-wrap:pretty]">{description}</p>
                     )}
                     <PageActions markdownUrl={markdownUrl} lastUpdated={lastUpdated} class={description ? undefined : "mt-3"}>
-                      <ConnectMcp />
+                      {capabilities.mcpUrl && <ConnectMcp />}
                     </PageActions>
                     </div>
                     {hasMobileToc && (

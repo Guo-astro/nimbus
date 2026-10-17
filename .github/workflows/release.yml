@@ -291,6 +291,16 @@ jobs:
       - name: Deploy
         working-directory: apps/demo-weather
         run: |
+          set -o pipefail
+          # A rerun of an older release must not replace a newer demo.
+          for pkg in nimbus-docs create-nimbus-docs; do
+            expected=$(jq -r .version "../../packages/$pkg/package.json")
+            latest=$(npm view "@cloudflare/$pkg" dist-tags.latest --json | jq -er '.')
+            if [ "$expected" != "$latest" ]; then
+              echo "::error::@cloudflare/$pkg at this commit is $expected, but npm latest is $latest. Refusing to replace the newer demo."
+              exit 1
+            fi
+          done
           pnpm exec wrangler deploy
           curl --fail --show-error --silent --retry 5 --retry-delay 3 -o /dev/null https://weather.nimbus-docs.com/
         env:

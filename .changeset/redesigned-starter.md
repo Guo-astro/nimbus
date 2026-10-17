@@ -16,4 +16,4 @@ New sites start on the redesigned starter:
 - Thin, theme-coloured scrollbars.
 - `PageActions` renders extra actions passed as children; the layout passes the Copy MCP URL action that way.
 
-Existing sites keep their look. `nimbus-docs upgrade` lists optional steps to adopt it, the lighter sidebar rows, and the new favicons and asset caching. The registry adds a `variants` lib that Badge and Button install with them.
+Existing sites keep their look. `nimbus-docs migrate` lists optional steps to adopt it, the lighter sidebar rows, and the new favicons and asset caching. The registry adds a `variants` lib that Badge and Button install with them.

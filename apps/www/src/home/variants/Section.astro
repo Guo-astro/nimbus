@@ -4,8 +4,9 @@
    2 · headline left, paragraph right, no label
    The headline is the <h2>; the label is a visual cue only. */
 // `bodyShort` replaces `body` below the md breakpoint, where long copy runs to many lines.
-interface Props { id: string; label: string; h1: string; h2?: string; body?: string; bodyShort?: string; layout?: 1 | 2; class?: string }
-const { id, label, h1, h2, body, bodyShort, layout = 1, class: cls = "" } = Astro.props;
+// `bodyClass` styles the paragraph, such as `md:hidden` to show it on phones only.
+interface Props { id: string; label: string; h1: string; h2?: string; body?: string; bodyShort?: string; bodyClass?: string; layout?: 1 | 2; class?: string }
+const { id, label, h1, h2, body, bodyShort, bodyClass, layout = 1, class: cls = "" } = Astro.props;
 const H = "text-balance text-[22px] leading-7 md:text-[26px] md:leading-8";
 const L = "font-display text-[22px] leading-7 text-foreground md:text-[26px] md:leading-8";
 const P = "text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground md:text-[18px] md:leading-7";
@@ -16,7 +17,7 @@ const P = "text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground
       <p class={L} aria-hidden="true">{label}</p>
       <div class="min-w-0">
         <h2 class={H}><span class="block text-foreground">{h1}</span>{h2 && <span class="block text-muted-foreground">{h2}</span>}</h2>
-        {body && <p class:list={[P, "mt-5 max-w-lg"]}>{bodyShort ? <><span class="md:hidden">{bodyShort}</span><span class="hidden md:inline">{body}</span></> : body}</p>}
+        {body && <p class:list={[P, "mt-5 max-w-lg", bodyClass]}>{bodyShort ? <><span class="md:hidden">{bodyShort}</span><span class="hidden md:inline">{body}</span></> : body}</p>}
       </div>
     </div>
   ) : (

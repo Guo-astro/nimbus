@@ -1336,7 +1336,9 @@ export function nimbus(
           unavailable: unavailable.keys(),
         });
         applySourceSpecs(sourceSpecs, sourceSnapshots, projectRoot);
-        beginPreparedMarkdownSession(astroConfig.root);
+        beginPreparedMarkdownSession(astroConfig.root, {
+          lazyHeadings: command === "dev",
+        });
         registerApiCollections(
           astroConfig.root,
           config.api,
@@ -1618,6 +1620,18 @@ export function nimbus(
               partialResolver,
             }),
           astroConfig.base || "/",
+          command === "dev"
+            ? async (collection, id) =>
+                (await import("./_internal/lazy-headings.js")).lazyPreparedHeadingRecord(
+                  {
+                    root: projectRoot,
+                    base: astroConfig.base || "/",
+                    partialResolver,
+                  },
+                  collection,
+                  id,
+                )
+            : undefined,
         );
         if (
           building &&

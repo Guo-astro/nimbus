@@ -12,7 +12,6 @@ Layouts are user-owned `.astro` files in `src/layouts/`. The scaffolder writes t
 
 - **`BaseLayout`** — the outer shell: `<html>`, `<head>`, theme bootstrap, font preloads, metadata. Everything renders inside it.
 - **`DocsLayout`** — the docs page shape: sidebar rail, content column, table of contents, breadcrumbs, prev/next. The default for content pages.
-- **`ShowcaseLayout`** — the component-showcase shape used by the `/components` collection.
 
 Because they're your files, the way to remove a piece of chrome is to delete it from the layout — drop `<Pagination />` from `DocsLayout` and it's gone site-wide.
 

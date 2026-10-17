@@ -10,7 +10,7 @@ Content is Markdown (`.md`) or MDX (`.mdx`). MDX lets you drop components straig
 
 ## Links under a deployment base
 
-Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Installation](/installation)`, not `[Installation](/docs/installation)`. Nimbus adds `/docs` during the build.
+Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Installation](/start-here/quickstart)`, not `[Installation](/docs/installation)`. Nimbus adds `/docs` during the build.
 
 This applies to Markdown links, reference definitions, native `<a href>` attributes, and static component `href` strings. Relative links, external URLs, fragments, query strings, code, and dynamic JSX expressions are left unchanged.
 
@@ -19,7 +19,7 @@ For a link computed in component or route code, import `withBase` from `@cloudfl
 ```ts
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 
-const href = withBase("/installation", import.meta.env.BASE_URL);
+const href = withBase("/start-here/quickstart", import.meta.env.BASE_URL);
 ```
 
 Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/installation", "/docs")` intentionally produces `/docs/docs/installation`.

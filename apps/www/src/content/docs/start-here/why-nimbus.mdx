@@ -1,9 +1,9 @@
 ---
-title: Philosophy
+title: Why Nimbus
 description: Some of the opinions behind Nimbus, what we believe documentation should look like in a world where humans and agents are both creators and consumers.
 audience: human
 sidebar:
-  order: 0
+  order: 3
 ---
 import { FileTree } from "@/components/ui/file-tree";
 import { Tabs, TabItem } from "@/components/ui/tabs";
@@ -177,7 +177,7 @@ aiGenerated: true   # drafted by an agent — shows "awaiting review" until a hu
 Provenance only pays off if drift gets caught. The lint engine emits versioned JSON carrying character-precise fixes that `--fix` applies in place, and the scaffolded `AGENT.md` ships an audit recipe with a fixed diagnostic format — so an agent can sweep the whole site and report back in a shape another tool can parse:
 
 ```text
-- [error] src/content/docs/cli.mdx:42 — broken internal link "/instal" — did you mean "/installation"?
+- [error] src/content/docs/cli.mdx:42 — broken internal link "/instal" — did you mean "/start-here/quickstart"?
 - [warn]  src/content/docs/registry.mdx:8 — link text "here" isn't meaningful out of context.
 Summary: 1 error, 1 warning.
 ```

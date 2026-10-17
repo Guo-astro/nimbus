@@ -1,5 +1,5 @@
 ---
-title: Markdown and llms.txt endpoints
+title: Markdown and llms.txt
 description: Add alternate Markdown/MDX versions, llms.txt indexes, and llms-full.txt.
 aiGenerated: true
 sidebar:
@@ -30,7 +30,7 @@ export const { GET, getStaticPaths } = markdownSourceRoute();
 
 These two routes serve every collection, including docs versions, a blog at `/blog`, and API references. API pages have a `.md` version but no `.mdx` source. Pages in hidden versions have neither. Collections you add later need no new route files. To customize the output for some or all pages, see [Override a default](/ai/override-markdown).
 
-The `prerender = true` lines are the static default. With a [`rendering` policy](/configuration#rendering), a page's Markdown follows its collection's rendering mode automatically: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files.
+The `prerender = true` lines are the static default. With a [`rendering` policy](/reference/configuration#rendering), a page's Markdown follows its collection's rendering mode automatically: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files.
 
 ## 2. Add the site index
 
@@ -109,5 +109,5 @@ Each command must return content with a successful status. A `404` means the cor
 ## Next steps
 
 - [Understand docs for agents](/ai/docs-for-agents)
-- [Customize generated Markdown](/configuration#customize-generated-markdown)
+- [Customize generated Markdown](/reference/configuration#customize-generated-markdown)
 - [Configure custom content loaders](/writing/pages-and-routing#other-collections)

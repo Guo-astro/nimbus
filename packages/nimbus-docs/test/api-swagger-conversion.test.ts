@@ -23,7 +23,7 @@ const CONVERT = "swagger2openapi src/api/swagger.yaml --yaml --outfile src/api/o
 const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
 
 test("the docs show the pinned converter and the command that generated the fixture", () => {
-  const docs = read("../../../apps/www/src/content/docs/api-reference.mdx");
+  const docs = read("../../../apps/www/src/content/docs/writing/openapi.mdx");
   assert.ok(docs.includes(`<PackageManagers pkg="swagger2openapi@${PINNED}" dev />`));
   assert.ok(docs.includes(`"dev": "${CONVERT} && astro dev"`));
   assert.ok(docs.includes(`"build": "${CONVERT} && astro build"`));

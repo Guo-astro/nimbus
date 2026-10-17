@@ -3,7 +3,7 @@ title: Remote MCP server
 description: Serve your documentation to agents over MCP from the site's own server, with list_pages and get_page.
 aiGenerated: true
 sidebar:
-  order: 5
+  order: 4
 ---
 
 import PackageManagers from "@/components/ui/package-managers/PackageManagers.astro";
@@ -61,7 +61,7 @@ A page, content entry or public file at either path fails the build, since the s
 
 ## The tools
 
-**`list_pages`** returns pages with their `title`, `url`, `markdownUrl` and `section`, plus `description` and `version` when the page has them, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; a root content page is `index`), or by one `version` from the site's [`versions`](/configuration#site-config) manifest, the docs versions that `nimbus-docs add new-version` sets up. A `version` filter returns that version's docs pages only; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
+**`list_pages`** returns pages with their `title`, `url`, `markdownUrl` and `section`, plus `description` and `version` when the page has them, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; a root content page is `index`), or by one `version` from the site's [`versions`](/reference/configuration#site-config) manifest, the docs versions that `nimbus-docs add new-version` sets up. A `version` filter returns that version's docs pages only; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
 
 ```json
 { "section": "guide" }

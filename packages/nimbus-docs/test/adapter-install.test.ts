@@ -65,7 +65,7 @@ test("cloudflare recipe uses node prerender env and pins 14.3.x", () => {
 test("the partial builds guide names the cloudflare recipe's versions", () => {
   const cf = ADAPTER_RECIPES.cloudflare;
   const guide = readFileSync(
-    fileURLToPath(new URL("../../../apps/www/src/content/docs/partial-builds.mdx", import.meta.url)),
+    fileURLToPath(new URL("../../../apps/www/src/content/docs/publish/partial-builds.mdx", import.meta.url)),
     "utf8",
   );
   const range = (spec: string) => spec.slice(spec.lastIndexOf("@") + 1);

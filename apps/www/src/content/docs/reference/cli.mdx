@@ -2,10 +2,10 @@
 title: CLI
 description: Use the nimbus-docs CLI to install registry features, migrate package APIs, review copied code, and check content.
 sidebar:
-  order: 2
+  order: 3
 ---
 
-The `nimbus-docs` CLI lists what's in the registry, installs it, records what you own in [`nimbus.json`](/project-structure), shows what's fallen behind upstream, and lints your MDX content.
+The `nimbus-docs` CLI lists what's in the registry, installs it, records what you own in [`nimbus.json`](/start-here/project-structure), shows what's fallen behind upstream, and lints your MDX content.
 
 ## `nimbus-docs list`
 
@@ -50,7 +50,7 @@ If a component is already installed, `add` keeps your copy — it never clobbers
 
 For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files," and `--overwrite --yes` only when you've decided to discard your edits. To upgrade a site, run `outdated`, apply each clean starter file it lists with `diff <file> --apply`, and update registry components with `add <slug> --overwrite`.
 
-Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
+Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/start-here/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
 
 ### Features
 
@@ -92,7 +92,7 @@ A coding agent running an adapter command gets the same edits as a shell. For `a
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print | claude" />
 
-Always run the project’s production build afterward. See [Rendering policy](/configuration#rendering-policy) for per-collection build/request overrides.
+Always run the project’s production build afterward. See [Rendering policy](/reference/configuration#rendering-policy) for per-collection build/request overrides.
 
 The equivalent long form is `nimbus-docs add server-output --adapter <cloudflare|vercel|netlify|node>`.
 
@@ -112,7 +112,7 @@ Adds a content source: part of the site built from another git repository, a Not
 
 ## `nimbus-docs init`
 
-Writes a [`nimbus.json`](/project-structure) for a project that lacks one — a repo scaffolded before the record existed, an existing Astro site adopting Nimbus, or a deleted record. Fresh scaffolds already have one, so `init` is the on-ramp for everything else.
+Writes a [`nimbus.json`](/start-here/project-structure) for a project that lacks one — a repo scaffolded before the record existed, an existing Astro site adopting Nimbus, or a deleted record. Fresh scaffolds already have one, so `init` is the on-ramp for everything else.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="init" />
 

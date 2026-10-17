@@ -1,9 +1,9 @@
 ---
-title: API reference
+title: OpenAPI reference pages
 description: Generate routed, versioned API documentation from an OpenAPI specification.
 aiGenerated: true
 sidebar:
-  order: 10
+  order: 6
 ---
 
 Nimbus generates API references from machine-readable specifications. Each supported format has its own source, configuration, and content loader.
@@ -577,7 +577,7 @@ Then run the Cloudflare adapter installer. It keeps an existing rendering policy
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
-Astro then logs "getStaticPaths() ignored in dynamic page" for the request-rendered API route. The warning is expected; see [Mix build and request rendering](/configuration#mix-build-and-request-rendering).
+Astro then logs "getStaticPaths() ignored in dynamic page" for the request-rendered API route. The warning is expected; see [Mix build and request rendering](/reference/configuration#mix-build-and-request-rendering).
 
 The recipe's API catch-all uses Nimbus runtime helpers to resolve either mode. Alternate Markdown versions and `llms.txt` indexes follow the rendering policy too, serving content prepared at build time. Coordinate data, search records, and sitemaps stay build output, and requests read prepared content entries rather than parsing the OpenAPI document.
 
@@ -663,7 +663,7 @@ function preparedCode(value: { highlightedHtml?: string }): string {
 
 Treat a missing prepared value as a stale or incorrectly built API index. Rebuild after changing the specification or API renderer types.
 
-See [Configuration](/configuration#rendering-policy) for the Cloudflare adapter and Wrangler requirements.
+See [Configuration](/reference/configuration#rendering-policy) for the Cloudflare adapter and Wrangler requirements.
 
 ### Published outputs
 

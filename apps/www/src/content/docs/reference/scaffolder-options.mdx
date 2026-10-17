@@ -1,9 +1,9 @@
 ---
-title: Installation
+title: Scaffolder options
 description: Scaffold a static or server-output Nimbus site in one command.
 audience: human
 sidebar:
-  order: 1
+  order: 4
 ---
 import { FileTree } from "@/components/ui/file-tree";
 
@@ -95,5 +95,5 @@ Then open the printed URL.
 Static scaffolds emit `dist/` for any static host. Server scaffolds render docs pages on request; on Cloudflare, every content collection renders on request. Cloudflare scaffolds also include `wrangler.jsonc` and a `deploy` script.
 
 <Aside type="tip">
-  After scaffolding, run `npx @cloudflare/nimbus-docs add <slug>` to install components from the registry. See [Adding components](/adding-components) for the workflow.
+  After scaffolding, run `npx @cloudflare/nimbus-docs add <slug>` to install components from the registry. See [Adding components](/styling/add-components) for the workflow.
 </Aside>

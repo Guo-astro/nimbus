@@ -11,35 +11,46 @@ const nimbusConfig = defineNimbusConfig({
   locale: "en",
   github: "https://github.com/cloudflare/nimbus",
   socialImageAlt: "Nimbus documentation preview",
+  editPattern: "https://github.com/cloudflare/nimbus/edit/main/apps/www/{path}",
+  // The sidebar follows the content tree: each top-level folder's index.mdx
+  // names its group and its place (sidebar.group, sidebar.order).
   sidebar: {
     indexDisplay: "overview-leaf",
+    defaultCollapsed: true,
     items: [
-      "get-started",
-      "installation",
-      "philosophy",
-      "cli",
-      "registry",
-      "project-structure",
-      "configuration",
-      "partial-builds",
-      "api-reference",
-      "adding-components",
-      { label: "Writing", icon: "ph:pencil-simple", autogenerate: { directory: "writing" } },
-      { label: "Navigation", icon: "ph:compass", autogenerate: { directory: "navigation" } },
-      { label: "Styling", icon: "ph:palette", autogenerate: { directory: "styling" } },
-      { label: "AI-ready", icon: "ph:sparkle", autogenerate: { directory: "ai" } },
-      {
-        label: "Components",
-        icon: "ph:puzzle-piece",
-        collapsed: false,
-        autogenerate: { collection: "components" },
-      },
+      { autogenerate: { collection: "docs" } },
+      { label: "Components", icon: "ph:puzzle-piece", autogenerate: { collection: "components" } },
     ],
   },
 });
 
+// Pages that moved when the docs were reorganized by task. Each old URL
+// reaches its new page in one hop; public/_redirects adds the `/old/` forms
+// and the Markdown versions.
+const moved = {
+  "/get-started": "/start-here/quickstart",
+  "/installation": "/start-here/quickstart",
+  "/project-structure": "/start-here/project-structure",
+  "/philosophy": "/start-here/why-nimbus",
+  "/api-reference": "/writing/openapi",
+  "/partial-builds": "/publish/partial-builds",
+  "/adding-components": "/styling/add-components",
+  "/ai/metadata-and-seo": "/publish/metadata-and-seo",
+  "/writing/frontmatter": "/reference/frontmatter",
+  "/configuration": "/reference/configuration",
+  "/cli": "/reference/cli",
+  "/registry": "/reference/registry",
+  "/writing/recipes": "/style-guide",
+  ...Object.fromEntries(
+    ["overview", "quickstart", "tutorial", "how-to", "concept", "reference", "example", "troubleshooting", "changelog"].map(
+      (type) => [`/writing/recipes/${type}`, `/style-guide/${type}`],
+    ),
+  ),
+};
+
 export default defineConfig({
   output: "static",
+  redirects: Object.fromEntries(Object.entries(moved).map(([from, to]) => [from, { status: 301, destination: to }])),
   integrations: [react(), nimbus(nimbusConfig, { markdown: { hastPlugins: [tableScroll()] } })],
   vite: {
     // Tailwind v4 via its Vite plugin (replaces the PostCSS plugin, which

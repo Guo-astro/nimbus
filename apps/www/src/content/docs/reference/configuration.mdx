@@ -3,7 +3,7 @@ title: Configuration
 description: Every option defineConfig and the Nimbus integration accept.
 aiGenerated: true
 sidebar:
-  order: 9
+  order: 1
   badge:
     text: Reference
     variant: info
@@ -42,7 +42,7 @@ export default defineConfig({
 | `homeLabel`                      | string            | Label for the "Home" breadcrumb.                                              |
 | `github`                         | string \| null    | Repo URL for the header link; `null` hides it.                                |
 | `editPattern`                    | string \| null    | Edit-link pattern; `{path}` is the page path.                                 |
-| `socialImage` / `socialImageAlt` | string            | OG fallback image and alt. See [Metadata and SEO](/ai/metadata-and-seo).      |
+| `socialImage` / `socialImageAlt` | string            | OG fallback image and alt. See [Metadata and SEO](/publish/metadata-and-seo).      |
 | `head`                           | array             | Site-wide `<head>` elements.                                                  |
 | `sidebar`                        | object            | Rail config — see [Sidebar](/navigation/sidebar).                             |
 | `features`                       | object            | `sidebar` / `tableOfContents` kill switches. See [Layouts](/styling/layouts). |
@@ -165,7 +165,7 @@ export default defineConfig({
 
 Cloudflare deployments also require a server-compatible `wrangler.jsonc`. Run `pnpm build` after setup to verify the adapter and Wrangler configuration together.
 
-See [Server adapters](/cli#server-adapters) for installer behavior and safety checks.
+See [Server adapters](/reference/cli#server-adapters) for installer behavior and safety checks.
 
 ##### Other Astro adapters
 

@@ -146,7 +146,7 @@ A `sources` map that is computed beyond a templated ref defers only the checks t
 
 `astro build` is strict; every other command starts without a source it can't fetch.
 
-**A partial build fetches only what it reads.** With [`NIMBUS_BUILD_ONLY`](/partial-builds), a build fetches a source when a collection in the slice reads it, or when any `api` entry does (a page in the slice may cite any API). Every other source isn't fetched and keeps the snapshot it last selected, so `lint` and the next full build still find it:
+**A partial build fetches only what it reads.** With [`NIMBUS_BUILD_ONLY`](/publish/partial-builds), a build fetches a source when a collection in the slice reads it, or when any `api` entry does (a page in the slice may cite any API). Every other source isn't fetched and keeps the snapshot it last selected, so `lint` and the next full build still find it:
 
 ```text
 nimbus: source "acme-sdk" not fetched: no collection in NIMBUS_BUILD_ONLY=docs reads it.

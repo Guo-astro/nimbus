@@ -2,7 +2,7 @@ export const cmd = "npx @cloudflare/create-nimbus-docs@latest";
 
 export const hero = {
   line1: "Meet Nimbus",
-  line2: "The documentation framework for the agent era",
+  line2: "The authoring tool for docs",
   body: "Documentation is now written by people and agents, and read by both. Nimbus is the authoring tool built for that: one workflow, native tools for each kind of author, and quality that holds all the way to publish.",
 };
 

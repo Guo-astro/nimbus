@@ -10,7 +10,7 @@ const { class: cls = "", href = "#ship", body = hero.body, ctas = true } = Astro
     <span class="block text-foreground">{hero.line1}</span>
     <span class="block text-muted-foreground">{hero.line2}</span>
   </h1>
-  <p class="mt-5 max-w-xl text-pretty text-[17px] leading-7 text-foreground/70">{body}</p>
+  {body && <p class="mt-5 max-w-xl text-pretty text-[17px] leading-7 text-foreground/70">{body}</p>}
   {ctas && <div class="mt-7 flex flex-wrap items-center gap-3">
     <LinkButton href={href} variant="primary" size="lg" icon>Get started</LinkButton>
     <LinkButton href="https://github.com/cloudflare/nimbus" variant="secondary" size="lg"><Icon name="ph:github-logo" class="size-4" /> Source</LinkButton>

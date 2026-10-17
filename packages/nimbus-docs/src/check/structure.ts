@@ -71,10 +71,16 @@ export async function checkStructure(
   const notes: Note[] = [];
 
   const config = checkConfigZod(findings, notes, parsed);
-  const { context: mountContext, collections, srcDir } = checkCollectionUrls(cwd, findings, parsed, srcDirOverride);
+  const { context: mountContext, collections, srcDir, built } = await checkCollectionUrls(
+    cwd,
+    findings,
+    notes,
+    parsed,
+    srcDirOverride,
+  );
   await checkApiCollections(cwd, findings, notes, parsed, config);
   checkSourceReferences(cwd, findings, parsed, config);
-  const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config, mountContext, srcDir);
+  const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config, mountContext, srcDir, built);
   if (parsed.ok && config) {
     const feature = serverAdapterFeature({
       unbundledApi: !parsed.unresolved.includes("api") && !!config.api?.some((entry) => entry.bundle === false),
@@ -83,7 +89,7 @@ export async function checkStructure(
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
   }
-  await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir);
+  await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir, built);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
 
@@ -267,13 +273,17 @@ function skippedNote(code: string, reason: string): Note {
   return { code, reason: `${reason} A build enforces them.`, requiresBuild: true };
 }
 
-/** The setup errors the build reports for collection routes, and the mount context they leave. */
-function checkCollectionUrls(
+/**
+ * The setup errors the build reports for collection routes, the mount context
+ * they leave, and the last build's page collections that still exist.
+ */
+async function checkCollectionUrls(
   cwd: string,
   findings: CheckFinding[],
+  notes: Note[],
   parsed: ConfigParseResult,
   srcDirOverride: string | undefined,
-): { context: MountContext; collections: CollectionUrl[]; srcDir: string } {
+): Promise<{ context: MountContext; collections: CollectionUrl[]; srcDir: string; built: string[] | null }> {
   const versions =
     parsed.ok && isVersionsObject(parsed.config.versions)
       ? { others: asStringArray(parsed.config.versions.others) }
@@ -308,7 +318,14 @@ function checkCollectionUrls(
       fixable: false,
     });
   const context = { versions, routes: mounts };
-  const built = readPageCollectionsFile(cwd)?.collections;
+  const recorded = readPageCollectionsFile(cwd)?.collections;
+  const built = recorded
+    ? await liveCollections(recorded, srcDir, notes, [
+        ...(versions?.others ?? []).map((version) => `docs-${version}`),
+        ...apiCollections,
+        ...mounts.keys(),
+      ])
+    : null;
   const hasDocs = built ? built.includes("docs") : mounts.has("docs") || existsSync(path.join(srcDir, "content", "docs"));
   const names = [
     ...new Set([
@@ -333,7 +350,29 @@ function checkCollectionUrls(
       moved: url !== fallback,
     };
   });
-  return { context, collections, srcDir };
+  return { context, collections, srcDir, built };
+}
+
+/**
+ * Drop the recorded names that are no longer declared, served by a route, or
+ * a version or API collection. When `content.config.ts` can't be fully read,
+ * every name stays.
+ */
+async function liveCollections(
+  recorded: string[],
+  srcDir: string,
+  notes: Note[],
+  known: string[],
+): Promise<string[]> {
+  const declared = await parseContentCollections(path.join(srcDir, "content.config.ts"));
+  if (declared === null || !declared.complete) return recorded;
+  const live = new Set([...known, ...declared.names]);
+  for (const name of recorded.filter((name) => !live.has(name)))
+    notes.push({
+      code: "nimbus/page-collections-stale",
+      reason: `\`${name}\` is in the last build's collection list but no longer declared; run a build to refresh.`,
+    });
+  return recorded.filter((name) => live.has(name));
 }
 
 async function checkRequestRendering(
@@ -344,6 +383,7 @@ async function checkRequestRendering(
   config: NimbusConfig | null,
   mountContext: MountContext,
   srcDir: string,
+  pageCollections: string[] | null,
 ): Promise<boolean> {
   if (!parsed.ok || config === null) return false;
   if (parsed.unresolved.includes("rendering") || parsed.unresolved.includes("...spread")) {
@@ -382,7 +422,6 @@ async function checkRequestRendering(
   // The build's page-collection list, when the last build wrote one. With
   // it, `check` reports the same post-sync rendering errors the build does;
   // without it, collections it can't confirm stay unchecked.
-  const pageCollections = readPageCollectionsFile(cwd)?.collections ?? null;
   if (pageCollections !== null) {
     const pageSet = new Set(pageCollections);
     const unknown = Object.keys(config.rendering.collections ?? {}).filter(
@@ -552,6 +591,7 @@ async function checkDuplicateRoutes(
   mountContext: MountContext,
   parsed: ConfigParseResult,
   srcDir: string,
+  built: string[] | null,
 ): Promise<void> {
   const contentRoot = path.join(srcDir, "content");
 
@@ -584,7 +624,7 @@ async function checkDuplicateRoutes(
   // since that build is checked too.
   const pageCollections = [
     ...new Set([
-      ...(readPageCollectionsFile(cwd)?.collections ?? ["docs"]),
+      ...(built ?? ["docs"]),
       ...(versions?.others ?? []).map((version) => `docs-${version}`),
       ...apiCollections,
       ...[...(placed ?? [])]
@@ -629,9 +669,8 @@ async function checkDuplicateRoutes(
   // The build's post-sync errors: a page under another collection's URL. A
   // collection a route helper serves is a page collection; `docs` is one
   // only when something confirms it (a site can serve another at the root).
-  const builtList = readPageCollectionsFile(cwd)?.collections;
-  const docsConfirmed = builtList
-    ? builtList.includes("docs")
+  const docsConfirmed = built
+    ? built.includes("docs")
     : placed?.has("docs") === true || existsSync(path.join(contentRoot, "docs"));
   const routedCollections = [...new Set([...pageCollections, ...mountContext.routes.keys()])].filter(
     (name) => name !== "docs" || docsConfirmed,

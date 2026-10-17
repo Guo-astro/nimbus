@@ -166,3 +166,35 @@ test("collection checks read routes and pages under the srcDir passed to check",
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a collection deleted since the last build is no longer listed or walked", async () => {
+  const contentConfig = (sdk: string) => `import { defineCollection } from "astro:content";
+import { docsCollection } from "@cloudflare/nimbus-docs/content";
+export const collections = {
+  docs: defineCollection(docsCollection()),${sdk}
+};`;
+  const files = {
+    ".nimbus/page-collections.json": JSON.stringify({ version: 1, collections: ["docs", "sdk"], mdxFiles: [] }),
+    "src/content/docs/sdk/intro.mdx": "---\ntitle: Intro\n---\n",
+    "src/content/sdk/intro.mdx": "---\ntitle: Intro\n---\n",
+  };
+  const deleted = project({}, { files: { ...files, "src/content.config.ts": contentConfig("") } });
+  const unreadable = project({}, { files: { ...files, "src/content.config.ts": contentConfig("\n  ...more,") } });
+  try {
+    const result = await runChecks(deleted, STRUCTURE);
+    assert.deepEqual(result.collections?.map(({ name }) => name), ["docs", "api"]);
+    const routeErrors = (codes: string[]) => codes.filter((code) => code === "nimbus/duplicate-slug" || code.startsWith("nimbus/collection-"));
+    assert.deepEqual(routeErrors(result.findings.map((f) => f.code)), []);
+    assert.deepEqual(
+      result.scopes.flatMap((scope) => scope.notes).filter((note) => note.code === "nimbus/page-collections-stale").map((note) => note.reason),
+      ["`sdk` is in the last build's collection list but no longer declared; run a build to refresh."],
+    );
+
+    const kept = await runChecks(unreadable, STRUCTURE);
+    assert.ok(kept.collections?.some(({ name }) => name === "sdk"));
+    assert.notDeepEqual(routeErrors(kept.findings.map((f) => f.code)), []);
+  } finally {
+    fs.rmSync(deleted, { recursive: true, force: true });
+    fs.rmSync(unreadable, { recursive: true, force: true });
+  }
+});

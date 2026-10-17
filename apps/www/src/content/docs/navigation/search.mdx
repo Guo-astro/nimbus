@@ -35,7 +35,10 @@ searchable: true     # …but still findable in site search
 Turn the framework search plumbing off entirely:
 
 ```ts title="astro.config.ts"
-nimbus({ /* … */, search: false });
+const nimbusConfig = defineNimbusConfig({
+  // …
+  search: false,
+});
 ```
 
 Or keep the UI but supply your own backend (Algolia, a hosted service) by implementing the `SearchProvider` interface and setting `search: { provider: "custom" }` — Nimbus then skips the Pagefind build step and lets your code render results.

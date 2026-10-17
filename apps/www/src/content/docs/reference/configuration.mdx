@@ -9,7 +9,7 @@ sidebar:
     variant: info
 ---
 
-Nimbus is configured in `astro.config.ts`. `defineConfig` (re-exported as `defineNimbusConfig`) types the site config; the `nimbus()` integration takes that config plus build-time options.
+Nimbus is configured in `astro.config.ts`. `defineConfig` from `@cloudflare/nimbus-docs`, imported as `defineNimbusConfig` so it doesn't clash with Astro's own `defineConfig`, types the site config; the `nimbus()` integration takes that config plus build-time options.
 
 ```ts title="astro.config.ts"
 import { defineConfig } from "astro/config";

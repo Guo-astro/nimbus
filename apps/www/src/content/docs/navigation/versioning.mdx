@@ -6,7 +6,7 @@ sidebar:
   order: 4
 ---
 
-When your product ships a new major release, you may want the old docs to stay readable. In Nimbus each version of the docs is its own content collection, served under its own path: the current docs stay at `/`, and `v1` lives in `src/content/v1/` and is served at `/v1/`. This page explains the setup; versions of a generated API reference work differently, see [OpenAPI reference pages](/writing/openapi#versioned-api-references).
+When your product ships a new major release, you may want the old docs to stay readable. In Nimbus each version of the docs is its own content collection, served under its own path: the current docs stay at `/`, and `v1` lives in a `docs-v1` collection, in `src/content/docs-v1/`, served at `/v1/`. This page explains the setup; versions of a generated API reference work differently, see [OpenAPI reference pages](/writing/openapi#versioned-api-references).
 
 ## Add a version
 
@@ -34,9 +34,9 @@ const nimbusConfig = defineNimbusConfig({
 | Field | What it does |
 | --- | --- |
 | `current` | The label of the docs at the root, the `docs` collection. |
-| `others` | The other versions, newest first. Each is the name of a collection and the first segment of its URLs. |
-| `deprecated` | Versions shown as deprecated in the picker and on their pages, and left out of search. |
-| `hidden` | Versions left out of the picker, search and the sitemap. Their pages still load at their URLs. |
+| `others` | The other versions, newest first. Each `<slug>` needs a collection named `docs-<slug>`, and is the first segment of its URLs. |
+| `deprecated` | Versions shown with a deprecation banner and a sidebar badge, and ranked lower in search. |
+| `hidden` | Versions left out of the picker and search. Their pages still load at their URLs. |
 
 ## What readers get
 

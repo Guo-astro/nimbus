@@ -62,6 +62,7 @@ export function platform(v: Version): Area {
         body: obj(props({
           name: str("", "Staging"),
           scopes: v === 1 ? undefined : arr(str("", "weather:read")),
+          allowed_origins: v === 1 ? undefined : arr(str("", "https://example.com"), "Browser origins allowed to use the key. Leave out for a server-side key."),
           expires_at: v === 1 ? undefined : time("", "2026-12-31T23:59:59Z"),
         }), ["name"]),
         responses: { "201": ref("CreatedApiKey") },

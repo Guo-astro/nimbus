@@ -57,12 +57,12 @@ const jsSample = `// inferred`;
   title="Components"
   description="Every component, one variant per card. Click a title for the full showcase."
   sidebar={sidebar}
-  headings={[]}
-  mode="custom"
+  headings={false}
   breadcrumbs={[]}
   prevNext={{ prev: undefined, next: undefined }}
+  collection="components"
 >
-  <div class="nb-cmp-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+  <div class="nb-cmp-grid not-prose grid grid-cols-1 sm:grid-cols-2 overflow-hidden rounded-lg border-s border-t border-border">
     {/* Accordion */}
     <div class="nb-cmp-card group/card">
       <div class="nb-cmp-preview">
@@ -601,10 +601,8 @@ const jsSample = `// inferred`;
 </DocsLayout>
 
 <style is:global>
-  /* Grid reaches the main column edges directly. Top + left borders
-     come from the site header (bottom) and sidebar (right) — drawing
-     them here too would double up the 1px line. Each card draws right
-     + bottom so adjacent cards share a single 1px line internally. */
+  /* The grid draws its top and left edges; each card draws right + bottom so
+     adjacent cards share a single 1px line. */
   .nb-cmp-grid {
     background: var(--nb-card);
   }

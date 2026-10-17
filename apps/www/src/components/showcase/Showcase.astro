@@ -8,7 +8,7 @@
  */
 import { Code as AstroCode } from "astro:components";
 import PreviewStage from "./PreviewStage.astro";
-import { Code } from "@/components/ui/code";
+import SourceCode from "./SourceCode.astro";
 
 type CodeProps = Parameters<typeof AstroCode>[0];
 
@@ -26,6 +26,6 @@ const { code, lang = "tsx", minHeight = "9rem" } = Astro.props;
     <slot />
   </PreviewStage>
   <div class="nb-showcase-pair-code">
-    <Code code={code} lang={lang} raw />
+    <SourceCode code={code} lang={lang} />
   </div>
 </div>

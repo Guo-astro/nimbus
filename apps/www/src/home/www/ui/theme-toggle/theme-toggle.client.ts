@@ -8,7 +8,7 @@ import { mount } from "@cloudflare/nimbus-docs/client";
 
 declare global {
   interface Window {
-    __nbApplyTheme?: () => void;
+    __nbApplyTheme?: (mode?: "dark" | "light") => void;
   }
 }
 

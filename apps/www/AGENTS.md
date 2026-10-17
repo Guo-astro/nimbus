@@ -69,8 +69,8 @@ Content here.
 
 - **The sidebar follows the content tree.** Each top-level folder under `src/content/docs/` is a group; its `index.mdx` sets the group's label, icon and place with `sidebar.group` and `sidebar.order`. `astro.config.ts` lists only the docs collection and the components collection, and holds no group labels or page order. Keep groups at most two levels deep.
 - **Moved pages redirect in one hop.** Add the old path to `moved` in `astro.config.ts` (Astro writes the bare path), and add the `/old/`, `/old/index.md` and `/old/index.mdx` lines to `public/_redirects`. Never chain redirects, never add a splat, and never redirect anything under `/registry/` except the page itself: published packages fetch registry files from there.
-- **Component pages** live in the `components` collection and render through `src/pages/components/[slug].astro` and `ShowcaseLayout`. Their install state is computed from `registry/manifests.ts` and the starter manifest.
-- **One phone menu.** `src/components/MobileSidebar.astro` is the drawer for `DocsLayout` and `ShowcaseLayout`. It borrows the page's `[data-nb-sidebar-tree]` while open and re-binds on every page swap; don't add per-layout drawer scripts.
+- **Docs pages use the starter's files as they are.** Layouts, components and styles match what the scaffolder generates; take changes from the starter rather than editing them here. www adds only the homepage (`src/home/`), the component catalog, and the `aiGenerated` label in page actions.
+- **Component pages** live in the `components` collection and render through `src/pages/components/[slug].astro` and the starter's `DocsLayout`. Their install state is computed from `registry/manifests.ts` and the starter manifest.
 - **`src/content/docs/ai/docs-for-agents.mdx` doesn't move.** The `nimbus-docs` package build copies that exact file, as raw text, into the npm package. Keep it free of components and partials.
 - **The new homepage is behind a switch.** Built with `WWW_HOMEPAGE=new`, `/` renders `src/home/HomePage.astro`; otherwise it's the docs index page. The homepage's files live in `src/home/`.
 

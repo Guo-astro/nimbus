@@ -96,6 +96,11 @@ export function composeRouteBreadcrumbs(
   });
 }
 
+/** A crumb label made from a URL segment: decoded and title-cased. */
+export function segmentLabel(part: string): string {
+  return safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /**
  * URL-segment fallback for pages with no node in the tree, so a stray
  * page still gets a root-anchored trail.
@@ -103,7 +108,7 @@ export function composeRouteBreadcrumbs(
 export function breadcrumbsFromUrl(slug: string, homeLabel = "Home", mount = ""): Breadcrumb[] {
   const parts = slug.split("/").filter(Boolean);
   const crumbs: Breadcrumb[] = [{ label: homeLabel, href: "/" }];
-  const label = (part: string) => safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const label = segmentLabel;
 
   // A collection served at a nested URL (`/products/sdk`) starts at its own
   // root: `/products` is no page.

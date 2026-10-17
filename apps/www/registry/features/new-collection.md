@@ -203,7 +203,7 @@ Write `src/pages/<prefix>/[...slug].astro`:
 
 ```astro
 ---
-import DocsLayout from "../../layouts/DocsLayout.astro";
+import DocsLayout from "@/layouts/DocsLayout.astro";
 import {
   getCollectionStaticPaths,
   getCollectionPage,
@@ -216,7 +216,7 @@ import {
   getTOC,
   stripBase,
 } from "@cloudflare/nimbus-docs/runtime";
-import { components } from "../../components";
+import { components } from "@/components";
 
 export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("<collection>");
@@ -268,8 +268,10 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 </DocsLayout>
 ```
 
-The relative imports are for a one-segment prefix (`/blog`); add one `../` per
-extra segment (`/products/sdk` needs `../../../layouts/DocsLayout.astro`).
+The `@/` imports resolve from `src/`, whatever the prefix's depth. If the
+site's `tsconfig.json` doesn't map `@/*` to `./src/*`, use relative imports
+instead: `../../` for a one-segment prefix (`/blog`), plus one `../` per extra
+segment.
 
 **The `collection` and `entryId` props are required, not optional.**
 They drive cross-version `<link rel="alternate">`, `<link rel="canonical">`,
@@ -329,11 +331,18 @@ that needs more than route scaffolding.
 
 ## 6. Optional — add to the sidebar
 
-If the user wants the new collection to appear in the site's sidebar, ask
-before editing. Sidebar layout is taste-laden; don't unilaterally drop a new
-group in.
+A collection whose prefix is inside a docs folder (`/integrations/dbt` beside
+`src/content/docs/integrations/`) already appears in that folder's sidebar
+group, with its landing page; skip this step unless the user wants it
+somewhere else. Adding it to `sidebar.items` moves it there.
 
-If yes, find the `sidebar.items` array in the Nimbus config and add:
+Otherwise, if the user wants the new collection to appear in the site's
+sidebar, ask before editing. Sidebar layout is taste-laden; don't
+unilaterally drop a new group in.
+
+If the config has no `sidebar.items`, adding one replaces the sidebar built
+from `src/content/docs/`; add `{ autogenerate: { collection: "docs" } }` to
+keep it. Then add:
 
 ```ts
 { label: "<Display Name>", autogenerate: { collection: "<collection>" } },
@@ -349,7 +358,11 @@ After writing all files:
 1. Run the user's build command — match their package manager (`pnpm`,
    `npm`, `yarn`).
 2. Confirm the build completes without errors.
-3. Confirm the dist output contains the expected files:
+3. If the collection renders on request (it's listed under
+   `rendering.collections` as `"request"`, or `rendering.default` is
+   `"request"`), its pages aren't written to `dist/`: start the built site
+   (or `astro dev`) and request the URLs in step 4 instead, then skip to it.
+   Otherwise, confirm the dist output contains the expected files:
    - `dist/<prefix>/welcome/index.html` (if a starter entry was created)
    - `dist/<prefix>/welcome/index.md` and `index.mdx` (served by the shared
      Markdown routes)

@@ -94,7 +94,7 @@ renders a different layout than this, mirror its imports and props instead:
 
 ```astro
 ---
-import DocsLayout from "../../layouts/DocsLayout.astro";
+import DocsLayout from "@/layouts/DocsLayout.astro";
 import {
   getCollectionStaticPaths,
   getCollectionPage,
@@ -107,7 +107,7 @@ import {
   getTOC,
   stripBase,
 } from "@cloudflare/nimbus-docs/runtime";
-import { components } from "../../components";
+import { components } from "@/components";
 
 export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("<collection>");

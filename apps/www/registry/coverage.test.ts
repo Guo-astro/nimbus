@@ -11,7 +11,7 @@ import { MANIFESTS, type ManifestEntry } from "./manifests.ts";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const COMPONENT_PAGES = resolve(HERE, "../src/content/components");
 const FEATURES_DIR = resolve(HERE, "features");
-const REGISTRY_MDX = resolve(HERE, "../src/content/docs/registry.mdx");
+const REGISTRY_MDX = resolve(HERE, "../src/content/docs/reference/registry.mdx");
 
 const slugsOfType = (type: ManifestEntry["type"]): string[] =>
   Object.entries(MANIFESTS as Record<string, ManifestEntry>)
@@ -53,6 +53,6 @@ test("every registry:feature is listed in the registry browser", () => {
     missing,
     [],
     `features absent from the /registry browser: [${missing.join(", ")}] — ` +
-      "list the slug as an inline-code entry in src/content/docs/registry.mdx.",
+      "list the slug as an inline-code entry in src/content/docs/reference/registry.mdx.",
   );
 });

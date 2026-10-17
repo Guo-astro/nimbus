@@ -1,0 +1,59 @@
+---
+title: Upgrading
+description: Move a Nimbus site to a new release, including the changes to files you own.
+aiGenerated: true
+sidebar:
+  order: 4
+---
+
+A Nimbus release has two parts: the `@cloudflare/nimbus-docs` package, which you upgrade like any dependency, and changes to starter and registry files, which live in your repo and change only when you take them. This page walks through both. [How customization works](/styling/how-customization-works) explains why they're separate.
+
+Commit your work first, so every change the upgrade makes shows in `git diff`.
+
+<Steps>
+  <Step title="Update the package">
+    <PackageManagers pkg="@cloudflare/nimbus-docs@latest" type="add" />
+  </Step>
+  <Step title="Run the migrations">
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="migrate" />
+
+    `migrate` compares the version your site last reviewed, recorded in `nimbus.json`, with the one you installed. It lists:
+
+    - **Migrations** it can apply to your code, such as a renamed option. It asks before writing; `--dry-run` and `--diff` show the plan without writing.
+    - **Required upgrade reviews**: changes you must make by hand, each with the files affected, what to do, and how to check it.
+    - **Optional upgrade entries**: improvements you can adopt now or later, such as a redesigned component.
+
+    Work through the required reviews. Then run the command `migrate` prints at the end, `migrate --yes`, to record the new version in `nimbus.json`. If `nimbus.json` doesn't say which version you came from, pass it: `migrate --from 0.17.0`.
+  </Step>
+  <Step title="Take starter changes">
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="outdated" />
+
+    `outdated` lists the starter files, such as layouts and `globals.css`, that changed upstream since your site was created. For a file you haven't edited, take the new version:
+
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/layouts/DocsLayout.astro --apply" />
+
+    For a file you have edited, run `diff` without `--apply` to see both sets of changes, and merge by hand.
+  </Step>
+  <Step title="Take registry changes">
+    For components you installed with `nimbus-docs add`, reinstall the ones `outdated` lists:
+
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout --overwrite" />
+
+    `--overwrite` replaces files you haven't edited and asks about the ones you have. Without a terminal it keeps edited files and lists them.
+  </Step>
+  <Step title="Check and build">
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="check" />
+
+    <PackageManagers pkg="build" type="run" />
+
+    Look through the site, then commit.
+  </Step>
+</Steps>
+
+## If something breaks
+
+- A build error that names a renamed option or removed helper usually has a migration: run `migrate` again and read its output.
+- An error from a file you own, such as a layout, means it needs the upstream change: compare it with `diff <file>`.
+- [Troubleshooting](/publish/troubleshooting) lists common errors by their exact text.
+
+Each package's changelog, on [npm](https://www.npmjs.com/package/@cloudflare/nimbus-docs) and in the repository, lists what each release changed.

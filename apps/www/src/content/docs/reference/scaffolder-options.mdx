@@ -1,13 +1,13 @@
 ---
 title: Scaffolder options
-description: Scaffold a static or server-output Nimbus site in one command.
+description: Every prompt and flag of create-nimbus-docs, and what it writes.
 audience: human
 sidebar:
   order: 4
 ---
 import { FileTree } from "@/components/ui/file-tree";
 
-One command sets up a project with layouts, components, content schemas, search, sitemap, OG images, and a Markdown version of every page.
+`create-nimbus-docs` sets up a project with layouts, components, content schemas, search, a sitemap, share cards, and a Markdown version of every page. For a guided first run, follow the [Quickstart](/start-here/quickstart); this page lists every option.
 
 ## Requirements
 
@@ -82,18 +82,4 @@ npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
 
 The `nimbus-docs` npm package ships the invisible plumbing (integration, data helpers, schemas). Everything visible — components under `src/components/`, MDX content under `src/content/docs/`, routes under `src/pages/`, design tokens in `src/styles/globals.css`, and the MDX globals registry at `src/components.ts` — copies into your repo and is yours to edit.
 
-## Run
-
-<PackageManagers pkg="dev" type="run" />
-
-Then open the printed URL.
-
-## Build and deploy
-
-<PackageManagers pkg="build" type="run" />
-
-Static scaffolds emit `dist/` for any static host. Server scaffolds render docs pages on request; on Cloudflare, every content collection renders on request. Cloudflare scaffolds also include `wrangler.jsonc` and a `deploy` script.
-
-<Aside type="tip">
-  After scaffolding, run `npx @cloudflare/nimbus-docs add <slug>` to install components from the registry. See [Adding components](/styling/add-components) for the workflow.
-</Aside>
+To run, build and publish the site, see the [Quickstart](/start-here/quickstart) and [Deploy](/publish/deploy).

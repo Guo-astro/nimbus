@@ -1,0 +1,47 @@
+---
+title: Versioning
+description: Keep the docs for earlier releases readable at their own URLs, with a picker to move between them.
+aiGenerated: true
+sidebar:
+  order: 4
+---
+
+When your product ships a new major release, you may want the old docs to stay readable. In Nimbus each version of the docs is its own content collection, served under its own path: the current docs stay at `/`, and `v1` lives in `src/content/v1/` and is served at `/v1/`. This page explains the setup; versions of a generated API reference work differently, see [OpenAPI reference pages](/writing/openapi#versioned-api-references).
+
+## Add a version
+
+The `new-version` recipe sets up a version end to end: it copies the content, registers the collection, adds its route, records it in the Nimbus config, and installs the version picker in your header.
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add new-version" />
+
+`add` hands the recipe to your coding agent, which asks which version to create and whether it's deprecated or hidden. To read the steps yourself, add `--print`.
+
+## The version manifest
+
+The recipe records your versions in the Nimbus config in `astro.config.ts`:
+
+```ts title="astro.config.ts"
+const nimbusConfig = defineNimbusConfig({
+  // …
+  versions: {
+    current: "v3",
+    others: ["v2", "v1"],
+    deprecated: ["v1"],
+  },
+});
+```
+
+| Field | What it does |
+| --- | --- |
+| `current` | The label of the docs at the root, the `docs` collection. |
+| `others` | The other versions, newest first. Each is the name of a collection and the first segment of its URLs. |
+| `deprecated` | Versions shown as deprecated in the picker and on their pages, and left out of search. |
+| `hidden` | Versions left out of the picker, search and the sitemap. Their pages still load at their URLs. |
+
+## What readers get
+
+- A version picker in the header that keeps the reader on the same page when the page exists in both versions.
+- Each version's own sidebar, built from its own folder.
+- A per-version `llms.txt`, so agents can read one version at a time.
+
+To retire a version, remove it from `others` and delete its collection, folder and route, then [redirect](/navigation/redirects) its URLs to the current docs.

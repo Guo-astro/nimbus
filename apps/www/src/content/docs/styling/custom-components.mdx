@@ -1,0 +1,79 @@
+---
+title: Custom components
+description: Write your own Astro component and use it in MDX pages, with or without a script.
+aiGenerated: true
+sidebar:
+  order: 6
+---
+
+When the [component catalog](/components) has nothing that fits, write your own. A Nimbus component is an ordinary Astro component in your repo; this page shows how to make one available in MDX and how to give it behaviour. It assumes you've read [Markdown and MDX](/writing/markdown-and-mdx).
+
+## Write it
+
+Put it in `src/components/`, and style it with Tailwind classes and the site's tokens, so it follows the theme in light and dark:
+
+```astro title="src/components/Stat.astro"
+---
+interface Props {
+  label: string;
+  value: string;
+}
+const { label, value } = Astro.props;
+---
+
+<div class="my-4 rounded-lg border border-border bg-card p-4">
+  <p class="text-sm text-muted-foreground">{label}</p>
+  <p class="text-2xl font-semibold text-foreground">{value}</p>
+</div>
+```
+
+## Use it in MDX
+
+Import it at the top of the page that uses it:
+
+```mdx title="src/content/docs/limits.mdx"
+import Stat from "@/components/Stat.astro";
+
+<Stat label="Requests a minute" value="1,000" />
+```
+
+Or register it in `src/components.ts` to use it on every page without an import:
+
+```ts title="src/components.ts"
+import Stat from "./components/Stat.astro";
+
+export const components = {
+  // …the components already listed
+  Stat,
+};
+```
+
+The build checks every capitalised tag in your MDX. A tag that's neither imported nor registered stops the build with the file and line, instead of rendering as text.
+
+## Give it behaviour
+
+A script in a component runs once per page load. Nimbus sites switch pages without a full reload, so set your component up with `mount` from `@cloudflare/nimbus-docs/client`, which runs it for every matching element on each page and cleans up when the reader leaves:
+
+```astro title="src/components/Counter.astro"
+<button type="button" data-counter>Clicked 0 times</button>
+
+<script>
+  import { mount } from "@cloudflare/nimbus-docs/client";
+
+  mount("[data-counter]", (button) => {
+    let count = 0;
+    const onClick = () => {
+      count += 1;
+      button.textContent = `Clicked ${count} times`;
+    };
+    button.addEventListener("click", onClick);
+    return () => button.removeEventListener("click", onClick);
+  });
+</script>
+```
+
+For interactive diagrams, start from the diagram components instead; see [Diagrams and interactive content](/writing/interactive-content).
+
+## Share it
+
+A component other sites could use belongs in the registry, where `nimbus-docs add` installs it as a file. [Registry](/reference/registry) describes the format.

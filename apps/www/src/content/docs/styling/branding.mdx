@@ -1,0 +1,51 @@
+---
+title: Branding
+description: Put your name, logo, favicon, colours and share cards on a Nimbus site.
+aiGenerated: true
+sidebar:
+  order: 3
+---
+
+Five changes make a Nimbus site look like your product. Each is a file or an option you own.
+
+## Name
+
+Set `title` and `description` in the Nimbus config in `astro.config.ts`. The title appears in every page's `<title>`, in share cards and in `llms.txt`; the description is the site's default meta description.
+
+## Logo
+
+The header and the phone menu draw `src/components/Logo.astro`, the Nimbus cloud by default. Replace its SVG with your mark, or change it to render an image:
+
+```astro title="src/components/Logo.astro"
+---
+interface Props { class?: string }
+const { class: cls = "h-5 w-auto" } = Astro.props;
+---
+<img src="/logo.svg" alt="" class={cls} />
+```
+
+The header keeps the site title as the link's accessible name, so the logo itself needs no text. To show your name beside the mark, add it inside `Logo.astro`.
+
+## Favicon
+
+Put `favicon.svg`, `favicon.ico` or `favicon.png` in `public/`. Nimbus links the first it finds, in that order.
+
+## Colours
+
+The accent is two tokens in `src/styles/globals.css`, one for light mode and one for dark:
+
+```css title="src/styles/globals.css"
+:root {
+  --nb-brand: oklch(0.55 0.2 265);
+}
+
+[data-mode="dark"] {
+  --nb-brand: oklch(0.8 0.12 265);
+}
+```
+
+`--nb-brand` colours the current page in the sidebar and the icons in cards. Check that text in the brand colour still reads at 4.5:1 against the background in both modes. [Theme and tokens](/styling/theme-and-tokens) lists every token, including the neutrals, radius and fonts.
+
+## Share cards
+
+Nimbus draws a share card for every page at build time. Its colours, spacing and fonts are in `src/pages/og/_og-card-config.ts`. A page's `socialImage` frontmatter replaces its card with your own image. See [Metadata and SEO](/publish/metadata-and-seo).

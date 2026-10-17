@@ -1,7 +1,8 @@
 ---
 title: Quickstart
-description: Build docs on Astro where humans and agents are both first-class — and you own every file.
+description: Create a Nimbus site, edit a page, and publish it, in about ten minutes.
 audience: human
+aiGenerated: true
 sidebar:
   order: 1
   badge:
@@ -9,41 +10,67 @@ sidebar:
     variant: tip
 ---
 
-Nimbus builds documentation sites on Astro. It ships the invisible plumbing as an npm package and writes the visible parts — layouts, components, styles, content — into your repo as real files you own from day one.
+Nimbus is a documentation framework built on Astro. This page takes you from an empty folder to a published site. You need a terminal; no Nimbus or Astro knowledge is assumed.
 
-## What makes it different
+<Steps>
+  <Step title="Check Node">
+    Nimbus needs Node 22.12 or later. Check yours with `node --version`.
+  </Step>
+  <Step title="Create the site">
+    <PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" />
 
-- **You own all your code.** The scaffolder writes layouts, components, and styles once and steps back. No upstream theme to fork around, no API to wait on. Edit any file.
-- **Humans and agents are first-class.** Every discoverable page ships a Markdown version, `/llms.txt` indexes the site, and JSON-LD lands in every head — so the agent web can read your docs as well as a browser can.
-- **Build with agents.** `nimbus-docs add` installs from a registry in two modes: components copy as files, features hand off a recipe a coding agent reads and applies.
+    Answer the prompts, or press Enter for each default. The scaffolder creates `my-docs/` and installs its dependencies. Not hosting on Cloudflare? Add `--deploy other`.
 
-## Quickstart
+    [Scaffolder options](/reference/scaffolder-options) lists every prompt and flag, including `--yes` to take every default and the empty variant with no example pages.
+  </Step>
+  <Step title="Look at what you got">
+    <Render file="project-tree" />
+  </Step>
+  <Step title="Name your site">
+    Open `astro.config.ts` and set three values in the Nimbus config:
 
-<PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" />
+    ```ts title="astro.config.ts"
+    const nimbusConfig = defineNimbusConfig({
+      site: "https://docs.example.com",
+      title: "Acme Docs",
+      description: "Guides and reference for Acme.",
+    });
+    ```
 
-Answer the prompts ([Installation](/start-here/quickstart) lists them). The scaffolder installs dependencies with the package manager you picked, which defaults to the one you ran it with. Then start the dev server:
+    `site` is your site's address, used for canonical URLs, share cards, the sitemap and `llms.txt`. If you don't know it yet, leave the placeholder for now and set it before you publish.
+  </Step>
+  <Step title="Start the dev server">
+    ```sh
+    cd my-docs
+    ```
 
-```sh
-cd my-docs
-```
+    <PackageManagers pkg="dev" type="run" />
 
-<PackageManagers pkg="dev" type="run" />
+    Open the address it prints, usually `http://localhost:4321`.
+  </Step>
+  <Step title="Edit a page">
+    Open `src/content/docs/index.mdx`, change the title or a sentence, and save. The page in your browser updates.
+  </Step>
+  <Step title="Milestone 1: your edited page is running locally">
+    You should see your site with your change, a sidebar, search in the header, and **Copy page** and **View as Markdown** above the title. To add more pages, see [Pages and routing](/writing/pages-and-routing).
+  </Step>
+  <Step title="Check the site">
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="check" />
 
-Open the URL it prints and edit anything under `src/` — the dev server reloads.
+    `check` finds configuration, structure and content problems without a full build. While `site` is still the placeholder it shows a warning, not an error.
+  </Step>
+  <Step title="Milestone 2: publish">
+    **Hosting elsewhere?** Your site is already a static build. Run the build and upload `dist/` to any static host; `wrangler.jsonc` and the `deploy` script are only for Cloudflare, and you can delete them. [Deploy](/publish/deploy) covers each host, and Astro's [deploy guides](https://docs.astro.build/en/guides/deploy/) cover many more.
 
-## Where to go next
+    <PackageManagers pkg="build" type="run" />
 
-<CardGrid>
-  <Card title="Install" icon="ph:download-simple">
-    Scaffold a site and learn what lands in your repo — see [Installation](/start-here/quickstart).
-  </Card>
-  <Card title="Project structure" icon="ph:tree-structure">
-    The files you own, the package boundary, and how the tree becomes the site — see [Project structure](/start-here/project-structure).
-  </Card>
-  <Card title="Browse components" icon="ph:squares-four">
-    Every UI component, every variant, with copy-paste examples — at [/components](/components).
-  </Card>
-  <Card title="Add from the registry" icon="ph:package">
-    `nimbus-docs add <slug>` copies a component into your repo — see [Adding components](/styling/add-components).
-  </Card>
-</CardGrid>
+    **On Cloudflare**, deploy:
+
+    <PackageManagers pkg="deploy" type="run" />
+
+    The first deploy opens a browser to sign in to Cloudflare. When it finishes, it prints your site's `*.workers.dev` URL. If you don't have your own domain yet, set `site` to that URL and deploy again, so canonical links and share cards point at the live site.
+  </Step>
+  <Step title="Next">
+    Write your first real page: [Pages and routing](/writing/pages-and-routing).
+  </Step>
+</Steps>

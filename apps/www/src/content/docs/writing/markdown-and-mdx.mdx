@@ -218,3 +218,5 @@ nimbus(config, {
   markdown: { hastPlugins: [externalLinks()] },
 });
 ```
+
+Remark and rehype plugins passed to `mdx({ remarkPlugins, rehypePlugins })` have no effect: Nimbus parses Markdown with Sätteri, not unified, and nothing reports that they were skipped. Use `markdown.mdastPlugins` and `markdown.hastPlugins` in the Nimbus integration options instead. To keep a unified plugin you can't replace, set `markdown.processor` to a unified processor; Nimbus features that need Sätteri, such as admonitions, then need turning off, as described above.

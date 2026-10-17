@@ -1,0 +1,51 @@
+---
+title: How customization works
+description: Which files are yours, which parts are the framework's, and how to take upstream changes without losing your own.
+aiGenerated: true
+sidebar:
+  order: 1
+---
+
+A Nimbus site has two layers. Read this before changing a component or a layout, so you know what an upgrade will and won't touch.
+
+## Your files
+
+The scaffolder writes the visible parts of the site into your repo, and from then on they're yours:
+
+- components in `src/components/`, and layouts in `src/layouts/`,
+- routes in `src/pages/`,
+- design tokens and styles in `src/styles/`,
+- the components every page can use, in `src/components.ts`,
+- your content in `src/content/`.
+
+Change any of them. Nothing overwrites them: upgrading the package leaves them alone, and Nimbus offers upstream changes to them as diffs you choose to take. [Project structure](/start-here/project-structure) maps each file.
+
+## The framework
+
+The `@cloudflare/nimbus-docs` package holds the parts with one right answer: the Astro integration, content schemas, data helpers such as the sidebar and table of contents, search indexing, the Markdown and `llms.txt` output, and the CLI. You import it; you don't copy it. Its exports are a stable contract, versioned with semver: a breaking change comes with a migration, which `nimbus-docs migrate` applies or explains. [Package API](/reference/package-api) lists the helpers your files call.
+
+## The ladder
+
+Customize at the lowest rung that does the job, since each rung up is more of your own code to maintain:
+
+1. **Configuration.** Options in `astro.config.ts`, such as the sidebar, search and rendering. See [Configuration](/reference/configuration).
+2. **Tokens.** Colours, type and spacing in `src/styles/globals.css`. See [Theme and tokens](/styling/theme-and-tokens).
+3. **Components from the registry.** Install with `nimbus-docs add`; they land as files you own. See [Add components and features](/styling/add-components).
+4. **Editing a file.** Change a component, layout or route directly.
+5. **Your own components.** Write new ones and use them in MDX. See [Custom components](/styling/custom-components).
+
+## Staying current
+
+Upstream changes to files you own arrive as changes you review:
+
+| Command | What it does |
+| --- | --- |
+| `nimbus-docs outdated` | Lists starter files, registry components and package API work that changed upstream. `--to <templates-vX.Y.Z>` compares against a specific release. |
+| `nimbus-docs diff <file>` | Shows the upstream change to one starter file next to yours. `--apply` takes it when you haven't edited the file. |
+| `nimbus-docs add <slug> --overwrite` | Reinstalls a registry component, asking before it replaces one you've edited. |
+| `nimbus-docs migrate` | Applies package API migrations and lists the upgrade reviews for your new version. |
+| `nimbus-docs init` | Writes `nimbus.json` for a project that doesn't have one, so the commands above know where it started. |
+
+`outdated` and `diff` download the starter from GitHub. If GitHub rate-limits you, set `GIGET_AUTH` to a GitHub token; see [Troubleshooting](/publish/troubleshooting#github-rate-limited-the-template-download-http-403).
+
+[Upgrading](/publish/upgrading) puts these in order for a release.

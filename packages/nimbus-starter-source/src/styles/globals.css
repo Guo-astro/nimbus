@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-mode="dark"], [data-mode="dark"] *));
+
 /* ============================================================
  * Nimbus Theme — THE file you edit to customize your site.
  *

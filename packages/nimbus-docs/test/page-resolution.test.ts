@@ -99,6 +99,7 @@ describe("prose page resolution", () => {
     ["docs-v1:guides/setup", entry("docs-v1", "guides/setup")],
     ["blog:v1", entry("blog", "v1")],
     ["sdk:setup", entry("sdk", "setup")],
+    ["sdk:index", entry("sdk", "index")],
   ]);
   let lookups: Array<{ collection: string; id: string; audience?: string }> =
     [];
@@ -215,6 +216,20 @@ describe("prose page resolution", () => {
       assert.equal(blogLeaf.page.entry.id, "v1");
     }
   });
+  test("an index path is not a second URL for a landing", async () => {
+    for (const [pathname, slug, collection] of [
+      ["/index", "index", "docs"],
+      ["/index/", "index", "docs"],
+      ["/v1/index", "v1/index", "docs"],
+      ["/products/kit/index/", "index", undefined],
+    ] as const) {
+      const result = await resolveProsePage(context(pathname, slug), { collection }, dependencies);
+      assert.deepEqual(result, { status: "not-found" }, pathname);
+    }
+    const landing = await resolveProsePage(context("/products/kit/", undefined, {}, "/products/kit/[...slug]"), {}, dependencies);
+    assert.equal(landing.status, "found");
+  });
+
   test("resolves a request route by its folder, nested, under a base, or a kept copy", async () => {
     for (const [pathname, pattern] of [
       ["/products/kit/setup/", "/products/kit/[...slug]"],

@@ -14,6 +14,7 @@ import {
   selectApiVersion,
   type ApiQueryRouting,
 } from "./api/resolve-versions.js";
+import { entryRouteKey } from "./astro-slug.js";
 import { toRouteKey } from "./url.js";
 
 export interface PageIdentity {
@@ -171,14 +172,19 @@ async function requestCollection(
   return null;
 }
 
+/**
+ * The collection and entry id a request names, and its `slug`: the page's
+ * route within the collection, which only the entry's own URL matches.
+ */
 async function requestProseIdentity(
   context: PageResolutionContext,
   collection: string | undefined,
   dependencies: ProseResolutionDependencies,
-): Promise<{ collection: string; id: string } | null> {
-  const id = normalizedPageId(context.params.slug);
+): Promise<{ collection: string; id: string; slug: string } | null> {
+  const slug = context.params.slug ? toRouteKey(`/${context.params.slug}`).slice(1) : "";
+  const id = slug || "index";
   const versions = await dependencies.getVersions();
-  const [first, ...rest] = id === "index" ? [] : id.split("/");
+  const [first, ...rest] = slug ? slug.split("/") : [];
   if (
     first &&
     versions?.others.includes(first) &&
@@ -189,12 +195,13 @@ async function requestProseIdentity(
     return {
       collection: `${PRIMARY_COLLECTION}-${first}`,
       id: rest.join("/") || "index",
+      slug: rest.join("/"),
     };
   }
 
-  if (collection) return { collection, id };
+  if (collection) return { collection, id, slug };
   const found = await requestCollection(context, dependencies);
-  return found ? { collection: found, id } : null;
+  return found ? { collection: found, id, slug } : null;
 }
 
 export async function resolveProsePage(
@@ -220,6 +227,8 @@ export async function resolveProsePage(
       context.projection,
     ));
   if (!entry) return { status: "not-found" };
+  // `/index` and `/<folder>/index` find the landing; only its own URL serves it.
+  if (requestIdentity && entryRouteKey(entry.id) !== requestIdentity.slug) return { status: "not-found" };
 
   const rendered = await dependencies.render(entry);
   return {

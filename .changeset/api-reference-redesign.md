@@ -13,4 +13,4 @@ A redesigned API reference:
 - Section page operations gain `method`, `path`, `description` and `deprecated`, and the root page gains an `index` of every endpoint.
 - `getApiRoot` reads an API version's root page from any route; `chunkApiIndex` and `apiIndexRows` split and flatten its index.
 
-`nimbus-docs upgrade` lists the optional steps to adopt it.
+`nimbus-docs migrate` lists the optional steps to adopt it.

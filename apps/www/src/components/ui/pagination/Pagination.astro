@@ -77,10 +77,10 @@ const next = composed ? undefined : prevNext?.next;
 <style>
   /* With one neighbour, the bar is that half alone, on its own side. */
   @media (min-width: 40rem) {
-    .nb-pagination-bar:not(:has(:global([data-slot="pagination-link"] + [data-slot="pagination-link"]))) {
+    .nb-pagination-bar:not(:has([data-slot="pagination-link"] + [data-slot="pagination-link"])) {
       width: 50%;
     }
-    .nb-pagination-bar:has(:global([rel="next"])):not(:has(:global([rel="prev"]))) {
+    .nb-pagination-bar:has([rel="next"]):not(:has([rel="prev"])) {
       margin-inline-start: auto;
     }
   }

@@ -1202,7 +1202,10 @@ export function getTOC(
 
 import type { AstroGlobal, GetStaticPaths } from "astro";
 
-function pageResolutionContext(astro: AstroGlobal): PageResolutionContext {
+/** What page resolution reads from a page's `Astro` or an endpoint's context. */
+type RouteContext = Pick<AstroGlobal, "locals" | "props" | "params" | "url" | "routePattern" | "request">;
+
+function pageResolutionContext(astro: RouteContext): PageResolutionContext {
   const audience = (
     astro.locals as {
       nimbus?: { audience?: NonNullable<ProjectionContext["audience"]> };
@@ -1773,7 +1776,7 @@ async function apiHomeVersion(
  *   const root = await getApiRoot(Astro, { collection: "api", version: "v2" });
  */
 export async function getApiRoot(
-  astro: AstroGlobal | undefined,
+  astro: RouteContext | undefined,
   options: { collection: string; version?: string | null },
 ): Promise<import("./api/index.js").ApiRootPage | null> {
   const { collection } = options;
@@ -1833,7 +1836,7 @@ export function getApiHomeStaticPaths(
  * `404` response.
  */
 export async function getApiHome(
-  astro: AstroGlobal,
+  astro: RouteContext,
   collection: string,
   options: { size?: number } = {},
 ): Promise<
@@ -1919,7 +1922,7 @@ async function resolveApiRoute(
 // entry, or a projection of the configured model (thin entries). Without
 // `astro` (a `getStaticPaths` call), the live collection isn't readable.
 async function renderApiEntry(
-  astro: AstroGlobal | undefined,
+  astro: RouteContext | undefined,
   collection: string,
   version: string | null,
   coordinate: string,

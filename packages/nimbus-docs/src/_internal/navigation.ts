@@ -177,7 +177,15 @@ export function getPrevNext(
   overrides?: PrevNextOverrides,
   validInternalLinks?: Set<string>,
 ): PrevNext {
-  const flat = flattenSidebar(sidebarTree);
+  // A page the tree reaches twice (a landing that's also a child link, a
+  // page in two groups) would otherwise neighbour itself.
+  const seen = new Set<string>();
+  const flat = flattenSidebar(sidebarTree).filter((item) => {
+    const key = toRouteKey(item.href);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   // Sidebar hrefs are trailing-slash browser-form; `currentPath` from
   // routes may be either form. Compare via route key so they line up.
   const currentKey = toRouteKey(currentPath);

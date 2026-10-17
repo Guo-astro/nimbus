@@ -210,4 +210,23 @@ describe("renderMarkdown: CommonMark → HTML for spec descriptions", () => {
     assert.match(html, /<code>code<\/code>/);
     assert.match(html, /<li>one<\/li>/);
   });
+
+  test("keeps a tag the sanitizer doesn't know as inert text", () => {
+    const render = (source: string) => renderMarkdown(source).trim();
+    assert.equal(render("Filter by metadata.<key> here."), "<p>Filter by metadata.&#x3C;key> here.</p>");
+    assert.equal(render("a.<id>.c"), "<p>a.&#x3C;id>.c</p>");
+    assert.equal(render("<x-y>z</x-y>"), "<p>&#x3C;x-y>z&#x3C;/x-y></p>");
+    assert.equal(render("<iframe src=x></iframe>"), "&#x3C;iframe src=x>&#x3C;/iframe>");
+    assert.equal(render("a <style>p{}</style> b"), "<p>a &#x3C;style>p{}&#x3C;/style> b</p>");
+    assert.equal(render("a <template><b>x</b></template>"), "<p>a &#x3C;template><b>x</b>&#x3C;/template></p>");
+    assert.doesNotMatch(render("a <plaintext><b>x</b>"), /<plaintext|<b>/);
+    assert.equal(
+      render("<key onclick=alert(1)>v</key>"),
+      "<p>&#x3C;key onclick=alert(1)>v&#x3C;/key></p>",
+    );
+    assert.equal(
+      render("a<br>b <https://x.dev> &lt;x&gt; <!-- c --> <b>c</b>"),
+      '<p>a<br>b <a href="https://x.dev">https://x.dev</a> &#x3C;x>  <b>c</b></p>',
+    );
+  });
 })

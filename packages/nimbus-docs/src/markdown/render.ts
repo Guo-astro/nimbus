@@ -18,7 +18,8 @@ import { markdownToHtml } from "satteri";
  * Sätteri emits raw HTML verbatim, so a hostile description could otherwise bake
  * `<script>`/`onerror`/`javascript:` into the static site (stored XSS). The
  * markdown output is passed through a parser-based allowlist (`hast-util-sanitize`
- * with the GitHub-flavored `defaultSchema`) before it ever reaches the page.
+ * with the GitHub-flavored `defaultSchema`) before it ever reaches the page. A tag
+ * the schema doesn't know, like the `<key>` in `metadata.<key>`, stays as text.
  *
  * Resilient by contract: empty/whitespace input yields `""`, and a renderer
  * failure degrades to the escaped source text rather than aborting the build.
@@ -29,10 +30,33 @@ export function renderMarkdown(source: string | undefined | null): string {
   if (!trimmed) return "";
   try {
     const raw = markdownToHtml(trimmed).html;
-    return toHtml(sanitize(fromHtml(raw, { fragment: true }), defaultSchema));
+    const tree = fromHtml(raw, { fragment: true, verbose: true });
+    tree.children = unknownTagsAsText(tree.children, raw);
+    return toHtml(sanitize(tree, defaultSchema));
   } catch {
     return `<p>${escapeHtml(trimmed)}</p>`;
   }
+}
+
+const knownTags = new Set([...(defaultSchema.tagNames ?? []), ...(defaultSchema.strip ?? [])]);
+
+type Node = ReturnType<typeof fromHtml>["children"][number];
+type Span = { start: { offset?: number }; end: { offset?: number } };
+
+function unknownTagsAsText(nodes: Node[], raw: string): Node[] {
+  return nodes.flatMap((node): Node[] => {
+    if (node.type !== "element") return [node];
+    if (knownTags.has(node.tagName)) return [{ ...node, children: unknownTagsAsText(node.children, raw) } as Node];
+    const children = unknownTagsAsText(node.content?.children ?? node.children, raw);
+    const { opening, closing } = (node.data as { position?: { opening?: Span; closing?: Span } } | undefined)
+      ?.position ?? {};
+    return [...sourceText(raw, opening), ...children, ...sourceText(raw, closing)];
+  });
+}
+
+function sourceText(raw: string, span: Span | undefined): Node[] {
+  if (span?.start.offset === undefined || span.end.offset === undefined) return [];
+  return [{ type: "text", value: raw.slice(span.start.offset, span.end.offset) }];
 }
 
 function escapeHtml(text: string): string {

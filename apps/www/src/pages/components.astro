@@ -18,6 +18,8 @@ import { Banner } from "@/components/ui/banner";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CardGrid } from "@/components/ui/card-grid";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Code } from "@/components/ui/code";
 import { CodeGroup } from "@/components/ui/code-group";
 import { CopyPrompt } from "@/components/ui/copy-prompt";
@@ -174,6 +176,22 @@ const jsSample = `// inferred`;
       </a>
     </div>
 
+    {/* CardGrid */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="w-full">
+          <CardGrid>
+            <Card title="Fast">Static output.</Card>
+            <Card title="Owned">Files you edit.</Card>
+          </CardGrid>
+        </div>
+      </div>
+      <a href={componentHref("card-grid")} class="nb-cmp-link">
+        <span>CardGrid</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
     {/* Code */}
     <div class="nb-cmp-card group/card">
       <div class="nb-cmp-preview">
@@ -199,6 +217,22 @@ const jsSample = `// inferred`;
       </div>
       <a href={componentHref("code-group")} class="nb-cmp-link">
         <span>CodeGroup</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
+    {/* Collapsible */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="w-full">
+          <Collapsible class="rounded-lg ring ring-border overflow-hidden bg-card">
+            <CollapsibleTrigger class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent transition-colors">What's inside?</CollapsibleTrigger>
+            <CollapsibleContent><p class="px-4 pb-3 text-sm text-muted-foreground">Anything you put in it.</p></CollapsibleContent>
+          </Collapsible>
+        </div>
+      </div>
+      <a href={componentHref("collapsible")} class="nb-cmp-link">
+        <span>Collapsible</span>
         <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
       </a>
     </div>
@@ -313,6 +347,20 @@ const jsSample = `// inferred`;
       </div>
       <a href={componentHref("icon")} class="nb-cmp-link">
         <span>Icon</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
+    {/* ImageZoom */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+          <Icon name="ph:magnifying-glass-plus" class="w-6 h-6" />
+          <span>Click any image in a page to zoom it.</span>
+        </div>
+      </div>
+      <a href={componentHref("image-zoom")} class="nb-cmp-link">
+        <span>ImageZoom</span>
         <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
       </a>
     </div>

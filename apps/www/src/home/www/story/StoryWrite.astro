@@ -1,0 +1,153 @@
+---
+/* Write: one file, two authors, a live preview. The checks flag one slip from each author; fixing them updates the preview. */
+import { Icon } from "@/home/icon";
+import { buttonVariants } from "../ui/button/variants";
+import { Code } from "@/components/ui/code";
+import Logo from "../Logo.astro";
+import RateLimitDiagram from "./RateLimitDiagram.astro";
+
+const before = `---
+title: Rate limits
+---
+
+Every API key can make 1,000 requests a minute.
+See [quotas](/docs/quota) for account limits.
+
+<Diagram of="request-path" />
+
+#### Raise your limit
+Open the support form with your account ID.
+Most requests are approved within a day.`;
+const after = before.replace("/docs/quota)", "/docs/quotas)").replace("#### Raise", "## Raise");
+const checks = [["links", "Links"], ["components", "Components"], ["headings", "Headings"], ["code", "Code blocks"]];
+const { class: cls = "" } = Astro.props;
+---
+<div class:list={["story-stage chrome-bg chrome-1 overflow-hidden rounded-2xl border border-border h-[640px]", cls]} data-story-write>
+  <div class="contents">
+    <!-- The editor -->
+    <div class="absolute top-6 left-6 -right-6 -bottom-12 overflow-hidden rounded-xl border border-border bg-card shadow-(--www-shadow-float) lg:top-12 lg:right-auto lg:left-12 lg:-bottom-12 lg:w-[58%]">
+      <!-- Tabs -->
+      <div class="flex h-[41px] items-stretch border-b border-border bg-muted/50 text-[12px] leading-4">
+        <span class="relative flex items-center gap-2 border-r border-border bg-card px-4 font-mono text-foreground shadow-[inset_0_-1px_0_var(--nb-card)]"><Icon name="ph:file-text" class="size-3.5 text-muted-foreground" />rate-limits.mdx<i class="ml-1 size-1.5 rounded-full bg-foreground/50"></i></span>
+        <span class="hidden items-center gap-2 border-r border-border px-4 font-mono text-muted-foreground sm:flex"><Icon name="ph:file-text" class="size-3.5" />bindings.mdx</span>
+        <span class="ml-auto flex items-center gap-1.5 px-4">
+          <span class="grid size-5 place-items-center rounded-full bg-foreground text-[10px] font-medium text-background ring-2 ring-muted">Y</span>
+          <span class="grid size-5 place-items-center rounded-full bg-info text-white ring-2 ring-muted"><Icon name="ph:sparkle-fill" class="size-3" /></span>
+        </span>
+      </div>
+      <!-- Breadcrumb -->
+      <div class="flex h-8 items-center gap-1.5 px-4 font-mono text-[11px] leading-4 text-muted-foreground">
+        <span>src</span><Icon name="ph:caret-right" class="size-3" /><span>content</span><Icon name="ph:caret-right" class="size-3" /><span>docs</span><Icon name="ph:caret-right" class="size-3" /><span class="text-foreground">rate-limits.mdx</span>
+      </div>
+      <div class="story-code" data-editor><Code code={before} lang="mdx" /></div>
+      <div hidden class="story-code" data-after><Code code={after} lang="mdx" /></div>
+    </div>
+
+    <!-- The page, in a browser -->
+    <div class="absolute top-[349px] left-6 -right-6 -bottom-12 overflow-hidden rounded-xl border border-border bg-card shadow-(--www-shadow-float) sm:left-24 lg:top-24 lg:right-12 lg:left-auto lg:w-[42%]">
+      <div class="flex h-[45px] items-center gap-3 border-b border-border bg-muted/50 px-4">
+        <span class="flex gap-1.5"><i class="size-2.5 rounded-full bg-border-strong"></i><i class="size-2.5 rounded-full bg-border-strong"></i><i class="size-2.5 rounded-full bg-border-strong"></i></span>
+        <span class="hidden items-center gap-1 text-muted-foreground sm:flex"><Icon name="ph:caret-left" class="size-3.5" /><Icon name="ph:caret-right" class="size-3.5 opacity-40" /></span>
+        <span class="mx-auto flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md bg-card px-3 text-[12px] leading-4 text-muted-foreground shadow-[0_0_0_1px_var(--nb-border)] sm:max-w-[280px]"><Icon name="ph:lock-simple" class="size-3 shrink-0" /><span class="truncate">nimbus-docs.com/docs/rate-limits</span></span>
+        <Icon name="ph:arrow-clockwise" class="hidden size-3.5 text-muted-foreground sm:block" />
+      </div>
+      <!-- The site's own header -->
+      <div class="hidden h-[45px] items-center gap-4 border-b border-border px-7 text-[12px] leading-4 sm:flex">
+        <span class="flex items-center gap-1.5 font-medium"><Logo class="h-4 w-auto" />Nimbus</span>
+        <span class="text-muted-foreground">Docs</span><span class="text-muted-foreground">API</span>
+        <span class="ml-auto flex h-6 w-24 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground shadow-[0_0_0_1px_var(--nb-border)]"><Icon name="ph:magnifying-glass" class="size-3" />Search</span>
+      </div>
+      <div class="px-5 py-4 sm:px-7 sm:py-6">
+        <p class="hidden text-[12px] leading-4 text-muted-foreground sm:block">Get started / Rate limits</p>
+        <p class="m-0 sm:mt-3 text-[28px] leading-9 font-medium tracking-tight">Rate limits</p>
+        <p class="mt-3 text-[14px] leading-6 text-foreground/80">Every API key can make 1,000 requests a minute. See <a class="underline decoration-foreground/30 underline-offset-[3px] transition-colors data-[broken]:decoration-warning data-[broken]:decoration-wavy" data-preview-link>quotas</a> for account limits.</p>
+        <div class="mt-5"><RateLimitDiagram /></div>
+        <p class="mt-6 font-medium tracking-tight transition-all duration-300 data-[level=h4]:text-[15px] data-[level=h4]:leading-6 data-[level=h2]:text-[20px] data-[level=h2]:leading-7" data-level="h4" data-preview-heading>Raise your limit</p>
+        <p class="mt-2 text-[14px] leading-6 text-foreground/80">Open the support form with your account ID. Most requests are approved within a day.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- The checks -->
+  <div class="absolute right-4 bottom-4 left-4 rounded-xl bg-card p-3 text-[12px] leading-5 shadow-(--www-shadow-menu) sm:right-auto sm:left-6 sm:w-[420px] lg:bottom-8 lg:left-20" data-checks>
+    <div class="flex h-7 items-center gap-2">
+      <Icon name="ph:shield-check" class="size-4 shrink-0 text-muted-foreground" />
+      <span class="font-medium">Checks</span>
+      <span class="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground" data-check-status><Icon name="ph:circle-notch" class="hidden size-3.5 motion-safe:animate-spin" data-spin /><span data-check-text>Not run</span></span>
+      <button type="button" data-act class={`${buttonVariants({ variant: "primary", size: "xs" })} ml-auto`}>Run checks</button>
+    </div>
+    <ul class="mt-3 flex gap-1 sm:gap-1.5">
+      {checks.map(([id, label]) => (
+        <li class="group flex h-7 flex-auto items-center justify-center gap-1 rounded-md bg-muted px-1.5 text-[11px] sm:gap-1.5 sm:px-2 sm:text-[12px] text-muted-foreground transition-colors data-[state=pass]:text-foreground data-[state=warn]:bg-warning-muted data-[state=warn]:text-foreground" data-chip={id} data-state="idle">
+          <span class="grid size-3.5 shrink-0 place-items-center">
+            <Icon name="ph:circle" class="size-3.5 group-data-[state=pass]:hidden group-data-[state=running]:hidden group-data-[state=warn]:hidden" />
+            <Icon name="ph:circle-notch" class="hidden size-3.5 motion-safe:animate-spin group-data-[state=running]:block" />
+            <Icon name="ph:check-bold" class="hidden size-3.5 text-success group-data-[state=pass]:block" />
+            <Icon name="ph:warning-bold" class="hidden size-3.5 text-warning group-data-[state=warn]:block" />
+          </span>{label}
+        </li>
+      ))}
+    </ul>
+  </div>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>("[data-story-write]");
+  if (root) {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
+    const editor = root.querySelector<HTMLElement>("[data-editor]")!;
+    const lines = () => Array.from(editor.querySelectorAll<HTMLElement>(".line"));
+    const afterLines = Array.from(root.querySelectorAll<HTMLElement>("[data-after] .line"));
+    const original = lines().map((l) => l.cloneNode(true) as HTMLElement);
+    const authors: Record<number, "you" | "agent"> = { 5: "you", 6: "you", 10: "agent", 11: "agent", 12: "agent" };
+    const findings: [number, string][] = [[6, "Link not found · You"], [10, "Heading skips a level · Agent"]];
+    const caret = (who: string, name: string) => { const c = document.createElement("span"); c.className = "story-caret"; c.dataset.who = who; c.dataset.name = name; return c; };
+    const dress = () => {
+      lines().forEach((l, i) => { const by = authors[i + 1]; if (by) l.dataset.by = by; });
+      lines()[5].append(caret("you", "You")); lines()[11].append(caret("agent", "Agent"));
+    };
+    dress();
+
+    const act = root.querySelector<HTMLButtonElement>("[data-act]")!, text = root.querySelector<HTMLElement>("[data-check-text]")!;
+    const link = root.querySelector<HTMLElement>("[data-preview-link]")!, heading = root.querySelector<HTMLElement>("[data-preview-heading]")!;
+    const chip = (id: string, state: string) => { root.querySelector<HTMLElement>(`[data-chip="${id}"]`)!.dataset.state = state; };
+    // `more` is extra detail shown only where there's room (sm and up).
+    const status = (label: string, busy = false, more = "") => {
+      text.textContent = label;
+      if (more) { const tail = document.createElement("span"); tail.className = "hidden sm:inline"; tail.textContent = more; text.append(tail); }
+      root.querySelector("[data-spin]")!.classList.toggle("hidden", !busy);
+    };
+    let step = "idle", busy = false;
+    act.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true; act.disabled = true;
+      if (step === "idle") {
+        status("Checking…", true);
+        for (const id of ["links", "components", "headings", "code"]) { chip(id, "running"); await wait(260); chip(id, id === "links" || id === "headings" ? "warn" : "pass"); }
+        for (const [n, msg] of findings) {
+          const l = lines()[n - 1]; l.classList.add("highlighted", "warning");
+          const lens = document.createElement("span"); lens.className = "story-lens"; lens.textContent = msg; l.append(lens);
+        }
+        link.dataset.broken = "";
+        status("2 issues", false, " · one from each author"); act.textContent = "Fix both"; step = "warn";
+      } else if (step === "warn") {
+        status("Fixing…", true);
+        for (const [n] of findings) {
+          await wait(450);
+          const fresh = afterLines[n - 1].cloneNode(true) as HTMLElement;
+          fresh.dataset.by = authors[n]; fresh.classList.add("diff", "add");
+          lines()[n - 1].replaceWith(fresh);
+          if (n === 6) { delete link.dataset.broken; fresh.append(caret("you", "You")); chip("links", "pass"); }
+          if (n === 10) { heading.dataset.level = "h2"; chip("headings", "pass"); }
+        }
+        status("All passing"); act.textContent = "Reset"; step = "pass";
+      } else {
+        lines().forEach((l, i) => l.replaceWith(original[i].cloneNode(true)));
+        dress(); heading.dataset.level = "h4"; delete link.dataset.broken;
+        ["links", "components", "headings", "code"].forEach((id) => chip(id, "idle"));
+        status("Not run"); act.textContent = "Run checks"; step = "idle";
+      }
+      act.disabled = false; busy = false;
+    });
+  }
+</script>

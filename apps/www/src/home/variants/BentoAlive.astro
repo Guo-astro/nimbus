@@ -1,0 +1,707 @@
+---
+/* Interactive bento: each cell is a stage with a window bleeding off the edge and a working control over it. */
+import BrandLogo from "../www/BrandLogo.astro";
+import { Icon } from "@/home/icon";
+import { buttonVariants } from "../www/ui/button/variants";
+import { Badge } from "../www/ui/badge";
+import { Code } from "@/components/ui/code";
+interface Props { class?: string; omit?: ("edit" | "checks" | "theme" | "diagram" | "try")[] }
+const { class: cls = "", omit = [] } = Astro.props;
+// With Try it folded into the API reference tile, the remaining tiles are
+// laid out as three full rows: AI search + API reference, recipes, MCP + loaders.
+const compact = omit.includes("try");
+const span = {
+  ask: "lg:col-span-2",
+  api: "lg:col-span-4",
+  recipe: compact ? "sm:col-span-2 lg:col-span-6 lg:order-1" : "sm:col-span-2 lg:col-span-6",
+  mcp: compact ? "lg:col-span-4 lg:order-2" : "lg:col-span-4",
+  loaders: compact ? "lg:col-span-2 lg:order-2" : "lg:col-span-2",
+};
+const stage = "chrome-bg relative overflow-hidden rounded-xl bg-accent";
+const win = "absolute overflow-hidden rounded-lg border border-border bg-card shadow-(--www-shadow-win)";
+const pop = "absolute rounded-xl bg-card shadow-(--www-shadow-menu)";
+// The image stage runs to the card's edges; the card clips its corners.
+const cell = "flex min-w-0 flex-col overflow-hidden rounded-xl bg-card";
+// Titles sit flush with the image's left edge (the card has no border or tint),
+// at sizes that read at a glance.
+const head = "pb-4";
+const headTitle = "text-lg leading-7 font-medium";
+const headDesc = "mt-1 text-base leading-6 text-foreground/70";
+// Nimbus code blocks sit flush inside a mock window.
+// Nimbus code styles are unlayered, so these overrides need `!` to win.
+const flushCode = "[&_.nb-code-figure]:my-0! [&_.nb-code-figure]:rounded-none! [&_.nb-code-figure]:border-0! [&_.nb-code-figure]:shadow-none! [&_.nb-code-figure]:before:hidden! [&_pre]:px-3! [&_pre]:text-[12px]! [&_pre]:leading-5!";
+const tryResponse = `{\n  "limit": 1000,\n  "remaining": 941,\n  "reset": 37\n}`;
+const questions = [
+  ["How do I raise my rate limit?", "Each key allows 1,000 requests a minute. Contact support with your account ID to raise it.", "Rate limits"],
+  ["What does a 429 mean?", "You went over the limit. Wait for RateLimit-Reset seconds, then retry.", "Errors"],
+  ["Can I bind KV to a Worker?", "Yes. Add a kv_namespaces entry to your config and redeploy.", "Bindings"],
+];
+const themes = [
+  { id: "stone", name: "Stone", sw: "#1c1917", vars: "--t-bg:#ffffff;--t-ink:#1c1917;--t-mut:#78716c;--t-acc:#1c1917;--t-font:Geist,sans-serif;--t-r:9999px" },
+  { id: "cursor", name: "Ink", sw: "#f54e00", vars: "--t-bg:#f7f7f4;--t-ink:#26251e;--t-mut:#26251e99;--t-acc:#f54e00;--t-font:Geist,sans-serif;--t-r:4px" },
+  { id: "serif", name: "Serif", sw: "#1e3a8a", vars: "--t-bg:#fbfaf7;--t-ink:#1f2937;--t-mut:#6b7280;--t-acc:#1e3a8a;--t-font:ui-serif,Georgia,serif;--t-r:6px" },
+];
+// ---- More panels ----
+const recipeSteps = [["1", "Discovery"], ["2", "Prompt the user"], ["3", "Plan"], ["4", "Register the collection"], ["5", "Implementation"], ["6", "Sidebar wiring"], ["7", "Verify"], ["8", "Already installed?"]];
+const recipeExcerpt = ["# Changelog", "You are helping the user add a changelog to their docs site.", "", "## 1. Discovery (read-only)", "Inspect the repo to learn its conventions.", "", "## 2. Prompt the user", "Ask, with sensible defaults: feed title, RSS feed, sidebar link."];
+const recipeQuestions = [["title", "Feed title", "Changelog", "What's new", "Changelog"], ["rss", "RSS feed", "Yes", "No", "Yes"], ["sidebar", "Sidebar link", "Yes", "No", "No"]];
+const specEndpoints = [
+  { id: "get", method: "GET", variant: "success", path: "/limits", summary: "Read your rate limits", status: "200 OK", body: `{ "limit": 1000, "remaining": 941 }`, lines: [2, 3], params: [["account_id", "query", "string"]] },
+  { id: "post", method: "POST", variant: "info", path: "/keys", summary: "Create an API key", status: "201 Created", body: `{ "id": "key_9bR4", "name": "Staging" }`, lines: [4, 5], params: [["name", "body", "string"], ["scopes", "body", "array"]] },
+  { id: "delete", method: "DELETE", variant: "danger", path: "/keys/{id}", summary: "Revoke an API key", status: "204 No Content", body: "", lines: [6, 7], params: [["id", "path", "string"]] },
+] as const;
+const specLines: string[] = ["paths:", "  /limits:", "    get: Read your rate limits", "  /keys:", "    post: Create an API key", "  /keys/{id}:", "    delete: Revoke an API key"];
+// Each spec line knows which endpoint it belongs to, so hovering a path drives the generated page.
+const specRows = specLines.map((text, i) => {
+  const n = i + 1;
+  const ep = specEndpoints.find((e) => n >= e.lines[0] && n <= e.lines[1]);
+  return { n, text, ep, first: ep?.lines[0] === n };
+});
+const sources = [
+  { id: "notion" as const, name: "Notion", pages: 38, page: "Onboarding" },
+  { id: "gdocs" as const, name: "Google Docs", pages: 12, page: "Style guide" },
+  { id: "repo" as const, name: "Repository", pages: 142, page: "Bindings" },
+];
+const nodes = [
+  ["client", "Client", "The browser or app making the request."],
+  ["worker", "Worker", "Runs your code at the edge, close to the user."],
+  ["kv", "KV", "Global key-value storage, read in milliseconds."],
+];
+---
+      <ul class:list={["chrome-cycle grid grid-cols-1 gap-x-4 gap-y-12 sm:grid-cols-2 lg:grid-cols-6", cls]}>
+        <!-- 1 · Agent edit: accept or reject -->
+        {!omit.includes("edit") && (<>
+        <li class:list={[cell, "lg:col-span-4 lg:row-span-2"]} data-edit>
+          <div class={head}><h3 class={headTitle}>Written with agents</h3><p class={headDesc}>An agent drafts in your structure. You accept or reject, line by line.</p></div>
+          <div class:list={[stage, "min-h-[380px] flex-1"]}>
+            <div class:list={[win, "top-6 left-6 -right-10 -bottom-10"]}>
+              <div class="flex h-8 items-center gap-4 border-b border-border px-3 text-[12px]"><span class="font-medium">rate-limits.mdx</span><span class="text-muted-foreground/70">bindings.mdx</span></div>
+              <pre class="p-4 font-mono text-[12px] leading-[1.8] text-foreground/70"><span class="text-muted-foreground/70">1</span>  <span class="text-foreground"># Rate limits</span>
+<span class="text-muted-foreground/70">2</span>
+<span class="text-muted-foreground/70">3</span>  Every API key can make 1,000 requests a minute.
+<span class="text-muted-foreground/70">4</span>
+<span class="text-muted-foreground/70">5</span>  &lt;<span class="text-foreground">Diagram</span> of="request-path" /&gt;
+<span class="text-muted-foreground/70">6</span>
+<span data-suggest class="block bg-success-muted"><span class="text-muted-foreground/70">7</span>  ## Raise your limit
+<span class="text-muted-foreground/70">8</span>  Open the support form with your account ID.</span></pre>
+            </div>
+            <div class:list={[pop, "right-6 bottom-6 w-[min(300px,calc(100%-3rem))] p-4"]}>
+              <p class="flex items-center gap-2 text-[13px] font-medium"><Icon name="ph:sparkle" class="size-3.5 text-muted-foreground" /><span data-edit-title>Agent suggests 2 lines</span></p>
+              <p class="mt-1 text-[12px] leading-5 text-muted-foreground" data-edit-note>Adds a section on raising the limit, from the support page.</p>
+              <div class="mt-3 flex gap-2" data-edit-actions><button type="button" data-accept class={buttonVariants({ variant: "primary", size: "xs" })}>Accept</button><button type="button" data-reject class={buttonVariants({ variant: "secondary", size: "xs" })}>Reject</button></div>
+              <button type="button" hidden data-reset class="mt-3 text-[12px] text-muted-foreground underline">Reset</button>
+            </div>
+          </div>
+        </li>
+        </>)}
+
+        <!-- 2 · Checks and review: a real four-step flow (check → fix → review → live) -->
+        {!omit.includes("checks") && (<>
+        <li class:list={[cell, "lg:col-span-2"]} data-approve data-step="check">
+          <div class={head}><h3 class={headTitle}>Checked before it ships</h3><p class={headDesc}>Drafts stay tagged until a person signs off.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8"]}>
+              <div class="flex h-[33px] items-center gap-2 border-b border-border px-3 text-[11px] leading-4">
+                <span class="flex items-center gap-1.5 font-mono text-muted-foreground" data-file><Icon name="ph:file-text" class="size-3.5" />rate-limits.mdx</span>
+                <span hidden class="flex items-center gap-1.5 font-mono text-foreground" data-live><span class="size-1.5 rounded-full bg-success"></span>nimbus-docs.com/docs/rate-limits</span>
+                <Badge variant="warning" text="Draft" data-badge-draft />
+                <Badge variant="success" text="Published" hidden data-badge-pub />
+              </div>
+              <ol class="py-2 font-mono text-[12px] leading-5">
+                {[["12", "Each key gets 1,000 requests"], ["13", "a minute."], ["14", "#### Raise your limit"], ["15", "Contact support."]].map(([n, code]) => (
+                  <li class="flex gap-3 px-3 data-[mark=warn]:bg-warning-muted data-[mark=fixed]:bg-success-muted" data-line={n}><span class="w-4 shrink-0 text-right text-muted-foreground/70">{n}</span><span data-code>{code}</span></li>
+                ))}
+              </ol>
+            </div>
+            <div class:list={[pop, "left-6 right-3 bottom-3 p-3 text-[12px]"]}>
+              <ul class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                {[["links", "Links resolve", ""], ["components", "Components valid", ""], ["headings", "Heading order", "Line 14"], ["review", "Reviewed by a person", ""]].map(([id, label, detail]) => (
+                  <li class="group flex h-5 min-w-0 items-center gap-2 text-muted-foreground data-[state=pass]:text-foreground data-[state=warn]:text-foreground" data-check={id} data-state="pending" hidden={id === "review"}>
+                    <Icon name="ph:circle" class="size-3.5 shrink-0 group-data-[state=pass]:hidden group-data-[state=warn]:hidden group-data-[state=running]:hidden" />
+                    <Icon name="ph:circle-notch" class="hidden size-3.5 shrink-0 motion-safe:animate-spin group-data-[state=running]:block" />
+                    <Icon name="ph:check-circle" class="hidden size-3.5 shrink-0 text-success group-data-[state=pass]:block" />
+                    <Icon name="ph:warning-circle" class="hidden size-3.5 shrink-0 text-warning group-data-[state=warn]:block" />
+                    <span class="truncate">{label}</span>
+                    {detail && <span class="ml-auto hidden shrink-0 font-mono text-[11px] leading-4 text-warning group-data-[state=warn]:inline">{detail}</span>}
+                  </li>
+                ))}
+              </ul>
+              <div class="mt-3 flex items-center justify-between border-t border-border pt-3">
+                <p class="text-[11px] leading-4 text-muted-foreground"><span data-step-label>Checks</span> · <span class="tabular-nums" data-step-count>1 / 4</span></p>
+                <button type="button" data-act class={buttonVariants({ variant: "primary", size: "xs" })}>Run checks</button>
+              </div>
+            </div>
+          </div>
+        </li>
+        </>)}
+
+        <!-- 3 · AI search: ask -->
+        <li class:list={[cell, span.ask]} data-ask>
+          <div class={head}><h3 class={headTitle}>AI search</h3><p class={headDesc}>Ask the docs. Get an answer, with its source.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 px-4 py-1.5 text-[12px] leading-5"]}><p class="text-muted-foreground/70">Get started / Rate limits</p><p class="mt-40 text-[14px] leading-6 font-medium">Rate limits</p><p class="mt-1 text-foreground/70">Every API key can make 1,000 requests a minute.</p></div>
+            <div class:list={[pop, "left-6 right-3 top-12 p-3"]}>
+              <div class="flex h-[33px] items-center gap-2 border-b border-border text-[12px]"><Icon name="ph:sparkle" class="size-3.5 text-muted-foreground" /><span data-q class="text-muted-foreground/70">Ask a question…</span><span class="ml-auto font-mono text-[10px] leading-4 text-muted-foreground/70">⌘K</span></div>
+              <ul class="-mx-2 mt-2 space-y-0.5 text-[12px]" data-qs>{questions.map(([q, a, src]) => (<li><button type="button" data-a={a} data-src={src} class="w-full truncate rounded px-2 py-1 text-left text-foreground/70 hover:bg-accent">{q}</button></li>))}</ul>
+              <div hidden data-answer class="mt-2 text-[12px] leading-5 text-foreground/80"><p data-answer-text></p><Badge variant="outline" class="mt-2 gap-1"><Icon name="ph:file-text" class="size-3" /><span data-answer-src></span></Badge></div>
+            </div>
+          </div>
+        </li>
+
+        <!-- 4 · Theme: one file, your style -->
+        {!omit.includes("theme") && (<>
+        <li class:list={[cell, "lg:col-span-2"]} data-theme-cell>
+          <div class={head}><h3 class={headTitle}>Your house style</h3><p class={headDesc}>One CSS file. Nothing to fork.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 p-5"]} data-themed style={themes[0].vars + ";background:var(--t-bg);color:var(--t-ink);font-family:var(--t-font)"}>
+              <p class="text-[11px]" style="color:var(--t-mut)">Get started / Rate limits</p>
+              <p class="mt-2 text-xl">Rate limits</p>
+              <p class="mt-2 max-w-[240px] text-[12px] leading-5" style="color:var(--t-mut)">Every API key can make 1,000 requests a minute. <span style="color:var(--t-acc);text-decoration:underline">Raise it</span>.</p>
+              <span class="mt-4 inline-flex px-3 py-1.5 text-[12px] text-primary-foreground" style="background:var(--t-acc);border-radius:var(--t-r)">Get a key</span>
+            </div>
+            <div class:list={[pop, "right-4 bottom-4 p-1.5"]}>
+              <p class="px-1.5 pt-0.5 pb-1.5 font-mono text-[10px] text-muted-foreground/70">globals.css</p>
+              <div class="flex gap-1">{themes.map((t, i) => (<button type="button" data-set={t.vars} aria-pressed={i === 0 ? "true" : "false"} class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-foreground/70 aria-[pressed=true]:bg-accent aria-[pressed=true]:text-foreground"><i class="size-2.5 rounded-full" style={`background:${t.sw}`}></i>{t.name}</button>))}</div>
+            </div>
+          </div>
+        </li>
+        </>)}
+
+        <!-- 5 · Try it: send -->
+        {!omit.includes("try") && (<>
+        <li class:list={[cell, "lg:col-span-2"]} data-try>
+          <div class={head}><h3 class={headTitle}>Try it</h3><p class={headDesc}>Run API calls from the page.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8"]}>
+              <div class="flex h-[41px] items-center gap-2 border-b border-border px-3 text-[12px]"><Badge variant="success" text="GET" class="font-mono" /><span class="truncate font-mono text-foreground/70">/v1/accounts/acme/limits</span></div>
+              <p class="flex items-center gap-2 p-3 font-mono text-[12px] leading-5 text-muted-foreground/70" data-idle><Icon name="ph:circle-notch" class="hidden size-3.5 motion-safe:animate-spin" data-spin /><span data-idle-text>Press Send to run this request.</span></p>
+              <div hidden data-res class={flushCode}>
+                <p class="flex items-center gap-2 px-3 pt-3 text-[12px] leading-5"><Badge variant="success" text="200 OK" /><span class="text-muted-foreground tabular-nums" data-ms>84 ms</span></p>
+                <Code code={tryResponse} lang="json" />
+              </div>
+            </div>
+            <div class:list={[pop, "right-3 bottom-3 flex items-center gap-2 rounded-[14px]! p-1.5 pl-3 text-[12px]"]}><span class="text-muted-foreground">Your key</span><span class="font-mono text-muted-foreground/70">sk_test_…4f2</span><button type="button" data-send class={buttonVariants({ variant: "primary", size: "xs" })}>Send</button></div>
+          </div>
+        </li>
+        </>)}
+
+        <!-- 9 · MCP server: ask, watch the agent call your docs as tools, get an answer with its source -->
+        <li class:list={[cell, span.mcp]} data-mcp>
+          <div class={head}><h3 class={headTitle}>MCP server</h3><p class={headDesc}>Your docs as a tool any agent can call.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 p-4 text-[12px] leading-5"]}>
+              <p class="flex items-center gap-2 text-muted-foreground" data-mcp-empty><Icon name="ph:plug" class="size-3.5" />Connected to <span class="font-mono text-foreground">nimbus-docs.com/mcp</span></p>
+              <div hidden data-mcp-thread class="space-y-3">
+                <p class="flex gap-3"><span class="w-12 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">You</span><span class="text-foreground" data-mcp-q></span></p>
+                {[["search", "search_documentation", "query"], ["read", "get_page", "path"]].map(([id, tool, arg]) => (
+                  <p hidden class="group flex items-center gap-3 font-mono text-[11px] leading-5" data-tool={id} data-state="running">
+                    <span class="w-12 shrink-0 text-muted-foreground">Agent</span>
+                    <Icon name="ph:circle-notch" class="size-3.5 shrink-0 text-muted-foreground motion-safe:animate-spin group-data-[state=done]:hidden" />
+                    <Icon name="ph:check-circle" class="hidden size-3.5 shrink-0 text-success group-data-[state=done]:block" />
+                    <span class="text-foreground">{tool}</span><span class="truncate text-muted-foreground">({arg}: "<span data-tool-arg></span>")</span>
+                    <span class="shrink-0 text-muted-foreground/70" data-tool-result></span>
+                  </p>
+                ))}
+                <div hidden class="flex gap-3" data-mcp-answer><span class="w-12 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">Agent</span><div class="min-w-0 max-w-md"><p class="text-foreground" data-mcp-text></p><a href="/ai/docs-for-agents/" class="mt-2 inline-flex no-underline" data-mcp-src-link><Badge variant="outline" class="gap-1"><Icon name="ph:file-text" class="size-3" /><span data-mcp-src></span></Badge></a></div></div>
+              </div>
+            </div>
+            <form class:list={[pop, "right-3 bottom-3 flex w-[min(360px,calc(100%-1.5rem))] items-center gap-2 rounded-[14px]! p-1.5 pl-3 text-[12px]"]} data-mcp-form>
+              <Icon name="ph:sparkle" class="size-3.5 shrink-0 text-muted-foreground" />
+              <input type="text" value="How do agents read my docs?" aria-label="Ask the agent" class="h-6 min-w-0 flex-1 bg-transparent leading-6 text-foreground outline-none" data-mcp-input />
+              <button type="submit" class={buttonVariants({ variant: "primary", size: "xs" })}>Ask</button>
+            </form>
+          </div>
+        </li>
+
+        <!-- 7 · Diagram: select a node -->
+        {!omit.includes("diagram") && (<>
+        <li class:list={[cell, "lg:col-span-2"]} data-diagram>
+          <div class={head}><h3 class={headTitle}>Interactive diagrams</h3><p class={headDesc}>Headless primitives. Readers click, you style.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 flex items-start p-4"]}>
+              <div class="flex items-center text-[12px]">
+                {nodes.map(([id, name, desc], i) => (<><button type="button" data-node={id} data-desc={desc} aria-pressed={i === 1 ? "true" : "false"} class="flex h-9 w-16 items-center justify-center rounded-md border border-border-strong bg-card aria-[pressed=true]:border-primary aria-[pressed=true]:bg-primary aria-[pressed=true]:text-primary-foreground">{name}</button>{i < nodes.length - 1 && <span class="h-0.5 w-10 bg-border"></span>}</>))}
+              </div>
+            </div>
+            <div class:list={[pop, "right-3 bottom-3 max-w-[240px] p-3 text-[12px] leading-5"]}><p class="font-medium" data-node-name>Worker</p><p class="text-muted-foreground" data-node-desc>{nodes[1][2]}</p></div>
+          </div>
+        </li>
+        </>)}
+
+        <!-- 8 · Features as recipes: the real changelog recipe, run end to end (discover → ask → plan → write → verify → already installed) -->
+        <li class:list={[cell, span.recipe]} data-recipe>
+          <div class={head}><h3 class={headTitle}>Features as recipes</h3><p class={headDesc}>Your agent follows the recipe. The code lands in your repo, written your way.</p></div>
+          <div class:list={[stage, "h-[500px] sm:h-80"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 flex"]}>
+              <div class="hidden w-56 shrink-0 border-r border-border sm:block">
+                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />changelog.md</div>
+                <ol class="p-1.5 text-[12px]">
+                  {recipeSteps.map(([n, label]) => (
+                    <li class="group flex h-7 items-center gap-2 rounded px-2 text-muted-foreground data-[state=active]:bg-accent data-[state=active]:text-foreground data-[state=done]:text-foreground/80 data-[state=skipped]:text-muted-foreground/60" data-outline={n} data-state="pending">
+                      <span class="w-3 shrink-0 font-mono text-[11px] leading-4 group-data-[state=done]:hidden">{n}</span>
+                      <Icon name="ph:check" class="hidden size-3 shrink-0 text-success group-data-[state=done]:block" />
+                      <span class="truncate leading-5 group-data-[state=skipped]:line-through">{label}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="flex h-[33px] items-center gap-2 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><span class="text-muted-foreground/70">$</span><span class="truncate text-foreground/80">npx nimbus-docs add changelog --print | claude</span></div>
+                <div class="p-4 text-[12px] leading-5">
+                  <p class="text-[11px] leading-4 text-muted-foreground" data-session-head>What your agent reads</p>
+                  <div class="mt-2 max-w-[520px] space-y-1" data-session>
+                    <pre class="font-mono text-[12px] leading-5 whitespace-pre-wrap text-foreground/70">{recipeExcerpt.map((l) => <span class:list={["block", l.startsWith("#") ? "text-foreground" : ""]}>{l || " "}</span>)}</pre>
+                  </div>
+                  <div hidden class="mt-3 w-72 max-w-full overflow-hidden rounded-md border border-border" data-preview>
+                    <div class="flex h-[33px] items-center border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground">/changelog</div>
+                    <div class="p-3">
+                      <p class="flex items-center justify-between"><span class="text-[14px] leading-6 font-medium" data-preview-title>Changelog</span><Badge variant="outline" text="RSS" data-preview-rss /></p>
+                      <p class="text-[11px] leading-4 text-muted-foreground">New features, improvements, and fixes.</p>
+                      <p class="mt-3 flex items-center gap-2 border-t border-border pt-3"><span class="font-mono text-[11px] leading-4 text-muted-foreground">Oct 9</span><span class="leading-5">Welcome</span></p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <template data-line-tpl>
+              <p class="group flex h-5 min-w-0 items-center gap-2" data-state="running">
+                <Icon name="ph:circle-notch" class="hidden size-3.5 shrink-0 text-muted-foreground motion-safe:animate-spin group-data-[state=running]:block" />
+                <Icon name="ph:check-circle" class="hidden size-3.5 shrink-0 text-success group-data-[state=done]:block" />
+                <Icon name="ph:plus" class="hidden size-3.5 shrink-0 text-success group-data-[state=add]:block" />
+                <Icon name="ph:pencil-simple" class="hidden size-3.5 shrink-0 text-warning group-data-[state=edit]:block" />
+                <span class="shrink-0 font-mono text-[11px] leading-4 text-foreground" data-line-main></span>
+                <span class="truncate text-muted-foreground" data-line-note></span>
+              </p>
+            </template>
+            <div class:list={[pop, "right-3 bottom-3 w-72 p-3 text-[12px] leading-5"]} data-recipe-pop>
+              <div data-view="idle">
+                <p class="font-medium">1,151 lines of instructions</p>
+                <p class="text-muted-foreground">No plugin to install. Nothing hidden in node_modules.</p>
+                <button type="button" data-go="run" class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}><Icon name="ph:sparkle" class="size-3.5" />Hand to agent</button>
+              </div>
+              <div hidden data-view="busy" class="flex h-6 items-center gap-2 text-muted-foreground"><Icon name="ph:circle-notch" class="size-3.5 motion-safe:animate-spin" /><span data-busy-label>Reading your repo…</span></div>
+              <div hidden data-view="ask">
+                <p class="font-medium">Your agent asks first</p>
+                <div class="mt-2 space-y-1.5">
+                  {recipeQuestions.map(([id, label, a, b, dflt]) => (
+                    <div class="flex h-7 items-center justify-between gap-2" role="group" aria-label={label}>
+                      <span class="text-muted-foreground">{label}</span>
+                      <span class="flex rounded-md bg-accent p-0.5">
+                        {[a, b].map((opt) => (<button type="button" data-answer={id} data-value={opt} aria-pressed={opt === dflt ? "true" : "false"} class="flex h-6 items-center rounded px-2 text-[11px] leading-4 text-muted-foreground aria-[pressed=true]:bg-card aria-[pressed=true]:text-foreground aria-[pressed=true]:shadow-sm">{opt}</button>))}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button type="button" data-go="plan" class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}>Continue</button>
+              </div>
+              <div hidden data-view="plan">
+                <p class="font-medium">The agent waits for your go-ahead</p>
+                <p class="text-muted-foreground">Nothing is written until you confirm.</p>
+                <div class="mt-3 flex gap-2"><button type="button" data-go="ask" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Change answers</button><button type="button" data-go="write" class={`${buttonVariants({ variant: "primary", size: "xs" })} flex-1`}>Write files</button></div>
+              </div>
+              <div hidden data-view="done">
+                <p class="flex items-center gap-2 font-medium"><Badge variant="success" text="Done" /><span data-done-count>14 files changed</span></p>
+                <p class="mt-1 text-muted-foreground">All of it in your repo. Edit any of it.</p>
+                <div class="mt-3 flex gap-2"><button type="button" data-go="reset" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Start over</button><button type="button" data-go="again" class={`${buttonVariants({ variant: "primary", size: "xs" })} flex-1`}>Run it again</button></div>
+              </div>
+              <div hidden data-view="again">
+                <p class="font-medium">Safe to run twice</p>
+                <p class="text-muted-foreground">The recipe names its own files, so your agent can tell it's already there.</p>
+                <button type="button" data-go="reset" class={`${buttonVariants({ variant: "secondary", size: "xs" })} mt-3 w-full!`}>Start over</button>
+              </div>
+            </div>
+          </div>
+        </li>
+
+        <!-- 11 · Content loaders: sync three sources, watch their pages land in the sidebar -->
+        <li class:list={[cell, span.loaders]} data-loaders>
+          <div class={head}><h3 class={headTitle}>Content loaders</h3><p class={headDesc}>Write where your team already writes.</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 p-4 text-[12px] leading-5"]}>
+              <p class="text-[11px] leading-4 text-muted-foreground">Get started</p>
+              <ul class="mt-1"><li class="h-6 leading-6">Quickstart</li><li class="h-6 leading-6 font-medium">Rate limits</li></ul>
+              <p class="mt-3 text-[11px] leading-4 text-muted-foreground">Guides</p>
+              <ul class="mt-1">
+                <li class="h-6 leading-6 text-muted-foreground/70" data-loader-empty>No guides yet</li>
+                {sources.map((s) => (<li hidden class="flex h-6 items-center gap-2 leading-6" data-loader-page={s.id}><BrandLogo id={s.id} class="size-3.5" />{s.page}</li>))}
+              </ul>
+            </div>
+            <div class:list={[pop, "right-3 bottom-3 w-56 p-3 text-[12px]"]}>
+              <ul class="space-y-1.5">
+                {sources.map((s) => (
+                  <li class="group flex h-5 items-center gap-2" data-source={s.id} data-state="idle">
+                    <BrandLogo id={s.id} class="size-3.5" />
+                    <span>{s.name}</span>
+                    <span class="ml-auto font-mono text-[11px] leading-4 text-muted-foreground tabular-nums" data-source-count>—</span>
+                    <Icon name="ph:circle-notch" class="hidden size-3.5 shrink-0 text-muted-foreground motion-safe:animate-spin group-data-[state=running]:block" />
+                    <Icon name="ph:check-circle" class="hidden size-3.5 shrink-0 text-success group-data-[state=done]:block" />
+                  </li>
+                ))}
+              </ul>
+              <button type="button" data-loaders-act class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}>Sync</button>
+            </div>
+          </div>
+        </li>
+
+        <!-- 12 · API reference: pick an endpoint, the spec and the generated page move together -->
+        <li class:list={[cell, span.api]} data-api>
+          <div class={head}><h3 class={headTitle}>API reference</h3><p class={headDesc}>{compact ? "Generated from your OpenAPI spec, with Try it on every endpoint." : "From your OpenAPI spec. Every endpoint, generated."}</p></div>
+          <div class:list={[stage, "h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 grid grid-cols-2"]}>
+              <div class="border-r border-border">
+                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />openapi.yaml<span class="ml-auto font-sans text-muted-foreground/70">Hover a path</span></div>
+                <ol class="py-2 font-mono text-[12px] leading-5">
+                  {specRows.map(({ n, text, ep, first }) => (<li class:list={["flex gap-3 px-3 data-[mark]:bg-accent", ep && "cursor-default outline-none"]} data-spec-line={n} data-ep={ep?.id} tabindex={first ? 0 : undefined} aria-label={first ? `Show ${ep!.method} ${ep!.path}` : undefined}><span class="w-4 shrink-0 text-right text-muted-foreground/70">{n}</span><span class="whitespace-pre text-foreground/80">{text}</span></li>))}
+                </ol>
+              </div>
+              <div>
+                <div class="flex h-[33px] items-center border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground">/api/<span data-api-slug>limits</span></div>
+                {specEndpoints.map((ep, i) => (
+                  <div class:list={["p-4", compact && "pr-12"]} data-api-page={ep.id} hidden={i !== 0}>
+                    <p class="flex items-center gap-2"><Badge variant={ep.variant} text={ep.method} class="font-mono" /><span class="font-mono text-[12px] leading-5">{ep.path}</span>{compact && <button type="button" data-api-send class={`${buttonVariants({ variant: "primary", size: "xs" })} ml-auto`}>Try it</button>}</p>
+                    <p class="mt-2 text-[14px] leading-6 font-medium">{ep.summary}</p>
+                    <p class="mt-3 text-[11px] leading-4 text-muted-foreground" data-api-params>Parameters</p>
+                    <ul class="mt-1 border-t border-border text-[12px]" data-api-params>
+                      {ep.params.map(([name, where, type]) => (<li class="flex h-[33px] items-center gap-2 border-b border-border"><span class="font-mono leading-5">{name}</span><span class="text-muted-foreground">{where}</span><span class="font-mono text-[11px] leading-4 text-muted-foreground/70">{type}</span></li>))}
+                    </ul>
+                    {compact && (
+                      <div hidden data-api-res class="mt-3">
+                        <p class="flex items-center gap-2 text-[12px] leading-5"><Badge variant="success" text={ep.status} /><span class="text-muted-foreground tabular-nums" data-api-ms>84 ms</span></p>
+                        {ep.body && <pre class="mt-2 rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-5 text-foreground/80">{ep.body}</pre>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </li>
+
+      </ul>
+  <script>
+    const $ = <T extends Element = HTMLElement>(r: ParentNode, s: string) => r.querySelector<T & HTMLElement>(s as any) as (T & HTMLElement) | null;
+    const $$ = (r: ParentNode, s: string) => Array.from(r.querySelectorAll<HTMLElement>(s));
+    const press = (group: HTMLElement[], on: HTMLElement) => group.forEach((b) => b.setAttribute("aria-pressed", String(b === on)));
+
+    const edit = $(document, "[data-edit]");
+    if (edit) {
+      const sug = $(edit, "[data-suggest]")!, title = $(edit, "[data-edit-title]")!, note = $(edit, "[data-edit-note]")!, acts = $(edit, "[data-edit-actions]")!, reset = $(edit, "[data-reset]")!;
+      const done = (t: string, n: string) => { title.textContent = t; note.textContent = n; acts.hidden = true; reset.hidden = false; };
+      $(edit, "[data-accept]")!.addEventListener("click", () => { sug.classList.remove("bg-success-muted"); done("Applied", "Two lines added. Checks passed."); });
+      $(edit, "[data-reject]")!.addEventListener("click", () => { sug.hidden = true; done("Discarded", "The page is as you left it."); });
+      reset.addEventListener("click", () => { sug.hidden = false; sug.classList.add("bg-success-muted"); title.textContent = "Agent suggests 2 lines"; note.textContent = "Adds a section on raising the limit, from the support page."; acts.hidden = false; reset.hidden = true; });
+    }
+
+    // Checks panel: check → fix → review → live. Timing respects reduced motion.
+    const appr = $(document, "[data-approve]");
+    if (appr) {
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, reduce ? 0 : ms));
+      const act = $<HTMLButtonElement>(appr, "[data-act]")!;
+      const check = (id: string) => $(appr, `[data-check="${id}"]`)!;
+      const set = (id: string, state: string) => { check(id).dataset.state = state; };
+      const line = $(appr, '[data-line="14"]')!;
+      const code = line.querySelector<HTMLElement>("[data-code]")!;
+      const step = (label: string, n: number) => { $(appr, "[data-step-label]")!.textContent = label; $(appr, "[data-step-count]")!.textContent = `${n} / 4`; };
+      const button = (label: string, busy = false) => { act.textContent = label; act.disabled = busy; };
+      let busy = false;
+      const reset = () => {
+        ["links", "components", "headings", "review"].forEach((id) => set(id, "pending"));
+        check("review").hidden = true;
+        delete line.dataset.mark; code.textContent = "#### Raise your limit";
+        $(appr, "[data-badge-draft]")!.hidden = false; $(appr, "[data-badge-pub]")!.hidden = true;
+        $(appr, "[data-file]")!.hidden = false; $(appr, "[data-live]")!.hidden = true;
+        appr.dataset.step = "check"; step("Checks", 1); button("Run checks");
+      };
+      act.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true;
+        const at = appr.dataset.step;
+        if (at === "check") {
+          button("Checking…", true);
+          for (const id of ["links", "components", "headings"]) {
+            set(id, "running"); await wait(450);
+            set(id, id === "headings" ? "warn" : "pass");
+          }
+          line.dataset.mark = "warn";
+          appr.dataset.step = "fix"; step("1 finding", 2); button("Let the agent fix it");
+        } else if (at === "fix") {
+          button("Fixing…", true); set("headings", "running"); await wait(600);
+          code.textContent = "## Raise your limit"; line.dataset.mark = "fixed";
+          set("headings", "pass"); await wait(250);
+          check("review").hidden = false;
+          appr.dataset.step = "review"; step("Review", 3); button("Approve");
+        } else if (at === "review") {
+          button("Publishing…", true); set("review", "running"); await wait(500);
+          set("review", "pass");
+          $(appr, "[data-badge-draft]")!.hidden = true; $(appr, "[data-badge-pub]")!.hidden = false;
+          $(appr, "[data-file]")!.hidden = true; $(appr, "[data-live]")!.hidden = false;
+          delete line.dataset.mark;
+          appr.dataset.step = "live"; step("Live", 4); button("Start over");
+        } else {
+          reset();
+        }
+        busy = false;
+      });
+    }
+
+    const ask = $(document, "[data-ask]");
+    if (ask) {
+      const q = $(ask, "[data-q]")!, list = $(ask, "[data-qs]")!, ans = $(ask, "[data-answer]")!;
+      $$(ask, "[data-a]").forEach((b) => b.addEventListener("click", () => {
+        q.textContent = b.textContent; q.classList.replace("text-muted-foreground/70", "text-foreground");
+        $(ask, "[data-answer-text]")!.textContent = b.dataset.a ?? ""; $(ask, "[data-answer-src]")!.textContent = b.dataset.src ?? "";
+        list.hidden = true; ans.hidden = false;
+      }));
+      q.addEventListener("click", () => { list.hidden = false; ans.hidden = true; q.textContent = "Ask a question…"; q.classList.replace("text-foreground", "text-muted-foreground/70"); });
+    }
+
+    const theme = $(document, "[data-theme-cell]");
+    if (theme) {
+      const page = $(theme, "[data-themed]")!; const sets = $$(theme, "[data-set]");
+      sets.forEach((b) => b.addEventListener("click", () => { page.setAttribute("style", `${b.dataset.set};background:var(--t-bg);color:var(--t-ink);font-family:var(--t-font)`); press(sets, b); }));
+    }
+
+    const tryit = $(document, "[data-try]");
+    if (tryit) {
+      // Each send spends one request, so the remaining count really goes down.
+      const send = $<HTMLButtonElement>(tryit, "[data-send]")!, idle = $(tryit, "[data-idle]")!, res = $(tryit, "[data-res]")!;
+      let remaining = 941;
+      const numberNode = () => {
+        const walk = document.createTreeWalker(res.querySelector("pre")!, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.textContent?.includes(String(remaining))) return n;
+        return null;
+      };
+      send.addEventListener("click", async () => {
+        if (send.disabled) return;
+        send.disabled = true; send.textContent = "Sending…";
+        res.hidden = true; idle.hidden = false;
+        $(tryit, "[data-spin]")!.classList.remove("hidden"); $(tryit, "[data-idle-text]")!.textContent = "GET /v1/accounts/acme/limits";
+        const ms = 60 + Math.round(Math.random() * 50);
+        await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 + ms));
+        const node = numberNode();
+        if (node && "sent" in res.dataset) { node.textContent = node.textContent!.replace(String(remaining), String(remaining - 1)); remaining -= 1; }
+        res.dataset.sent = "";
+        $(tryit, "[data-ms]")!.textContent = `${ms} ms`;
+        idle.hidden = true; res.hidden = false;
+        send.textContent = "Send again"; send.disabled = false;
+      });
+    }
+
+    const dia = $(document, "[data-diagram]");
+    if (dia) {
+      const ns = $$(dia, "[data-node]");
+      ns.forEach((b) => b.addEventListener("click", () => { press(ns, b); $(dia, "[data-node-name]")!.textContent = b.textContent; $(dia, "[data-node-desc]")!.textContent = b.dataset.desc ?? ""; }));
+    }
+
+    // Features as recipes: follows the real changelog recipe's sections, and the answers shape what gets written.
+    const recipe = $(document, "[data-recipe]");
+    if (recipe) {
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
+      const session = $(recipe, "[data-session]")!, head = $(recipe, "[data-session-head]")!, preview = $(recipe, "[data-preview]")!;
+      const tpl = $<HTMLTemplateElement>(recipe, "[data-line-tpl]")!;
+      const intro = session.innerHTML;
+      const view = (name: string) => $$(recipe, "[data-view]").forEach((v) => { v.hidden = v.dataset.view !== name; });
+      const busy = (label: string) => { $(recipe, "[data-busy-label]")!.textContent = label; view("busy"); };
+      const outline = (n: string, state: string) => { $(recipe, `[data-outline="${n}"]`)!.dataset.state = state; };
+      const answer = (id: string) => $(recipe, `[data-answer="${id}"][aria-pressed="true"]`)!.dataset.value!;
+      const clear = (title: string) => { head.textContent = title; session.replaceChildren(); preview.hidden = true; };
+      const line = (main: string, note = "", state = "running") => {
+        const el = (tpl.content.firstElementChild as HTMLElement).cloneNode(true) as HTMLElement;
+        el.dataset.state = state;
+        el.querySelector("[data-line-main]")!.textContent = main;
+        el.querySelector("[data-line-note]")!.textContent = note;
+        session.append(el);
+        return el;
+      };
+      const say = (text: string) => { const p = document.createElement("p"); p.className = "pt-1 text-foreground"; p.textContent = text; session.append(p); };
+      const files = () => {
+        const rss = answer("rss") === "Yes";
+        return [
+          "src/layouts/ChangelogLayout.astro",
+          ...["DateRail.astro", "ChangelogEntry.astro", "ChangelogFeed.astro", "ChangelogFilter.astro", "changelog.client.ts"].map((f) => `src/components/changelog/${f}`),
+          ...["index.astro", "[...slug].astro", "page/[page].astro", "[...slug]/index.md.ts", ...(rss ? ["rss.xml.ts"] : [])].map((f) => `src/pages/changelog/${f}`),
+          "src/pages/og/changelog.png.ts",
+          "src/content/changelog/2026-10-09-welcome.mdx",
+        ];
+      };
+      const edits = () => ["src/content.config.ts", ...(answer("sidebar") === "Yes" ? ["astro.config.ts"] : [])];
+      let running = false;
+      const step = async (fn: () => Promise<void>) => { if (running) return; running = true; await fn(); running = false; };
+
+      const discover = async () => {
+        $$(recipe, "[data-outline]").forEach((o) => { o.dataset.state = "pending"; });
+        outline("1", "active"); clear("1 · Discovery"); busy("Reading your repo…");
+        const reads: [string, string][] = [
+          ["package.json", "pnpm, nimbus-docs 0.16"],
+          ["src/content.config.ts", "collections: docs, guides"],
+          ["astro.config.ts", "sidebar has 3 groups"],
+          ["src/styles/globals.css", "Nimbus tokens found"],
+          ["src/components/ui/", "Pagination missing, adding it"],
+        ];
+        for (const [path, note] of reads) { const l = line(path); await wait(380); l.dataset.state = "done"; l.querySelector("[data-line-note]")!.textContent = note; }
+        outline("1", "done"); outline("2", "active");
+        say("Before I write anything, a few choices.");
+        view("ask");
+      };
+
+      const plan = async () => {
+        outline("2", "done"); outline("3", "active");
+        const made = files(), changed = edits();
+        clear(`3 · Plan`);
+        say(`I'll create ${made.length} files and edit ${changed.length}:`);
+        line("src/layouts/", "ChangelogLayout.astro", "add");
+        line("src/components/changelog/", "5 files", "add");
+        line("src/pages/changelog/", `${made.filter((f) => f.startsWith("src/pages/changelog/")).length} files`, "add");
+        line("src/pages/og/", "changelog.png.ts", "add");
+        line("src/content/changelog/", "a welcome entry", "add");
+        changed.forEach((f) => line(f, f.includes("astro.config") ? "a sidebar link" : "registers the collection", "edit"));
+        const p = document.createElement("p"); p.className = "pt-1 font-mono text-[11px] leading-4 text-muted-foreground";
+        p.textContent = ["/changelog", "/changelog/<slug>", ...(answer("rss") === "Yes" ? ["/changelog/rss.xml"] : [])].join("   ");
+        session.append(p);
+        view("plan");
+      };
+
+      const write = async () => {
+        outline("3", "done"); outline("4", "active"); clear("4 · Register the collection"); busy("Writing…");
+        const reg = line("src/content.config.ts", "", "running"); await wait(450); reg.dataset.state = "edit"; reg.querySelector("[data-line-note]")!.textContent = "changelog: docsCollection({ base, schemaFields })";
+        await wait(300); outline("4", "done"); outline("5", "active");
+        const made = files();
+        clear(`5 · Implementation`);
+        for (const [i, f] of made.entries()) {
+          head.textContent = `5 · Implementation · ${i + 1} / ${made.length}`;
+          const l = line(f); await wait(170); l.dataset.state = "add";
+          while (session.children.length > 8) session.firstElementChild!.remove();
+        }
+        outline("5", "done");
+        if (answer("sidebar") === "Yes") {
+          outline("6", "active"); clear("6 · Sidebar wiring");
+          const s = line("astro.config.ts"); await wait(400); s.dataset.state = "edit"; s.querySelector("[data-line-note]")!.textContent = "added Changelog to the sidebar";
+          await wait(300); outline("6", "done");
+        } else outline("6", "skipped");
+        outline("7", "active"); clear("7 · Verify");
+        for (const [cmd, note] of [["nimbus-docs check", "0 issues"], ["astro build", "/changelog rendered"]]) { const l = line(cmd); await wait(550); l.dataset.state = "done"; l.querySelector("[data-line-note]")!.textContent = note; }
+        $(recipe, "[data-preview-title]")!.textContent = answer("title");
+        $(recipe, "[data-preview-rss]")!.hidden = answer("rss") === "No";
+        preview.hidden = false;
+        outline("7", "done");
+        const total = made.length + edits().length;
+        $(recipe, "[data-done-count]")!.textContent = `${total} files changed`;
+        view("done");
+      };
+
+      const again = async () => {
+        $$(recipe, "[data-outline]").forEach((o) => { o.dataset.state = "pending"; });
+        outline("8", "active"); clear("8 · Already installed?"); busy("Checking…");
+        for (const path of ["src/content/changelog/", "src/pages/changelog/index.astro"]) { const l = line(path); await wait(400); l.dataset.state = "done"; l.querySelector("[data-line-note]")!.textContent = "found"; }
+        say("Changelog is already installed. Nothing to change.");
+        outline("8", "done"); view("again");
+      };
+
+      const reset = async () => {
+        $$(recipe, "[data-outline]").forEach((o) => { o.dataset.state = "pending"; });
+        head.textContent = "What your agent reads"; session.innerHTML = intro; preview.hidden = true; view("idle");
+      };
+
+      $$(recipe, "[data-answer]").forEach((b) => b.addEventListener("click", () => press($$(recipe, `[data-answer="${b.dataset.answer}"]`), b)));
+      const actions: Record<string, () => Promise<void>> = {
+        run: discover, plan, write, again, reset,
+        ask: async () => { outline("3", "pending"); outline("2", "active"); clear("2 · Prompt the user"); say("Before I write anything, a few choices."); view("ask"); },
+      };
+      $$(recipe, "[data-go]").forEach((b) => b.addEventListener("click", () => step(actions[b.dataset.go!])));
+    }
+
+    // ---- More panels ----
+    const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const pause = (ms: number) => new Promise((r) => setTimeout(r, reduceMotion ? 0 : ms));
+
+    // MCP: the agent searches, reads, then answers with its source.
+    const mcp = $(document, "[data-mcp]");
+    if (mcp) {
+      // One real answer, from nimbus-docs.com's "Docs for agents" page; anything
+      // else finds nothing and says so.
+      const answer = { query: "agents read docs", hits: "4 results", path: "/ai/docs-for-agents/index.md", size: "15.9 KB", text: "Every page is also served as Markdown at its own address, and llms.txt indexes the whole site. Agents read those, not your HTML.", src: "Docs for agents" };
+      const isAboutAgents = (q: string) => /\bagents?\b/i.test(q) && /\b(read|reads|use|find|see|docs?)\b/i.test(q);
+      const form = $<HTMLFormElement>(mcp, "[data-mcp-form]")!, input = $<HTMLInputElement>(mcp, "[data-mcp-input]")!;
+      const tool = (id: string) => $(mcp, `[data-tool="${id}"]`)!;
+      let running = false;
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (running || !input.value.trim()) return;
+        running = true;
+        const known = isAboutAgents(input.value);
+        const query = input.value.trim().replace(/\?$/, "").slice(0, 40);
+        $(mcp, "[data-mcp-empty]")!.hidden = true; $(mcp, "[data-mcp-thread]")!.hidden = false;
+        $(mcp, "[data-mcp-q]")!.textContent = input.value;
+        ["search", "read"].forEach((id) => { tool(id).hidden = true; tool(id).dataset.state = "running"; tool(id).querySelector<HTMLElement>("[data-tool-result]")!.textContent = ""; });
+        $(mcp, "[data-mcp-answer]")!.hidden = true;
+        const steps: [string, string, string][] = known
+          ? [["search", answer.query, answer.hits], ["read", answer.path, answer.size]]
+          : [["search", query, "0 results"]];
+        for (const [id, arg, result] of steps) {
+          const el = tool(id); el.querySelector<HTMLElement>("[data-tool-arg]")!.textContent = arg; el.hidden = false;
+          await pause(550); el.dataset.state = "done"; el.querySelector<HTMLElement>("[data-tool-result]")!.textContent = `→ ${result}`;
+        }
+        const out = $(mcp, "[data-mcp-text]")!; $(mcp, "[data-mcp-src]")!.textContent = answer.src; out.textContent = "";
+        $(mcp, "[data-mcp-src-link]")!.hidden = !known; $(mcp, "[data-mcp-answer]")!.hidden = false;
+        for (const word of (known ? answer.text : "I'm just a demo!").split(" ")) { out.textContent += (out.textContent ? " " : "") + word; await pause(35); }
+        running = false;
+      });
+    }
+
+    // Content loaders: each source syncs, its pages land in the sidebar.
+    const loaders = $(document, "[data-loaders]");
+    if (loaders) {
+      const act = $<HTMLButtonElement>(loaders, "[data-loaders-act]")!;
+      const counts: Record<string, number> = { notion: 38, gdocs: 12, repo: 142 };
+      act.addEventListener("click", async () => {
+        if (act.disabled) return;
+        const synced = act.textContent === "Reset";
+        if (synced) {
+          $$(loaders, "[data-source]").forEach((s) => { s.dataset.state = "idle"; s.querySelector<HTMLElement>("[data-source-count]")!.textContent = "—"; });
+          $$(loaders, "[data-loader-page]").forEach((p) => { p.hidden = true; }); $(loaders, "[data-loader-empty]")!.hidden = false;
+          act.textContent = "Sync"; return;
+        }
+        act.disabled = true; act.textContent = "Syncing…";
+        for (const s of $$(loaders, "[data-source]")) {
+          const id = s.dataset.source!; const count = s.querySelector<HTMLElement>("[data-source-count]")!;
+          s.dataset.state = "running";
+          for (let n = 0; n <= counts[id]; n += Math.ceil(counts[id] / 8)) { count.textContent = String(n); await pause(40); }
+          count.textContent = String(counts[id]); s.dataset.state = "done";
+          $(loaders, "[data-loader-empty]")!.hidden = true; $(loaders, `[data-loader-page="${id}"]`)!.hidden = false;
+          await pause(120);
+        }
+        act.disabled = false; act.textContent = "Reset";
+      });
+    }
+
+    // API reference: endpoint tabs drive both the spec and the generated page.
+    const api = $(document, "[data-api]");
+    if (api) {
+      const ranges: Record<string, [number, number]> = { get: [2, 3], post: [4, 5], delete: [6, 7] };
+      const slugs: Record<string, string> = { get: "limits", post: "keys", delete: "keys/id" };
+      const show = (id: string) => {
+        $$(api, "[data-api-page]").forEach((pg) => { pg.hidden = pg.dataset.apiPage !== id; });
+        const [a, b] = ranges[id];
+        $$(api, "[data-spec-line]").forEach((l) => { const n = Number(l.dataset.specLine); if (n >= a && n <= b) l.dataset.mark = ""; else delete l.dataset.mark; });
+        $(api, "[data-api-slug]")!.textContent = slugs[id];
+      };
+      $$(api, "[data-ep]").forEach((l) => { const go = () => show(l.dataset.ep!); l.addEventListener("mouseenter", go); l.addEventListener("focus", go); });
+      show("get");
+      // Try it: each endpoint page sends its own request and shows the response in place of its parameters.
+      $$(api, "[data-api-send]").forEach((el) => {
+        const send = el as HTMLButtonElement;
+        const page = send.closest<HTMLElement>("[data-api-page]")!;
+        send.addEventListener("click", async () => {
+          if (send.disabled) return;
+          send.disabled = true; send.textContent = "Sending…";
+          const ms = 60 + Math.round(Math.random() * 50);
+          await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 + ms));
+          $(page, "[data-api-ms]")!.textContent = `${ms} ms`;
+          $$(page, "[data-api-params]").forEach((el) => { el.hidden = true; }); $(page, "[data-api-res]")!.hidden = false;
+          send.textContent = "Send again"; send.disabled = false;
+        });
+      });
+    }
+
+  </script>

@@ -15,6 +15,7 @@ import {
   stripBase,
 } from "@cloudflare/nimbus-docs";
 import { components } from "../components";
+import HomePage from "../home/HomePage.astro";
 
 export const prerender = true;
 // Serve the root index entry (`docs/index.mdx`) at `/` instead of `/index`,
@@ -32,6 +33,9 @@ export const getStaticPaths: GetStaticPaths = async (options) => {
 const page = await getDocsPage(Astro);
 if (page instanceof Response) return page;
 const { entry, Content, headings } = page;
+// The new homepage ships behind a switch: built with `WWW_HOMEPAGE=new`, `/`
+// renders src/home/HomePage.astro in place of the docs index page.
+const showHomepage = process.env.WWW_HOMEPAGE === "new" && entry.id === "index";
 
 const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
 
@@ -58,6 +62,7 @@ const markdownUrl = markdownPath;
 const socialImage = entry.data.socialImage ?? `/og/${entry.id}.png`;
 ---
 
+{showHomepage ? <HomePage /> : (
 <DocsLayout
   title={entry.data.title}
   description={entry.data.description}
@@ -82,3 +87,4 @@ const socialImage = entry.data.socialImage ?? `/og/${entry.id}.png`;
 >
   <Content components={components} />
 </DocsLayout>
+)}

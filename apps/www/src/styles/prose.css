@@ -159,7 +159,7 @@
   font-family: var(--nb-font-mono);
   direction: ltr;
   unicode-bidi: isolate;
-  background: color-mix(in oklch, var(--nb-foreground) 6%, transparent);
+  background: var(--nb-code-tint);
   border-radius: var(--nb-radius-sm);
   padding: 0.125rem 0.3125rem;
   font-size: 0.875em;

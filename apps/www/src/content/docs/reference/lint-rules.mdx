@@ -3,10 +3,32 @@ title: Lint rules
 description: Every rule nimbus-docs lint and the build check, with what each flags, its options, and whether it fixes itself.
 aiGenerated: true
 sidebar:
-  order: 5
+  order: 3
 ---
 
 Nimbus checks content in two ways. **Build validators** catch what would break a page; they always run and fail the build. **Authoring rules** catch what renders but shouldn't ship; they're off until you turn them on, and `nimbus-docs lint` runs them. [Linting](/writing/linting) shows how to turn rules on, set their severity per collection, and use `--fix`.
+
+| Rule | Kind | Fixes itself | Options |
+| --- | --- | --- | --- |
+| [`nimbus/mdx-syntax`](#nimbusmdx-syntax) | Build validator | — | — |
+| [`nimbus/component-pascalcase`](#nimbuscomponent-pascalcase) | Build validator | — | — |
+| [`nimbus/partial-exists`](#nimbuspartial-exists) | Build validator | — | — |
+| [`nimbus/duplicate-slug`](#nimbusduplicate-slug) | Build validator | — | — |
+| [`nimbus/frontmatter-shape`](#nimbusfrontmatter-shape) | Authoring rule | — | — |
+| [`nimbus/description-required`](#nimbusdescription-required) | Authoring rule | — | — |
+| [`nimbus/internal-link`](#nimbusinternal-link) | Authoring rule | — | allowRelative, components, ignore |
+| [`nimbus/redirected-link`](#nimbusredirected-link) | Authoring rule | — | components, ignore |
+| [`nimbus/image-ref`](#nimbusimage-ref) | Authoring rule | — | aliases, components, ignore |
+| [`nimbus/single-h1`](#nimbussingle-h1) | Authoring rule | — | — |
+| [`nimbus/heading-hierarchy`](#nimbusheading-hierarchy) | Authoring rule | — | — |
+| [`nimbus/heading-punctuation`](#nimbusheading-punctuation) | Authoring rule | Yes | — |
+| [`nimbus/duplicate-heading-text`](#nimbusduplicate-heading-text) | Authoring rule | — | — |
+| [`nimbus/code-block-lang`](#nimbuscode-block-lang) | Authoring rule | — | — |
+| [`nimbus/code-block-prompt-prefix`](#nimbuscode-block-prompt-prefix) | Authoring rule | — | — |
+| [`nimbus/no-self-host-url`](#nimbusno-self-host-url) | Authoring rule | — | hosts |
+| [`nimbus/bare-url`](#nimbusbare-url) | Authoring rule | — | — |
+| [`nimbus/list-marker-style`](#nimbuslist-marker-style) | Authoring rule | Yes | style |
+| [`nimbus/emphasis-style`](#nimbusemphasis-style) | Authoring rule | Yes | style |
 
 ## Build validators
 
@@ -91,6 +113,43 @@ A bullet list that uses a different marker from the rest. Option: `style`, `"das
 ### nimbus/emphasis-style
 
 Italics that use a different delimiter from the rest. Option: `style`, `"asterisk"` (default) or `"underscore"`. **Fixes itself.**
+
+## Build and check findings
+
+The build and `nimbus-docs check` report these codes with the file and the fix. They aren't lint rules, so they can't be turned off.
+
+### Collection routing
+
+Errors. See [Collection URLs](/writing/collections#collection-urls).
+
+| Code | Cause |
+|---|---|
+| `nimbus/collection-two-routes` | Several static routes for one collection, none at its default URL. Keep one. |
+| `nimbus/collection-same-url` | Two collections at one URL. Move one of their routes. |
+| `nimbus/collection-dynamic-folder` | A collection other than `docs` served only from routes under dynamic folders. Give it a static route. |
+| `nimbus/collection-docs-route` | `docs` routed away from the site root. Move the route to `src/pages/[...slug].astro`, or set Astro's `base`. |
+| `nimbus/collection-version-route` | A docs version routed away from `/<version>`. Move the route there. |
+| `nimbus/collection-api-root` | An API collection routed at the site root. Move its route into a folder. |
+| `nimbus/collection-route-param` | A route helper in a route whose parameter isn't `slug` (`[...path].astro`). Rename it to `[...slug].astro`. |
+| `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
+
+A page that renders from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file, or the route Nimbus couldn't read. A request-rendered route under a folder no collection is served from returns not found and logs the same advice; one under a dynamic folder (`src/pages/[locale]/kit/[...slug].astro`) isn't reported, since its folder depends on the URL.
+
+Warnings:
+
+| Code | Cause |
+|---|---|
+| `nimbus/collection-unread-route` | A route in a nested folder whose `getStaticPaths` Nimbus can't read. The collection stays at its default URL. |
+| `nimbus/collection-alias-route` | Several static routes for one collection; the extra ones duplicate its pages in the sitemap and search. Delete them or redirect them. |
+
+### Content sources
+
+Warnings from `nimbus-docs check`. See [Content from another repository](/content-sources/git).
+
+| Code | Cause |
+|---|---|
+| `nimbus/source-floating-ref` | A source pinned to a literal branch or tag, so its pages can change between builds. |
+| `nimbus/source-unreferenced` | A source that no collection and no `api` entry reads. |
 
 ## Reserved codes
 

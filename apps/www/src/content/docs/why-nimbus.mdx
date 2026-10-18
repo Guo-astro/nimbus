@@ -3,12 +3,10 @@ title: Why Nimbus
 description: Some of the opinions behind Nimbus, what we believe documentation should look like in a world where humans and agents are both creators and consumers.
 audience: human
 sidebar:
-  order: 3
+  order: 0.2
 ---
 import { FileTree } from "@/components/ui/file-tree";
-import { Tabs, TabItem } from "@/components/ui/tabs";
 import { PrimitivesDiagram } from "@/components/react/diagram-showcase/PrimitivesDiagram";
-import { PingPongDemo } from "@/components/react/diagram-showcase/PingPongDemo";
 
 ## You own all your code
 
@@ -16,19 +14,7 @@ Layouts, components, content, styles — every visible piece of your site lives 
 
 Coding agents work the same way you do. When nothing important hides behind an import boundary, an agent can reason about the repo far better.
 
-<FileTree>
-- my-docs/
-  - src/
-    - components/
-    - content/docs/
-    - layouts/
-    - pages/
-    - styles/
-      - globals.css
-    - components.ts
-  - astro.config.ts
-  - package.json
-</FileTree>
+[Project structure](/project-structure) maps every file.
 
 ## Interactive content, fully yours
 
@@ -38,41 +24,7 @@ Documentation worth reading often needs to *show* mechanism — how a request fl
 
 <PrimitivesDiagram client:visible />
 
-The smallest meaningful example — `usePhase` walks two steps, the rendered nodes light up in turn. `<DiagramControls>` is installed via the registry; everything else comes from `nimbus-docs/react`.
-
-<Tabs>
-  <TabItem label="Preview">
-    <PingPongDemo client:visible />
-  </TabItem>
-  <TabItem label="Code">
-    ```tsx
-    import { Diagram, usePhase } from "@cloudflare/nimbus-docs/react";
-    import { DiagramControls } from "@/components/react/diagram";
-
-    function PingPong() {
-      const { current } = usePhase({
-        steps: [{ id: "left", hold: 1500 }, { id: "right", hold: 1500 }],
-        loop: true,
-      });
-      return (
-        <div className="flex items-center justify-center gap-12 py-12">
-          <Node label="Left" active={current === "left"} />
-          <Node label="Right" active={current === "right"} />
-        </div>
-      );
-    }
-
-    export function Demo() {
-      return (
-        <Diagram label="Ping-pong">
-          <DiagramControls />
-          <PingPong />
-        </Diagram>
-      );
-    }
-    ```
-  </TabItem>
-</Tabs>
+The smallest meaningful example, a two-step diagram with its code, is on [Diagrams and interactive content](/writing/interactive-content).
 
 Action bars, tabs, and play/pause controls install on demand into `src/components/react/diagram/` — edit, restyle, or replace freely; the hooks keep working. Sites that never author an interactive card pay nothing.
 
@@ -90,8 +42,8 @@ Documentation is no longer read only by people, and as a result every Nimbus sit
 A way to build documentation sites on top of Astro.
 
 ## Pages
-- [Getting started](https://nimbus-docs.com/get-started/index.md)
-- [Installation](https://nimbus-docs.com/installation/index.md)
+- [Quickstart](https://nimbus-docs.com/quickstart/index.md)
+- [Why Nimbus](https://nimbus-docs.com/why-nimbus/index.md)
 - [CLI](https://nimbus-docs.com/cli/index.md)
 ```
 
@@ -177,7 +129,7 @@ aiGenerated: true   # drafted by an agent — shows "awaiting review" until a hu
 Provenance only pays off if drift gets caught. The lint engine emits versioned JSON carrying character-precise fixes that `--fix` applies in place, and the scaffolded `AGENT.md` ships an audit recipe with a fixed diagnostic format — so an agent can sweep the whole site and report back in a shape another tool can parse:
 
 ```text
-- [error] src/content/docs/cli.mdx:42 — broken internal link "/instal" — did you mean "/start-here/quickstart"?
+- [error] src/content/docs/cli.mdx:42 — broken internal link "/instal" — did you mean "/quickstart"?
 - [warn]  src/content/docs/registry.mdx:8 — link text "here" isn't meaningful out of context.
 Summary: 1 error, 1 warning.
 ```
@@ -187,16 +139,6 @@ The docs become something an agent can keep correct over time — maintained and
 ## The tree is the truth
 
 There is no second config to maintain alongside your content. The directory structure under `src/content/` is the URL structure. The directory structure is also the sidebar. Move a file and its entry moves with it; delete a file and the entry disappears. Frontmatter handles the fine-grain knobs — order, badges, draft state — but the shape of the tree comes from the filesystem itself.
-
-<FileTree>
-- src/content/docs/
-  - getting-started.mdx
-  - guides/
-    - styling.mdx
-    - deploying.mdx
-  - reference/
-    - api.mdx
-</FileTree>
 
 The result is a single source of truth for what pages exist. The site can't drift from its own contents, because its contents are the site.
 
@@ -213,4 +155,4 @@ Each version is its own content collection, with the same schema. A `docs-v2/` c
   - docs-v3/
 </FileTree>
 
-The same primitive handles internationalisation (a `docs-fr/` collection is a French site) and per-product splits (a `docs-api/` collection sits next to `docs-cli/`). When you need versions, you already have most of what you need; you didn't pay for it earlier.
+The same primitive handles per-product splits (a `docs-api/` collection sits next to `docs-cli/`). When you need versions, you already have most of what you need; you didn't pay for it earlier.

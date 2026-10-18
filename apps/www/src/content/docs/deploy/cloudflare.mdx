@@ -1,56 +1,60 @@
 ---
-title: Deploy
-description: Publish a Nimbus site to Cloudflare or any static host, with or without rendering on request.
+title: Deploy to Cloudflare
+description: Publish your site to Cloudflare Workers with one command, static or with a server.
 aiGenerated: true
 sidebar:
   order: 1
+  label: Cloudflare
 ---
 
-A Nimbus site builds to static files by default, so it runs on any host that serves files. This page covers Cloudflare, which the scaffolder sets up for you, then every other host, then rendering pages on request. It assumes a site created with the [Quickstart](/start-here/quickstart).
+The scaffolder sets every new site up for Cloudflare: a `wrangler.jsonc` that serves the built `dist/` folder with Workers Static Assets, and a `deploy` script. A static site needs no Astro adapter.
 
-Before you publish anywhere, set `site` in `astro.config.ts` to the address readers will use. `nimbus-docs check` warns while it's still the placeholder.
+## Prerequisites
 
-## Cloudflare
+- A site created with the [Quickstart](/quickstart), without `--deploy other`
+- A Cloudflare account
 
-A site scaffolded for Cloudflare, the default, has:
+## Steps
 
-- `wrangler.jsonc`, which serves the built `dist/` folder with Workers Static Assets. There's no Astro adapter: a static site doesn't need one.
-- Four scripts in `package.json`: `predeploy` runs `astro check` and `astro build`, `deploy` runs `wrangler deploy`, and `preview:cf` builds the site and serves it locally with `wrangler dev`, as Cloudflare will.
+<Steps>
+  <Step title="Set the site address">
+    In `astro.config.ts`, set `site` in the Nimbus config to the address readers will use. `nimbus-docs check` warns while it's still the placeholder.
+  </Step>
+  <Step title="Deploy">
+    <PackageManagers pkg="deploy" type="run" />
 
-Deploy with:
+    `predeploy` runs `astro check` and `astro build` first. The first run opens a browser to sign in to Cloudflare.
+  </Step>
+</Steps>
 
-<PackageManagers pkg="deploy" type="run" />
+## Verify
 
-The first run opens a browser to sign in to Cloudflare, then publishes the site at `https://<name>.<your-subdomain>.workers.dev`. To serve it at your own domain, add a custom domain to the Worker in the Cloudflare dashboard, then set `site` to that domain and deploy again.
+Wrangler prints the site's address when it finishes:
 
-## Other static hosts
+```text
+Deployed my-docs triggers (<n> sec)
+  https://my-docs.<your-subdomain>.workers.dev
+```
 
-Scaffold with `--deploy other` for a project without `wrangler.jsonc` or the Cloudflare scripts, or delete them from an existing one. Then build:
+Open it: your site, as it ran locally. To check the production build before deploying, run `npm run preview:cf`, which serves it with `wrangler dev` as Cloudflare will.
 
-<PackageManagers pkg="build" type="run" />
+## Use your own domain
 
-and publish the `dist/` folder. Astro's [deploy guides](https://docs.astro.build/en/guides/deploy/) cover the settings for each host. On Vercel and Netlify production builds, Nimbus reads the site's address from the host when `site` is still the placeholder; on any other host, set it yourself.
+In the Cloudflare dashboard, add a custom domain to the Worker. Then set `site` to that domain and deploy again.
 
-## Render on request
+## With a server
 
-Some features need a server: rendering pages on request, a [remote MCP server](/ai/remote-mcp), and API references that render on request. Add an adapter for your host:
+[Request rendering](/reference/rendering), the [remote MCP server](/ai/remote-mcp) and [Markdown at page URLs](/ai/markdown-negotiation) need a server. Add the Cloudflare adapter:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add server-output --adapter node" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
-`--adapter` takes `cloudflare`, `vercel`, `netlify` or `node`, and `add adapter-node` is the same command. It sets `output: "server"` and installs the adapter. Choose which collections render on request with `rendering` in the Nimbus config; see [Configuration](/reference/configuration#mix-build-and-request-rendering). To start a new site with a server, pass `--adapter` to the scaffolder instead of `--deploy`.
+The scripts stay the same: `deploy` builds and publishes the Worker. To start a new site with a server, pass `--adapter cloudflare` to the scaffolder.
 
-On Cloudflare, the scaffolded scripts stay the same: `deploy` builds and publishes the Worker. On Node, the scaffolder adds a `start` script, `node ./dist/server/entry.mjs`.
+## Deploy from CI
 
-Generated API pages render on request on Cloudflare, and on Node with `bundle: false`. [OpenAPI reference pages](/writing/openapi#build-or-request-rendering) covers both, and what each mode publishes for agents.
+The "Last updated" line and the sitemap's dates come from git history, and most CI systems clone only the latest commit. Set `fetch-depth: 0` on the checkout step in GitHub Actions, or run `git fetch --unshallow`, before the build.
 
-## Serve under a path
+## Next steps
 
-To publish the site under a path, such as `https://example.com/docs/`, set Astro's `base` to `/docs` in `astro.config.ts`. Every page, Markdown version and `llms.txt` moves under it. [Build one locale or one part](/publish/partial-builds#under-a-base) covers serving several Nimbus builds under one hostname.
-
-## Redirects
-
-Redirects in `astro.config.ts` reach every host: on a static host Astro writes a page that sends readers on, and adapters turn them into the host's own rules. For the old Markdown and `llms.txt` URLs, or a site under a `base`, add host rules too. [Redirects](/navigation/redirects#host-level-redirects) shows both.
-
-## Last-updated dates in CI
-
-The "Last updated" line and the sitemap's dates come from git history. Most CI systems clone only the latest commit, so set `fetch-depth: 0` on the checkout step in GitHub Actions, or run `git fetch --unshallow`, before the build. [Metadata and SEO](/publish/metadata-and-seo) has the details.
+- [Serve under a path](/deploy/base-path): publish at `example.com/docs/`.
+- [Metadata and SEO](/publish/metadata-and-seo): titles, share cards and sitemaps.

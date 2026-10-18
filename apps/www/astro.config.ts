@@ -20,6 +20,8 @@ const nimbusConfig = defineNimbusConfig({
     items: [
       { autogenerate: { collection: "docs" } },
       { label: "Components", icon: "ph:puzzle-piece", autogenerate: { collection: "components" } },
+      // The glossary is an appendix, after the component catalog.
+      { label: "Glossary", link: "/glossary" },
     ],
   },
 });
@@ -28,18 +30,15 @@ const nimbusConfig = defineNimbusConfig({
 // reaches its new page in one hop; public/_redirects adds the `/old/` forms
 // and the Markdown versions.
 const moved = {
-  "/get-started": "/start-here/quickstart",
-  "/installation": "/start-here/quickstart",
-  "/project-structure": "/start-here/project-structure",
-  "/philosophy": "/start-here/why-nimbus",
-  "/api-reference": "/writing/openapi",
+  "/get-started": "/quickstart",
+  "/installation": "/quickstart",
+  "/philosophy": "/why-nimbus",
   "/partial-builds": "/publish/partial-builds",
   "/adding-components": "/styling/add-components",
   "/ai/metadata-and-seo": "/publish/metadata-and-seo",
   "/writing/frontmatter": "/reference/frontmatter",
   "/configuration": "/reference/configuration",
-  "/cli": "/reference/cli",
-  "/registry": "/reference/registry",
+  "/writing/api-reference": "/api-reference/openapi/setup",
   "/writing/recipes": "/style-guide",
   ...Object.fromEntries(
     ["overview", "quickstart", "tutorial", "how-to", "concept", "reference", "example", "troubleshooting", "changelog"].map(

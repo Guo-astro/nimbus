@@ -6,13 +6,13 @@ sidebar:
   order: 2
 ---
 
-Search ships on by default, backed by [Pagefind](https://pagefind.app/) — a static, index-at-build-time engine. No configuration is required.
+Search ships on by default, backed by [Pagefind](https://pagefind.app/) — a static, index-at-build-time engine. New sites include Pagefind and need no configuration.
 
-## How it works
+## Indexing
 
 After `astro build`, Nimbus runs Pagefind over the output `dist/` and writes a search index alongside your pages. The index is served statically, so search works on any host with no backend.
 
-Install Pagefind as a dev dependency so the build step can find it:
+A site created without it adds Pagefind as a dev dependency:
 
 <PackageManagers pkg="pagefind" type="add" />
 
@@ -41,4 +41,4 @@ const nimbusConfig = defineNimbusConfig({
 });
 ```
 
-Or keep the UI but supply your own backend (Algolia, a hosted service) by implementing the `SearchProvider` interface and setting `search: { provider: "custom" }` — Nimbus then skips the Pagefind build step and lets your code render results.
+Or keep the UI but supply your own backend (such as a hosted search service) by implementing the `SearchProvider` interface and setting `search: { provider: "custom" }` — Nimbus then skips the Pagefind build step and lets your code render results.

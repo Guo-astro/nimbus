@@ -3,7 +3,8 @@ title: Remote MCP server
 description: Serve your documentation to agents over MCP from the site's own server, with list_pages and get_page.
 aiGenerated: true
 sidebar:
-  order: 4
+  order: 5
+  label: Remote MCP
 ---
 
 import PackageManagers from "@/components/ui/package-managers/PackageManagers.astro";
@@ -88,14 +89,6 @@ A homepage made in `src/pages` instead of a content entry isn't a page here: `ge
 Give the client the endpoint URL using its own remote MCP setup instructions. Configuration formats differ between clients.
 
 The starter's docs layout shows a **Copy MCP URL** page action whenever the server is on. Clicking it copies the endpoint URL and briefly changes the label to **Copied**.
-
-A site made before the action existed can add the two starter files:
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ConnectMcp.astro --apply" />
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/connect-mcp.client.ts --apply" />
-
-`diff` needs a site on a released version. Otherwise, copy both files from a newly scaffolded site.
 
 Then in `src/layouts/DocsLayout.astro`, pass it to `PageActions`, which renders it after its own actions:
 

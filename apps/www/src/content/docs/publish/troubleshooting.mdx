@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Fixes for the errors people hit most, titled by the message you'll see.
+description: Fixes for the common failures in Nimbus, by the message you'll see.
 aiGenerated: true
 sidebar:
   order: 5
@@ -9,6 +9,10 @@ sidebar:
 Each entry starts with the message as Nimbus or your tools print it. Search this page for a phrase from your error.
 
 ## GitHub rate-limited the template download (HTTP 403)
+
+```text
+GitHub rate-limited the template download (HTTP 403).
+```
 
 The scaffolder, `nimbus-docs outdated` and `diff` download starter files from GitHub, which allows 60 anonymous requests an hour from one address. Shared networks and CI hit that quickly. Set `GIGET_AUTH` to a GitHub token for the run:
 
@@ -69,7 +73,7 @@ The "Last updated" line and the sitemap's dates come from git history, and CI us
 
 pnpm 10 asks before running a dependency's install scripts. The scaffolder's `pnpm-workspace.yaml` already declines them for esbuild and sharp, and for workerd on Cloudflare, because each ships a working prebuilt binary. The warning is safe to ignore, and approving them with `pnpm approve-builds` is also fine.
 
-## Still stuck
+## Still stuck?
 
 Ask in [GitHub Discussions](https://github.com/cloudflare/nimbus/discussions), or [open an issue](https://github.com/cloudflare/nimbus/issues) if it looks like a bug. Include:
 

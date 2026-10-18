@@ -1,43 +1,26 @@
 ---
 title: Quickstart
-description: Create a Nimbus site, edit a page, and publish it, in about ten minutes.
+description: Run a Nimbus docs site on your machine in five minutes.
 audience: human
 aiGenerated: true
 sidebar:
-  order: 1
+  order: 0.1
   badge:
     text: Start here
     variant: tip
 ---
 
-Nimbus is a documentation framework built on Astro. This page takes you from an empty folder to a published site. You need a terminal; no Nimbus or Astro knowledge is assumed.
+By the end you'll have a docs site running locally, with a page you've edited.
+
+## Prerequisites
+
+- Node 22.12 or later (`node --version`)
+
+## Steps
 
 <Steps>
-  <Step title="Check Node">
-    Nimbus needs Node 22.12 or later. Check yours with `node --version`.
-  </Step>
   <Step title="Create the site">
-    <PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" />
-
-    Answer the prompts, or press Enter for each default. The scaffolder creates `my-docs/` and installs its dependencies. Not hosting on Cloudflare? Add `--deploy other`.
-
-    [Scaffolder options](/reference/scaffolder-options) lists every prompt and flag, including `--yes` to take every default and the empty variant with no example pages.
-  </Step>
-  <Step title="Look at what you got">
-    <Render file="project-tree" />
-  </Step>
-  <Step title="Name your site">
-    Open `astro.config.ts` and set three values in the Nimbus config:
-
-    ```ts title="astro.config.ts"
-    const nimbusConfig = defineNimbusConfig({
-      site: "https://docs.example.com",
-      title: "Acme Docs",
-      description: "Guides and reference for Acme.",
-    });
-    ```
-
-    `site` is your site's address, used for canonical URLs, share cards, the sitemap and `llms.txt`. If you don't know it yet, leave the placeholder for now and set it before you publish.
+    <PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" args="my-docs --yes" />
   </Step>
   <Step title="Start the dev server">
     ```sh
@@ -45,32 +28,24 @@ Nimbus is a documentation framework built on Astro. This page takes you from an 
     ```
 
     <PackageManagers pkg="dev" type="run" />
-
-    Open the address it prints, usually `http://localhost:4321`.
   </Step>
-  <Step title="Edit a page">
-    Open `src/content/docs/index.mdx`, change the title or a sentence, and save. The page in your browser updates.
-  </Step>
-  <Step title="Milestone 1: your edited page is running locally">
-    You should see your site with your change, a sidebar, search in the header, and **Copy page** and **View as Markdown** above the title. To add more pages, see [Pages and routing](/writing/pages-and-routing).
-  </Step>
-  <Step title="Check the site">
-    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="check" />
-
-    `check` finds configuration, structure and content problems without a full build. While `site` is still the placeholder it shows a warning, not an error.
-  </Step>
-  <Step title="Milestone 2: publish">
-    **Hosting elsewhere?** Your site is already a static build. Run the build and upload `dist/` to any static host; `wrangler.jsonc` and the `deploy` script are only for Cloudflare, and you can delete them. [Deploy](/publish/deploy) covers each host, and Astro's [deploy guides](https://docs.astro.build/en/guides/deploy/) cover many more.
-
-    <PackageManagers pkg="build" type="run" />
-
-    **On Cloudflare**, deploy:
-
-    <PackageManagers pkg="deploy" type="run" />
-
-    The first deploy opens a browser to sign in to Cloudflare. When it finishes, it prints your site's `*.workers.dev` URL. If you don't have your own domain yet, set `site` to that URL and deploy again, so canonical links and share cards point at the live site.
-  </Step>
-  <Step title="Next">
-    Write your first real page: [Pages and routing](/writing/pages-and-routing).
+  <Step title="Edit the home page">
+    Open `src/content/docs/index.mdx`, change the title, and save.
   </Step>
 </Steps>
+
+## You should see
+
+```text
+ astro  v<version> ready in <n> ms
+┃ Local    http://localhost:4321/
+┃ Network  use --host to expose
+```
+
+Open `http://localhost:4321/`: your site, with your new title, a sidebar and search. The scaffolder wrote the layouts, components and styles into `my-docs/`, and they're yours to change.
+
+## Next step
+
+[Pages and routing](/writing/pages-and-routing): add your first real page.
+
+Also: [Deploy to Cloudflare](/deploy/cloudflare) · [Project structure](/project-structure)

@@ -1,0 +1,42 @@
+---
+title: Serve under a path
+description: Publish your site under a path such as example.com/docs/, beside another site on the same domain.
+aiGenerated: true
+sidebar:
+  order: 4
+  label: Under a path
+---
+
+Set Astro's `base` to publish the site under a path. Every page, Markdown version and `llms.txt` moves under it.
+
+## Steps
+
+<Steps>
+  <Step title="Set the base">
+    In `astro.config.ts`:
+
+    ```ts title="astro.config.ts" {2}
+    export default defineConfig({
+      base: "/docs",
+      // …
+    });
+    ```
+  </Step>
+  <Step title="Decide who owns the domain's discovery files">
+    Agent discovery files live at the domain root, not under `/docs`. If another site owns the domain, set `agents: { discovery: false }` in the Nimbus config. Otherwise, see [Under a base path](/ai/agent-discovery#under-a-base-path) for where they go.
+  </Step>
+  <Step title="Build and deploy">
+    <PackageManagers pkg="build" type="run" />
+
+    With the Cloudflare adapter and static output, deploy with `wrangler deploy --assets ./dist/client`.
+  </Step>
+</Steps>
+
+## Verify
+
+Open `https://example.com/docs/` and `https://example.com/docs/llms.txt`. Both load, and links in `llms.txt` start with `/docs/`.
+
+## Next steps
+
+- [Partial builds](/publish/partial-builds#under-a-base): serve several Nimbus builds under one hostname.
+- [Redirects](/navigation/redirects#host-level-redirects): host rules for a site under a base.

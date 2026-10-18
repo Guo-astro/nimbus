@@ -2,16 +2,15 @@
 title: Content from Notion
 description: Build a collection from a Notion database, with drafts, slugs and ordering from its properties.
 sidebar:
-  order: 9
+  label: Notion
+  order: 2
 ---
 
 A Notion database can be a page collection: each row is a page, its blocks the page body. Notion pages are Markdown: they get routes, the sidebar, search, Markdown versions, `llms.txt`, citations and links like any page, but no MDX components, no callouts, no edit link and no last-updated date.
 
 ## Add it
 
-```sh
-npx nimbus-docs add source notion --print | claude
-```
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source notion --print | claude" />
 
 The guide has your agent install `@notionhq/client` and `notion-to-md`, and write `src/loaders/notion.ts`: a loader that reads the database with the Notion SDK and turns each page into Markdown with notion-to-md. Nimbus holds no Notion code; the loader is yours to edit. The rest is wired like any collection:
 

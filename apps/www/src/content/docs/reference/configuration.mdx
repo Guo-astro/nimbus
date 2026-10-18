@@ -1,12 +1,10 @@
 ---
-title: Configuration
+title: Nimbus config
 description: Every option defineConfig and the Nimbus integration accept.
 aiGenerated: true
 sidebar:
   order: 1
-  badge:
-    text: Reference
-    variant: info
+  label: Nimbus config
 ---
 
 Nimbus is configured in `astro.config.ts`. `defineConfig` from `@cloudflare/nimbus-docs`, imported as `defineNimbusConfig` so it doesn't clash with Astro's own `defineConfig`, types the site config; the `nimbus()` integration takes that config plus build-time options.
@@ -50,7 +48,9 @@ export default defineConfig({
 | `versions`                       | object            | Versioning manifest — each version is its own content collection.             |
 | `rendering`                      | object            | Build or request rendering policy for canonical content collection routes.    |
 | `agents`                         | object            | Agent services and discovery. `agents.mcp` serves a remote MCP server; `agents.discovery: false` leaves origin-root discovery to another site. |
-| `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/writing/content-sources). |
+| `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/content-sources/git). |
+| `api` | array | API references generated from specs, one entry each. See [OpenAPI options](/api-reference/openapi/options). |
+| `apiReferences` | array | API references on other Nimbus sites that this site cites. See [Cite API pages](/api-reference/citations#cite-an-api-hosted-elsewhere). |
 
 ### Content sources
 
@@ -76,100 +76,12 @@ export default defineConfig({
 
 Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
-#### Enable request rendering
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `rendering.default` | `"build"` \| `"request"` | `"build"` | Mode for `docs`, version collections and API collections. |
+| `rendering.collections` | `Record<string, "build" \| "request">` | — | Mode by Astro collection name, not by URL or version. Every name must be a registered collection with its own catch-all route, and once `rendering` is set, every other page collection with its own catch-all route, such as a `blog`, must be listed. |
 
-Request rendering requires a compatible Astro adapter and at least one collection set to `"request"` in the Nimbus config. Prose collections use Astro's adapter support. Generated API collections currently support request rendering on Cloudflare; keep those collections set to `"build"` on other adapters. Provider-specific setup is listed below.
-
-Set the default when most or all canonical collection routes should render on request:
-
-```ts
-const nimbusConfig = defineNimbusConfig({
-  // ...
-  rendering: {
-    default: "request",
-  },
-});
-```
-
-Run the production build after changing output mode or rendering policy. It is the authoritative check that the selected adapter supports Nimbus request rendering.
-
-#### Mix build and request rendering
-
-`rendering.default` applies to `docs`, version collections, and API collections. `rendering.collections` sets a mode by Astro collection name, not by URL or version — and it is how any other page collection with its own catch-all route (a `blog`, say) gets a mode: the build fails after content sync if `rendering` is set and such a collection isn't listed.
-
-Render most collections on request but keep an archive prerendered:
-
-```ts
-rendering: {
-  default: "request",
-  collections: {
-    archived: "build",
-  },
-},
-```
-
-Or keep the site static except for one collection:
-
-```ts
-rendering: {
-  default: "build",
-  collections: {
-    api: "request",
-  },
-},
-```
-
-Every override must name a registered collection with its own canonical catch-all route. Nimbus fails the build for unknown collection names rather than silently ignoring them.
-
-Keep `export const prerender = true` and `getStaticPaths` in canonical route files: Nimbus switches each route to the configured mode. Astro still logs "getStaticPaths() ignored in dynamic page" for routes rendered on request. The warning is expected and needs no change.
-
-Request-rendered routes are still added to the sitemap and Pagefind search index during the production build. Nimbus uses the content source to create those build-time discovery files; no extra sitemap or search configuration is required.
-
-##### Cloudflare
-
-Cloudflare supports request-rendered prose and generated API collections. Choose **Server** and **Cloudflare** when creating a new site. For an existing site, run the adapter installer from the project root:
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
-
-The installer wires `@astrojs/cloudflare` and sets Astro to server output. It creates `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static configuration. Customized Wrangler files and alternate JSON or TOML configurations are preserved with manual guidance.
-
-When the active Nimbus config has no rendering policy, the installer adds `rendering: { default: "request" }`. Existing policies are preserved. If an imported or ambiguous Nimbus config cannot be edited safely, the installer completes the adapter setup; from a shell it prints instructions for generating a coding-agent recipe, and in a coding agent session it prints the recipe itself. Generate that recipe with:
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print" />
-
-Pass the printed recipe to your coding agent to finish the project-specific configuration.
-
-The resulting Astro configuration includes the rendering policy, server output, and adapter:
-
-```ts title="astro.config.ts"
-import cloudflare from "@astrojs/cloudflare";
-import { defineConfig } from "astro/config";
-import nimbus, {
-  defineConfig as defineNimbusConfig,
-} from "@cloudflare/nimbus-docs";
-
-const nimbusConfig = defineNimbusConfig({
-  site: "https://docs.example.com",
-  title: "Acme",
-  rendering: {
-    default: "request",
-  },
-});
-
-export default defineConfig({
-  output: "server",
-  adapter: cloudflare({ prerenderEnvironment: "node" }),
-  integrations: [nimbus(nimbusConfig)],
-});
-```
-
-Cloudflare deployments also require a server-compatible `wrangler.jsonc`. Run `pnpm build` after setup to verify the adapter and Wrangler configuration together.
-
-See [Server adapters](/reference/cli#server-adapters) for installer behavior and safety checks.
-
-##### Other Astro adapters
-
-For prose collections, use the official [Node](https://docs.astro.build/en/guides/integrations-guide/node/), [Netlify](https://docs.astro.build/en/guides/integrations-guide/netlify/), or [Vercel](https://docs.astro.build/en/guides/integrations-guide/vercel/) adapter with `output: "server"` and the same Nimbus rendering policy. Follow the adapter's deployment instructions, serve the generated static assets alongside the server, and verify the production HTTP responses. [Docs for agents](/ai/docs-for-agents#markdown-negotiation) includes a Node example and explains how static Markdown is retrieved on each target.
+To set up a server and choose modes, see [Choose build or request rendering](/reference/rendering).
 
 ### Agents
 
@@ -203,6 +115,12 @@ The second argument to `nimbus()` controls build behavior:
 | `validateMdx`        | `true`                  | PascalCase tag validation. `false` to skip; object to override paths. See [Markdown and MDX](/writing/markdown-and-mdx).                                                                                                                               |
 | `admonitions`        | `true`                  | Native Sätteri MDX directives → `<Aside>`; object adds `typeAliases`, `contentDirs`, and `skip`. Set `false` when using an incompatible custom processor.                                                                                                                                        |
 | `markdown`           | Sätteri processor       | Configure authored Markdown processing and generated Markdown customization. `markdown.features` turns on Sätteri syntax, such as `{ headingAttributes: true }` for `{#id}` heading ids or `{ math: true }`. See [Markdown and MDX](/writing/markdown-and-mdx#heading-ids-and-math). |
+| `markdown.processor` | Sätteri | A custom Astro Markdown processor. The options below, except `componentMap` and `partialResolver`, are ignored with one. |
+| `markdown.features` | — | Sätteri syntax features, such as `{ headingAttributes: true }` or `{ math: true }`. Every Nimbus pass reads Markdown with them. |
+| `markdown.mdastPlugins` | `[]` | Sätteri mdast plugins, run in order. |
+| `markdown.hastPlugins` | `[]` | Sätteri hast plugins, run in order after Shiki. See [Package API](/styling/package-api#markdown-plugins) for ready-made ones. |
+| `markdown.componentMap` | — | How your own MDX components appear in generated Markdown. See [Customize generated Markdown](#customize-generated-markdown). |
+| `markdown.partialResolver` | — | Maps static `<Render>` attributes to partial IDs in generated Markdown. |
 | `sitemap`            | enabled when `site` set | `false` to disable.                                                                                                                                                                                                                                    |
 | `mdx`                | —                       | Options forwarded to Astro's MDX integration. Their behavior remains processor-owned.                                                                                                                                                                                                        |
 | `icons`              | `true`                  | Built-in icon system. `true` auto-detects `@iconify-json/*` packages (Phosphor, Material Icons, etc.) and local `src/icons/*.svg`. `false` to disable. Object for explicit config (`iconDir`, `include`, `svgoOptions`). See [Icon](/components/icon). |

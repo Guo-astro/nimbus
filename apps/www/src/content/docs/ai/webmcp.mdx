@@ -1,0 +1,80 @@
+---
+title: Add WebMCP search
+description: Add the WebMCP search tool to a site created before it shipped, so an agent in the reader's browser can search your docs.
+aiGenerated: true
+sidebar:
+  order: 7
+  label: WebMCP search
+---
+
+[WebMCP](https://webmachinelearning.github.io/webmcp/) is an experimental browser API that lets a page offer tools to an agent running in the browser. Nimbus registers one tool, `search_documentation`, which searches the site's search index. New sites have it already.
+
+## What new sites get
+
+Nothing loads until an agent calls the tool, and browsers without the API skip it. Results follow the same rules as site search: drafts and hidden versions are left out, and so are `noindex` pages unless they set `searchable: true`.
+
+### Input
+
+| Field | Type | Default | Constraints |
+| --- | --- | --- | --- |
+| `query` | string | — | Required, at most 500 characters |
+| `limit` | integer | `5` | 1 to 20 |
+| `version` | string | Every version except deprecated ones | Versioned sites only; any visible version, deprecated included |
+
+**Result:** a list of matches, each with `title`, `heading`, an anchored `url`, and a plain-text `excerpt` of at most 1,000 characters.
+
+### Errors
+
+| Code | Meaning |
+| --- | --- |
+| `invalid_input` | The query, limit or version is invalid. |
+| `index_unavailable` | The search index couldn't load: check that the build's whole `pagefind/` folder is deployed. |
+| `search_failed` | The search or its code failed to load. Retry, or reload the page. |
+
+## Add it to an older site
+
+### Prerequisites
+
+- Site search on the default provider (`search` not set to `false` or a custom provider)
+- Pagefind 1.5.2 or later
+
+### Steps
+
+<Steps>
+  <Step title="Copy the component">
+    Copy `src/components/WebMCP.astro` from the [starter](https://github.com/cloudflare/nimbus/blob/main/packages/nimbus-starter-source/src/components/WebMCP.astro) into your project's `src/components/`.
+  </Step>
+  <Step title="Render it in the head">
+    In `src/layouts/BaseLayout.astro`, import the component and render it inside `<head>`:
+
+    ```astro title="src/layouts/BaseLayout.astro"
+    ---
+    import WebMCP from "@/components/WebMCP.astro";
+    ---
+    <head>
+      <!-- … -->
+      <WebMCP />
+    </head>
+    ```
+  </Step>
+  <Step title="Build the site">
+    ```sh
+    npm run build
+    ```
+  </Step>
+</Steps>
+
+### Verify
+
+Open any built page's HTML and find the tool's settings in `<head>`:
+
+```html
+<meta name="nimbus-webmcp" content="{&quot;search&quot;:&quot;pagefind&quot;,…}">
+```
+
+If the tag is missing, the site's search isn't the default provider. The tool needs a production build: in `astro dev` it answers `index_unavailable`.
+
+## Next steps
+
+- [Remote MCP server](/ai/remote-mcp): let agents outside the browser read your docs.
+- [Agent discovery](/ai/agent-discovery): the files agents read to find your site.

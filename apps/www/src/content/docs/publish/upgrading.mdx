@@ -1,12 +1,13 @@
 ---
-title: Upgrading
+title: Upgrade Nimbus
 description: Move a Nimbus site to a new release, including the changes to files you own.
 aiGenerated: true
 sidebar:
   order: 4
+  label: Upgrading
 ---
 
-A Nimbus release has two parts: the `@cloudflare/nimbus-docs` package, which you upgrade like any dependency, and changes to starter and registry files, which live in your repo and change only when you take them. This page walks through both. [How customization works](/styling/how-customization-works) explains why they're separate.
+A Nimbus release has two parts: the `@cloudflare/nimbus-docs` package, which you upgrade like any dependency, and changes to starter and registry files, which live in your repo and change only when you take them. This page walks through both, and `nimbus-docs migrate` lists every step your version jump needs. [Ownership](/styling/how-customization-works) explains why they're separate.
 
 Commit your work first, so every change the upgrade makes shows in `git diff`.
 
@@ -41,19 +42,25 @@ Commit your work first, so every change the upgrade makes shows in `git diff`.
 
     `--overwrite` replaces files you haven't edited and asks about the ones you have. Without a terminal it keeps edited files and lists them.
   </Step>
-  <Step title="Check and build">
-    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="check" />
-
-    <PackageManagers pkg="build" type="run" />
-
-    Look through the site, then commit.
-  </Step>
 </Steps>
+
+## Verify
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="check" />
+
+<PackageManagers pkg="build" type="run" />
+
+`check` exits with no errors, the build passes, and `outdated` lists no required package API work. Look through the site, then commit.
 
 ## If something breaks
 
 - A build error that names a renamed option or removed helper usually has a migration: run `migrate` again and read its output.
 - An error from a file you own, such as a layout, means it needs the upstream change: compare it with `diff <file>`.
-- [Troubleshooting](/publish/troubleshooting) lists common errors by their exact text.
 
 Each package's changelog, on [npm](https://www.npmjs.com/package/@cloudflare/nimbus-docs) and in the repository, lists what each release changed.
+
+## Next steps
+
+- [Troubleshooting](/publish/troubleshooting): common errors by their exact text.
+- [Ownership](/styling/how-customization-works): which files an upgrade touches.
+- [CLI](/cli): every `outdated`, `diff` and `migrate` flag.

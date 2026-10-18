@@ -1,6 +1,6 @@
 ---
-title: How customization works
-description: Which files are yours, which parts are the framework's, and how to take upstream changes without losing your own.
+title: Ownership
+description: Which files are yours and which are the framework's, and what that means for customizing and upgrading.
 aiGenerated: true
 sidebar:
   order: 1
@@ -8,21 +8,11 @@ sidebar:
 
 A Nimbus site has two layers. Read this before changing a component or a layout, so you know what an upgrade will and won't touch.
 
-## Your files
+## Your files and the framework's
 
-The scaffolder writes the visible parts of the site into your repo, and from then on they're yours:
+Everything the scaffolder writes into your repo is yours: components, layouts, routes, styles and content. Change any of it. Nothing overwrites your files: upgrading the package leaves them alone, and Nimbus offers upstream changes to them as diffs you choose to take. [Project structure](/project-structure) maps each file and where the framework's part begins.
 
-- components in `src/components/`, and layouts in `src/layouts/`,
-- routes in `src/pages/`,
-- design tokens and styles in `src/styles/`,
-- the components every page can use, in `src/components.ts`,
-- your content in `src/content/`.
-
-Change any of them. Nothing overwrites them: upgrading the package leaves them alone, and Nimbus offers upstream changes to them as diffs you choose to take. [Project structure](/start-here/project-structure) maps each file.
-
-## The framework
-
-The `@cloudflare/nimbus-docs` package holds the parts with one right answer: the Astro integration, content schemas, data helpers such as the sidebar and table of contents, search indexing, the Markdown and `llms.txt` output, and the CLI. You import it; you don't copy it. Its exports are a stable contract, versioned with semver: a breaking change comes with a migration, which `nimbus-docs migrate` applies or explains. [Package API](/reference/package-api) lists the helpers your files call.
+The `@cloudflare/nimbus-docs` package's exports are a stable contract, versioned with semver: a breaking change comes with a migration, which `nimbus-docs migrate` applies or explains. [Package API](/styling/package-api) lists the helpers your files call.
 
 ## The ladder
 
@@ -48,4 +38,4 @@ Upstream changes to files you own arrive as changes you review:
 
 `outdated` and `diff` download the starter from GitHub. If GitHub rate-limits you, set `GIGET_AUTH` to a GitHub token; see [Troubleshooting](/publish/troubleshooting#github-rate-limited-the-template-download-http-403).
 
-[Upgrading](/publish/upgrading) puts these in order for a release.
+[Upgrade Nimbus](/publish/upgrading) puts these in order for a release.

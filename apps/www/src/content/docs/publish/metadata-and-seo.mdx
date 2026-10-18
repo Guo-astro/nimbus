@@ -13,7 +13,7 @@ Nimbus handles the metadata baseline automatically and gives you per-page and si
 `title` and `description` frontmatter populate `<title>` and `<meta name="description">`, and feed the search snippet and `llms.txt` indexes. Site-wide fallbacks come from the Nimbus config:
 
 ```ts title="astro.config.ts"
-nimbus({
+const nimbusConfig = defineNimbusConfig({
   site: "https://docs.example.com",
   title: "Acme",
   description: "Build with Acme.",
@@ -24,9 +24,9 @@ nimbus({
 
 Set a site-wide fallback card and alt text, then override per page:
 
-```ts
-nimbus({
-  /* … */
+```ts title="astro.config.ts"
+const nimbusConfig = defineNimbusConfig({
+  // …
   socialImage: "/og.png",
   socialImageAlt: "Acme documentation",
 });

@@ -3,7 +3,7 @@ title: Package API
 description: The helpers your pages, layouts and components call from @cloudflare/nimbus-docs, grouped by task.
 aiGenerated: true
 sidebar:
-  order: 6
+  order: 7
 ---
 
 The starter's routes and layouts call these helpers, and so will yours when you customize them. This page covers the ones customization needs; each package entry exports more, and its TypeScript types document every export. The package follows semver, and `nimbus-docs migrate` handles breaking changes ([Upgrading](/publish/upgrading)).
@@ -44,10 +44,52 @@ From `@cloudflare/nimbus-docs`. The starter's `src/pages/[...slug].astro` uses t
 | --- | --- |
 | `withBase(path, base)` | Adds Astro's `base` to a site path, once. |
 | `stripBase(pathname, base)` | Removes it. |
+| `entryRouteKey(id)` | An entry's route: its id with a final `/index` removed. |
+
+Route matching uses logical, unbased paths; links sent to a browser use based paths:
+
+```ts
+import {
+  entryRouteKey,
+  stripBase,
+  withBase,
+} from "@cloudflare/nimbus-docs/runtime";
+
+const route = entryRouteKey(entry.id);
+const requestedRoute = stripBase(Astro.url.pathname, import.meta.env.BASE_URL);
+const href = withBase(`/${route}`, import.meta.env.BASE_URL);
+```
+
+Nimbus rejects ambiguous or unsafe generated routes during the build. Common causes include both `foo` and `foo/index`, collisions with reserved `llms.txt` routes, encoded path separators, and encoded `.` or `..` segments. The build error names the conflicting entries.
+
+### Page URLs
+
+`getDocsPage()` and `getCollectionPage()` return each page's URLs next to `entry`, `Content`, and `headings`, so page routes don't build them by hand. `getIndexedEntries()` returns the same values on each `IndexedEntry`.
+
+| Field | Example | Description |
+| --- | --- | --- |
+| `markdownUrl` | `/blog/welcome/index.md` | The page's clean Markdown version. `/index.md` for the site root. |
+| `sourceUrl` | `/blog/welcome/index.mdx` | The page's authored source. `undefined` for entries without an authored body. |
+| `ogImageUrl` | `/og/blog/welcome.png` | The page's generated OG card. `/og/index.png` for the site root, `/og/blog.png` for the root of a collection mounted at `/blog`. |
+
+The URLs follow the entry ID. Astro's glob loader slugifies file paths, which drops dots: `src/content/docs/1.1.1.1/encryption.mdx` gets the ID `1111/encryption`. Dots are kept where Astro doesn't slugify: a version prefix (`/v1.2/guide/`), an API operation (`payment.succeeded`), or a `slug` frontmatter field, which Astro uses as the ID. `docsCollection()` accepts `slug` without any schema change.
+
+Each URL is site-relative, without Astro's deployment base; the starter's layouts add the base when they emit it. The starter's page route uses the URLs directly:
+
+```astro title="src/pages/[...slug].astro (excerpt)"
+---
+const page = await getDocsPage(Astro);
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
+const socialImage = entry.data.socialImage ?? ogImageUrl;
+---
+```
+
+`getOgImagePages()` returns the `pages` map for astro-og-canvas's `OGImageRoute`: one entry per indexed page, keyed so the card is written at that page's `ogImageUrl`, with the page's `IndexedEntry` as the value. The starter's `src/pages/og/[...slug].ts` passes it through; see [Customize OG cards](/ai/override-markdown#customize-og-cards).
 
 ## API reference pages
 
-From `@cloudflare/nimbus-docs/runtime`. [OpenAPI reference pages](/writing/openapi) shows them in the API route.
+From `@cloudflare/nimbus-docs/runtime`. [Add an OpenAPI reference](/api-reference/openapi/setup) shows them in the API route.
 
 | Helper | What it does |
 | --- | --- |
@@ -55,6 +97,43 @@ From `@cloudflare/nimbus-docs/runtime`. [OpenAPI reference pages](/writing/opena
 | `getApiRoute(Astro)` | The page and sidebar for an API route, or a redirect or `404` `Response`. |
 | `getApiRoot(Astro, { collection, version })` | A version's root page, with its index of every endpoint, from any route. |
 | `getApiVersions(collection)` | The versions of an API, for a picker. |
+| `getVersionSwitchUrl({ collection, sourceVersion, id, targetVersion })` | The same page in another version, or that version's landing page. |
+| `getApiVersionHead(collection, version, coordinate, request)` | The canonical link and alternate versions, for a custom API head. |
+| `apiIndexRows(index)`, `chunkApiIndex(index, { size })` | Flatten a root page's index, or split it the way the API home does. |
+
+### Build a page from the whole reference
+
+To build your own page from the whole reference, read a version's root page with `getApiRoot` from `@cloudflare/nimbus-docs/runtime`; leave out `version` for the default. Its `index` holds every operation and webhook exactly once, each with its `method`, `path` and link. `apiIndexRows(index)` flattens it, and `chunkApiIndex(index, { size })` splits it the way the home does.
+
+```astro title="src/pages/endpoints.astro"
+---
+import { apiIndexRows, getApiRoot, withBase } from "@cloudflare/nimbus-docs/runtime";
+
+const root = await getApiRoot(Astro, { collection: "api" });
+const rows = root ? apiIndexRows(root.index) : [];
+---
+
+<ul>
+  {rows.map(([method, path, label, href]) => (
+    <li><a href={withBase(href, import.meta.env.BASE_URL)}>{label}</a> <code>{method} {path}</code></li>
+  ))}
+</ul>
+```
+
+### Link to the same page in another version
+
+```ts
+const href = await getVersionSwitchUrl({
+  collection: "api",
+  sourceVersion: "2026-10-09",
+  id: coordinate,
+  targetVersion: "2026-10-02",
+});
+```
+
+Import it from `@cloudflare/nimbus-docs/runtime` and apply `withBase` once when rendering the link. Pass the page's exact source version, including on the latest version's pages. The link goes to the same operation in the target version, or to that version's landing page when the operation doesn't exist there.
+
+For custom API heads, use `getApiVersionHead`; the starter's `ApiLayout` uses it too.
 
 ## Collections
 

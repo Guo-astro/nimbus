@@ -18,18 +18,9 @@ The **lint engine** is the on-demand authoring-quality layer. Rules have stable 
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 
-Flags — combine with `lint`:
+It walks `src/content/`, runs each authoring rule you've enabled, and exits non-zero when any `error`-severity finding survives. [CLI](/cli#nimbus-docs-lint) lists its flags, such as `--fix` and `--format=json`.
 
-| Flag | Effect |
-|---|---|
-| `--format=json` | agent-readable diagnostics |
-| `--rule=nimbus/single-h1` | run one rule |
-| `--fix` | apply auto-fixes in place |
-| `--quiet` | errors only |
-
-It walks `src/content/`, runs each authoring rule you've enabled, and exits non-zero when any `error`-severity finding survives.
-
-It also reads page collections that load from another folder, including [content sources](/writing/content-sources): a problem in a source's snapshot is reported as `sdk: docs/guides/intro.mdx:12`, its path in the source repository, and `--fix` leaves the snapshot untouched. A collection with no files on disk, such as a Notion database, is named as not inspected. Lint reads `.mdx` files, and says how many Markdown (`.md`) pages that leaves out.
+It also reads page collections that load from another folder, including [content sources](/content-sources/git): a problem in a source's snapshot is reported as `sdk: docs/guides/intro.mdx:12`, its path in the source repository, and `--fix` leaves the snapshot untouched. A collection with no files on disk, such as a Notion database, is named as not inspected. Lint reads `.mdx` files, and says how many Markdown (`.md`) pages that leaves out.
 
 ## Configure severities
 

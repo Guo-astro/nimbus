@@ -1,0 +1,56 @@
+---
+title: Cite API pages
+description: Link to an API operation from your guides by its coordinate, so the link survives URL changes.
+aiGenerated: true
+sidebar:
+  order: 1
+  label: Citations
+---
+
+A coordinate names an API item independently of its URL, such as an operation's `operationId`. [Routes and coordinates](/api-reference/openapi/routes) lists the coordinate of every OpenAPI item.
+
+## Link from prose by coordinate
+
+Use an `api.ref:` destination in Markdown or MDX under `src/content`:
+
+```md
+See how to [retrieve an event](api.ref:api:retrieveEvent).
+```
+
+Nimbus resolves the citation during the build:
+
+- `api` identifies the API collection.
+- `retrieveEvent` identifies the operation independently of its route.
+- A citation without a version targets the API family's default version.
+- An unknown coordinate in a known collection fails the authored-content build and may suggest a close match.
+- An unknown collection is warned and rewritten to `#`; verify collection names against `/nimbus-api/coordinates.json` so dead citations do not ship.
+
+Pin a historical version only when the prose specifically discusses it:
+
+```md
+Review the [v1 operation](api.ref:api@v1:retrieveEvent).
+```
+
+Use `/nimbus-api/coordinates.json` to inspect the exact coordinates and resolved URLs published by a built site.
+
+## Cite an API hosted elsewhere
+
+A documentation site can cite a reference published by another Nimbus site without mounting or republishing it:
+
+```ts
+apiReferences: [
+  {
+    collection: "api",
+    manifest: "https://api.example.com/nimbus-api/coordinates.json",
+    origin: "https://api.example.com",
+  },
+],
+```
+
+`collection` must match the collection key published by the remote manifest. `origin` is the absolute prefix prepended to site-relative manifest paths. Include the deployment base when the remote reference is hosted below one, for example `https://api.example.com/docs`.
+
+The remote collection then uses the same prose syntax: `api.ref:api:retrieveEvent`. Remote references provide citation targets only; they do not add the remote pages to local search or agent outputs.
+
+The manifest lists each page's path without a trailing slash, and it doesn't record the remote site's `trailingSlash`. With `origin`, citations use the path as listed, so on a remote site that serves `/api/retrieve-event/`, a citation links to `/api/retrieve-event`, which that site may redirect or answer with 404. Without `origin`, the paths stay site-relative and take this site's trailing-slash shape, which is right only when both sites use the same `trailingSlash` and `build.format`. Check a citation against the remote site before relying on it.
+
+Nimbus fetches HTTPS manifests during the build. An unavailable or malformed remote manifest produces warnings and its citations resolve to `#`; it does not stop the build. You can instead commit a manifest and use a project-relative path when builds must work offline. An unreadable local manifest, invalid JSON, or invalid top-level shape fails the build; malformed entries inside an otherwise valid manifest are warned and ignored.

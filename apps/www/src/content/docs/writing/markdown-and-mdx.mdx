@@ -8,38 +8,6 @@ sidebar:
 
 Content is Markdown (`.md`) or MDX (`.mdx`). MDX lets you drop components straight into prose — cards, tabs, steps, asides, and anything you build.
 
-## Links under a deployment base
-
-Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Installation](/start-here/quickstart)`, not `[Installation](/docs/installation)`. Nimbus adds `/docs` during the build.
-
-This applies to Markdown links, reference definitions, native `<a href>` attributes, and static component `href` strings. Relative links, external URLs, fragments, query strings, code, and dynamic JSX expressions are left unchanged.
-
-For a link computed in component or route code, import `withBase` from `@cloudflare/nimbus-docs/runtime` and apply it once:
-
-```ts
-import { withBase } from "@cloudflare/nimbus-docs/runtime";
-
-const href = withBase("/start-here/quickstart", import.meta.env.BASE_URL);
-```
-
-Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/installation", "/docs")` intentionally produces `/docs/docs/installation`.
-
-## Images under a deployment base
-
-Prefer relative image paths (`./architecture.png`) or files in `src/assets`. Astro optimizes them, and they work under any base.
-
-A file in `public/` is served under the base, and images follow Astro's rule rather than the link rule above: Nimbus adds the base to reference definitions, but not to inline images. With `base: "/docs"` and `public/architecture.png`:
-
-```md
-![Architecture](/docs/architecture.png)
-
-![Architecture][arch]
-
-[arch]: /architecture.png
-```
-
-Write the base in an inline image or `<img src>`, and leave it out of a reference definition. `nimbus-docs lint` reports either mistake with `nimbus/image-ref`, and `nimbus-docs lint --fix` repairs inline images and definitions when the file is in `public/`.
-
 ## The components registry
 
 Components listed in `src/components.ts` are available in every MDX file **without an import**:
@@ -124,25 +92,15 @@ This fenced example stays code.
 
 Built-in types: `note`, `info`, `tip`, `caution`, `warning`, `important`, `danger`. Add synonyms with `admonitions: { typeAliases: { heads: "tip" } }`. `Aside` must be in your components registry (the default starter exports it).
 
-Titles use the existing plain `title` prop. Sätteri emits the string attribute;
-quotes and expression-looking text are not evaluated. Markup in titles remains
-literal text. Directive titles must still be valid MDX syntax because Sätteri
-parses the document before the AST pass runs. For arbitrary text such as an
-unclosed `<T>` or `{`, use the direct component's string prop:
+Titles use the existing plain `title` prop. Sätteri emits the string attribute; quotes and expression-looking text are not evaluated. Markup in titles remains literal text. Directive titles must still be valid MDX syntax because Sätteri parses the document before the AST pass runs. For arbitrary text such as an unclosed `<T>` or `{`, use the direct component's string prop:
 
 ```mdx
 <Aside title="Use <T>">Body content.</Aside>
 ```
 
-No Aside component update is required.
+Sätteri parses the directives and their bodies; Nimbus maps recognized directive nodes to Aside. Body indentation is not rewritten. Code examples, frontmatter, expressions and JSX attributes remain protected. The existing opening-line body form is retained for compatibility.
 
-Sätteri parses the directives and their bodies; Nimbus maps recognized directive
-nodes to Aside. Body indentation is not rewritten. Code examples, frontmatter,
-expressions and JSX attributes remain protected. The existing opening-line body
-form is retained for compatibility.
-
-Nesting and fence termination follow Sätteri's native grammar. Use a longer outer
-fence for nested admonitions:
+Nesting and fence termination follow Sätteri's native grammar. Use a longer outer fence for nested admonitions:
 
 ```mdx
 ::::note
@@ -154,17 +112,9 @@ Inner content.
 ::::
 ```
 
-Unknown directives remain literal by default. If your Sätteri processor explicitly
-enables native directives, unrecognized nodes remain available to your own AST
-plugins. Files containing standalone carriage returns
-also remain literal because the installed native directive parser does not handle
-those line endings consistently; LF and CRLF are supported.
+Unknown directives remain literal by default. If your Sätteri processor explicitly enables native directives, unrecognized nodes remain available to your own AST plugins. Files with standalone carriage returns also remain literal; use LF or CRLF line endings.
 
-This feature requires Nimbus's native Sätteri MDX pipeline. Compatible explicit
-Sätteri processors are supported. For unified or another custom processor, set
-`admonitions: false` and retain that processor's callout implementation. `.md`
-files, raw imports and files outside `admonitions.contentDirs` are unchanged. Use
-`admonitions.skip` for per-file opt-outs.
+This feature requires Nimbus's native Sätteri MDX pipeline. Compatible explicit Sätteri processors are supported. For unified or another custom processor, set `admonitions: false` and retain that processor's callout implementation. `.md` files, raw imports and files outside `admonitions.contentDirs` are unchanged. Use `admonitions.skip` for per-file opt-outs.
 
 ## Heading ids and math
 
@@ -207,9 +157,7 @@ A ` ```math ` fence works like `$$`. Formulas are typeset during the build into 
 
 ## Extending Markdown
 
-Extend Sätteri with `markdown.mdastPlugins` for Markdown AST transformations and
-`markdown.hastPlugins` for HTML AST transformations. Nimbus provides native
-plugins through `@cloudflare/nimbus-docs/markdown`:
+Extend Sätteri with `markdown.mdastPlugins` for Markdown AST transformations and `markdown.hastPlugins` for HTML AST transformations. Nimbus provides native plugins through `@cloudflare/nimbus-docs/markdown`:
 
 ```ts title="astro.config.ts"
 import { externalLinks } from "@cloudflare/nimbus-docs/markdown";
@@ -220,3 +168,35 @@ nimbus(config, {
 ```
 
 Remark and rehype plugins passed to `mdx({ remarkPlugins, rehypePlugins })` have no effect: Nimbus parses Markdown with Sätteri, not unified, and nothing reports that they were skipped. Use `markdown.mdastPlugins` and `markdown.hastPlugins` in the Nimbus integration options instead. To keep a unified plugin you can't replace, set `markdown.processor` to a unified processor; Nimbus features that need Sätteri, such as admonitions, then need turning off, as described above.
+
+## Links under a deployment base
+
+Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Install](/guides/install)`, not `[Install](/docs/guides/install)`. Nimbus adds `/docs` during the build.
+
+This applies to Markdown links, reference definitions, native `<a href>` attributes, and static component `href` strings. Relative links, external URLs, fragments, query strings, code, and dynamic JSX expressions are left unchanged.
+
+For a link computed in component or route code, import `withBase` from `@cloudflare/nimbus-docs/runtime` and apply it once:
+
+```ts
+import { withBase } from "@cloudflare/nimbus-docs/runtime";
+
+const href = withBase("/quickstart", import.meta.env.BASE_URL);
+```
+
+Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/guides/install", "/docs")` intentionally produces `/docs/docs/guides/install`.
+
+## Images under a deployment base
+
+Prefer relative image paths (`./architecture.png`) or files in `src/assets`. Astro optimizes them, and they work under any base.
+
+A file in `public/` is served under the base, and images follow Astro's rule rather than the link rule above: Nimbus adds the base to reference definitions, but not to inline images. With `base: "/docs"` and `public/architecture.png`:
+
+```md
+![Architecture](/docs/architecture.png)
+
+![Architecture][arch]
+
+[arch]: /architecture.png
+```
+
+Write the base in an inline image or `<img src>`, and leave it out of a reference definition. `nimbus-docs lint` reports either mistake with `nimbus/image-ref`, and `nimbus-docs lint --fix` repairs inline images and definitions when the file is in `public/`.

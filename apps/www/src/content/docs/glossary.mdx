@@ -4,7 +4,8 @@ description: The terms these docs use, in alphabetical order.
 aiGenerated: true
 next: false
 sidebar:
-  order: 8
+  order: 6
+  hidden: true
 ---
 
 ### Collection
@@ -17,11 +18,11 @@ A piece of the page's interface, such as tabs or a card. Starter components ship
 
 ### Content source
 
-Somewhere outside `src/content` that a collection reads its pages from, such as another git repository or a Notion database. See [Content from other sources](/writing/content-sources).
+Somewhere outside `src/content` that a collection reads its pages from, such as another git repository or a Notion database. See [Content from other sources](/content-sources/git).
 
 ### Coordinate
 
-The stable name of an API page, such as an operation's `operationId`. Links to API pages use coordinates, so they survive URL changes. See [OpenAPI reference pages](/writing/openapi).
+The stable name of an API page, such as an operation's `operationId`. Links to API pages use coordinates, so they survive URL changes. See [Cite API pages](/api-reference/citations).
 
 ### Feature
 
@@ -37,7 +38,7 @@ The Markdown copy of a page that Nimbus publishes beside its HTML, at `<page>/in
 
 ### nimbus.json
 
-The file that records which Nimbus release your site's files came from and which version's upgrade steps you've reviewed. Commit it; `outdated`, `diff` and `migrate` read it.
+The committed record of where your site's files came from and what you've installed. See [`nimbus.json`](/project-structure#nimbusjson--the-provenance-record).
 
 ### Partial
 
@@ -53,11 +54,11 @@ Markdown instructions a coding agent follows to add a [feature](#feature) to you
 
 ### Registry
 
-The catalog that `nimbus-docs add` installs from. Its items are components, libraries, features and content sources. See [Registry](/reference/registry).
+The catalog that `nimbus-docs add` installs from. Its items are components, libraries, features and content sources. See [Registry](/registry).
 
 ### Rendering on request
 
-Building a page when a reader asks for it, on a server, instead of once at build time. See [Deploy](/publish/deploy#render-on-request).
+Building a page when a reader asks for it, on a server, instead of once at build time. See [Choose build or request rendering](/reference/rendering).
 
 ### Sätteri
 
@@ -65,11 +66,11 @@ The Markdown parser Nimbus uses. It's fast, and it means remark plugins passed t
 
 ### Slice
 
-Part of a site built and deployed on its own, such as one locale. See [Build one locale or one part](/publish/partial-builds).
+Part of a site built and deployed on its own, such as one product's guides. See [Partial builds](/publish/partial-builds).
 
 ### Starter
 
-The files the scaffolder writes into a new site: layouts, components, styles, routes and example content. They're yours from then on. See [How customization works](/styling/how-customization-works).
+The files the scaffolder writes into a new site: layouts, components, styles, routes and example content. They're yours from then on. See [Ownership](/styling/how-customization-works).
 
 ### Templates tag
 

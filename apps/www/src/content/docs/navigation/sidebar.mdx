@@ -8,25 +8,25 @@ sidebar:
 
 Nimbus builds a typed sidebar tree from your content. Start with the filesystem, take control with configuration, or transform the final tree for navigation that depends on application data or the current route.
 
-## Generate from the filesystem
+## Order and label pages
 
-The sidebar is generated from `src/content/docs/` by default. Set `sidebar.items` in `astro.config.ts` only when you need to override that structure. Use `sidebar.order` in a page's frontmatter, such as `src/content/docs/get-started.mdx`, to control ordering; otherwise entries are alphabetical.
+The sidebar is generated from `src/content/docs/` by default. Set `sidebar.items` in `astro.config.ts` only when you need to override that structure. Use `sidebar.order` in a page's frontmatter, such as `src/content/docs/guides/install.mdx`, to control ordering; otherwise entries are alphabetical.
 
-```yaml title="src/content/docs/get-started.mdx"
+```yaml title="src/content/docs/guides/install.mdx"
 ---
-title: Get started
+title: Install the CLI
 sidebar:
   order: 1
-  label: Quickstart
+  label: Install
   badge:
     text: New
     variant: tip
 ---
 ```
 
-Frontmatter can also hide entries, customize directory groups, redirect links, or collapse a section. See [Per-page controls](#per-page-controls).
+Frontmatter can also hide entries, customize directory groups, redirect links, or collapse a section. See [Hide or change one page's entry](#hide-or-change-one-pages-entry).
 
-## Define the structure
+## Arrange the sidebar by hand
 
 In `astro.config.ts`, use `sidebar.items` when the filesystem should not define the entire rail. Config items can be nested and can mix manual links with generated content:
 
@@ -65,15 +65,15 @@ sidebar: {
 | `"slug"` | Link one page from the primary collection. |
 | `{ label, link }` | Add a labeled internal or external link. |
 | `{ autogenerate: { directory } }` | Generate a group from one content directory. |
-| `{ autogenerate: { collection, prefix? } }` | Mount another registered collection, linked where it's served ([Collection URLs](/writing/pages-and-routing#collection-urls)). `prefix` sets the URL for a collection served by your own route, not a Nimbus route helper; for one that is, the route sets the URL and `prefix` is deprecated. |
+| `{ autogenerate: { collection, prefix? } }` | Mount another registered collection, linked where it's served ([Collection URLs](/writing/collections#collection-urls)). `prefix` sets the URL for a collection served by your own route, not a Nimbus route helper; for one that is, the route sets the URL and `prefix` is deprecated. |
 | `{ label, items }` | Build a recursive manual group. Groups support `collapsed`, `badge`, and `icon`. |
 | `{ segment, landing }` | Give a manual group ownership of a URL segment while linking its label and breadcrumbs to a real landing page. |
 
 Array position controls manual item order. Nimbus does not re-sort a configured or transformed array.
 
-## Nested collections
+## Show a collection inside a folder
 
-A collection served inside a docs folder's URL appears in that folder. With `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/pages-and-routing#collection-urls)), dbt is a group inside Connectors whose landing is `/integrations/connectors/dbt/`. Breadcrumbs and previous and next links follow, because they read the sidebar. A page the sidebar leaves out takes the breadcrumbs of the deepest group above its URL, then a crumb for each page between there and itself, titled like the page.
+A collection served inside a docs folder's URL appears in that folder. With `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/collections#collection-urls)), dbt is a group inside Connectors whose landing is `/integrations/connectors/dbt/`. Breadcrumbs and previous and next links follow, because they read the sidebar. A page the sidebar leaves out takes the breadcrumbs of the deepest group above its URL, then a crumb for each page between there and itself, titled like the page.
 
 This works wherever the folder is generated: with no `sidebar.items`, inside `{ autogenerate: { collection: "docs" } }`, or inside `{ autogenerate: { directory } }`, including one inside a hand-made `{ label, items }` group. It's never placed directly among a hand-made group's own items. If folders between are missing, the collection goes in the deepest one that exists, and a folder whose only page is its `index` becomes a group to hold it, as it would with a second page. That group keeps the label the page had as a link, and drops its `Draft` badge, as any folder's group does.
 
@@ -103,24 +103,17 @@ Not placed:
 
 In `astro dev`, edits to a placed collection's pages under `src/content` show on reload. A collection loaded from elsewhere, or from a content source, shows changes to its navigation after a restart.
 
-## Scope large sidebars
+## Show only the current section
 
-Large sites can progressively narrow the rail:
+A site with many sections overflows a rail that lists everything. Set `scope: "section"` and each page's rail shows only its own top-level group:
 
 ```ts title="astro.config.ts"
 sidebar: {
   scope: "section",
-  isolate: { boundaries: ["learning-paths/*", "reference/*"] },
-  defaultCollapsed: true,
 }
 ```
 
-- `scope: "full"` is the default and renders the complete tree on every page.
-- `scope: "section"` renders only the active top-level group. Pair it with section tabs or another cross-section navigation surface.
-- `isolate.boundaries` descends again when a route matches a segment glob. `*` matches one path segment; non-matching routes are unchanged.
-- `defaultCollapsed` closes groups by default. The active group still opens, and a group's explicit `collapsed` value wins.
-
-Build section tabs from the same structural tree:
+Readers then need another way to move between sections. Build section tabs for the header from the same tree with `getSidebarSections()`:
 
 ```astro
 ---
@@ -132,7 +125,34 @@ const sections = await getSidebarSections(currentSlug, {
 ---
 ```
 
-## Control group landing pages
+`scope: "full"`, the default, renders the complete tree on every page.
+
+## Give a deep folder its own sidebar
+
+When one section is itself large, such as a reference with a folder per product, scope the rail one level deeper. List the folders that should get their own rail as segment globs, where `*` matches one path segment:
+
+```ts title="astro.config.ts"
+sidebar: {
+  scope: "section",
+  isolate: { boundaries: ["reference/*"] },
+}
+```
+
+A page under `/reference/cli/` now shows only the `reference/cli` group. Pages outside a boundary keep the section rail.
+
+## Collapse groups until they're needed
+
+A long rail is easier to scan when its groups start closed. Set `defaultCollapsed: true`:
+
+```ts title="astro.config.ts"
+sidebar: {
+  defaultCollapsed: true,
+}
+```
+
+The group holding the current page still opens. A group with its own `collapsed: false` in `sidebar.items` stays open, so a "Start here" group can stay visible while the rest close.
+
+## Choose how group landing pages appear
 
 A directory `index.mdx` is its group's landing page. Configure how those landings appear across the site in `astro.config.ts`:
 
@@ -151,7 +171,7 @@ sidebar: {
 | `sidebar.group.hideIndex: true` | Keeps the page built but makes its group heading non-interactive. |
 | `sidebar.hideChildren: true` | Collapses the whole directory to one link to its landing page. |
 
-## Transform the final tree
+## Change the sidebar per page
 
 Configuration defines the structural tree. `getSidebar()` also accepts a synchronous or asynchronous `transform` for computed navigation. It runs after scope and isolation, but before `indexDisplay` reshapes landing pages.
 
@@ -205,7 +225,7 @@ A transform can fetch data, insert or remove nodes, rewrite nested groups, attac
 
 Transforms only affect the page rail. Breadcrumbs and `getSidebarSections()` continue to use the structural tree.
 
-## Per-page controls
+## Hide or change one page's entry
 
 Use frontmatter for local changes:
 
@@ -221,11 +241,11 @@ Use frontmatter for local changes:
 | `sidebar.group.icon` | Adds an `astro-icon` icon to the directory group. |
 | `sidebar.group.hideIndex` | Prevents the directory group heading from linking to its index. |
 | `sidebar.hideChildren` or `hideChildren` | Collapses the directory to its landing link. |
-| `external_link` | Rewrites the sidebar destination to another internal path or an external URL. |
+| `external_link` | Points the entry at another internal path or an absolute URL. The page still builds at its own path, and absolute URLs open in a new tab. |
 
 Set `features.sidebar: false` in `astro.config.ts` to disable the rail site-wide. See [Frontmatter](/reference/frontmatter) for complete field shapes and badge variants.
 
-## Markup and styling hooks
+## Restyle sidebar rows
 
 Sidebar groups are native `<details>`/`<summary>` elements: opening and closing needs no JavaScript, links in closed groups stay in the HTML for find-in-page and crawlers, and closed lists carry `display: none` so large trees stay fast. A group with a landing page lists it as the group's first child, labelled "Overview" — the summary row is label-only.
 
@@ -238,15 +258,4 @@ Rows carry no class or data attribute, so a sidebar of thousands of pages stays 
 | `[data-nb-sidebar] details > ul` | A group's child list. |
 | `i[data-m]` | An API operation's method chip; `data-m` is the lowercase method. |
 
-The `.nb-sidebar-link`, `.nb-sidebar-row` and `.nb-sidebar-list` classes still style an element that carries them, for a row placed elsewhere. Sites that styled rows by those classes or by the old `data-nb-sidebar-*` attributes switch to the selectors above; the `lighter-sidebar-rows` upgrade entry lists the steps.
-
 Each page renders one sidebar tree: the mobile drawer borrows the rail's tree while it is open and returns it on close, so open groups, the filter, and scroll position stay with you across the breakpoint.
-
-Upgrading from the scripted-collapsible markup: run `nimbus-docs outdated` to see which files changed, and `nimbus-docs diff <file> --apply` to update them. Update these together, since a partial update breaks the sidebar's styling or its saved open groups:
-
-- `src/components/ui/sidebar/*`
-- `src/layouts/DocsLayout.astro`
-- `src/styles/globals.css` (if you edited it, copy in the "Sidebar rows" section by hand)
-- With an API reference, last: the `api-sidebar` and `api-layout` registry components. These come from the registry, not the starter, so reinstall them with `nimbus-docs add api-sidebar --overwrite` and `nimbus-docs add api-layout --overwrite`. Commit first: reinstalling also replaces the components they depend on, including `src/components/ui/sidebar/*`, so review the change with `git diff` and reapply your own edits.
-
-If you edited these files, you can keep your copies: the framework's state scripts drive both the old and the new markup. Port your edits when convenient. Groups with a landing page now show it as an "Overview" child row instead of a split label/caret header.

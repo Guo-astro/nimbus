@@ -29,6 +29,7 @@ Frontmatter is validated against a Zod schema at build time, with errors written
 | `prev` / `next` | string \| object \| `false` | — | Override or disable pagination links. |
 | `previousSlug` | string \| string[] | — | Versioning rename hatch — see [Redirects](/navigation/redirects). |
 | `external_link` | URL \| `/path` | — | Rewrite the sidebar link target. |
+| `nimbusDisableRules` | string[] | — | Rule codes to skip on this page, such as `["nimbus/bare-url"]`. See [Linting](/writing/linting#in-file-disables). |
 
 ## The `sidebar` object
 
@@ -44,6 +45,8 @@ sidebar:
   group:                      # when this page is a directory index.mdx
     label: Getting started
     badge: Beta
+    icon: ph:rocket-launch    # astro-icon name, shown before the label
+    hideIndex: false          # true: the group heading doesn't link to this page
 ```
 
 ## Banner
@@ -85,8 +88,8 @@ description: Every option defineConfig accepts.
 sidebar:
   order: 9
   badge:
-    text: Reference
-    variant: info
+    text: New
+    variant: tip
 tableOfContents:
   maxHeadingLevel: 2
 ---

@@ -1,0 +1,91 @@
+---
+title: Choose build or request rendering
+description: Prerender each collection at build time or render it when a reader asks for it, set per collection in one rendering policy.
+aiGenerated: true
+sidebar:
+  order: 4
+  label: Rendering policy
+---
+
+import PackageManagers from "@/components/ui/package-managers/PackageManagers.astro";
+
+Every collection's pages are prerendered at build time unless you say otherwise. The rendering policy in the Nimbus config switches a collection to render on request instead, which needs a server.
+
+## Pick a mode
+
+| Mode | Pages are rendered | Choose it when |
+| --- | --- | --- |
+| `"build"` (default) | Once, during `astro build` | The site is static, or builds are fast enough |
+| `"request"` | When a reader requests them | Builds are slow, or you want [Markdown at page URLs](/ai/markdown-negotiation) or a [remote MCP server](/ai/remote-mcp) |
+
+The policy covers the routes Nimbus serves collections from. Your own files under `src/pages/` keep their own `prerender` setting.
+
+## Prerequisites
+
+- A host with an Astro server adapter: Cloudflare, Netlify, Node or Vercel
+
+## Steps
+
+<Steps>
+  <Step title="Add a server adapter">
+    From the project root, install the adapter for your host:
+
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+
+    Other hosts use `adapter-netlify`, `adapter-node` or `adapter-vercel`. The installer sets `output: "server"` and wires the adapter. On Cloudflare, it also adds `rendering: { default: "request" }` if the config has no policy yet.
+  </Step>
+  <Step title="Set the policy">
+    In `astro.config.ts`, set `rendering` in the Nimbus config. `default` applies to the docs, their versions and API references; `collections` sets a mode by collection name:
+
+    ```ts title="astro.config.ts"
+    const nimbusConfig = defineNimbusConfig({
+      // …
+      rendering: {
+        default: "request",
+        collections: {
+          archive: "build",
+        },
+      },
+    });
+    ```
+
+    To keep the site prerendered except for one collection, flip it: `default: "build"` with that collection set to `"request"`.
+  </Step>
+  <Step title="Build the site">
+    ```sh
+    npm run build
+    ```
+
+    Astro logs `getStaticPaths() ignored in dynamic page` for each request-rendered route. That's expected: leave `getStaticPaths` and `prerender` in the route files, and Nimbus switches each route to the mode the policy sets.
+  </Step>
+</Steps>
+
+## Verify
+
+A request-rendered page has no HTML file in the build output. For a page at `/guide/`:
+
+```sh
+ls dist/client/guide/index.html
+```
+
+```text
+ls: dist/client/guide/index.html: No such file or directory
+```
+
+If the file is there, the page's collection is still set to `"build"`: check the collection name in `rendering.collections`. Then deploy and load the page to confirm the server renders it.
+
+## What stays build output
+
+Request rendering changes when HTML is made, not what's discoverable. The sitemap, the search index, `llms.txt`, and each page's Markdown version are still prepared during the build, so search and agents see every page.
+
+## Rules the build enforces
+
+- Every name in `rendering.collections` must be a registered collection with its own catch-all route. An unknown name fails the build.
+- `default` covers `docs`, version collections and API collections. Once `rendering` is set, any other page collection with its own catch-all route, such as a `blog`, must be listed in `collections`.
+- Generated API references render on request only on Cloudflare. On other adapters, keep API collections set to `"build"`. See [Large APIs](/api-reference/large-apis#render-on-request) for large APIs and many versions.
+
+## Next steps
+
+- [Deploy to Cloudflare](/deploy/cloudflare) or [other hosts](/deploy/other-hosts): ship the server.
+- [Serve Markdown at page URLs](/ai/markdown-negotiation): a feature request rendering unlocks.
+- [Configuration](/reference/configuration#rendering-policy): every `rendering` field.

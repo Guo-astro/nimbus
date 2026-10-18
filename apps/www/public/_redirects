@@ -1,20 +1,14 @@
 # Pages that moved. The bare paths are Astro `redirects` (astro.config.ts);
 # these add the trailing-slash forms and the Markdown versions, one hop each.
-/get-started/ /start-here/quickstart 301
-/get-started/index.md /start-here/quickstart/index.md 301
-/get-started/index.mdx /start-here/quickstart/index.mdx 301
-/installation/ /start-here/quickstart 301
-/installation/index.md /start-here/quickstart/index.md 301
-/installation/index.mdx /start-here/quickstart/index.mdx 301
-/project-structure/ /start-here/project-structure 301
-/project-structure/index.md /start-here/project-structure/index.md 301
-/project-structure/index.mdx /start-here/project-structure/index.mdx 301
-/philosophy/ /start-here/why-nimbus 301
-/philosophy/index.md /start-here/why-nimbus/index.md 301
-/philosophy/index.mdx /start-here/why-nimbus/index.mdx 301
-/api-reference/ /writing/openapi 301
-/api-reference/index.md /writing/openapi/index.md 301
-/api-reference/index.mdx /writing/openapi/index.mdx 301
+/get-started/ /quickstart 301
+/get-started/index.md /quickstart/index.md 301
+/get-started/index.mdx /quickstart/index.mdx 301
+/installation/ /quickstart 301
+/installation/index.md /quickstart/index.md 301
+/installation/index.mdx /quickstart/index.mdx 301
+/philosophy/ /why-nimbus 301
+/philosophy/index.md /why-nimbus/index.md 301
+/philosophy/index.mdx /why-nimbus/index.mdx 301
 /partial-builds/ /publish/partial-builds 301
 /partial-builds/index.md /publish/partial-builds/index.md 301
 /partial-builds/index.mdx /publish/partial-builds/index.mdx 301
@@ -30,12 +24,9 @@
 /configuration/ /reference/configuration 301
 /configuration/index.md /reference/configuration/index.md 301
 /configuration/index.mdx /reference/configuration/index.mdx 301
-/cli/ /reference/cli 301
-/cli/index.md /reference/cli/index.md 301
-/cli/index.mdx /reference/cli/index.mdx 301
-/registry/ /reference/registry 301
-/registry/index.md /reference/registry/index.md 301
-/registry/index.mdx /reference/registry/index.mdx 301
+/writing/api-reference/ /api-reference/openapi/setup 301
+/writing/api-reference/index.md /api-reference/openapi/setup/index.md 301
+/writing/api-reference/index.mdx /api-reference/openapi/setup/index.mdx 301
 /writing/recipes/ /style-guide 301
 /writing/recipes/index.md /style-guide/index.md 301
 /writing/recipes/index.mdx /style-guide/index.mdx 301

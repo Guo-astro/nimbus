@@ -1,20 +1,19 @@
 ---
-title: Content from other sources
+title: Content from another repository
 description: Build part of the site from another git repository, a Notion database, or any provider, with pages that behave like the site's own.
 sidebar:
-  order: 8
+  label: Git repositories
+  order: 1
 ---
 
 A product with several repositories keeps its docs next to its code: the SDK's guides in the SDK repository, the API's spec with the API. Nimbus can build part of a site from them without copying anything in. Start from the CLI, which hands your coding agent a guide for the source you name:
 
-```sh
-npx nimbus-docs add source github --print | claude
-```
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source github --print | claude" />
 
 | `add source …` | What it adds |
 | --- | --- |
 | `git`, or `github`, `gitlab`, `bitbucket` | Pages from another git repository, checked out at build time (this page) |
-| `notion` | Pages from a Notion database, through a loader your agent writes into your site ([Content from Notion](/writing/content-from-notion)) |
+| `notion` | Pages from a Notion database, through a loader your agent writes into your site ([Content from Notion](/content-sources/notion)) |
 | a URL | A guide for writing a loader for any other provider, starting from its docs |
 
 `add source` alone lists them.
@@ -165,7 +164,7 @@ A schema field named `source` counts as a read too; `schema: docsCollection().sc
 ```text
 nimbus-docs: could not fetch source "acme-sdk" (https://github.com/acme/acme-sdk.git @ main): <git's error>. No snapshot of this repo, ref and path exists under .nimbus/sources/acme-sdk/.
   Read by: collection "sdk".
-  Give git a credential: https://nimbus-docs.com/writing/content-sources/#private-repositories
+  Give git a credential: https://nimbus-docs.com/content-sources/git/#private-repositories
 ```
 
 **Everything else starts without it.** `astro dev` and `astro sync` (which `astro check` runs) start without such a source: its collections are empty, the rest of the site works, and the log says so once per start:

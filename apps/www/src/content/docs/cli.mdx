@@ -1,11 +1,23 @@
 ---
 title: CLI
-description: Use the nimbus-docs CLI to install registry features, migrate package APIs, review copied code, and check content.
+description: Every nimbus-docs command, with its flags and what it changes.
 sidebar:
-  order: 3
+  order: 0.4
 ---
 
-The `nimbus-docs` CLI lists what's in the registry, installs it, records what you own in [`nimbus.json`](/start-here/project-structure), shows what's fallen behind upstream, and lints your MDX content.
+The `nimbus-docs` CLI lists what's in the registry, installs it, records what you own in [`nimbus.json`](/project-structure), shows what's fallen behind upstream, and lints your MDX content.
+
+| Command | What it does |
+| --- | --- |
+| [`list`](#nimbus-docs-list) | Lists what the registry has. |
+| [`add <slug>`](#nimbus-docs-add-slug) | Installs a component, utility, feature or server adapter. |
+| [`add source <name\|url>`](#nimbus-docs-add-source-nameurl) | Hands your coding agent a guide for a content source. |
+| [`init`](#nimbus-docs-init) | Writes `nimbus.json` for a project that lacks one. |
+| [`migrate`](#nimbus-docs-migrate) | Applies package API migrations and lists upgrade reviews. |
+| [`outdated`](#nimbus-docs-outdated) | Lists starter files, components and package API work that changed upstream. |
+| [`diff [file]`](#nimbus-docs-diff-file) | Shows, or takes, the upstream change to a starter file. |
+| [`check`](#nimbus-docs-check) | Checks the project's setup, config and content without a build. |
+| [`lint`](#nimbus-docs-lint) | Runs the authoring rules you've turned on. |
 
 ## `nimbus-docs list`
 
@@ -48,9 +60,9 @@ If a component is already installed, `add` keeps your copy — it never clobbers
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 
-For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files," and `--overwrite --yes` only when you've decided to discard your edits. To upgrade a site, run `outdated`, apply each clean starter file it lists with `diff <file> --apply`, and update registry components with `add <slug> --overwrite`.
+For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files," and `--overwrite --yes` only when you've decided to discard your edits.
 
-Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/start-here/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
+Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
 
 ### Features
 
@@ -92,13 +104,13 @@ A coding agent running an adapter command gets the same edits as a shell. For `a
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print | claude" />
 
-Always run the project’s production build afterward. See [Rendering policy](/reference/configuration#rendering-policy) for per-collection build/request overrides.
+Always run the project’s production build afterward. See [Rendering policy](/reference/rendering) for per-collection build/request overrides.
 
 The equivalent long form is `nimbus-docs add server-output --adapter <cloudflare|vercel|netlify|node>`.
 
 ## `nimbus-docs add source <name|url>`
 
-Adds a content source: part of the site built from another git repository, a Notion database, or any provider. See [Content from other sources](/writing/content-sources).
+Adds a content source: part of the site built from another git repository, a Notion database, or any provider. See [Content from other sources](/content-sources/git).
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source github --print | claude" />
 
@@ -112,7 +124,7 @@ Adds a content source: part of the site built from another git repository, a Not
 
 ## `nimbus-docs init`
 
-Writes a [`nimbus.json`](/start-here/project-structure) for a project that lacks one — a repo scaffolded before the record existed, an existing Astro site adopting Nimbus, or a deleted record. Fresh scaffolds already have one, so `init` is the on-ramp for everything else.
+Writes a [`nimbus.json`](/project-structure) for a project that lacks one — a repo scaffolded before the record existed, an existing Astro site adopting Nimbus, or a deleted record. Fresh scaffolds already have one, so `init` is the on-ramp for everything else.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="init" />
 
@@ -129,13 +141,7 @@ The starter version, `templates-v*` tag, and previously reviewed Nimbus version 
 
 ## Keeping up to date
 
-Package managers update Nimbus itself; Nimbus updates known API usage and reviews copied code:
-
-```sh
-pnpm up @cloudflare/nimbus-docs --latest
-pnpm nimbus-docs migrate
-pnpm nimbus-docs outdated
-```
+These commands keep a site current. [Upgrade Nimbus](/publish/upgrading) puts them in order for a release.
 
 ### `nimbus-docs migrate`
 
@@ -216,7 +222,7 @@ Checks that couldn't run are listed as `notes` on their scope rather than as fin
 
 ## `nimbus-docs lint`
 
-Walks `src/content/`, and the folders of page collections that load from elsewhere (including [content sources](/writing/content-sources)), runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
+Walks `src/content/`, and the folders of page collections that load from elsewhere (including [content sources](/content-sources/git)), runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 

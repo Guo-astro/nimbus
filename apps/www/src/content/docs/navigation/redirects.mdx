@@ -1,25 +1,12 @@
 ---
 title: Redirects
-description: Point old URLs at new ones — sidebar rewrites, renamed pages, and host-level redirects.
+description: Send old URLs to new ones — renamed pages across versions, and host-level redirects.
 aiGenerated: true
 sidebar:
-  order: 3
+  order: 5
 ---
 
-Three mechanisms cover the common cases: rewriting a sidebar link, renaming a page across versions, and host-level URL redirects.
-
-## Rewrite a sidebar link
-
-`external_link` changes where the sidebar links a page without moving where it builds. Point a deprecated entry at its replacement, or send an entry off-site:
-
-```yaml
----
-title: Old guide
-external_link: /guides/new-guide
----
-```
-
-It accepts an absolute URL (`https://…`) or a site-absolute path (`/foo/bar`). The page still builds at its own path; only the rail link changes. Absolute URLs render with `target="_blank"`.
+Two mechanisms cover the common cases: renaming a page across versions, and host-level URL redirects. To change only where a sidebar entry links, without a redirect, see [`external_link`](/navigation/sidebar#hide-or-change-one-pages-entry).
 
 ## Renamed pages across versions
 
@@ -48,7 +35,7 @@ export default defineConfig({
 
 On static hosts these compile to redirect files; on Cloudflare and other adapters they become native redirect rules.
 
-When you move a collection to another folder ([Collection URLs](/writing/pages-and-routing#collection-urls)), redirect its old URLs with one dynamic entry:
+When you move a collection to another folder ([Collection URLs](/writing/collections#collection-urls)), redirect its old URLs with one dynamic entry:
 
 ```ts title="astro.config.ts"
 export default defineConfig({

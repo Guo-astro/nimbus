@@ -9,13 +9,12 @@ import ExpSentence from "./story/exp/ExpSentence.astro";
 import ExpVoice from "./story/exp/ExpVoice.astro";
 import ExpRibbon from "./story/exp/ExpRibbon.astro";
 import ExpStart from "./story/exp/ExpStart.astro";
-import Hero from "../variants/Hero.astro";
+import Hero from "./Hero.astro";
 import Section from "../variants/Section.astro";
 import BentoAlive from "../variants/BentoAlive.astro";
 import { Icon } from "@/home/icon";
 import Logo from "./Logo.astro";
 import { LinkButton } from "./ui/link-button";
-import { Code } from "@/components/ui/code";
 import { Accordion, AccordionTrigger, AccordionContent, AccordionGroup } from "./ui/accordion";
 import { ThemeToggle } from "./ui/theme-toggle";
 import { SearchTrigger, SearchDialog } from "@/components/ui/search";
@@ -94,11 +93,7 @@ const big = "text-[22px] leading-7 text-foreground md:text-[26px] md:leading-8";
   <SearchDialog />
 
   <main id="main" class="mx-auto max-w-[1440px] px-6">
-    <section class="pt-16 pb-20 md:pt-24"><Hero ctas={false} body="">
-      <div class="mt-7 max-w-xl [&_.nb-code-figure]:my-0!">
-        <Code code={installCmd} lang="sh" />
-      </div>
-    </Hero></section>
+    <Hero />
 
     <!-- The thesis: one sentence; each section after it proves a phrase of it -->
     <section id="one-file" class="border-t border-border pt-14"><ExpSentence label={false} /></section>

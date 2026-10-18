@@ -1525,5 +1525,5 @@ test("policy-rendered routes that export getStaticPaths get one explaining line"
   assert.doesNotMatch(infos[0]!, /blog/);
   // A comment mentioning getStaticPaths isn't an export; Astro doesn't warn.
   assert.doesNotMatch(infos[0]!, /v1/);
-  assert.match(infos[0]!, /don't add `export const prerender`/);
+  assert.match(infos[0]!, /the policy decides, whatever a route's `export const prerender` says/);
 });

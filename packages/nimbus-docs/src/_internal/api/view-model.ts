@@ -927,6 +927,18 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** The sidebar group that lists webhooks. Not a model coordinate: no
+ *  coordinate contains a space, so it can't collide with one. */
+const WEBHOOKS_NAV = "webhooks group";
+
+function webhookCoordinates(model: DocsModel): Coordinate[] {
+  const view = viewOf(model);
+  return [...model.pages.pages].filter((coordinate) => {
+    const node = view.node(coordinate);
+    return node?.facts.kind === "operation" && protocolString(node.facts.protocol, "webhook") !== undefined;
+  });
+}
+
 function projectNavBase(model: DocsModel): ApiNavItem[] {
   const cached = navBaseCache.get(model);
   if (cached) return cached;
@@ -954,6 +966,19 @@ function projectNavBase(model: DocsModel): ApiNavItem[] {
   };
 
   const base = model.nav.roots.map(toItem);
+  // Webhooks belong to no tag, so the parsed nav never holds them: they get a
+  // closing "Webhooks" group of their own, in spec order.
+  const webhooks = webhookCoordinates(model);
+  if (webhooks.length > 0) {
+    base.push({
+      coordinate: WEBHOOKS_NAV,
+      label: "Webhooks",
+      kind: "section",
+      children: webhooks.map((coordinate) =>
+        toItem({ coordinate, label: labelFor(view.node(coordinate)!), kind: "operation", children: [] }),
+      ),
+    });
+  }
   deepFreeze(base);
   navBaseCache.set(model, base);
   return base;
@@ -970,6 +995,10 @@ export function projectNav(
   }
 
   const ancestors = ancestorsOf(viewOf(model), activeCoordinate);
+  // A webhook's group is a sidebar-only parent.
+  if (base.some((item) => item.coordinate === WEBHOOKS_NAV && item.children.some((c) => c.coordinate === activeCoordinate))) {
+    ancestors.add(WEBHOOKS_NAV);
+  }
   const onPath = new Set<Coordinate>(ancestors);
   onPath.add(activeCoordinate);
 

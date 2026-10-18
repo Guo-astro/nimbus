@@ -536,3 +536,39 @@ describe("renderEntryAsMarkdown: site renderers and parse failures", () => {
     assert.match(warnings[0]!, /\[nimbus\] Generated Markdown for page\.mdx keeps its MDX as written: it couldn't be parsed/);
   });
 });
+
+describe("renderEntryAsMarkdown: relative images", () => {
+  const render = (body: string, filePath = "src/content/docs/guides/deploy.mdx", base = "/") =>
+    renderEntryAsMarkdown({ body, filePath }, { base });
+  const published = /\/_nimbus\/md\/[a-z0-9]+\/pipeline\.png/;
+
+  test("a relative image points at its published copy", () => {
+    const out = render("![The pipeline](./pipeline.png)");
+    assert.match(out, new RegExp(`^!\\[The pipeline\\]\\(${published.source}\\)$`));
+  });
+
+  test("the same source gets the same URL from every page", () => {
+    const a = render("![a](./pipeline.png)");
+    const b = render("![b](../pipeline.png)", "src/content/docs/guides/other/page.mdx");
+    assert.equal(a.match(published)?.[0], b.match(published)?.[0]);
+  });
+
+  test("the site's base goes in front", () => {
+    assert.match(render("![x](pipeline.png)", undefined, "/docs/"), /^!\[x\]\(\/docs\/_nimbus\/md\//);
+  });
+
+  test("a reference definition an image uses is rewritten, a link's is not", () => {
+    const out = render("![x][img] and [y][doc]\n\n[img]: ./pipeline.png\n[doc]: ./other.md");
+    assert.match(out, /\[img\]: \/_nimbus\/md\/[a-z0-9]+\/pipeline\.png/);
+    assert.match(out, /\[doc\]: \.\/other\.md/);
+  });
+
+  test("absolute, external and in-code images are left alone", () => {
+    const body = "![a](/a.png) ![b](https://x.test/b.png)\n\n```md\n![c](./c.png)\n```";
+    assert.equal(render(body), body);
+  });
+
+  test("plain Markdown pages are rewritten too", () => {
+    assert.match(render("![x](./pipeline.png)", "src/content/docs/guides/deploy.md"), published);
+  });
+});

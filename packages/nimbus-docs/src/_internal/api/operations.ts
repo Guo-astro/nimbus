@@ -371,7 +371,9 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
     // schema in a later pass.
   }
 
-  const auth = resolveAuth(op.security ?? ctx.doc.security);
+  // A webhook is a request the API sends you, so the API's own top-level
+  // security isn't what the receiver checks; only the webhook's own applies.
+  const auth = resolveAuth(site.sampleTarget ? (op.security ?? ctx.doc.security) : op.security);
   const facts: OperationFacts = {
     kind: "operation",
     summary: asString(op.summary),

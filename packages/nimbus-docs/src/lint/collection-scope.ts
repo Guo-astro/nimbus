@@ -62,9 +62,11 @@ export function pageCollectionLintScope(
     const negative = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
     const matches = picomatch(positive, negative.length > 0 ? { ignore: negative } : {});
     // Lint reads MDX; count the Markdown pages it leaves out, so a clean
-    // result doesn't hide them.
-    for (const { abs, rel } of walkFilesSync(place.dir, { extensions: [".md"] })) {
-      if (matches(rel)) markdown.add(abs);
+    // result doesn't hide them. A Markdown partial isn't a page.
+    if (place.role !== "partials") {
+      for (const { abs, rel } of walkFilesSync(place.dir, { extensions: [".md"] })) {
+        if (matches(rel)) markdown.add(abs);
+      }
     }
     if (inside(contentDir, place.dir)) continue;
     owners.push({ dir: place.dir, collection });

@@ -12,7 +12,7 @@ const draft: (string | [string, string, string])[] = [
   "- See ", ["[quotas](/docs/quota)", "[quotas](/docs/quotas)", "link the destination"], " for limits",
 ];
 ---
-<div class:list={["story-stage chrome-bg chrome-2 relative overflow-hidden rounded-2xl border border-border", bare ? "p-6" : "h-[440px]"]} data-exp-voice data-phase="idle">
+<div class:list={["story-stage chrome-bg chrome-2 relative overflow-hidden rounded-2xl border border-border", bare ? "p-3 sm:p-6" : "h-[440px]"]} data-exp-voice data-phase="idle">
   {!bare && <p class="absolute top-6 left-6 text-[13px] leading-none text-muted-foreground">Rules</p>}
   {!bare && <p class="absolute top-11 left-6 max-w-[300px] text-[20px] leading-7 tracking-tight">Every author follows the same rules.</p>}
 
@@ -21,7 +21,7 @@ const draft: (string | [string, string, string])[] = [
       <span class="grid size-4 place-items-center rounded-full bg-info text-white"><Icon name="ph:sparkle-fill" class="size-2.5" /></span>Drafted by an agent
       <span class="ml-auto font-mono" data-voice-meta>forecast.mdx</span>
     </div>
-    <p class="flex-1 px-6 py-6 font-mono text-[15px] leading-7 whitespace-pre-wrap text-foreground/90">{draft.map((part) => typeof part === "string" ? part : (
+    <p class="flex-1 overflow-x-auto px-4 py-5 font-mono text-[12px] leading-6 whitespace-pre text-foreground/90 sm:px-6 sm:py-6 sm:text-[15px] sm:leading-7">{draft.map((part) => typeof part === "string" ? part : (
         <span class="group/s relative" data-slip data-note={part[2]}><span class="rounded-sm transition-colors duration-300 group-data-[state=flag]/s:bg-warning-muted group-data-[state=flag]/s:underline group-data-[state=flag]/s:decoration-warning group-data-[state=flag]/s:decoration-wavy group-data-[state=fixed]/s:hidden" data-old>{part[0]}</span><span class="hidden rounded-sm bg-success-muted text-foreground group-data-[state=fixed]/s:inline" data-new>{part[1]}</span></span>
       ))}</p>
     <div class="flex h-[49px] items-center gap-3 border-t border-border px-4 text-[12px] leading-4">

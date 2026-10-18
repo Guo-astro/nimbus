@@ -68,6 +68,7 @@ import {
   type UnreadRoute,
 } from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
+import { copyMarkdownImages } from "./_internal/markdown-images-copy.js";
 import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
@@ -3692,6 +3693,8 @@ export function nimbus(
       },
       "astro:build:done": async ({ dir, pages, logger }) => {
         const distDir = fileURLToPath(dir);
+        // Relative images the Markdown versions point at (markdown-images.ts).
+        copyMarkdownImages(distDir, projectRootForBuild);
         // The build has read every page; a failed build releases at exit.
         releaseContentSourceLeases(projectRootForBuild);
         // A slice without the root collection: its site-wide files go under

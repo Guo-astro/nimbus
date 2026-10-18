@@ -368,8 +368,9 @@ After writing all files, run the user's build command and confirm:
 2. `dist/api/index.html` (overview) and `dist/api/<slug>/index.html` exist.
 3. `dist/api/index.md` and `dist/api/<slug>/index.md` exist and contain
    the rendered reference (operation method/path, request body, responses).
-4. `dist/api/llms.txt` lists every API page, and the root `dist/llms.txt`
-   includes `api` as a top-level section.
+4. `dist/api/llms.txt` links to one index per URL folder, such as
+   `dist/api/widgets/llms.txt`, and each of those lists its pages. The root
+   `dist/llms.txt` includes `api` as a top-level section.
 5. `dist/llms-full.txt` embeds the generated API Markdown.
 
 If the build fails on a route, read its message and fix the config, then

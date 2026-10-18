@@ -22,6 +22,7 @@ import {
   type CitationIndex,
 } from "./api/citations.js";
 import { getTabs, isCommandType } from "../lib/pkgm.js";
+import { rewriteRelativeImages } from "./markdown-images.js";
 import { sourceFeatures } from "./markdown-features.js";
 import { runtimeWarn } from "./runtime-warn.js";
 
@@ -665,6 +666,8 @@ export function renderEntryAsMarkdown(
     }).code;
   }
 
+  markdown = withPublishedImages(markdown, entry.filePath, options.base ?? "/", isMdx);
+
   if (!isMdx) return markdown.trim();
 
   const { mdxToMdast, markdownToMdast } = satteri();
@@ -729,6 +732,21 @@ export function renderEntryAsMarkdown(
   }
   out += markdown.slice(cursor);
   return out.trim();
+}
+
+/**
+ * Point relative images at the copies the build publishes, so they load from
+ * the Markdown version's URL and from llms-full.txt. Without Node (a server
+ * build rendering at request time) or a parse, the Markdown stays as written.
+ */
+function withPublishedImages(markdown: string, filePath: string | undefined, base: string, isMdx: boolean): string {
+  if (!filePath || !/!\[|\]:/.test(markdown)) return markdown;
+  try {
+    const { mdxToMdast, markdownToMdast } = satteri();
+    return rewriteRelativeImages(markdown, (isMdx ? mdxToMdast : markdownToMdast)(markdown), filePath, base);
+  } catch {
+    return markdown;
+  }
 }
 
 // MDX-only syntax: Markdown reads it as HTML or text, so it can't be compared.

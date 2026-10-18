@@ -62,9 +62,9 @@ Route-level `partialHeadings` options are not supported. Configure prepared head
 
 ## Parameters
 
-Declare accepted params in the partial's frontmatter — suffix optional ones with `?`. They arrive as props:
+Declare accepted params in the partial's frontmatter — suffix optional ones with `?`. They arrive as props, which only an `.mdx` partial can read: a `.md` partial is plain Markdown and shows `{props.runtime}` as written.
 
-```md title="src/content/partials/runtime-note.md"
+```mdx title="src/content/partials/runtime-note.mdx"
 ---
 params: [runtime, version?]
 ---

@@ -120,7 +120,9 @@ sidebar: {
 }
 ```
 
-Readers then need another way to move between sections. Build section tabs for the header from the same tree with `getSidebarSections()`:
+A section is a top-level group that lists another collection, written `autogenerate: { collection: "api" }`. Groups of the main docs collection's own pages, by `directory` or `items`, aren't sections.
+
+With two or more sections, the starter's header shows them as tabs: in the bar on wide screens, and on a row of their own on phones. It builds them from the same tree with `getSidebarSections()`, and a header of your own can too:
 
 ```astro
 ---

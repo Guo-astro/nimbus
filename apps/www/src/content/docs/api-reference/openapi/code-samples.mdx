@@ -14,6 +14,7 @@ Each operation page shows the request in cURL, TypeScript, and Python, built fro
 - Otherwise the value is generated from the parameter's schema, as request bodies are. Without a declared value, it's a type guess, such as `string`, `0`, or a format's stock value.
 - A path parameter without a declared value shows its name in angle brackets, such as `<account_id>`: a guessed identifier would name no real resource.
 - Required query parameters and headers keep the generated value, guesses included. One with no schema, or whose generated value is an array or object, shows `<name>`.
+- Optional query parameters and headers are left out of samples, even with an `example`.
 
 ## Servers and credentials
 

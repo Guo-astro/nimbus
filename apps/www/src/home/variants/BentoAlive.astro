@@ -88,7 +88,7 @@ const nodes = [
             <div class:list={[pop, "right-6 bottom-6 w-[min(300px,calc(100%-3rem))] p-4"]}>
               <p class="flex items-center gap-2 text-[13px] font-medium"><Icon name="ph:sparkle" class="size-3.5 text-muted-foreground" /><span data-edit-title>Agent suggests 2 lines</span></p>
               <p class="mt-1 text-[12px] leading-5 text-muted-foreground" data-edit-note>Adds a section on raising the limit, from the support page.</p>
-              <div class="mt-3 flex gap-2" data-edit-actions><button type="button" data-accept class={buttonVariants({ variant: "primary", size: "xs" })}>Accept</button><button type="button" data-reject class={buttonVariants({ variant: "secondary", size: "xs" })}>Reject</button></div>
+              <div class="mt-3 flex gap-2" data-edit-actions><button type="button" data-accept class={buttonVariants({ variant: "primary", size: "demo" })}>Accept</button><button type="button" data-reject class={buttonVariants({ variant: "secondary", size: "xs" })}>Reject</button></div>
               <button type="button" hidden data-reset class="mt-3 text-[12px] text-muted-foreground underline">Reset</button>
             </div>
           </div>
@@ -128,7 +128,7 @@ const nodes = [
               </ul>
               <div class="mt-3 flex items-center justify-between border-t border-border pt-3">
                 <p class="text-[11px] leading-4 text-muted-foreground"><span data-step-label>Checks</span> · <span class="tabular-nums" data-step-count>1 / 4</span></p>
-                <button type="button" data-act class={buttonVariants({ variant: "primary", size: "xs" })}>Run checks</button>
+                <button type="button" data-act class={buttonVariants({ variant: "primary", size: "demo" })}>Run checks</button>
               </div>
             </div>
           </div>
@@ -180,7 +180,7 @@ const nodes = [
                 <Code code={tryResponse} lang="json" />
               </div>
             </div>
-            <div class:list={[pop, "right-3 bottom-3 flex items-center gap-2 rounded-[14px]! p-1.5 pl-3 text-[12px]"]}><span class="text-muted-foreground">Your key</span><span class="font-mono text-muted-foreground/70">sk_test_…4f2</span><button type="button" data-send class={buttonVariants({ variant: "primary", size: "xs" })}>Send</button></div>
+            <div class:list={[pop, "right-3 bottom-3 flex items-center gap-2 rounded-[14px]! p-1.5 pl-3 text-[12px]"]}><span class="text-muted-foreground">Your key</span><span class="font-mono text-muted-foreground/70">sk_test_…4f2</span><button type="button" data-send class={buttonVariants({ variant: "primary", size: "demo" })}>Send</button></div>
           </div>
         </li>
         </>)}
@@ -208,7 +208,7 @@ const nodes = [
             <form class:list={[pop, "right-3 bottom-3 flex w-[min(360px,calc(100%-1.5rem))] items-center gap-2 rounded-[14px]! p-1.5 pl-3 text-[12px]"]} data-mcp-form>
               <Icon name="ph:sparkle" class="size-3.5 shrink-0 text-muted-foreground" />
               <input type="text" value="How do agents read my docs?" aria-label="Ask the agent" class="h-6 min-w-0 flex-1 bg-transparent leading-6 text-foreground outline-none" data-mcp-input />
-              <button type="submit" class={buttonVariants({ variant: "primary", size: "xs" })}>Ask</button>
+              <button type="submit" class={buttonVariants({ variant: "primary", size: "demo" })}>Ask</button>
             </form>
           </div>
         </li>
@@ -277,7 +277,7 @@ const nodes = [
               <div data-view="idle">
                 <p class="font-medium">1,151 lines of instructions</p>
                 <p class="text-muted-foreground">No plugin to install. Nothing hidden in node_modules.</p>
-                <button type="button" data-go="run" class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}><Icon name="ph:sparkle" class="size-3.5" />Hand to agent</button>
+                <button type="button" data-go="run" class={`${buttonVariants({ variant: "primary", size: "demo" })} mt-3 w-full!`}><Icon name="ph:sparkle" class="size-3.5" />Hand to agent</button>
               </div>
               <div hidden data-view="busy" class="flex h-6 items-center gap-2 text-muted-foreground"><Icon name="ph:circle-notch" class="size-3.5 motion-safe:animate-spin" /><span data-busy-label>Reading your repo…</span></div>
               <div hidden data-view="ask">
@@ -292,17 +292,17 @@ const nodes = [
                     </div>
                   ))}
                 </div>
-                <button type="button" data-go="plan" class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}>Continue</button>
+                <button type="button" data-go="plan" class={`${buttonVariants({ variant: "primary", size: "demo" })} mt-3 w-full!`}>Continue</button>
               </div>
               <div hidden data-view="plan">
                 <p class="font-medium">The agent waits for your go-ahead</p>
                 <p class="text-muted-foreground">Nothing is written until you confirm.</p>
-                <div class="mt-3 flex gap-2"><button type="button" data-go="ask" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Change answers</button><button type="button" data-go="write" class={`${buttonVariants({ variant: "primary", size: "xs" })} flex-1`}>Write files</button></div>
+                <div class="mt-3 flex gap-2"><button type="button" data-go="ask" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Change answers</button><button type="button" data-go="write" class={`${buttonVariants({ variant: "primary", size: "demo" })} flex-1`}>Write files</button></div>
               </div>
               <div hidden data-view="done">
                 <p class="flex items-center gap-2 font-medium"><Badge variant="success" text="Done" /><span data-done-count>14 files changed</span></p>
                 <p class="mt-1 text-muted-foreground">All of it in your repo. Edit any of it.</p>
-                <div class="mt-3 flex gap-2"><button type="button" data-go="reset" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Start over</button><button type="button" data-go="again" class={`${buttonVariants({ variant: "primary", size: "xs" })} flex-1`}>Run it again</button></div>
+                <div class="mt-3 flex gap-2"><button type="button" data-go="reset" class={`${buttonVariants({ variant: "secondary", size: "xs" })} flex-1`}>Start over</button><button type="button" data-go="again" class={`${buttonVariants({ variant: "primary", size: "demo" })} flex-1`}>Run it again</button></div>
               </div>
               <div hidden data-view="again">
                 <p class="font-medium">Safe to run twice</p>
@@ -338,7 +338,7 @@ const nodes = [
                   </li>
                 ))}
               </ul>
-              <button type="button" data-loaders-act class={`${buttonVariants({ variant: "primary", size: "xs" })} mt-3 w-full!`}>Sync</button>
+              <button type="button" data-loaders-act class={`${buttonVariants({ variant: "primary", size: "demo" })} mt-3 w-full!`}>Sync</button>
             </div>
           </div>
         </li>
@@ -347,18 +347,19 @@ const nodes = [
         <li class:list={[cell, span.api]} data-api>
           <div class={head}><h3 class={headTitle}>API reference</h3><p class={headDesc}>{compact ? "Generated from your OpenAPI spec, with Try it on every endpoint." : "From your OpenAPI spec. Every endpoint, generated."}</p></div>
           <div class:list={[stage, "h-72"]}>
-            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 grid grid-cols-2"]}>
-              <div class="border-r border-border">
-                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />openapi.yaml<span class="ml-auto font-sans text-muted-foreground/70">Hover a path</span></div>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:grid-cols-2"]}>
+              <div class="min-w-0 overflow-hidden border-r border-border">
+                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />openapi.yaml<span class="ml-auto hidden font-sans whitespace-nowrap text-muted-foreground/70 sm:inline"><span class="hidden pointer-fine:inline">Hover a path</span><span class="pointer-fine:hidden">Tap a path</span></span></div>
                 <ol class="py-2 font-mono text-[12px] leading-5">
                   {specRows.map(({ n, text, ep, first }) => (<li class:list={["flex gap-3 px-3 data-[mark]:bg-accent", ep && "cursor-default outline-none"]} data-spec-line={n} data-ep={ep?.id} tabindex={first ? 0 : undefined} aria-label={first ? `Show ${ep!.method} ${ep!.path}` : undefined}><span class="w-4 shrink-0 text-right text-muted-foreground/70">{n}</span><span class="whitespace-pre text-foreground/80">{text}</span></li>))}
                 </ol>
+                <p class="px-3 text-[11px] leading-4 text-muted-foreground/70 sm:hidden"><span class="hidden pointer-fine:inline">Hover a path</span><span class="pointer-fine:hidden">Tap a path</span></p>
               </div>
-              <div>
+              <div class="min-w-0">
                 <div class="flex h-[33px] items-center border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground">/api/<span data-api-slug>limits</span></div>
                 {specEndpoints.map((ep, i) => (
-                  <div class:list={["p-4", compact && "pr-12"]} data-api-page={ep.id} hidden={i !== 0}>
-                    <p class="flex items-center gap-2"><Badge variant={ep.variant} text={ep.method} class="font-mono" /><span class="font-mono text-[12px] leading-5">{ep.path}</span>{compact && <button type="button" data-api-send class={`${buttonVariants({ variant: "primary", size: "xs" })} ml-auto`}>Try it</button>}</p>
+                  <div class:list={["p-4", compact && "pr-10 sm:pr-12"]} data-api-page={ep.id} hidden={i !== 0}>
+                    <p class="flex flex-wrap items-center gap-2 sm:flex-nowrap"><Badge variant={ep.variant} text={ep.method} class="font-mono" /><span class="font-mono text-[12px] leading-5">{ep.path}</span>{compact && <button type="button" data-api-send class={`${buttonVariants({ variant: "primary", size: "demo" })} ml-auto`}>Try it</button>}</p>
                     <p class="mt-2 text-[14px] leading-6 font-medium">{ep.summary}</p>
                     <p class="mt-3 text-[11px] leading-4 text-muted-foreground" data-api-params>Parameters</p>
                     <ul class="mt-1 border-t border-border text-[12px]" data-api-params>
@@ -367,7 +368,7 @@ const nodes = [
                     {compact && (
                       <div hidden data-api-res class="mt-3">
                         <p class="flex items-center gap-2 text-[12px] leading-5"><Badge variant="success" text={ep.status} /><span class="text-muted-foreground tabular-nums" data-api-ms>84 ms</span></p>
-                        {ep.body && <pre class="mt-2 rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-5 text-foreground/80">{ep.body}</pre>}
+                        {ep.body && <pre class="mt-2 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-[11px] leading-5 text-foreground/80">{ep.body}</pre>}
                       </div>
                     )}
                   </div>
@@ -686,7 +687,7 @@ const nodes = [
         $$(api, "[data-spec-line]").forEach((l) => { const n = Number(l.dataset.specLine); if (n >= a && n <= b) l.dataset.mark = ""; else delete l.dataset.mark; });
         $(api, "[data-api-slug]")!.textContent = slugs[id];
       };
-      $$(api, "[data-ep]").forEach((l) => { const go = () => show(l.dataset.ep!); l.addEventListener("mouseenter", go); l.addEventListener("focus", go); });
+      $$(api, "[data-ep]").forEach((l) => { const go = () => show(l.dataset.ep!); l.addEventListener("mouseenter", go); l.addEventListener("focus", go); l.addEventListener("click", go); });
       show("get");
       // Try it: each endpoint page sends its own request and shows the response in place of its parameters.
       $$(api, "[data-api-send]").forEach((el) => {
@@ -699,7 +700,7 @@ const nodes = [
           await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 + ms));
           $(page, "[data-api-ms]")!.textContent = `${ms} ms`;
           $$(page, "[data-api-params]").forEach((el) => { el.hidden = true; }); $(page, "[data-api-res]")!.hidden = false;
-          send.textContent = "Send again"; send.disabled = false;
+          send.textContent = "Resend"; send.disabled = false;
         });
       });
     }

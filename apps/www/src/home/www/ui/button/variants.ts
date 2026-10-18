@@ -16,7 +16,8 @@ export type ButtonVariant =
   | "destructive"
   | "secondary-destructive"
   | "outline";
-export type ButtonSize = "xs" | "sm" | "base" | "lg";
+// `demo` is for the homepage demos' controls: a 32px tap target on phones, `xs` from `sm` up.
+export type ButtonSize = "xs" | "demo" | "sm" | "base" | "lg";
 export type ButtonShape = "base" | "square" | "circle";
 
 // `rounded-lg` is the default radius for every button; `circle` overrides
@@ -40,6 +41,7 @@ export const buttonVariantClasses: Record<ButtonVariant, string> = {
 // Rectangular sizing (shape="base"). Radius comes from `buttonBase`.
 export const buttonSizeText: Record<ButtonSize, string> = {
   xs: "gap-1 px-2 py-1 text-xs",
+  demo: "h-8 gap-1 px-3 text-[13px] sm:h-auto sm:px-2 sm:py-1 sm:text-xs",
   sm: "gap-1 px-3 py-1.5 text-xs",
   base: "gap-1.5 px-4 py-2 text-sm",
   lg: "gap-2 px-5 py-2.5 text-sm",
@@ -48,6 +50,7 @@ export const buttonSizeText: Record<ButtonSize, string> = {
 // Square/circle sizing (icon-only): equal dimensions, no padding.
 export const buttonSizeCompact: Record<ButtonSize, string> = {
   xs: "size-7",
+  demo: "size-8 sm:size-7",
   sm: "size-8",
   base: "size-9",
   lg: "size-10",
@@ -55,6 +58,7 @@ export const buttonSizeCompact: Record<ButtonSize, string> = {
 
 export const buttonIconSize: Record<ButtonSize, string> = {
   xs: "h-3.5 w-3.5",
+  demo: "h-3.5 w-3.5",
   sm: "h-3.5 w-3.5",
   base: "h-4 w-4",
   lg: "h-[1.125rem] w-[1.125rem]",

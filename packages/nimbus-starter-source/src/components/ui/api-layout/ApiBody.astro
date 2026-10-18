@@ -190,7 +190,7 @@ const deprecationHtml = page.deprecated
               hidden={index !== 0}
             >
               {example.description && <p class="mb-2 text-sm text-muted-foreground">{example.description}</p>}
-              <div class="overflow-hidden rounded-lg bg-card ring ring-border">
+              <div class="[&_.nb-code-figure]:my-0">
                 <Fragment set:html={preparedCode(example)} />
               </div>
             </div>
@@ -212,7 +212,7 @@ const deprecationHtml = page.deprecated
             <ApiFieldList fields={body.fields} truncated={body.truncated} />
           ) : null}
           {body.example && (
-            <div class="mt-2 overflow-hidden rounded-lg bg-card ring ring-border">
+            <div class="mt-2 [&_.nb-code-figure]:my-0">
               <Fragment set:html={preparedCode(body.example)} />
             </div>
           )}
@@ -274,7 +274,7 @@ const deprecationHtml = page.deprecated
                           <ApiFieldList badge={mediaBadge(b.mediaType)} />
                         )}
                         {b.example && (
-                          <div class="mt-2 overflow-hidden rounded-lg bg-card ring ring-border">
+                          <div class="mt-2 [&_.nb-code-figure]:my-0">
                             <Fragment set:html={preparedCode(b.example)} />
                           </div>
                         )}

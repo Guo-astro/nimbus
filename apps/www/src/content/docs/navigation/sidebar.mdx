@@ -73,9 +73,13 @@ Array position controls manual item order. Nimbus does not re-sort a configured 
 
 ## Show a collection inside a folder
 
-A collection served inside a docs folder's URL appears in that folder. With `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/collections#collection-urls)), dbt is a group inside Connectors whose landing is `/integrations/connectors/dbt/`. Breadcrumbs and previous and next links follow, because they read the sidebar. A page the sidebar leaves out takes the breadcrumbs of the deepest group above its URL, then a crumb for each page between there and itself, titled like the page.
+A collection served inside a docs folder's URL appears in that folder. Take `src/content/docs/integrations/connectors/` and a `dbt` collection routed at `src/pages/integrations/connectors/dbt/[...slug].astro` (see [Collection URLs](/writing/collections#collection-urls)). dbt becomes a group inside Connectors, with `/integrations/connectors/dbt/` as its landing.
 
-This works wherever the folder is generated: with no `sidebar.items`, inside `{ autogenerate: { collection: "docs" } }`, or inside `{ autogenerate: { directory } }`, including one inside a hand-made `{ label, items }` group. It's never placed directly among a hand-made group's own items. If folders between are missing, the collection goes in the deepest one that exists, and a folder whose only page is its `index` becomes a group to hold it, as it would with a second page. That group keeps the label the page had as a link, and drops its `Draft` badge, as any folder's group does.
+Breadcrumbs and previous and next links follow, because they read the sidebar. A page the sidebar leaves out gets the breadcrumbs of the deepest group above its URL.
+
+This works wherever the folder is generated, by default or with `autogenerate`, but never among a hand-made group's own items.
+
+If folders in between are missing, the collection goes in the deepest one that exists. A folder whose only page is its `index` becomes a group to hold it, keeping that page's label.
 
 The collection's own `index` page controls the group, as a folder's does. Set its label and position:
 
@@ -92,7 +96,10 @@ sidebar:
 
 With no `index` page, the group is a heading named after the URL's last segment (`Dbt`). Show only its landing link with `sidebar.hideChildren: true`, or leave the whole collection out of the sidebar, along with any collection served inside it, with `sidebar.hidden: true`.
 
-To place it yourself, name it in `sidebar.items` with `{ autogenerate: { collection: "dbt" } }`, link to its URL with `{ label: "dbt", link: "/integrations/connectors/dbt/" }`, or make it a hand-made group's `landing`; it then appears only there. A link or a `landing` shows only the collection's landing page, and leaves out the collections served inside it; to show its pages and theirs, use `{ autogenerate: { collection } }`, with a `label` to make it a group with its landing. Without a `label`, its pages go straight into the surrounding group, so its landing page isn't linked and its `hideChildren` has no effect.
+To place it yourself, name it in `sidebar.items`; it then appears only there:
+
+- **`{ autogenerate: { collection: "dbt" }, label: "dbt" }`** shows its pages as a group with its landing. Without `label`, its pages go straight into the surrounding group, and its landing isn't linked.
+- **`{ label: "dbt", link: "/integrations/connectors/dbt/" }`**, or a hand-made group's `landing`, shows only its landing page.
 
 Not placed:
 

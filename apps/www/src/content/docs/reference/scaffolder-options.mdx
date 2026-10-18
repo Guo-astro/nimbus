@@ -42,7 +42,9 @@ The scaffolder asks:
   </Step>
 </Steps>
 
-Pass `--yes` to accept every default without prompts. Without a terminal, such as in CI or when an agent runs it, pass `--yes` or a flag for every question; otherwise the scaffolder exits with the list of unanswered questions and their flags. Unknown flags, and flags that contradict each other, stop the scaffolder before it writes anything. Pass `--help` to list every flag.
+Pass `--yes` to accept every default, or `--help` to list every flag.
+
+Without a terminal, such as in CI or an agent, pass `--yes` or a flag for every question; otherwise the scaffolder exits and lists the flags it still needs. Unknown or conflicting flags stop it before it writes anything.
 
 If installing dependencies fails, the scaffolder keeps the project, prints the commands that finish the setup, and exits with status 1. To scaffold from a local template directory instead of downloading one, such as when working on templates offline, pass `--template-dir <path>`.
 

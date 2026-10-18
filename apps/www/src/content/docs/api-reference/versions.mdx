@@ -37,7 +37,7 @@ The version marked `default: true` owns `/api`; other versions mount below their
 The version picker sits in the header beside search on every API page, at every width; the recipe's route passes it to `Header`'s `actions` slot. It keeps readers on the same page when they switch versions. Nimbus links pages across versions in this order:
 
 1. **Same coordinate.** Pages that share a coordinate, such as the same `operationId`, are the same page. This link always wins.
-2. **Same method and path.** When an `operationId` changed between versions, an operation links to the one with the same HTTP method and path. A path segment that is a single parameter may be renamed, so `/zones/{zone_id}` matches `/zones/{id}`, but `{name}.{format}` must stay the same. Among operations not already linked between the two versions, the match must be the only one on each side. Links chain across versions, so a v1 page can link to a v3 page through v2.
+2. **Same method and path.** When an `operationId` changed, an operation links to the one with the same method and path, if that match is unique. A whole-segment parameter may be renamed, so `/zones/{zone_id}` matches `/zones/{id}`. Links chain, so v1 can reach v3 through v2.
 3. **No match.** An ambiguous or conflicting match links nothing, and the picker opens the other version's landing page.
 
 Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
@@ -62,11 +62,20 @@ api: [
 ],
 ```
 
-Every version serves from the family's own path: `/api/pets/` renders the default version, `/api/pets/?version=v1` renders `v1`, and an unknown id, or `version` given more than once, returns the 404 page. An empty `version` selects the default. An operation keeps its path across versions only while its slug does: with the default operation ID routes, an operation renamed between versions has a different path in each, and the version picker links them. Version-prefixed paths such as `/api/v1/pets/` do not exist in this mode. Inside a non-default version, every generated same-version link — page body, navigation, breadcrumbs, citations, the picker's active item — carries that version's `version` query, so readers stay in the version they chose.
+Every version serves from the family's own path: `/api/pets/` is the default version, and `/api/pets/?version=v1` is `v1`. An unknown id returns the 404 page, and an empty `version` selects the default. There are no `/api/v1/` paths in this mode.
+
+An operation keeps its path across versions while its slug does. A renamed operation has a different path in each version, and the version picker links them.
+
+Inside a non-default version, every generated link carries its `version` query, so readers stay in the version they chose.
 
 To use another parameter name, set it with `versionUrl: { in: "query", param: "api-version" }` (any lowercase name). Avoid `lang`: the starter's code samples use it for the selected language.
 
-The sitemap, alternate Markdown, `llms.txt`, and `llms-full.txt` stay version-free: they describe the default version at the plain URLs. The API catalog lists each visible version, a non-default one at its query URL (`/api/?version=v1`) with its spec at `/api/v1/openapi.json`; `/.well-known/ard.json` lists those with a published spec. The homepage `Link` header points to the complete catalog and advertises only each family’s default reference and published spec. Non-default pages are `noindex`, with their default counterpart as canonical; a page with no default counterpart has no canonical. Per-page Markdown exists for the default version only: a `.md` URL serves the default version whatever its `version` says (with `bundle: false`, a non-default `version` returns 404 instead), and a non-default page requested with `Accept: text/markdown` answers with its HTML. A hidden version's pages are reached only by its query, but `hidden` is not access control: `/nimbus-api/coordinates.json` lists them, and its spec is published at `/api/<version>/openapi.json` unless the version sets `publishSpec: false`.
+The sitemap, Markdown versions, `llms.txt` and `llms-full.txt` describe only the default version, at the plain URLs.
+
+- **Catalog.** The API catalog lists each visible version, a non-default one at its query URL with its spec at `/api/v1/openapi.json`. The homepage `Link` header lists only the default.
+- **Search engines.** Non-default pages are `noindex`, with the default page as canonical when one exists.
+- **Markdown.** Only the default version has Markdown. A `.md` URL serves the default version whatever its `version` says, or returns 404 with `bundle: false`.
+- **Hidden versions** are reached only by their query, but `hidden` isn't access control: `/nimbus-api/coordinates.json` lists them, and their spec is published unless `publishSpec: false`.
 
 If a cache sits in front of the site, its cache key must keep the version parameter and vary on `Accept`, or readers get another version's page or the wrong format.
 

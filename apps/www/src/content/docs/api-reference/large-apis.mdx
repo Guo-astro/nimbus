@@ -25,7 +25,9 @@ api: [
 
 With `"on-demand"`, the current page's ancestors are open and show all their children, so its neighbors are one click away. Schema and webhook pages show top-level items only. The setting applies to every version of a family.
 
-When a reader opens a collapsed group, the sidebar fetches the page its label links to and copies the group's rows from that page's sidebar. A group without a page, such as an `x-tagGroups` category, takes its rows from the API overview instead. Fetching starts when the pointer moves over a group or it receives focus, so rows usually appear as soon as it opens. If they cannot load, opening the group goes to its page instead.
+When a reader opens a collapsed group, the sidebar fetches the group's page and copies its rows from there. A group without a page, such as an `x-tagGroups` category, uses the API overview.
+
+Fetching starts on hover or focus, so rows usually appear as the group opens. If they can't load, the group link goes to its page instead.
 
 Without JavaScript, a collapsed group's label still links to its page. Categories from `x-tagGroups` have no page to link to, so they open only on pages inside them; the API overview's body links every section.
 
@@ -40,7 +42,7 @@ tags:
     parent: workers
 ```
 
-In every mode, the sidebar keeps the groups a reader opened and its scroll position from page to page for the rest of the session, in the desktop rail and the mobile drawer. Restored groups appear already open. Rows loaded on one page show on the next before it paints; a new deployment starts over, so rows saved before it are never shown after it.
+In every mode, the sidebar keeps the reader's open groups and scroll position from page to page for the session, on desktop and mobile. Loaded rows show on the next page before it paints. A new deployment starts fresh, so old rows never show after it.
 
 The API rail renders the same markup as the docs sidebar: groups are native `<details>`/`<summary>` rows styled by position (`[data-nb-api-nav] li > a`, `details > summary`, `details > ul`) in `src/styles/globals.css`, a group's page lists as its first "Overview" child, and each page renders one tree that the mobile drawer borrows while open. See [Restyle sidebar rows](/navigation/sidebar#restyle-sidebar-rows).
 
@@ -52,9 +54,13 @@ Every group page lists its operations and its subsections, and the [API home](#t
 
 ## The API home
 
-The API home lists every operation and webhook of the version, the way a section page lists its own: each `x-tagGroups` group a heading, in the spec's order, each section its linked title and description, then its operations, name first with the method and path beneath. Sections in no group come after the groups, then operations without a tag, then webhooks. A filter at the top searches every endpoint: Enter opens the first match and Escape clears it.
+The API home lists every operation and webhook of the version, the way a section page lists its pages. Each `x-tagGroups` group is a heading, in the spec's order. Each section shows its title and description, then its operations: name first, method and path beneath.
 
-A large spec loads in parts. The page holds the first `API_HOME_CHUNK_SIZE` endpoints, 150 unless you change it in `src/components/ui/api-layout/home.ts`, keeping sections whole where they fit and splitting a larger one into continued parts. Each later part is a page of its own, which the home fetches as the reader nears the end; without JavaScript, the list ends in a link to the next part. The filter fetches a compact list of every endpoint the first time it's focused, so it finds endpoints that haven't loaded, and shows up to 200 matches. Browser find-in-page searches only the parts that have loaded.
+Sections in no group come next, then untagged operations, then webhooks. The filter at the top searches every endpoint: Enter opens the first match, Escape clears it.
+
+A large spec loads in parts. The page holds the first `API_HOME_CHUNK_SIZE` endpoints, 150 by default, set in `src/components/ui/api-layout/home.ts`. Sections stay whole where they fit.
+
+Each later part is its own page, fetched as the reader nears the end; without JavaScript, the list ends in a link to the next part. The filter loads a compact list of every endpoint on first focus, so it finds unloaded ones too, and shows up to 200 matches. Find-in-page only searches loaded parts.
 
 The parts and the filter's list come from two routes the [recipe](/api-reference/openapi/setup#install-with-the-recipe) writes under `src/pages/nimbus-api/home/<collection>/`, served at `/nimbus-api/home/<collection>/<version>/<n>/` and `…/<version>/index.json`, with `default` as the version of an unversioned API. They render like the collection's pages, built or on request, and the part pages are `noindex`.
 
@@ -96,7 +102,9 @@ rendering: {
 },
 ```
 
-Nimbus then writes each page's data as static assets beside the site, shares unchanged pages between versions, and reads one version's index plus the requested page on each request. Each build also ships the previous successful build's page files, so a server still running that release during a rollout (for example a Node server in a blue-green swap) keeps working; on Cloudflare each Worker version already keeps its own files. The build suggests `bundle: false` when an API's bundled page data passes 16 MiB.
+Nimbus then writes each page's data as static assets beside the site, and shares unchanged pages between versions. Each request reads one version's index and the requested page. The build suggests `bundle: false` when an API's bundled page data passes 16 MiB.
+
+Each build also ships the previous build's page files, so a server still on the old release during a rollout keeps working. On Cloudflare, each Worker version already keeps its own files.
 
 Pages are read through an Astro live collection, which Astro only accepts from your own `src/live.config.ts`. Add it once; the build shows this snippet if it's missing:
 
@@ -111,8 +119,21 @@ export const collections = {
 
 When Astro's route cache is enabled, each page is cached with the tags `nimbus-api:<collection>` and `nimbus-api:<collection>@<version>`.
 
-`bundle: false` needs the collection rendered on request and the Cloudflare or Node adapter; the build explains what to change otherwise. It also changes discovery for that API: search, `llms.txt`, `llms-full.txt`, the sitemap and Markdown versions cover the default version only. Every version still publishes its spec unless `publishSpec: false` or publication fails, and visible versions are listed in the API catalog. Older versions stay readable as HTML, with `noindex`, and their Markdown returns 404.
+`bundle: false` needs the collection rendered on request, with the Cloudflare or Node adapter; otherwise the build says what to change.
 
-With `bundle: false`, Nimbus reuses the versions you didn't change. In CI, restore `.nimbus/cache/page-assets/` before the build and save it after a successful deploy, not after preview builds, so "previous" means the live release; restore the whole directory. Key the cache by project, with a fallback key so adding a version keeps the earlier entries. Nimbus checks the cache's contents itself and rebuilds anything missing or damaged, so keep your specs in the repository, not only in the cache. Upgrading Nimbus can rebuild every version once.
+It also narrows discovery for that API. Search, `llms.txt`, `llms-full.txt`, the sitemap and Markdown versions cover only the default version. Older versions stay readable as HTML with `noindex`, still publish their spec, and stay in the API catalog.
 
-API pages show the sidebar filter; press `/` to focus it. With `sidebar: "full"` it filters the sidebar in place, matching titles and HTTP methods. With `sidebar: "on-demand"`, the sidebar holds only part of the API, so the filter loads a small list of the version's pages the first time you focus it or type, then matches titles, methods and paths locally. Results link to the page in the version you're reading. Each build also ships the previous release's lists, so a tab left open across a deploy keeps filtering; in CI that needs `.nimbus/cache/page-assets/` restored as described above, for bundled APIs too.
+With `bundle: false`, Nimbus reuses the versions you didn't change. In CI:
+
+- Restore the whole `.nimbus/cache/page-assets/` directory before the build.
+- Save it after a successful production deploy, not after previews, so "previous" means the live release.
+- Key the cache by project, with a fallback key so adding a version keeps earlier entries.
+
+Nimbus checks the cache and rebuilds anything missing or damaged, so keep your specs in the repository. Upgrading Nimbus can rebuild every version once.
+
+API pages show the sidebar filter; press `/` to focus it.
+
+- **`sidebar: "full"`** filters the sidebar in place, by title and HTTP method.
+- **`sidebar: "on-demand"`** loads a small list of the version's pages on first use, then matches titles, methods and paths.
+
+Results stay in the version you're reading. A tab left open across a deploy keeps filtering, as long as CI restores `.nimbus/cache/page-assets/` as above, for bundled APIs too.

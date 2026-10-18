@@ -51,6 +51,10 @@ apiReferences: [
 
 The remote collection then uses the same prose syntax: `api.ref:api:retrieveEvent`. Remote references provide citation targets only; they do not add the remote pages to local search or agent outputs.
 
-The manifest lists each page's path without a trailing slash, and it doesn't record the remote site's `trailingSlash`. With `origin`, citations use the path as listed, so on a remote site that serves `/api/retrieve-event/`, a citation links to `/api/retrieve-event`, which that site may redirect or answer with 404. Without `origin`, the paths stay site-relative and take this site's trailing-slash shape, which is right only when both sites use the same `trailingSlash` and `build.format`. Check a citation against the remote site before relying on it.
+The manifest lists paths without a trailing slash. With `origin`, citations use them as listed, so a remote site that serves `/api/retrieve-event/` may redirect or 404 the link. Without `origin`, paths take this site's trailing-slash shape, which is right only when both sites match.
 
-Nimbus fetches HTTPS manifests during the build. An unavailable or malformed remote manifest produces warnings and its citations resolve to `#`; it does not stop the build. You can instead commit a manifest and use a project-relative path when builds must work offline. An unreadable local manifest, invalid JSON, or invalid top-level shape fails the build; malformed entries inside an otherwise valid manifest are warned and ignored.
+Check a citation against the remote site before relying on it.
+
+Nimbus fetches HTTPS manifests during the build. If one is unavailable or malformed, the build warns and its citations link to `#`. For offline builds, commit the manifest and use a project path.
+
+A local manifest that can't be read or parsed fails the build. Malformed entries in a valid manifest are skipped with a warning.

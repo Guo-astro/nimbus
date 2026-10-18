@@ -23,7 +23,9 @@ Values appear on:
 - operation pages, including webhooks, as `page.extensions`, from the operation object;
 - every field, as `field.extensions`: parameters, request bodies, response fields, additional media types, and fields on schema pages. A parameter's own value wins over its schema's, and a property's own value wins over the schema it references.
 
-Tag pages, schema-page headers, response objects and the sidebar don't carry them, and neither does the Markdown version of a page or `llms.txt`. A field or operation that declares none of the listed names has no `extensions` at all. The [published spec](/api-reference/openapi/options#published-spec) is the spec itself, so it keeps every `x-*` field, listed or not; set `publishSpec: false` to keep it unpublished.
+Tag pages, schema-page headers, response objects, the sidebar, Markdown versions and `llms.txt` don't carry them. A field or operation with none of the listed names has no `extensions`.
+
+The [published spec](/api-reference/openapi/options#published-spec) keeps every `x-*` field, listed or not; set `publishSpec: false` to keep it unpublished.
 
 Read them in your copies of the API components. In `ApiBody.astro`, which already imports `Banner`, add the two lines to the frontmatter and the markup where the notice should appear, such as below the page actions:
 

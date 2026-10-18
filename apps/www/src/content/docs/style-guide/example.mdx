@@ -7,7 +7,9 @@ sidebar:
 ---
 
 <Aside type="note" title="Need">
-At work, acting — the reader wants working code to copy and adapt. Their opening question: *"Show me working code for X."* Not a procedure to follow (how-to), not a lesson (tutorial): code showing how something is *done*, which is a different thing from instructions for doing it — the copyable-code half of the documentation gap. In the agent era this is the highest-leverage type: both reader personas start at the code sample, and agents paste examples into codebases verbatim.
+At work, acting — the reader wants working code to copy and adapt. Their opening question: *"Show me working code for X."* Not a procedure to follow (how-to), not a lesson (tutorial), but code showing how something is *done*.
+
+This is the highest-leverage type today: people start at the code sample, and agents paste examples into codebases verbatim.
 </Aside>
 
 ## When to use it
@@ -25,7 +27,7 @@ The two laws of the type:
 
 ## Title & description
 
-- **Title: the goal plus the stack.** "Verify signatures **in a Next.js route handler**" · "Debounce webhook bursts **with Redis**." The stack qualifier is the type's title signal — a how-to states a surface-neutral goal ("Rotate a signing secret"); an example names the environment its code lives in, because the code is the content. (A deliberate softening of the how-to title grammar: the imperative verb matches how-to; the stack suffix disambiguates.) Never "Example 3" or "Miscellaneous snippets."
+- **Title: the goal plus the stack.** "Verify signatures **in a Next.js route handler**" · "Debounce webhook bursts **with Redis**." A how-to states a neutral goal ("Rotate a signing secret"); an example names the environment its code lives in, because the code is the content. Never "Example 3" or "Miscellaneous snippets."
 - **Description formula:** "*What the code does*, in *the stack it's written for*." — e.g. "Verify Hookline signatures in a Next.js route handler, rejecting replays."
 
 ## Scaffold this page
@@ -34,7 +36,9 @@ Install the recipe — your coding agent reads the full skeleton and checklist a
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add content-example" />
 
-**The cookbook form.** Several related examples can share one page: the page takes a **noun-phrase category title** ("Signature verification," "Batching"), and each `##` entry follows the single-page skeleton the scaffold installs, minus the frontmatter — goal line, assumptions line, code, shown result, How-it-works. One `lastVerified` for the page means its *oldest-verified* entry. Split an entry to its own page when its code outgrows a screen. Adding a related example goes on the category page first; a new page needs a new category or an outgrown entry.
+**The cookbook form.** Several related examples can share one page with a **noun-phrase category title** ("Signature verification," "Batching"). Each `##` entry follows the single-page skeleton without the frontmatter: goal line, assumptions line, code, shown result, How-it-works.
+
+The page's `lastVerified` means its *oldest-verified* entry. Add related examples to the category page first, and split an entry out when its code outgrows a screen.
 
 ## Component guidance
 
@@ -55,7 +59,9 @@ Install the recipe — your coding agent reads the full skeleton and checklist a
 
 ## Links & freshness
 
-Link the concept behind the pattern and the reference for every magic value; link *from* the related how-to back to the example ("just want the code? →"). Freshness is the type's whole reputation: examples are tested artifacts, re-run on every release that touches their APIs (CI if possible), `lastVerified` stamped — a cookbook of code that no longer compiles is the loudest possible signal a product is unmaintained.
+Link the concept behind the pattern and the reference for every magic value, and link *from* the related how-to back to the example ("just want the code? →").
+
+Freshness is the type's whole reputation. Re-run examples on every release that touches their APIs, in CI if possible, and stamp `lastVerified`. Code that no longer compiles is the loudest sign a product is unmaintained.
 
 ## Agent notes
 

@@ -93,11 +93,15 @@ export const prerender = true;
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
 
-Each section index lists the pages directly in its folder, then links each sub-folder's own `llms.txt` under "Sections", so an agent descends one level at a time. A folder with even one page gets its own index; a folder holding only an `index.mdx` is a page of its parent. A section is named by its index page's `sidebar.group.label`, then its title, then the folder name.
+Each section index lists the pages in its folder, then links each sub-folder's `llms.txt` under "Sections", so an agent descends one level at a time. A folder with only an `index.mdx` is a page of its parent.
+
+A section is named by its index page's `sidebar.group.label`, then its title, then the folder name.
 
 Each `GET` returns `404` for an unknown section. Rendered on request, it returns a `500` without details when an index can't be read, and logs the error. To change what a route serves, see [Override a default](/ai/override-markdown#override-an-llmstxt-index).
 
-The `llms.txt` endpoints follow the rendering policy the same way: the site index and `llms-full.txt` render in `rendering.default`, and a section index renders in the mode of the collection it lists. The `agent-endpoints` helpers support either mode and require the Nimbus Astro integration. The build still warns about a Markdown version or `llms.txt` index in a prerendered collection that no route generated, and names the route that serves it.
+The `llms.txt` endpoints follow the rendering policy too: the site index and `llms-full.txt` use `rendering.default`, and a section index uses its collection's mode.
+
+The build warns when a prerendered collection's Markdown or `llms.txt` has no route, and names the route to add.
 
 ### Verify
 
@@ -118,7 +122,9 @@ curl --fail http://localhost:4321/llms-full.txt
 curl --fail http://localhost:4321/writing/llms.txt
 ```
 
-Each command must return content with a successful status. A `404` means the corresponding route file is missing, or the collection isn't a page collection — only collections made with Nimbus's helpers publish Markdown; wrap a custom loader with `withNimbusMarkdown()` as described in [Other collections](/writing/collections#add-a-collection). If a section index is absent, confirm that the section has discoverable pages and appears in `/llms.txt`.
+Each command should return content with a success status. A `404` means the route file is missing, or the collection isn't a page collection; wrap a custom loader with [`withNimbusMarkdown()`](/writing/collections#add-a-collection).
+
+If a section index is missing, check that the section has discoverable pages and appears in `/llms.txt`.
 
 ## Direct rendering
 

@@ -6,18 +6,42 @@ sidebar:
   order: 3
 ---
 
-Each operation page shows the request in cURL, TypeScript, and Python. Parameter values come from the specification:
+Each operation page shows the request in cURL, TypeScript, and Python, built from the specification.
+
+## Parameter values
 
 - A parameter's own `example`, or its first `examples` entry, comes first.
 - Otherwise the value is generated from the parameter's schema, as request bodies are. Without a declared value, it's a type guess, such as `string`, `0`, or a format's stock value.
 - A path parameter without a declared value shows its name in angle brackets, such as `<account_id>`: a guessed identifier would name no real resource.
 - Required query parameters and headers keep the generated value, guesses included. One with no schema, or whose generated value is an array or object, shows `<name>`.
 
-Credentials always render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are, as in a real request. Samples send requests to the spec's first server, with each server variable set to its `default`. Without a server, or with a relative one such as `/v1`, samples start with `<base-url>` for the reader to fill in. A variable with no default shows its name in angle brackets, such as `<region>`. Request bodies use the request example, or a value generated from the schema. A string example is sent exactly as written unless the media type is JSON (`application/json`, a `+json` type, with or without parameters such as `; charset=utf-8`), which sends it as a JSON string. So a string under `application/x-ndjson` or `application/jsonl` arrives unchanged.
+## Servers and credentials
 
-For methods that support a request body, an explicit JSON `null` is sent as the four bytes `null` in every generated language. It is distinct from an absent body. Without an authored example, Nimbus still generates a value from a usable schema.
+- **Credentials** render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are.
+- **Server.** Samples use the spec's first server, with each variable set to its `default`. A variable with no default shows as `<region>`.
+- **No server**, or a relative one such as `/v1`: samples start with `<base-url>` for the reader to fill in.
 
-An `application/x-www-form-urlencoded` body is sent as form fields, including with parameters such as `; charset=utf-8`, which the `Content-Type` header keeps. A property with an entry in the media type's `encoding` follows it: `style`, `explode`, or `allowReserved` select query-style serialization, and an entry without them sends the value as its `contentType`, so an object is sent as JSON. A `deepObject` property indexes every array (`expand[0]=customer`). A property without an `encoding` entry uses the bracket convention common to form APIs, not OpenAPI's JSON default: nested objects in brackets (`metadata[plan]=pro`), the name repeated for each item of a scalar array (`tags=a&tags=b`), and arrays of objects indexed (`items[0][price]=p_1`). A string example is read as an encoded form. A `null` field is sent as an empty value (`name=`), the same as `""`; a JSON `contentType` sends it as `null`. Empty objects and arrays send no fields, and any other example sends no body.
+## Request bodies
+
+A body uses the request example, or a value generated from the schema.
+
+A string example is sent exactly as written, unless the media type is JSON (`application/json` or a `+json` type), which sends it as a JSON string. So a string under `application/x-ndjson` arrives unchanged.
+
+An explicit JSON `null` is sent as `null`, which is different from no body.
+
+### Form bodies
+
+An `application/x-www-form-urlencoded` body is sent as form fields. Without an `encoding` entry, properties use the bracket convention most form APIs expect:
+
+| Value | Sent as |
+|---|---|
+| Nested object | `metadata[plan]=pro` |
+| Array of scalars | `tags=a&tags=b` |
+| Array of objects | `items[0][price]=p_1` |
+| `null` or `""` | `name=` |
+| Empty object or array | no field |
+
+A property with an `encoding` entry follows it. `style`, `explode` or `allowReserved` select query-style serialization, and `deepObject` indexes every array, such as `expand[0]=customer`. An entry with only a `contentType` sends the value as that type, so an object is sent as JSON.
 
 For example, this media type sends `tags` joined with commas and `metadata` in brackets:
 
@@ -39,17 +63,22 @@ application/x-www-form-urlencoded:
 tags=a%2Cb,c&metadata%5Bplan%5D=pro
 ```
 
-With `explode: false`, items are joined with `,` (`form`), `|` (`pipeDelimited`), or `%20` (`spaceDelimited`), and each item is encoded first, so a separator inside an item stays distinct from the one between items. With `allowReserved: true`, a `,` inside an item is sent unencoded as OpenAPI specifies, so `["a,b", "c"]` and `["a", "b,c"]` send the same bytes; use `allowReserved: false` or a JSON `contentType` when items can contain separators. With `explode: true`, or a JSON `contentType`, an array repeats the field once per item.
+- **`explode: false`** joins items with `,` (`form`), `|` (`pipeDelimited`) or `%20` (`spaceDelimited`). Each item is encoded first, so a separator inside an item stays distinct.
+- **`explode: true`** repeats the field once per item.
+- **`allowReserved: true`** sends a `,` inside an item unencoded, as OpenAPI specifies, so `["a,b", "c"]` and `["a", "b,c"]` send the same bytes. Form delimiters (`=`, `&`, `+`) and unsafe characters stay encoded.
+- **A JSON `contentType`** JSON-serializes each value first, so `abc` is sent as `%22abc%22`, and `null` as `null`.
 
-An explicit JSON `contentType`, including a `+json` media type, JSON-serializes each field value before form encoding: a string such as `abc` is sent as `%22abc%22`. With `allowReserved: true`, valid percent-encoded triples and safe reserved characters pass through unchanged; form delimiters (`=`, `&`, `+`) and unsafe characters (`[`, `]`, `#`) stay encoded. Forms using reserved expansion are sent as pre-encoded text so the HTTP client does not encode them again.
+A string example is read as an already-encoded form.
+
+### Multipart bodies
 
 A `multipart/form-data` body is sent as one part per field:
 
-- **Files.** A string with `format: binary` is sent as a file named after the field in angle brackets, such as `<file>`, whatever the example holds, unless OpenAPI 3.1 `encoding` selects form-style serialization. A generated request example shows the same placeholder; an authored one keeps its values. An array of files is sent as one part per item in the example, with the same name; a generated example has two. An explicitly empty array sends no file parts. Without a concrete part type, file parts use `application/octet-stream`.
-- **Fields with an `encoding` entry.** In OpenAPI 3.1, `style`, `explode`, or `allowReserved` serialize the field as a form field does, so `deepObject` gives names such as `link_options[create]`; these settings take precedence over `contentType`. OpenAPI 3.0 ignores those settings for multipart. A `contentType` sends the part with that type, or with the first type when several are listed. In TypeScript, such a part is sent with the file name `blob`, the only way `FormData` gives a part its own type.
-- **Other fields.** An object, or an array of objects, is one JSON part. An array of scalars repeats the field. Anything else is a text part, sent exactly as written, even when it starts with `@`.
+- **Files.** A string with `format: binary` is sent as a file named `<file>` (the field's name in brackets). An array of files sends one part per item, and a generated example has two. File parts default to `application/octet-stream`.
+- **Fields with an `encoding` entry.** In OpenAPI 3.1, `style`, `explode` and `allowReserved` serialize the field as a form field, so `deepObject` gives names such as `link_options[create]`. A `contentType` sends the part with that type. OpenAPI 3.0 ignores these for multipart.
+- **Other fields.** An object, or an array of objects, is one JSON part. An array of scalars repeats the field. Anything else is a text part, sent as written, even when it starts with `@`.
 
-A field without `format: binary` is not treated as a file. In OpenAPI 3.1, `contentMediaType` alone does not make a string a file; use `encoding.contentType` to set the part's type. Other multipart types, such as `multipart/mixed`, get no generated sample; the page still shows the request example.
+Only `format: binary` makes a field a file; in OpenAPI 3.1, use `encoding.contentType` to set a part's type. Other multipart types, such as `multipart/mixed`, get no generated sample, and the page shows the request example instead.
 
 For example, a file upload with one text field:
 
@@ -68,11 +97,22 @@ curl --request GET \
   --header 'Authorization: Bearer <token>'
 ```
 
-An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language, such as an SDK call and a raw request in Python. Each entry's `label` names it in the code rail's picker and in the page's Markdown version. An entry without a `label` uses its `lang`, and a repeated name is numbered: `Python`, `Python (2)`.
+## Authored samples
 
-On the page, the request body appears inside the code samples, and the page's Markdown version also lists it as an example request. An operation with no samples at all, such as with `samples.generate: []` and no `x-codeSamples`, shows its request example on the page instead.
+An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language.
 
-Two settings on the `api` entry control generated samples. `samples.generate` picks the languages Nimbus generates, on every operation; it defaults to all three, and `[]` generates none. `samples.keepGenerated` keeps generated languages next to authored samples. For example, to generate only cURL, and show it next to any authored SDK samples:
+Each entry's `label` names it in the code rail and the Markdown version. Without one, its `lang` is used, and repeats are numbered: `Python`, `Python (2)`.
+
+The request body appears inside the code samples, and the Markdown version also lists it as an example request. An operation with no samples at all shows its request example on the page instead.
+
+## Choose languages
+
+Two settings on the `api` entry control generated samples, for every version of a family:
+
+- **`samples.generate`** picks the languages to generate. The default is all three, and `[]` generates none.
+- **`samples.keepGenerated`** keeps generated languages next to authored ones. Each must also be in `generate`.
+
+Valid values are `"curl"`, `"typescript"` and `"python"`. For example, to generate only cURL, and show it next to any authored SDK samples:
 
 ```ts title="astro.config.ts"
 api: [
@@ -84,9 +124,9 @@ api: [
 ],
 ```
 
-Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, and `typescript` or `ts`, in any case. An authored `shell` or `bash` sample does not replace cURL. Every `keepGenerated` language must also be in `generate`. Valid values for both are `"curl"`, `"typescript"`, and `"python"`. The settings apply to every version of a family.
+Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, `typescript` or `ts`, in any case. A `shell` or `bash` sample doesn't replace cURL.
 
-The code rail remembers the reader's language, not the exact sample: choosing a second Python sample opens the first Python sample on the next operation. A `?lang=` link opens the sample with that id, such as `python-2`, or the first sample in that language, such as `python`.
+The code rail remembers the reader's language, not the exact sample. A `?lang=` link opens the sample with that id, such as `python-2`, or the first in that language, such as `python`.
 
 ## Render prepared code in your own components
 

@@ -9,7 +9,7 @@ sidebar:
 
 A site with several products or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice is a static site of its own; your host routes each slice's path prefix to it, so visitors see one hostname.
 
-The unit is a collection. A product's guides are a collection with its own route prefix, the API reference is a collection, and so is any part you keep separate. Set the collections up first as you would without slices: a product's guides are a [new collection](/writing/collections) with its own route and sidebar entry, an API is an [API reference](/api-reference/openapi/setup).
+The unit is a collection: a product's guides, an API reference, or any part you keep separate. Set the collections up first as you would without slices, as a [new collection](/writing/collections) or an [API reference](/api-reference/openapi/setup).
 
 ## Build a slice
 
@@ -48,11 +48,18 @@ Any other slice writes its site-wide files under its prefix, where its own deplo
 
 A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/sdk/…` for a page under `/sdk/`, and `/og/sdk.png` for the collection's index page, so the slice takes those too (below).
 
-The root slice's `llms.txt` lists every page collection's `llms.txt`, the absent ones included, so an agent reading the index finds every slice. An absent collection is named by its formatted name (`Sdk` for `sdk`; an API collection by its configured label), not by its index page's title, which that build doesn't read. Its sitemap index lists only its own files; the other slices' sitemaps are announced in `robots.txt` (below).
+The root slice's `llms.txt` links every collection's `llms.txt`, including the slices it didn't build, so agents find them all. A collection it didn't build is named from its collection name (`Sdk` for `sdk`) or its API label.
+
+Its sitemap index lists only its own files; `robots.txt` announces the other slices' sitemaps (below).
 
 ## Deploy each slice
 
-Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. A slice needs four paths: the prefix itself (`/sdk`, so the slashless form doesn't reach the root slice), everything under it (`/sdk/*`), its pages' OG images (`/og/sdk/*`) and its index page's OG image (`/og/sdk.png`). Everything else goes to the root slice. The most specific prefix wins; nothing merges at build time, and slices deploy in any order.
+Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. Everything else goes to the root slice, the most specific prefix wins, and slices deploy in any order. Each slice needs four paths:
+
+- the prefix itself, `/sdk`, so the slashless form doesn't reach the root slice;
+- everything under it, `/sdk/*`;
+- its pages' OG images, `/og/sdk/*`;
+- its index page's OG image, `/og/sdk.png`.
 
 A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and come from the root slice, so a change there deploys the root slice.
 
@@ -129,7 +136,11 @@ export default defineConfig({
 }
 ```
 
-The root slice's file has the same `assets` block and the routes `example.com/docs` and `example.com/docs/*`. With the adapter, Nimbus also copies the root slice's discovery files to the origin root (`/.well-known/…`, [Docs for agents](/ai/docs-for-agents#agent-discovery)): add `example.com/.well-known/*` to its routes if the origin root is yours, or serve those files from the site that owns it. Deploy every slice, the root one too, with `--config` (`npx wrangler deploy --config wrangler.jsonc`): without it, `wrangler deploy` uses the configuration the adapter generates instead of yours.
+The root slice's file has the same `assets` block and the routes `example.com/docs` and `example.com/docs/*`.
+
+The adapter also copies the root slice's [discovery files](/ai/agent-discovery) to the origin root. If the origin root is yours, add `example.com/.well-known/*` to its routes; otherwise serve them from the site that owns it.
+
+Deploy every slice, the root one too, with `npx wrangler deploy --config wrangler.jsonc`. Without `--config`, wrangler uses the adapter's generated configuration instead of yours.
 
 **A reverse proxy:** the same `location` blocks with `/docs` in front (`location /docs/sdk/ { proxy_pass https://sdk.internal; }`). `proxy_pass` without a path passes the request path through, base included, so each origin serves its slice under `/docs`.
 
@@ -208,7 +219,7 @@ A slice of several collections writes one bundle; the other collections' bundle 
 
 ## Links between slices
 
-A slice build knows only its own routes. To check links into the other slices, it reads `.nimbus/routes.json` from the previous build and keeps those slices' routes, so `nimbus-docs lint` still checks them, as warnings rather than errors, and says so once. Without a previous build, links into the other slices are skipped, with one notice. A whole-site build restores the full check.
+A slice build knows only its own routes. It keeps the other slices' routes from the previous build's `.nimbus/routes.json`, so `nimbus-docs lint` still checks links into them, as warnings. Without a previous build, those links are skipped with one notice. A whole-site build restores the full check.
 
 In CI, cache `.nimbus/routes.json` from the whole-site build of the base branch and restore it before a slice build; [Build only changed slices](/publish/changed-slices) shows the workflow.
 

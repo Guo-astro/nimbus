@@ -7,7 +7,9 @@ sidebar:
 ---
 
 <Aside type="note" title="Need">
-At work, looking something up — a value, an option, a limit, a name. The reader enters sideways (search, an anchor link, an agent's retrieval), grabs the fact, and leaves. Their opening question: *"What are the exact values?"* This recipe covers **prose-side reference** — config files, CLI flags, event types, limits, settings. API reference compiled from a spec is the other workstream; the two share the discipline: facts have one source, and the reader must predict the page's shape blind.
+At work, looking something up — a value, an option, a limit, a name. The reader enters sideways (search, an anchor link, an agent's retrieval), grabs the fact, and leaves. Their opening question: *"What are the exact values?"*
+
+This recipe covers **prose-side reference**: config files, CLI flags, event types, limits, settings. API reference built from a spec follows the same discipline: facts have one source, and the reader can predict the page's shape blind.
 </Aside>
 
 ## When to use it
@@ -58,7 +60,9 @@ Reference pages don't end — they stop after the last entry (plus the boilerpla
 
 ## Links & freshness
 
-Link each entry to the concept explaining it and the how-to exercising it *where they exist* — and keep entry anchors stable; reference anchors are the most-cited URLs on a docs site. Facts here have exactly one source: if entries duplicate values that live in code or schema, generate them — hand-maintained copies of machine truths are a reliable source of drift. Hand-maintained fact pages with no machine source (limits, quotas) carry a visible last-verified date (`lastVerified` in frontmatter); generated pages inherit their source's freshness.
+Link each entry to the concept explaining it and the how-to exercising it, *where they exist*. Keep entry anchors stable: they're the most-cited URLs on a docs site.
+
+Facts have exactly one source. If entries copy values that live in code or a schema, generate them, because hand-kept copies drift. Pages with no machine source, such as limits and quotas, carry a visible `lastVerified` date.
 
 ## Agent notes
 

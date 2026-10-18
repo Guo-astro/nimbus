@@ -41,7 +41,9 @@ Here, Nimbus removes `/v1` and publishes the operation at `/api/events/retrieve`
 
 Derivation recognizes `/<resource>` and `/<resource>/{parameter}` after prefix removal. It maps collection `GET`/`POST` to `list`/`create`, and member `GET`/`PUT`/`PATCH`/`DELETE` to `retrieve`/`update`/`update`/`delete`. Tags do not affect operation routes derived by either convention. Other shapes or unsupported method/shape combinations normally fall back to a normalized coordinate with a build warning; the build fails if that coordinate cannot produce a non-empty route.
 
-Tag pages follow the convention too. `resource-action-v2` publishes them at lowercase URLs: `/api/tags/locations` for the tag `Locations`, `/api/tags/user-management` for `User Management`. The earlier `resource-action-v1` derives the same operation routes but keeps a tag's own casing, `/api/tags/Locations` and `/api/tags/User-Management`. A tag's coordinate, `tags.Locations`, is the same under every convention. Each convention's rules are frozen: a change in routing ships as a new name, never as an edit to an existing one.
+Tag pages follow the convention too. `resource-action-v2` lowercases them, so `User Management` is at `/api/tags/user-management`. The earlier `resource-action-v1` keeps the tag's casing: `/api/tags/User-Management`. A tag's coordinate, such as `tags.Locations`, is the same under both.
+
+A convention never changes once released; new routing ships under a new name.
 
 An explicit operation override, keyed by the exact usable `operationId`, takes precedence and can preserve an existing URL or handle a path that cannot be derived:
 
@@ -60,7 +62,9 @@ Renaming a coordinate requires updating citations and affects cross-version matc
 
 ### Switching conventions
 
-Moving a collection from `resource-action-v1` to `resource-action-v2` changes its tag page URLs and nothing else. Adding `routes` to a collection that had none changes its operation URLs as well. Citations keep resolving, since they name coordinates. Add redirects on the deployment platform for the old `tags/<Tag>` URLs, and for the old operation URLs when they moved. Readers' open sidebar groups reset once, as after any deployment that changes hrefs. A version family may use a different convention per version; the version picker still pairs each page with its counterpart by coordinate.
+Moving from `resource-action-v1` to `resource-action-v2` changes only tag page URLs. Adding `routes` to a collection that had none changes operation URLs too. Citations keep working, since they name coordinates, but add redirects for the old URLs.
+
+Each version in a family can use a different convention; the version picker still pairs pages by coordinate.
 
 ### Coordinate shapes
 
@@ -79,7 +83,9 @@ Operations are not the only addressable items. Nimbus assigns coordinates to pag
 | Schema field (with schema pages on) | `Event.created_at` |
 | Webhook | `delivery.succeeded` |
 
-Request field lists leave out properties marked `readOnly` in every applicable schema alternative, and response field lists leave out those marked `writeOnly` likewise, so those fields have no coordinate there. Synthesized examples use the selected alternative; authored examples retain their values. A webhook's payload is sent by the API, so it follows the response rule. Cite a `readOnly` field where it appears, in the response; a citation to it under the request fails the build and, when a matching response field exists, names it.
+Request field lists leave out `readOnly` properties, and response field lists leave out `writeOnly` ones, so those fields have no coordinate there. A webhook's payload follows the response rule.
+
+Cite a `readOnly` field in the response, where it appears. A citation to it under the request fails the build and names the response field.
 
 Use `/nimbus-api/coordinates.json` to inspect the exact coordinates and resolved URLs published by a built site.
 

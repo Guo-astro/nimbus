@@ -51,7 +51,10 @@ These formats are defaults, not add-ons. The cost of being a dead end on the age
 
 ## Agentic authoring
 
-Adding Nimbus default components or features is done with `nimbus-docs add`. It works differently depending on what you're adding. Components and utilities copy as files — `registry:ui` and `registry:lib` slugs resolve their dependencies and land in your repo. Features hand off as prompts — a `registry:feature` slug is a markdown recipe the coding agent in your environment reads, adapts to your project, and applies.
+You add components and features with `nimbus-docs add`:
+
+- **Components and utilities** are copied into your repo as files, with their dependencies.
+- **Features** are recipes: Markdown your coding agent reads, adapts to your project, and applies.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add 404-page" />
 
@@ -91,9 +94,9 @@ Every Nimbus site already ships the formats agents read — a Markdown version o
 
 *Everyone made docs readable by agents. Nimbus makes docs writable, maintainable, and operable by them — end to end, on a codebase you fully own.*
 
-The precondition is the first principle on this page. When every file lives in your repo and nothing important hides behind an import boundary, an agent can do more than read your docs — it can change them safely, because it can see the whole of what it's touching. A vendor's themed runtime can be scraped by an agent; it can't be rewritten by one.
+This depends on the first principle on this page. When every file lives in your repo, an agent can change your docs safely, not just read them, because it sees everything it's touching. An agent can scrape a vendor's themed runtime, but it can't rewrite one.
 
-That's why features arrive as recipes rather than code you wire up by hand. `nimbus-docs add` detects when it's running inside a coding agent and pipes it a structured recipe — discover the project, confirm a plan, execute, then *verify the build still passes* and check whether the feature was already installed before touching a file. Installation stops being a copy-paste chore and becomes a conversation your agent owns from start to finish.
+That's why features arrive as recipes. When `nimbus-docs add` runs inside a coding agent, it hands over a recipe: check whether the feature is already there, discover the project, confirm a plan, apply it, and *verify the build still passes*. Your agent owns the install from start to finish.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add new-version" comment="inside a coding agent, the recipe pipes straight in" />
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add new-version --print | claude" comment="from a human shell, hand it to the agent of your choice" />
@@ -102,7 +105,9 @@ That's why features arrive as recipes rather than code you wire up by hand. `nim
 
 The moment agents start drafting pages, the question stops being *can a machine read this* and becomes *who wrote this, and has a human checked it.* Because you own the content collections, the answer lives in the schema you control — provenance is a few `schemaFields` away, not a convention bolted on top.
 
-The starter ships one such field. The default is inverted: agent-facing is assumed, so `audience: "human"` is the deliberate flag for a page written first for people. You extend the schema with more the same way — this site adds `aiGenerated` to mark a page an agent drafted but no human has reviewed yet, and the page-actions row surfaces an "awaiting review" label until someone signs off:
+The starter ships one such field. Pages are assumed to be for agents too, so `audience: "human"` marks a page written first for people.
+
+You add more fields the same way. This site adds `aiGenerated` for pages an agent drafted and no one has reviewed, and shows an "awaiting review" label until someone signs off:
 
 ```ts title="src/content.config.ts"
 import { z } from "astro/zod";
@@ -136,7 +141,7 @@ The docs become something an agent can keep correct over time — maintained and
 
 ## The tree is the truth
 
-There is no second config to maintain alongside your content. The directory structure under `src/content/` is the URL structure. The directory structure is also the sidebar. Move a file and its entry moves with it; delete a file and the entry disappears. Frontmatter handles the fine-grain knobs — order, badges, draft state — but the shape of the tree comes from the filesystem itself.
+There's no second config to keep in step with your content. The folders under `src/content/` are both the URLs and the sidebar: move a file and its entry moves, delete it and the entry goes. Frontmatter handles the details, such as order, badges and drafts.
 
 The result is a single source of truth for what pages exist. The site can't drift from its own contents, because its contents are the site.
 

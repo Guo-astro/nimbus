@@ -28,9 +28,16 @@ export const collections = {
 
 The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`.
 
-A page collection's files can live anywhere. A glob over a folder outside `src/` (a checkout of another repository, a shared folder in a monorepo) gets callouts, components, citations, links, collision checks and lint exactly as a page under `src/content` does. A loader with no files (a CMS) gets everything that reads the entry: routes, the sidebar, citations, links, Markdown versions, `llms.txt`, search and URL collision checks. Its pages are Markdown only, so no callouts or components, and `nimbus-docs lint` names the collection as not inspected. Such a loader must check its ids for duplicates before it writes, because without a file Nimbus can't tell a collision from an update. In a hand-written glob, two files with one slug fail the build, except a byte-identical copy, which Astro's glob never writes; the factories catch that too. For content in another repository or a CMS, see [Content from other sources](/content-sources/git).
+A page collection's files can live anywhere. For content in another repository or a CMS, see [Content from another repository](/content-sources/git).
 
-Page collections come from the helpers: a collection made with `docsCollection()`, `componentsCollection()`, or a `withNimbusMarkdown()`-wrapped loader becomes pages — routed, indexed, and included in search, the sitemap, `llms.txt`, and Markdown versions. Every other collection is plain Astro data: Nimbus doesn't route it, index it, check it, or fail on it, no wrapping is needed, and `getCollection()` works as in any Astro site. Collection names carry no meaning — there is no reserved `_` prefix. `apiCollection()` is the purpose-built exception for API references because Nimbus supplies its renderer.
+- **A folder outside `src/`**, such as a shared folder in a monorepo, works exactly like a page under `src/content`.
+- **A loader with no files**, such as a CMS, gets routes, the sidebar, citations, links, Markdown versions, `llms.txt` and search. Its pages are Markdown only, so no callouts or components, and lint skips it. It must reject duplicate ids itself, because without files Nimbus can't tell a collision from an update.
+
+Two files with the same slug fail the build.
+
+A collection made with `docsCollection()`, `componentsCollection()` or a `withNimbusMarkdown()` loader becomes pages: routed, and included in search, the sitemap, `llms.txt` and Markdown versions. `apiCollection()` does the same for API references, with Nimbus's renderer.
+
+Every other collection is plain Astro data. Nimbus leaves it alone, and `getCollection()` works as usual. Collection names carry no meaning.
 
 ## Collection URLs
 
@@ -77,6 +84,12 @@ const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL
 ---
 ```
 
-Moving a route moves every URL in that collection, whether it renders at build or on request. Add a redirect from the old URLs (see [Redirects](/navigation/redirects)). Until you do, `nimbus-docs lint` reports links to them as broken and suggests their new URL; after, turn on [`nimbus/redirected-link`](/writing/linting) to find the links still going through the redirect. In `astro dev`, moving a route file restarts the server onto the new URLs and logs the redirect to add. After that restart, Astro can stop showing content edits until you restart the dev server yourself; an `astro.config` edit does the same on a plain Astro site. A collection nested inside a docs folder appears inside that folder in the sidebar, and breadcrumbs and previous and next links follow (see [Show a collection inside a folder](/navigation/sidebar#show-a-collection-inside-a-folder)). A collection's own `llms.txt` at a nested URL needs the starter's nested section route, `src/pages/[...section]/llms.txt.ts`; the root `llms.txt` and the nearest section above it link to it. With a `[section]` route, the root `llms.txt` lists that collection's pages instead.
+Moving a route moves every URL in that collection, so add a [redirect](/navigation/redirects) from the old URLs. Until you do, `nimbus-docs lint` reports links to them as broken and suggests the new URL. Afterwards, [`nimbus/redirected-link`](/writing/linting) finds links still going through the redirect.
+
+In `astro dev`, moving a route file restarts the server and logs the redirect to add. After that restart, restart the dev server yourself if content edits stop showing.
+
+A collection nested inside a docs folder appears inside that folder in the sidebar, breadcrumbs and previous and next links; see [Show a collection inside a folder](/navigation/sidebar#show-a-collection-inside-a-folder).
+
+A nested collection's own `llms.txt` needs the starter's `src/pages/[...section]/llms.txt.ts` route. With a `[section]` route instead, the root `llms.txt` lists the collection's pages.
 
 The build and `nimbus-docs check` report collection routing mistakes with the file and the fix. See [Build and check findings](/reference/lint-rules#build-and-check-findings) for every code.

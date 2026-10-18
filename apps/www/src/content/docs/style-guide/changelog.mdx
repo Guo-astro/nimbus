@@ -8,7 +8,9 @@ sidebar:
 ---
 
 <Aside type="note" title="Need">
-At work, looking up — the reader maintains an integration that worked yesterday (the starved "Maintain" job). Their opening questions: *"What changed, does it break me, and what do I do about it?"* Docs that don't communicate change are wrong by next quarter, on a schedule — and for agents the stakes are higher still, because the changelog is where the model's stale priors get corrected.
+At work, looking up — the reader maintains an integration that worked yesterday. Their opening questions: *"What changed, does it break me, and what do I do about it?"*
+
+Docs that don't communicate change are wrong by next quarter. For agents the stakes are higher, because the changelog is where a model's stale knowledge gets corrected.
 </Aside>
 
 ## When to use it
@@ -46,7 +48,9 @@ Install the recipe — your coding agent reads the full skeleton and checklist a
 
 ## Ending
 
-A changelog doesn't end; it accumulates. The contract is at the *top* (policy link, subscription channels) and per-entry (links to the pages describing the new state). Published entries are never *silently* rewritten: if an entry turns out wrong — a breaking change went unflagged — amend the original entry *and* publish a dated correction entry, so both the version-scanning upgrader and the timeline reader see it.
+A changelog doesn't end; it accumulates. The contract sits at the *top* (policy link, subscription channels) and in each entry (links to the pages describing the new state).
+
+Never rewrite a published entry *silently*. If one turns out wrong, such as an unflagged breaking change, amend it *and* publish a dated correction, so readers scanning by version and by date both see it.
 
 ## Thresholds
 
@@ -56,7 +60,9 @@ A changelog doesn't end; it accumulates. The contract is at the *top* (policy li
 
 ## Links & freshness
 
-The changelog is the site's freshness layer — entries deep-link into stable doc anchors, which is one more reason reference anchors never move ([the reference recipe](/style-guide/reference)). Publishing an entry and updating the pages it links to is *one* act, not two: an entry announcing a field the reference doesn't show yet documents a product that doesn't exist. Entry headings are themselves permalinks other people cite — treat them with the same stability rule.
+Entries deep-link into stable doc anchors, one more reason [reference anchors](/style-guide/reference) never move. Entry headings are permalinks too, so keep them stable.
+
+Publishing an entry and updating the pages it links to is *one* act. An entry announcing a field the reference doesn't show yet documents a product that doesn't exist.
 
 ## Agent notes
 

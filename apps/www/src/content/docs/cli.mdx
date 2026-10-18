@@ -56,13 +56,25 @@ For `registry:ui` and `registry:lib` slugs, the CLI resolves dependencies, copie
   </Step>
 </Steps>
 
-If a component is already installed, `add` keeps your copy — it never clobbers files you own. A component whose files already match the registry is reported as up to date and left alone. Missing files are always added, and `add` lists every file it adds and every differing file it keeps. Pass `--overwrite` to replace files that differ with the registry version (the upgrade path). It lists every file it replaces, and in a terminal it asks first when you've edited the component, dependencies included. Without a terminal, such as an agent, CI or a pipe, there is nobody to ask, so edited components are kept and listed with the commands that replace them, and the command exits 1; `--overwrite --yes` replaces them and says how many carried edits. Edits are detected from the component's install record in `nimbus.json` or, for a component that came with the starter, from the starter release your site came from, downloaded from GitHub (set `GIGET_AUTH` to a GitHub token if it's rate-limited, or pass `--template-dir <path>` to compare against a local checkout offline). When neither is available, it asks in a terminal and keeps the files otherwise. Commit first, run it, and review the change with `git diff`:
+#### Already installed
+
+`add` never overwrites files you own. It adds missing files, keeps files that differ from the registry, and lists both. A component that already matches the registry is reported as up to date.
+
+#### Replace your copy
+
+`--overwrite` replaces files that differ with the registry version, and lists each one. In a terminal, it asks first if you've edited the component or its dependencies.
+
+Without a terminal, such as an agent, CI or a pipe, edited components are kept, listed with the command that replaces them, and the command exits `1`. `--overwrite --yes` replaces them and says how many had edits.
+
+`add` finds your edits from the install record in `nimbus.json`. For a component that came with the starter, it compares against your starter release, downloaded from GitHub. If that download is rate-limited, set `GIGET_AUTH` to a GitHub token, or pass `--template-dir <path>` to use a local checkout. With neither, it asks in a terminal and otherwise keeps the files.
+
+Commit first, run it, and review the change with `git diff`:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add badge --overwrite" />
 
 For `add`, `--yes` assents to prompts such as dependency installs but still keeps existing files. Use `--overwrite` when you actually mean "replace my files," and `--overwrite --yes` only when you've decided to discard your edits.
 
-Once installed, the component lives in your repo. Edit freely — there's no upstream API to break. Each `add` also appends an entry to your [`nimbus.json`](/project-structure) — slug, source registry, the registry release it came from, and a content hash — so later upgrades can track what you own.
+Once installed, the component is yours to edit; there's no upstream API to break. Each `add` records it in [`nimbus.json`](/project-structure) with its slug, registry, release and a content hash, so upgrades can tell what you changed.
 
 ### Features
 
@@ -83,7 +95,10 @@ Add the adapter for the host you deploy to: `adapter-cloudflare`, `adapter-netli
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
-`adapter-cloudflare` also adds request rendering when the Nimbus config has no explicit rendering policy. Existing policies are preserved; imported or ambiguous configurations receive a coding-agent handoff instead of a speculative rewrite. The command creates a server-compatible `wrangler.jsonc` when none exists or replaces an unchanged Nimbus static config; custom JSONC and alternate JSON/TOML configs stay untouched.
+`adapter-cloudflare` also does two things:
+
+- **Rendering policy.** It adds request rendering when the Nimbus config has none. An existing policy is kept, and an imported or ambiguous config gets a coding-agent handoff instead.
+- **`wrangler.jsonc`.** It writes a server-compatible one when none exists, or replaces an unchanged static one from Nimbus. A customized `wrangler.jsonc`, or a JSON or TOML config, is left alone.
 
 After completing the adapter install, expect:
 
@@ -100,7 +115,9 @@ export default defineConfig({
 });
 ```
 
-A coding agent running an adapter command gets the same edits as a shell. For `adapter-cloudflare` only, where the CLI can't edit safely but an agent can (no marked `output` block, a non-literal `output` value, a CommonJS or symlinked config, a failed write, or a Nimbus config imported from another file), it says why and prints a versioned recipe for the agent to finish, and exits `0`. Use `--print` to get that recipe without changing anything:
+A coding agent running an adapter command gets the same edits as a shell.
+
+Sometimes `adapter-cloudflare` can't edit the config safely: there's no marked `output` block, `output` isn't a literal, the config is CommonJS or a symlink, the write fails, or the Nimbus config is imported. It then says why, prints a recipe for your agent to finish the job, and exits `0`. `--print` prints that recipe without changing anything:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare --print | claude" />
 
@@ -120,7 +137,7 @@ Adds a content source: part of the site built from another git repository, a Not
 | `notion` | A Notion database. The agent installs `@notionhq/client` and `notion-to-md` and writes `src/loaders/notion.ts`. |
 | a URL | A provider's documentation: a guide for writing its loader, starting from that URL. |
 
-`add source` alone lists them. Like a feature, the guide goes to your coding agent: printed when one is detected or `--print` is passed, otherwise the command shows how to pipe it. `add source` writes no files: any code a source needs, the agent writes from the guide. A source's name on its own (`add notion`) points you to `add source notion`.
+`add source` alone lists them. Like a feature, the guide goes to your coding agent, and the agent writes any code the source needs; `add source` itself writes no files. A source's name on its own, such as `add notion`, points you to `add source notion`.
 
 ## `nimbus-docs init`
 
@@ -153,13 +170,16 @@ Existing projects without a reviewed baseline must provide the exact Nimbus vers
 pnpm nimbus-docs migrate --from PREVIOUS_VERSION
 ```
 
-Use `--dry-run` or `--diff` for a read-only plan, `--yes --json` for an agent-safe apply loop, and `--print` for a self-contained Markdown handoff. A computed Astro `srcDir` can be supplied explicitly with `--src-dir <relative-dir>`.
+| Flag | Effect |
+|---|---|
+| `--dry-run`, `--diff` | Show the plan without changing files. |
+| `--yes --json` | Apply and report as JSON, for agents. |
+| `--print` | Print the remaining work as one Markdown handoff for an agent. |
+| `--src-dir <relative-dir>` | Name Astro's `srcDir` when the config computes it. |
 
-Nimbus applies an edit only when it recognizes the source and can prove the change is safe. Customized or ambiguous code remains unchanged and is returned as a review task. `migrate --print` emits that task for any agent or workflow; Nimbus does not launch one itself.
+The output lists the version range, required reviews, planned diffs, blockers and errors. Files outside the reported scan aren't claimed as checked.
 
-Migration output includes the selected version range, required reviews, planned diffs, blockers, and errors. Files outside the reported scan boundary are not claimed as checked.
-
-Upgrade entries marked optional appear after required work in `migrate` and as informational Package API notes in `outdated`. They never stop a build. Some only describe an adoption step; others note a change the release makes on its own, such as newly published files, so read each one. Run `migrate --yes` to record them as reviewed when you are ready.
+Optional upgrade entries come after required work. They never stop a build, but read each one: some describe a change the release makes on its own, such as newly published files. `migrate --yes` records them as reviewed.
 
 After completing all reported work, explicitly confirm it and advance the committed reviewed baseline:
 
@@ -167,7 +187,11 @@ After completing all reported work, explicitly confirm it and advance the commit
 pnpm nimbus-docs migrate --from PREVIOUS_VERSION --yes
 ```
 
-Repeat `--from` only when the project has no recorded baseline. A clean rerun in a terminal asks before recording the reviewed version in `nimbus.json`. Without a terminal, such as in CI or an agent, `migrate` records it only with `--yes`. Nimbus never records completion while a detectable migration remains. A required review also stops the dev server; `astro dev` prints the reason, while `astro dev --background` reports only that the server exited before becoming ready, so run `astro dev logs` or `nimbus-docs check`, which names the review. Then run `outdated` to review user-owned starter and registry code, followed by `nimbus-docs check`, `astro check`, and the production build. The `migrate` output is the version-selected upgrade guide.
+Pass `--from` only when the project has no recorded baseline. In a terminal, `migrate` asks before recording the reviewed version in `nimbus.json`; without one, it records it only with `--yes`. It never records it while a migration remains.
+
+A pending required review also stops `astro dev`. With `astro dev --background`, the server only reports that it exited, so run `nimbus-docs check` to see which review.
+
+Next, run `outdated`, then `nimbus-docs check`, `astro check` and the production build.
 
 ### `nimbus-docs outdated`
 
@@ -175,11 +199,11 @@ The read-only "am I behind?" overview across package APIs, starter files, and re
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="outdated" />
 
-- **Package APIs** — points pending source migrations and version-selected reviews to `migrate`. Reviews that only concern API reference pages are skipped when `src/content.config.*` doesn't use `apiCollection` and imports only from Astro, Zod and Nimbus; if it imports anything else (your own files included) or can't be read, every review shows. It also says when a newer Nimbus release is out (looked up on npm; skipped when the lookup fails), and when nothing needs changing but the review isn't recorded yet.
-- **Registry components** — compares each recorded content hash against the current registry and classifies the recorded local footprint, and lists npm dependencies installed below the version a component needs, with the command to update them. Registry updates remain review-only because overwrite can also affect dependencies.
-- **Starter files** — compares your scaffolded `src/` files, plus `AGENT.md`, `CLAUDE.md`, and `tsconfig.json`, against the upstream `templates-v*` tag, including additions and removals. Because those files came from a tag that was never in your git history, plain `git diff` can't show this. Content files are hidden by default (`--all` to include them). Files every site rewrites, such as `package.json`, `wrangler.jsonc`, and `nimbus.json`, aren't compared; changes to them come through `migrate`.
+- **Package APIs** — pending migrations and reviews, which `migrate` handles. It also says when a newer Nimbus release is on npm. Reviews about API reference pages are skipped when `src/content.config.*` clearly doesn't use `apiCollection`.
+- **Registry components** — components that changed upstream, and npm dependencies older than a component needs, with the command to update them. Updates stay review-only, because overwriting can change dependencies too.
+- **Starter files** — your `src/` files, `AGENT.md`, `CLAUDE.md` and `tsconfig.json`, compared with the upstream `templates-v*` tag. `git diff` can't show this, because that tag was never in your history. Content files are hidden unless you pass `--all`. Files every site rewrites, such as `package.json`, `wrangler.jsonc` and `nimbus.json`, aren't compared.
 
-Pass `--json` for agent-readable findings; apart from the `newer-release` warning, they depend only on the project. `summary.packageApis` counts every migration and upgrade review, and `summary.requiredPackageApis` counts the required ones. `warnings` flags a compared starter that needs a newer package than the project has (`starter-needs-newer-package`), which also blocks `diff --apply`. Projects without complete `nimbus.json` provenance still receive Package API results and an explicit partial-coverage result.
+`--json` gives agent-readable findings. `summary.packageApis` counts every migration and review, and `summary.requiredPackageApis` the required ones. A `starter-needs-newer-package` warning means the newer starter needs a newer package than you have, and it blocks `diff --apply`. Without a complete `nimbus.json`, you still get the package API results, marked as partial.
 
 ### `nimbus-docs diff [file]`
 
@@ -188,11 +212,20 @@ Read-only detail for starter files — what you changed, and what changed upstre
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff" comment="every changed starter file" />
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro" comment="one file" />
 
-Each file is one of: **clean to pull** (upstream changed, you didn't), **added/removed upstream**, **hand-merge** (you both changed it), or **your changes** (you edited it, upstream didn't; `--apply` reports that there's nothing to pull and keeps your edits). For clean updates, additions, and removals, you can let the CLI apply one reviewed change:
+| Status | Meaning |
+|---|---|
+| clean to pull | Upstream changed it; you didn't. |
+| added or removed upstream | The file is new upstream, or gone. |
+| hand-merge | You both changed it. |
+| your changes | You changed it; upstream didn't. Nothing to pull. |
+
+For a clean update, addition or removal, the CLI can apply the change for one file:
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro --apply" />
 
-`--apply` is explicit and per-file, rejects symlink/path escapes, and rechecks the clean preimage or absence before writing — it never merges. It records the tag it took the file from in `nimbus.json` (`templatesTagByFile`), so later diffs compare that file from there. Review with `git diff` afterward. Pass `--to <templates-vX.Y.Z>` to target a specific tag, or `--template-dir <path>` to compare offline against a local checkout.
+`--apply` works one file at a time and never merges: it rechecks that the file is still unedited, then writes. It records the tag in `nimbus.json` (`templatesTagByFile`), so later diffs start from there. Review with `git diff` afterward.
+
+`--to <templates-vX.Y.Z>` compares against a specific tag, and `--template-dir <path>` against a local checkout.
 
 ## `nimbus-docs check`
 
@@ -222,7 +255,7 @@ Checks that couldn't run are listed as `notes` on their scope rather than as fin
 
 ## `nimbus-docs lint`
 
-Walks `src/content/`, and the folders of page collections that load from elsewhere (including [content sources](/content-sources/git)), runs each authoring rule you've enabled, prints diagnostics, and exits non-zero when any `error`-severity finding survives. The build is never gated by lint — drafts that fail lint still render under `astro dev`.
+Runs the authoring rules you've turned on over `src/content/`, and over collections that load from elsewhere, such as [content sources](/content-sources/git). It exits non-zero when an `error` finding remains. Lint never blocks the build.
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 
@@ -235,7 +268,9 @@ Flags — combine with `lint`:
 | `--fix` | apply auto-fixes in place |
 | `--quiet` | errors only, suppress warnings |
 
-Severity overrides live with the integration (`nimbus(config, { rules })`), and `astro build`, `astro dev` or `astro sync` writes them to `.nimbus/lint.json`. If you've changed the rules since, `lint` says so and asks you to run `astro sync`. Without that file, `lint` exits `1` and asks you to build first, unless `--rule` names a rule to run. In-file disables (`nimbusDisableRules` frontmatter, inline comments) work with no config.
+You set rules in the integration (`nimbus(config, { rules })`), and `astro build`, `astro dev` or `astro sync` writes them to `.nimbus/lint.json`. Without that file, `lint` exits `1` and asks you to build first, unless `--rule` names a rule. If the rules changed since, it asks you to run `astro sync`.
+
+`nimbusDisableRules` frontmatter and inline comments turn rules off in one file, with no config.
 
 `nimbus/internal-link` and `nimbus/redirected-link` need `astro build` to run first. Without the route list the build writes, lint exits `1` with an error on `.nimbus/routes.json`.
 

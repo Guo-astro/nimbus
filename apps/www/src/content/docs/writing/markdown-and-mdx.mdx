@@ -131,7 +131,9 @@ nimbus(config, {
 });
 ```
 
-With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` keep working when the heading text changes. A heading that ends in other `{…}` text, such as `## GET /accounts/{account_id}` in a `.md` file, is read as attributes too; leave the feature off if your headings end that way. A `.md` page's generated Markdown keeps the heading as you wrote it.
+With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` survive a heading change.
+
+A heading ending in other `{…}` text, such as `## GET /accounts/{account_id}`, is read as attributes too; leave the feature off if your headings end that way.
 
 Pages, generated Markdown, reusable snippets and `nimbus-docs lint` all read Markdown with the same features.
 
@@ -167,7 +169,9 @@ nimbus(config, {
 });
 ```
 
-Remark and rehype plugins passed to `mdx({ remarkPlugins, rehypePlugins })` have no effect: Nimbus parses Markdown with Sätteri, not unified, and nothing reports that they were skipped. Use `markdown.mdastPlugins` and `markdown.hastPlugins` in the Nimbus integration options instead. To keep a unified plugin you can't replace, set `markdown.processor` to a unified processor; Nimbus features that need Sätteri, such as admonitions, then need turning off, as described above.
+Remark and rehype plugins passed to `mdx()` silently do nothing, because Nimbus parses Markdown with Sätteri, not unified. Use `markdown.mdastPlugins` and `markdown.hastPlugins` instead.
+
+To keep a unified plugin you can't replace, set `markdown.processor` to a unified processor, and turn off features that need Sätteri, such as admonitions.
 
 ## Links under a deployment base
 

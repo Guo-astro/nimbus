@@ -7,7 +7,9 @@ sidebar:
 ---
 
 <Aside type="note" title="Need">
-At work, acting — recovering, not progressing. The reader has an error string or a symptom and will paste it into search (or their agent will). Their opening question: *"Why am I seeing this, and how do I make it stop?"* Errors are content, not exceptions — and this is the type where human search and agent retrieval align perfectly, because both match on the exact string.
+At work, acting — recovering, not progressing. The reader has an error string or a symptom and will paste it into search, or their agent will. Their opening question: *"Why am I seeing this, and how do I make it stop?"*
+
+Errors are content. Here human search and agent retrieval want the same thing, because both match on the exact string.
 </Aside>
 
 ## When to use it
@@ -29,7 +31,7 @@ It is not:
 
 ## Title & description
 
-- **Entry titles: the verbatim symptom — ideally the exact error message.** "Error: signature timestamp outside tolerance" beats "Signature problems" in search, in retrieval, and in a sidebar scan. Long messages: keep the distinctive substring, trimmed to roughly 70 characters, with ASCII `...` marking the cut. Message type ("Error:", "Warning:") stays in the title. Symptom-shaped entries without a message get observable phrasing: "Deliveries succeed but arrive twice."
+- **Entry titles: the verbatim symptom, ideally the exact error message.** "Error: signature timestamp outside tolerance" beats "Signature problems" everywhere. Trim long messages to the distinctive part, about 70 characters, marking the cut with `...`, and keep "Error:" or "Warning:". Without a message, describe what's observable: "Deliveries succeed but arrive twice."
 - **Page title:** "Troubleshooting *area*" — e.g. "Troubleshooting delivery."
 - **Description formula:** "Fixes for the common failures in *area*, by symptom."
 
@@ -58,7 +60,9 @@ Dedicated pages end with **Still stuck?** — the escalation path with a collect
 
 ## Links & freshness
 
-Every Cause links to the concept explaining the mechanism; every multi-step Fix links to (or is) a how-to. Feed this page from support requests and community questions — it's the one type whose backlog writes itself — and prune entries when the product fixes the underlying failure: a fix for a problem that no longer exists sends readers hunting for a setting that's gone. Stamp the page's `lastVerified` date when you sweep it against the current release.
+Every Cause links to the concept explaining it; every multi-step Fix links to, or is, a how-to.
+
+Feed this page from support requests and community questions. Prune entries once the product fixes the failure, or readers go hunting for a setting that's gone. Stamp `lastVerified` when you check the page against a release.
 
 ## Agent notes
 

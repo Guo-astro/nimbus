@@ -72,7 +72,7 @@ Content here.
 - **Docs pages use the starter's files as they are.** Layouts, components and styles match what the scaffolder generates; take changes from the starter rather than editing them here. www adds only the homepage (`src/home/`), the component catalog, and the `aiGenerated` label in page actions.
 - **Component pages** live in the `components` collection and render through `src/pages/components/[slug].astro` and the starter's `DocsLayout`. Their install state is computed from `registry/manifests.ts` and the starter manifest.
 - **`src/content/docs/ai/docs-for-agents.mdx` doesn't move.** The `nimbus-docs` package build copies that exact file, as raw text, into the npm package. Keep it free of components and partials.
-- **The new homepage is behind a switch.** Built with `WWW_HOMEPAGE=new`, `/` renders `src/home/HomePage.astro`; otherwise it's the docs index page. The homepage's files live in `src/home/`.
+- **The homepage is its own route.** `/` renders `src/home/HomePage.astro`, injected in `astro.config.ts`, so its styles stay off the docs pages. The homepage's files live in `src/home/`.
 
 ## Adding things
 

@@ -47,14 +47,13 @@ const moved = {
   ),
 };
 
-// The new homepage ships behind a switch: built with `WWW_HOMEPAGE=new`, `/` is
-// src/home/HomePage.astro, a route of its own so its styles stay off the docs
-// pages. Otherwise `/` is the docs collection's index page.
+// `/` is src/home/HomePage.astro, a route of its own so its styles stay off the
+// docs pages.
 const homepage = {
   name: "www-homepage",
   hooks: {
     "astro:config:setup": ({ injectRoute }: { injectRoute: (route: { pattern: string; entrypoint: string }) => void }) => {
-      if (process.env.WWW_HOMEPAGE === "new") injectRoute({ pattern: "/", entrypoint: "./src/home/HomePage.astro" });
+      injectRoute({ pattern: "/", entrypoint: "./src/home/HomePage.astro" });
     },
   },
 };

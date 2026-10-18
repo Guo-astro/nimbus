@@ -102,13 +102,21 @@ describe("the root page's index", () => {
   test("lists every operation and webhook exactly once", () => {
     const listed = indexRefs(root.index).map((ref) => ref.href);
     assert.equal(new Set(listed).size, listed.length, "no operation listed twice");
-    // The sidebar lists operations; webhooks are on the home and their own pages.
-    assert.deepEqual(
-      listed.filter((href) => !href.includes("/webhooks/")).sort(),
-      navOperations(getApiNav(model).items).sort(),
-    );
+    // The sidebar lists the same pages: operations, then webhooks in their own group.
+    assert.deepEqual(listed.sort(), navOperations(getApiNav(model).items).sort());
     assert.deepEqual(listed.filter((href) => href.includes("/webhooks/")), ["/shapes/webhooks/alert.created/"]);
     assert.equal(apiIndexRows(root.index).length, listed.length);
+  });
+
+  test("webhooks close the sidebar in their own group, open on a webhook's page", () => {
+    const last = (nav: { items: ApiNavItem[] }) => nav.items.at(-1)!;
+    const group = last(getApiNav(model));
+    assert.equal(group.label, "Webhooks");
+    assert.equal(group.href, undefined, "the group has no page of its own");
+    assert.deepEqual(group.children.map((c) => c.href), ["/shapes/webhooks/alert.created/"]);
+    const onHook = last(getApiNav(model, group.children[0]!.coordinate));
+    assert.equal(onHook.expanded, true);
+    assert.equal(onHook.children[0]!.active, true);
   });
 
   test("groups follow x-tagGroups, then the sections in no group", () => {

@@ -723,13 +723,13 @@ pre.astro-code .highlighted-word {
 		font-weight: 500;
 	}
 	/* A top-level group reads as a section heading, set apart from the loose
-	   pages above it. */
-	[data-nb-sidebar] .top-level > li + li:has(> details) {
+	   pages above it; consecutive groups keep the row spacing. */
+	[data-nb-sidebar] .top-level > li:not(:has(> details)) + li:has(> details) {
 		margin-top: 0.75rem;
 	}
 	[data-nb-sidebar] .top-level > li > details > summary {
 		color: var(--nb-foreground);
-		font-weight: 600;
+		font-weight: 500;
 	}
 }
 

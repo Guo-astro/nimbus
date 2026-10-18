@@ -44,7 +44,7 @@ const { class: cls = "" } = Astro.props;
     </div>
 
     <!-- The page, in a browser -->
-    <div class="absolute top-[349px] left-6 -right-6 -bottom-12 overflow-hidden rounded-xl border border-border bg-card shadow-(--www-shadow-float) sm:left-24 lg:top-24 lg:right-12 lg:left-auto lg:w-[42%]">
+    <div class="absolute top-[349px] left-12 -right-6 -bottom-12 overflow-hidden rounded-xl border border-border bg-card shadow-(--www-shadow-float) sm:left-24 lg:top-24 lg:right-12 lg:left-auto lg:w-[42%]">
       <div class="flex h-[45px] items-center gap-3 border-b border-border bg-muted/50 px-4">
         <span class="flex gap-1.5"><i class="size-2.5 rounded-full bg-border-strong"></i><i class="size-2.5 rounded-full bg-border-strong"></i><i class="size-2.5 rounded-full bg-border-strong"></i></span>
         <span class="hidden items-center gap-1 text-muted-foreground sm:flex"><Icon name="ph:caret-left" class="size-3.5" /><Icon name="ph:caret-right" class="size-3.5 opacity-40" /></span>
@@ -76,9 +76,9 @@ const { class: cls = "" } = Astro.props;
       <span class="flex min-w-0 items-center gap-1.5 truncate text-muted-foreground" data-check-status><Icon name="ph:circle-notch" class="hidden size-3.5 motion-safe:animate-spin" data-spin /><span data-check-text>Not run</span></span>
       <button type="button" data-act class={`${buttonVariants({ variant: "primary", size: "xs" })} ml-auto`}>Run checks</button>
     </div>
-    <ul class="mt-3 flex gap-1 sm:gap-1.5">
+    <ul class="mt-3 grid grid-cols-2 gap-1 sm:flex sm:gap-1.5">
       {checks.map(([id, label]) => (
-        <li class="group flex h-7 flex-auto items-center justify-center gap-1 rounded-md bg-muted px-1.5 text-[11px] sm:gap-1.5 sm:px-2 sm:text-[12px] text-muted-foreground transition-colors data-[state=pass]:text-foreground data-[state=warn]:bg-warning-muted data-[state=warn]:text-foreground" data-chip={id} data-state="idle">
+        <li class="group flex h-7 flex-auto items-center justify-center gap-1 rounded-md whitespace-nowrap bg-muted px-1.5 text-[11px] sm:gap-1.5 sm:px-2 sm:text-[12px] text-muted-foreground transition-colors data-[state=pass]:text-foreground data-[state=warn]:bg-warning-muted data-[state=warn]:text-foreground" data-chip={id} data-state="idle">
           <span class="grid size-3.5 shrink-0 place-items-center">
             <Icon name="ph:circle" class="size-3.5 group-data-[state=pass]:hidden group-data-[state=running]:hidden group-data-[state=warn]:hidden" />
             <Icon name="ph:circle-notch" class="hidden size-3.5 motion-safe:animate-spin group-data-[state=running]:block" />

@@ -346,20 +346,19 @@ const nodes = [
         <!-- 12 · API reference: pick an endpoint, the spec and the generated page move together -->
         <li class:list={[cell, span.api]} data-api>
           <div class={head}><h3 class={headTitle}>API reference</h3><p class={headDesc}>{compact ? "Generated from your OpenAPI spec, with Try it on every endpoint." : "From your OpenAPI spec. Every endpoint, generated."}</p></div>
-          <div class:list={[stage, "h-72"]}>
-            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:grid-cols-2"]}>
-              <div class="min-w-0 overflow-hidden border-r border-border">
-                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />openapi.yaml<span class="ml-auto hidden font-sans whitespace-nowrap text-muted-foreground/70 sm:inline"><span class="hidden pointer-fine:inline">Hover a path</span><span class="pointer-fine:hidden">Tap a path</span></span></div>
+          <div class:list={[stage, "h-[460px] sm:h-72"]}>
+            <div class:list={[win, "top-6 left-6 -right-8 -bottom-8 grid grid-rows-[auto_minmax(0,1fr)] sm:grid-cols-2 sm:grid-rows-none"]}>
+              <div class="min-w-0 overflow-hidden border-b border-border sm:border-r sm:border-b-0">
+                <div class="flex h-[33px] items-center gap-1.5 border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground"><Icon name="ph:file-text" class="size-3.5" />openapi.yaml<span class="ml-auto mr-8 font-sans whitespace-nowrap text-muted-foreground/70 sm:mr-0"><span class="hidden pointer-fine:inline">Hover a path</span><span class="pointer-fine:hidden">Tap a path</span></span></div>
                 <ol class="py-2 font-mono text-[12px] leading-5">
                   {specRows.map(({ n, text, ep, first }) => (<li class:list={["flex gap-3 px-3 data-[mark]:bg-accent", ep && "cursor-default outline-none"]} data-spec-line={n} data-ep={ep?.id} tabindex={first ? 0 : undefined} aria-label={first ? `Show ${ep!.method} ${ep!.path}` : undefined}><span class="w-4 shrink-0 text-right text-muted-foreground/70">{n}</span><span class="whitespace-pre text-foreground/80">{text}</span></li>))}
                 </ol>
-                <p class="px-3 text-[11px] leading-4 text-muted-foreground/70 sm:hidden"><span class="hidden pointer-fine:inline">Hover a path</span><span class="pointer-fine:hidden">Tap a path</span></p>
               </div>
               <div class="min-w-0">
                 <div class="flex h-[33px] items-center border-b border-border px-3 font-mono text-[11px] leading-4 text-muted-foreground">/api/<span data-api-slug>limits</span></div>
                 {specEndpoints.map((ep, i) => (
                   <div class:list={["p-4", compact && "pr-10 sm:pr-12"]} data-api-page={ep.id} hidden={i !== 0}>
-                    <p class="flex flex-wrap items-center gap-2 sm:flex-nowrap"><Badge variant={ep.variant} text={ep.method} class="font-mono" /><span class="font-mono text-[12px] leading-5">{ep.path}</span>{compact && <button type="button" data-api-send class={`${buttonVariants({ variant: "primary", size: "demo" })} ml-auto`}>Try it</button>}</p>
+                    <p class="flex items-center gap-2"><Badge variant={ep.variant} text={ep.method} class="font-mono" /><span class="font-mono text-[12px] leading-5">{ep.path}</span>{compact && <button type="button" data-api-send class={`${buttonVariants({ variant: "primary", size: "demo" })} ml-auto`}>Try it</button>}</p>
                     <p class="mt-2 text-[14px] leading-6 font-medium">{ep.summary}</p>
                     <p class="mt-3 text-[11px] leading-4 text-muted-foreground" data-api-params>Parameters</p>
                     <ul class="mt-1 border-t border-border text-[12px]" data-api-params>
@@ -700,7 +699,7 @@ const nodes = [
           await new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 300 + ms));
           $(page, "[data-api-ms]")!.textContent = `${ms} ms`;
           $$(page, "[data-api-params]").forEach((el) => { el.hidden = true; }); $(page, "[data-api-res]")!.hidden = false;
-          send.textContent = "Resend"; send.disabled = false;
+          send.textContent = "Send again"; send.disabled = false;
         });
       });
     }

@@ -94,7 +94,7 @@ test("a slice never fetches a source none of its collections reads, and never cr
     await assert.rejects(build(configure()), (error: Error) => {
       assert.match(error.message, /could not fetch source "b" \([^)]+\): [\s\S]+\. No snapshot of this repo, ref and path exists under \.nimbus\/sources\/b\/\./);
       assert.match(error.message, /\n {2}Read by: collection "sdk"\.\n/);
-      assert.match(error.message, /Give git a credential: https:\/\/nimbus-docs\.com\/writing\/content-sources\/#private-repositories/);
+      assert.match(error.message, /Give git a credential: https:\/\/nimbus-docs\.com\/content-sources\/git\/#private-repositories/);
       assert.doesNotMatch(error.message, /NIMBUS_BUILD_ONLY/);
       return true;
     });

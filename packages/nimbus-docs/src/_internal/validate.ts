@@ -918,7 +918,7 @@ export function validateNimbusConfig(
 
   throw new Error(
     `Invalid nimbus.config — fix these issues:\n${issues}\n\n` +
-      `See https://nimbus-docs.com/configuration/ for the full config schema.`,
+      `See https://nimbus-docs.com/reference/configuration/ for the full config schema.`,
   );
 }
 

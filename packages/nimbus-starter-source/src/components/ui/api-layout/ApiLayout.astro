@@ -204,7 +204,7 @@ if (versionStatus?.isHidden) {
     {/* With a rail, previous/next sits after it, so on narrow screens the
         samples come before it; from 90rem it returns under the body. */}
     {hasRail && nav.prevNext && (
-      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 2xl:px-16 min-[90rem]:col-start-1 min-[90rem]:row-start-2 min-[90rem]:-mt-12">
+      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 -mt-12 md:px-8 2xl:px-16 min-[90rem]:col-start-1 min-[90rem]:row-start-2">
         <Pagination prevNext={nav.prevNext} data-pagefind-ignore />
       </div>
     )}

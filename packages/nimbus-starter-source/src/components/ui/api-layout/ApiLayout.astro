@@ -175,7 +175,7 @@ if (versionStatus?.isHidden) {
           </div>
         )}
         <ApiBody page={page} version={version} home={home} />
-        {nav.prevNext && <Pagination prevNext={nav.prevNext} data-pagefind-ignore />}
+        {nav.prevNext && !hasRail && <Pagination prevNext={nav.prevNext} data-pagefind-ignore />}
       </div>
     </main>
 
@@ -190,7 +190,7 @@ if (versionStatus?.isHidden) {
     )}
 
     {hasRail && (
-      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 min-[90rem]:mx-0 min-[90rem]:max-w-none min-[90rem]:sticky min-[90rem]:top-14 min-[90rem]:h-[calc(100vh-3.5rem)] min-[90rem]:w-[29rem] min-[90rem]:shrink-0 min-[90rem]:overflow-y-auto min-[90rem]:pt-8 min-[90rem]:pe-6 min-[90rem]:pb-8 min-[90rem]:ps-1 2xl:w-(--nb-code-rail-width)">
+      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 min-[90rem]:col-start-2 min-[90rem]:row-span-2 min-[90rem]:row-start-1 min-[90rem]:mx-0 min-[90rem]:max-w-none min-[90rem]:sticky min-[90rem]:top-14 min-[90rem]:h-[calc(100vh-3.5rem)] min-[90rem]:w-[29rem] min-[90rem]:shrink-0 min-[90rem]:overflow-y-auto min-[90rem]:pt-8 min-[90rem]:pe-6 min-[90rem]:pb-8 min-[90rem]:ps-1 2xl:w-(--nb-code-rail-width)">
         <ApiCodeRail
           responses={page.responses}
           samples={page.samples}
@@ -198,6 +198,14 @@ if (versionStatus?.isHidden) {
           method={page.method}
           coordinate={page.coordinate}
         />
+      </div>
+    )}
+
+    {/* With a rail, previous/next sits after it, so on narrow screens the
+        samples come before it; from 90rem it returns under the body. */}
+    {hasRail && nav.prevNext && (
+      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 2xl:px-16 min-[90rem]:col-start-1 min-[90rem]:row-start-2 min-[90rem]:-mt-12">
+        <Pagination prevNext={nav.prevNext} data-pagefind-ignore />
       </div>
     )}
   </div>

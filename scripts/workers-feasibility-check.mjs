@@ -1022,7 +1022,7 @@ function assertWorkerPurityScanner() {
 
 /** The picker's links on a page: href plus whether it is the active entry.
  *  By default, the copy ApiLayout mounts in its mobile drawer. */
-function pickerLinks(html, marker = "data-mobile-sidebar", end = "</section>") {
+function pickerLinks(html, marker = "data-feasibility-picker-header", end = "data-feasibility-picker-end") {
   const start = html.search(new RegExp(`${marker}[\\s>]`));
   assert(start !== -1, "query-mode page is missing the version picker");
   const region = html.slice(start, html.indexOf(end, start));
@@ -1060,6 +1060,7 @@ async function verifyQueryVersions(site, baseConfig) {
   mkdirSync(join(site, "src/pages/qapi"), { recursive: true });
   writeFileSync(join(site, "src/pages/qapi/[...slug].astro"), `---
 import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import Header from "@/components/Header.astro";
 import { ApiLayout } from "@/components/ui/api-layout";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
@@ -1073,6 +1074,12 @@ const { page, nav, collection, version, coordinate } = result;
 ---
 
 <BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref}>
+  <Header showSidebar collection={collection}>
+    <div slot="actions" data-feasibility-picker-header>
+      <VersionSwitcher apiCollection={collection} apiVersion={version} coordinate={coordinate} />
+      <i data-feasibility-picker-end></i>
+    </div>
+  </Header>
   <nav data-feasibility-picker-no-coordinate>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
   </nav>
@@ -1115,8 +1122,8 @@ const { page, nav, collection, version, coordinate } = result;
     const page = async (route) => {
       const { response, html } = await request(origin, route);
       assert(response.status === 200, `${route} returned ${response.status}`);
-      // ApiLayout's two copies (rail and drawer) plus the fixture's own.
-      assert(html.split('aria-label="Versions"').length - 1 === 3, `${route} should render the picker in the rail and the drawer`);
+      // The header's picker, as the API recipe mounts it, plus the fixture's own.
+      assert(html.split('aria-label="Versions"').length - 1 === 2, `${route} should render the picker in the header`);
       // Not inside the tree: its scroll restore finds the current page by aria-current.
       const tree = html.slice(html.search(/data-nb-api-tree[\s>]/), html.indexOf("</aside>"));
       assert(!tree.includes('aria-label="Versions"'), `${route} renders the picker inside the sidebar tree`);

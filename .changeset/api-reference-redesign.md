@@ -5,7 +5,7 @@
 
 A redesigned API reference:
 
-- The API home lists every endpoint, grouped by `x-tagGroups`, with a filter; large specs load in parts as you scroll. The API route serves the later parts at `/api/index/2/` and on, `noindex` and left out of the sitemap and search; it takes the part size as `homeChunkSize` in `getApiStaticPaths` or `getApiRoute`, and `getApiRoute` returns the parts as `home`.
+- The API home lists every endpoint, grouped by `x-tagGroups`, with a filter; large specs load in parts as you scroll. The API route serves the later parts at `/api/index/2/` and on, `noindex` and left out of the sitemap and search; it takes the part size as `homeChunkSize` in both `getApiStaticPaths` and `getApiRoute` (without it, the home is one page), and `getApiRoute` returns the parts as `home`.
 - Section pages list their endpoints name first, with the method and path beneath.
 - The API version picker sits in the header, at every width.
 - Code rail lines sit on whole pixels, with quieter line numbers; section titles are in full ink.

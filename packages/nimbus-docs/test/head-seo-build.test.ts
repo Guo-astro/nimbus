@@ -114,6 +114,10 @@ test("head and sitemap: measured og:image sizes, 404 noindex, lastmod, /sitemap.
   await withSite("nimbus-head-", async (root, write) => {
     await write("public/og4.png", pngBytes(987, 555));
     await write("public/og/hero.png", pngBytes(800, 800));
+    await write(
+      "src/content/docs/inject.mdx",
+      '---\ntitle: Inject\ndescription: "a </script><script>window.injected = 1</script> b"\n---\nInject.\n',
+    );
     commitAll(root);
     __resetLastUpdatedForTests();
     await build({
@@ -157,6 +161,12 @@ test("head and sitemap: measured og:image sizes, 404 noindex, lastmod, /sitemap.
     const sized = await dist("sized/index.html");
     assert.equal(ogWidth(sized), "1600");
     assert.equal(ogHeight(sized), "900");
+
+    // a description can't close the structured data's script
+    const inject = await dist("inject/index.html");
+    const jsonLd = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(inject)![1]!;
+    assert.doesNotMatch(jsonLd, /</);
+    assert.equal(JSON.parse(jsonLd).description, "a </script><script>window.injected = 1</script> b");
 
     // 404: one site name in the title, noindex, canonical untouched
     const notFound = await dist("404.html");

@@ -245,12 +245,13 @@ export interface ApiHome {
   listHref?: string;
 }
 
-/** The home's view for part `number`, or `null` when the list has no such part. */
+/** The home's view for part `number`, or `null` when the list has no such part.
+ *  Without `size`, the whole list is one part. */
 export function apiHome(
   index: ApiRootIndex,
   options: { homeHref: string; part: number; size?: number; listHref?: string },
 ): ApiHome | null {
-  const chunks = chunkApiIndex(index, { size: options.size });
+  const chunks = chunkApiIndex(index, { size: options.size ?? Infinity });
   const part = chunks[options.part - 1];
   if (!part) return null;
   return {

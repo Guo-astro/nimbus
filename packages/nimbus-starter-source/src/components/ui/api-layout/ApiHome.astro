@@ -28,7 +28,7 @@ const base = import.meta.env.BASE_URL;
 const grouped = page.index.groups.some((group) => group.label !== null);
 const later = (home?.parts ?? []).slice(1).map((part) => ({
   href: withBase(part.href, base),
-  label: `Endpoints ${part.start}–${part.end} of ${home!.total}`,
+  label: `endpoints ${part.start}–${part.end} of ${home!.total}`,
 }));
 const rows = apiIndexRows(page.index);
 const methods = [...new Set(rows.map(([method]) => method.toUpperCase()))];

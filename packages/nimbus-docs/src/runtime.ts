@@ -1650,7 +1650,7 @@ export function getApiStaticPaths(
         ...(homeChunkSize === undefined ? {} : { homeChunkSize }),
       };
       paths.push({ params: { slug: entry.id === "index" ? undefined : entry.id }, props });
-      if (data.coordinate !== collection) continue;
+      if (homeChunkSize === undefined || data.coordinate !== collection) continue;
       // The home's later parts, each a page of its own.
       const { page } = await renderApiEntry(undefined, collection, props.version, collection, entry);
       if (page.kind !== "api") continue;
@@ -1665,8 +1665,9 @@ export function getApiStaticPaths(
   };
 }
 
-/** How the API home splits its list: `homeChunkSize` endpoints per part (150
- *  unless set). Pass the same value the starter's `ApiHome` shows. */
+/** How the API home splits its list: `homeChunkSize` endpoints per part.
+ *  Without it, the home lists every endpoint on one page. A built route passes
+ *  the same value to `getApiStaticPaths` and `getApiRoute`. */
 export interface ApiHomeOptions {
   homeChunkSize?: number;
 }
@@ -1849,7 +1850,13 @@ async function resolveApiRoute(
   let home: ApiRouteProps["home"];
   if (page.kind === "api") {
     const { apiHome } = await import("./_internal/api/home-index.js");
-    const size = (astro.props as { homeChunkSize?: number }).homeChunkSize ?? options.homeChunkSize;
+    const props = astro.props as { coordinate?: string; homeChunkSize?: number };
+    const size = options.homeChunkSize;
+    if (props.coordinate !== undefined && props.homeChunkSize !== size) {
+      throw new Error(
+        `nimbus-docs: the API home's homeChunkSize is ${props.homeChunkSize ?? "unset"} in getApiStaticPaths("${collection}") but ${size ?? "unset"} in getApiRoute. Pass API_HOME_CHUNK_SIZE to both, as the api-reference recipe's route does.`,
+      );
+    }
     home = apiHome(page.index, { homeHref: page.href, part: homePart ?? 1, size, listHref: listHref(apiLists) }) ?? undefined;
     if (!home && homePart) return proseResolutionResponse(astro, { status: "not-found" });
   }

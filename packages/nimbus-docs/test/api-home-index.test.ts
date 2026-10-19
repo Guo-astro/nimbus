@@ -337,8 +337,9 @@ describe("the home's later parts", () => {
     assert.equal(apiHome(empty, { homeHref: "/api/", part: 1 }), null);
   });
 
-  test("without a size, parts hold 150 endpoints", () => {
-    const home = apiHome({ ...empty, operations: refs(151) }, { homeHref: "/api/", part: 1 })!;
-    assert.deepEqual(home.parts.map((part) => part.end), [150, 151]);
+  test("without a size, the whole list is one part", () => {
+    const index = { ...empty, operations: refs(400) };
+    assert.deepEqual(apiHome(index, { homeHref: "/api/", part: 1 })!.parts.map((part) => part.end), [400]);
+    assert.equal(apiHome(index, { homeHref: "/api/", part: 2 }), null);
   });
 });

@@ -240,7 +240,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 export const prerender = true;
 export const getStaticPaths = getApiStaticPaths("api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 
-const result = await getApiRoute(Astro);
+const result = await getApiRoute(Astro, { homeChunkSize: API_HOME_CHUNK_SIZE });
 if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate, home } = result;
 // A later part of the API home's list: a page of its own, kept out of search.
@@ -290,11 +290,10 @@ scrolls, and a reader without script walks them as ordinary pages. They're
 `noindex` and left out of the sitemap and search. The filter reads the
 version's page list, which Nimbus writes; there's no route to add.
 
-The route passes the size to `getApiStaticPaths`, which builds one page per
-part. A route rendered on request has no `getStaticPaths`, so it passes the
-size to `getApiRoute` instead: `getApiRoute(Astro, { homeChunkSize:
-API_HOME_CHUNK_SIZE })`. Without it, parts hold 150 endpoints, the starter's
-default.
+The route passes the size to both `getApiStaticPaths`, which builds one page
+per part, and `getApiRoute`, which reads it when the route renders on request.
+A built route fails the build if the two differ. Without it, the home lists every endpoint on
+one page.
 
 ## 5. Optional — add to the sidebar
 

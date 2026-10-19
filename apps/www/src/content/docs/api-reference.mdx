@@ -344,7 +344,7 @@ Every group page lists its operations and its subsections, and the [API home](#t
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add api-layout" />
 
-For each component already in your project whose copy differs from the registry, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` replaces every component `api-layout` uses that you haven't edited, including the docs sidebar, and asks about the ones you have; without a terminal it keeps those and lists them, and `--overwrite --yes` replaces them too. If your docs sidebar predates 0.19, replace the "Sidebar rows" section of `src/styles/globals.css` with the one from 0.19 in the same change, or the docs sidebar loses its styling.
+For each component already in your project whose copy differs from the registry, it asks whether to overwrite it. Choose **Overwrite** for `api-layout` and `api-sidebar`, which replaces your edits to those two, and **Skip** for the rest to keep yours. `--overwrite` replaces every component `api-layout` uses that you haven't edited, including the docs sidebar, and asks about the ones you have; without a terminal it keeps those and lists them, and `--overwrite --yes` replaces them too. These components use the 0.19 starter's styles, so a site scaffolded before 0.19.0 adopts the redesigned starter first; `nimbus-docs migrate` lists its steps.
 
 Components come from the registry on nimbus-docs.com, which is updated shortly after each release. If `add` warns that the registry is older than your project, the new components aren't published yet: keep `sidebar: "full"` and try again later.
 

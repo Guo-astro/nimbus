@@ -14,6 +14,7 @@ import {
   selectApiVersion,
   type ApiQueryRouting,
 } from "./api/resolve-versions.js";
+import { parseApiHomePart } from "./api/home-index.js";
 import { entryRouteKey } from "./astro-slug.js";
 import { toRouteKey } from "./url.js";
 
@@ -39,6 +40,8 @@ export interface ApiPage {
   collection: string;
   version: string | null;
   coordinate: string;
+  /** The part of the API home's list a `<home>/index/<n>/` URL names. */
+  homePart?: number;
 }
 
 export type PageResolution<
@@ -263,12 +266,17 @@ export async function resolveApiPage(
     typeof context.props.version === "string" ? context.props.version : null;
   let coordinate = staticCoordinate;
   let entry = context.props.entry as CollectionEntry<string> | undefined;
+  // A built part names itself in its props; only a request parses its URL.
+  let homePart =
+    typeof context.props.homePart === "number" ? context.props.homePart : undefined;
 
   if (hasStaticIdentity && !entry) {
+    const slugId = normalizedPageId(context.params.slug);
+    const id = homePart ? (parseApiHomePart(slugId)?.homeId ?? slugId) : slugId;
     entry =
       (await dependencies.getVisibleEntry(
         collection!,
-        normalizedPageId(context.params.slug),
+        id,
         context.projection,
       )) ?? undefined;
     if (!entry) return { status: "not-found" };
@@ -290,54 +298,58 @@ export async function resolveApiPage(
     // the id "v2/foo", finds the v2 entry, sees the mismatch, and 404s.
     const queryRouting =
       (await dependencies.getApiQueryRouting?.(collection)) ?? null;
+    const selected = queryRouting
+      ? selectApiVersion(context.url.searchParams, queryRouting)
+      : undefined;
+    if (selected === null) return { status: "not-found" };
+    const find = async (pageId: string) => {
+      const storeId =
+        !queryRouting || selected === queryRouting.defaultVersion
+          ? pageId
+          : pageId === "index"
+            ? selected!
+            : `${selected}/${pageId}`;
+      const found = await dependencies.getVisibleEntry(
+        collection!,
+        storeId,
+        context.projection,
+      );
+      if (!found) return undefined;
+      const foundVersion =
+        typeof found.data.version === "string" ? found.data.version : null;
+      if (queryRouting && foundVersion !== selected) return undefined;
+      return found;
+    };
+
+    // A page's own URL wins: `index` is reserved only at the top, so an
+    // operation can end in `…/index/2`.
+    entry = await find(id);
+    if (!entry) {
+      const part = parseApiHomePart(id);
+      const home = part ? await find(part.homeId) : undefined;
+      if (!home || home.data.coordinate !== collection) return { status: "not-found" };
+      entry = home;
+      homePart = part!.part;
+    }
+    coordinate =
+      typeof entry.data.coordinate === "string"
+        ? entry.data.coordinate
+        : undefined;
+    version = queryRouting
+      ? selected!
+      : typeof entry.data.version === "string"
+        ? entry.data.version
+        : null;
+    if (!coordinate) return { status: "not-found" };
     if (queryRouting) {
-      const selected = selectApiVersion(context.url.searchParams, queryRouting);
-      if (selected === null) return { status: "not-found" };
-      const isDefault = selected === queryRouting.defaultVersion;
-      const storeId = isDefault
-        ? id
-        : id === "index"
-          ? selected
-          : `${selected}/${id}`;
-      entry =
-        (await dependencies.getVisibleEntry(
-          collection,
-          storeId,
-          context.projection,
-        )) ?? undefined;
-      if (!entry) return { status: "not-found" };
-      const entryVersion =
-        typeof entry.data.version === "string" ? entry.data.version : null;
-      if (entryVersion !== selected) return { status: "not-found" };
-      coordinate =
-        typeof entry.data.coordinate === "string"
-          ? entry.data.coordinate
-          : undefined;
-      version = selected;
-      if (!coordinate) return { status: "not-found" };
       const legacy = legacyVersionLocation(context.url, queryRouting.param);
       if (legacy)
         return { status: "redirect", location: legacy, permanent: true };
-    } else {
-      entry =
-        (await dependencies.getVisibleEntry(
-          collection,
-          id,
-          context.projection,
-        )) ?? undefined;
-      if (!entry) return { status: "not-found" };
-
-      coordinate =
-        typeof entry.data.coordinate === "string"
-          ? entry.data.coordinate
-          : undefined;
-      version =
-        typeof entry.data.version === "string" ? entry.data.version : null;
-      if (!coordinate) {
-        return { status: "not-found" };
-      }
     }
   }
+
+  // Only the API home has later parts.
+  if (homePart && coordinate !== collection) return { status: "not-found" };
 
   const rendered = await dependencies.render(
     collection!,
@@ -357,6 +369,7 @@ export async function resolveApiPage(
       collection: collection!,
       version,
       coordinate: coordinate!,
+      ...(homePart ? { homePart } : {}),
     },
   };
 }

@@ -1,6 +1,7 @@
 // The API home's index: every operation and webhook listed exactly once, in
 // x-tagGroups order, with anchors that never collide; and its chunks, which
-// never exceed their bound however the spec is shaped.
+// never exceed their bound however the spec is shaped; and the later parts
+// URLs, each a page of its own under the home.
 
 import assert from "node:assert/strict";
 import { before, describe, test } from "node:test";
@@ -17,7 +18,15 @@ import {
   type ApiRootPage,
   type ApiSectionPage,
 } from "../src/api/index.js";
-import { apiIndexRows, chunkApiIndex, type ApiIndexChunk } from "../src/_internal/api/home-index.js";
+import {
+  apiHome,
+  apiHomePartHref,
+  apiIndexRows,
+  chunkApiIndex,
+  parseApiHomePart,
+  type ApiIndexChunk,
+} from "../src/_internal/api/home-index.js";
+import { setLinkPolicy } from "../src/_internal/url.js";
 import { coordinateAnchor } from "../src/_internal/api/view-model.js";
 
 const ok = { "200": { description: "ok" } };
@@ -282,5 +291,54 @@ describe("chunkApiIndex", () => {
       chunkApiIndex({ groups: [{ label: null, anchor: "more", operations: [], sections: [section("Empty", [])] }], operations: [], webhooks: [] }),
       [],
     );
+  });
+});
+
+describe("the home's later parts", () => {
+  test("a part's id names its home and number; anything else is no part", () => {
+    assert.deepEqual(parseApiHomePart("index/2"), { homeId: "index", part: 2 });
+    assert.deepEqual(parseApiHomePart("v2/index/12"), { homeId: "v2", part: 12 });
+    for (const id of ["index", "index/1", "index/0", "index/02", "index/two", "charges/index", "index/2/more"])
+      assert.equal(parseApiHomePart(id), null, id);
+  });
+
+  test("a part's URL follows the site's trailing slash", (t) => {
+    t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+    setLinkPolicy({ trailingSlash: "never", format: "directory" });
+    assert.equal(apiHomePartHref("/api", 2), "/api/index/2");
+    assert.equal(apiHomePartHref("/api?version=v2", 2), "/api/index/2?version=v2");
+    setLinkPolicy({ trailingSlash: "always", format: "directory" });
+    assert.equal(apiHomePartHref("/api/", 2), "/api/index/2/");
+  });
+
+  test("a part's URL sits under the home, keeping a version query", () => {
+    assert.equal(apiHomePartHref("/api/", 1), "/api/");
+    assert.equal(apiHomePartHref("/api/", 2), "/api/index/2/");
+    assert.equal(apiHomePartHref("/api/v2/", 3), "/api/v2/index/3/");
+    assert.equal(apiHomePartHref("/api/?version=v2", 2), "/api/index/2/?version=v2");
+    assert.equal(apiHomePartHref("/", 2), "/index/2/");
+  });
+
+  test("the home view links every part and shows the one asked for", () => {
+    const index: ApiRootIndex = { ...empty, operations: refs(320) };
+    const home = apiHome(index, { homeHref: "/api/", part: 2, size: 150, listHref: "/_nimbus/pages/nav-x.json" })!;
+    assert.equal(home.part.number, 2);
+    assert.equal(home.total, 320);
+    assert.equal(home.listHref, "/_nimbus/pages/nav-x.json");
+    assert.deepEqual(
+      home.parts.map(({ number, start, end, href }) => [number, start, end, href]),
+      [
+        [1, 1, 150, "/api/"],
+        [2, 151, 300, "/api/index/2/"],
+        [3, 301, 320, "/api/index/3/"],
+      ],
+    );
+    assert.equal(apiHome(index, { homeHref: "/api/", part: 4, size: 150 }), null);
+    assert.equal(apiHome(empty, { homeHref: "/api/", part: 1 }), null);
+  });
+
+  test("without a size, parts hold 150 endpoints", () => {
+    const home = apiHome({ ...empty, operations: refs(151) }, { homeHref: "/api/", part: 1 })!;
+    assert.deepEqual(home.parts.map((part) => part.end), [150, 151]);
   });
 });

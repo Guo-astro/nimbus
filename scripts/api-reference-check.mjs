@@ -649,8 +649,6 @@ async function assertRecipeFixtureParity() {
   const recipe = await readFile(API_REFERENCE_RECIPE, "utf8");
   for (const [path, language] of [
     ["src/pages/api/[...slug].astro", "astro"],
-    ["src/pages/nimbus-api/home/api/[version]/[chunk].astro", "astro"],
-    ["src/pages/nimbus-api/home/api/[version]/index.json.ts", "ts"],
   ]) {
     const fixtureSource = await readFile(join(OVERLAY, path), "utf8");
     const fixture = fixtureSource.endsWith("\n")
@@ -674,8 +672,6 @@ async function applyOverlay() {
     "astro.config.ts",
     "src/content.config.ts",
     "src/pages/api/[...slug].astro",
-    "src/pages/nimbus-api/home/api/[version]/[chunk].astro",
-    "src/pages/nimbus-api/home/api/[version]/index.json.ts",
   ];
   for (const file of files) {
     const target = join(site, file);
@@ -683,6 +679,11 @@ async function applyOverlay() {
     await cp(join(OVERLAY, file), target);
   }
   await forceTrailingSlash(join(site, "astro.config.ts"));
+  // Two endpoints a part, so the small spec builds the home's later parts.
+  const homeSize = join(site, "src", "components", "ui", "api-layout", "home.ts");
+  const homeSource = await readFile(homeSize, "utf8");
+  assert(homeSource.includes("API_HOME_CHUNK_SIZE = 150"), "api-layout/home.ts no longer sets API_HOME_CHUNK_SIZE = 150");
+  await writeFile(homeSize, homeSource.replace("API_HOME_CHUNK_SIZE = 150", "API_HOME_CHUNK_SIZE = 2"));
   await mkdir(join(site, "src", "api"), { recursive: true });
   await cp(SPEC, join(site, "src", "api", "smallco.yaml"));
   await writeFile(
@@ -920,12 +921,14 @@ async function startStaticServer(dist) {
 async function assertArtifactsAndSmoke(dist) {
   const expectedRoutes = EXPECTED.pages.map((page) => page.route).sort();
   const apiFiles = await walk(join(dist, "api"));
-  const htmlRoutes = apiFiles
+  const isHomePart = (route) => /^\/api\/index\/\d+$/.test(route);
+  const allHtmlRoutes = apiFiles
     .filter((file) => file.endsWith(`${sep}index.html`))
     .map((file) =>
       normalizeRoute(`/${relative(dist, dirname(file)).split(sep).join("/")}`),
     )
     .sort();
+  const htmlRoutes = allHtmlRoutes.filter((route) => !isHomePart(route));
   const markdownRoutes = apiFiles
     .filter((file) => file.endsWith(`${sep}index.md`))
     .map((file) =>
@@ -975,20 +978,42 @@ async function assertArtifactsAndSmoke(dist) {
     titleOf(operationHtml)?.includes(" · API |"),
     "API leaf page titles must end with \" · API\"",
   );
-  // The API home lists every endpoint, name first, and its filter reads a
-  // list of every endpoint. An unversioned API shows no version picker.
-  const overviewHtml = await readFile(join(dist, "api", "index.html"), "utf8");
+  // The home's later parts: pages of their own under the API route, linked in
+  // order from the home, kept out of search and the sitemap.
+  const homeParts = allHtmlRoutes.filter(isHomePart);
+  assert(homeParts.includes("/api/index/2"), "the API home built no later parts");
+  const homeHtml = await readFile(join(dist, "api", "index.html"), "utf8");
+  assert(homeHtml.includes('href="/api/index/2/"'), "the API home doesn't link its second part");
+  for (const route of homeParts) {
+    const html = await readFile(join(dist, route.slice(1), "index.html"), "utf8");
+    assert(html.includes('<meta name="robots" content="noindex"'), `${route} is not noindex`);
+    assert(html.includes("data-api-home-chunk"), `${route} has no list for the home to fetch`);
+    assert(!html.includes("data-pagefind-body"), `${route} is in the search index`);
+    const next = `/api/index/${Number(route.split("/").at(-1)) + 1}`;
+    assert(
+      html.includes(`href="${next}/"`) === homeParts.includes(next),
+      `${route} doesn't link the next part, or links one that doesn't exist`,
+    );
+  }
+  const sitemaps = (await walk(dist)).filter((file) => /sitemap-\d+\.xml$/.test(file));
+  for (const file of sitemaps)
+    assert(!(await readFile(file, "utf8")).includes("/api/index/"), "a later part of the API home is in the sitemap");
+
+  // The API home lists every endpoint, name first, and its filter reads the
+  // version's page list. An unversioned API shows no version picker.
+  const overviewHtml = homeHtml;
+  const listed = [overviewHtml, ...(await Promise.all(homeParts.map((route) => readFile(join(dist, route.slice(1), "index.html"), "utf8"))))];
   assert(
     overviewHtml.includes("data-api-home-chunk") &&
-      overviewHtml.includes('href="/api/charges/create/"'),
+      listed.some((html) => html.includes('href="/api/charges/create/"')),
     "the API home does not list its endpoints",
   );
-  const homeRows = JSON.parse(
-    await readFile(join(dist, "nimbus-api", "home", "api", "default", "index.json"), "utf8"),
-  );
+  const filterSrc = /data-filter-src="([^"]+)"/.exec(overviewHtml)?.[1];
+  assert(filterSrc?.startsWith("/_nimbus/pages/"), "the API home's filter has no page list");
+  const homeRows = JSON.parse(await readFile(join(dist, filterSrc.slice(1)), "utf8"));
   assert(
     Array.isArray(homeRows) &&
-      homeRows.some((row) => row[0] === "POST" && row[3] === "/api/charges/create/"),
+      homeRows.some((row) => row.method === "POST" && row.url === "/api/charges/create/"),
     "the API home's filter list is missing an endpoint",
   );
   assert(

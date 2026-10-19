@@ -271,7 +271,8 @@ describe("API page resolution", () => {
     },
   ];
   const entries = new Map([
-    ["api:index", entry("api", "index", { coordinate: "root", version: "v2" })],
+    // A root page's coordinate is its collection's name.
+    ["api:index", entry("api", "index", { coordinate: "api", version: "v2" })],
     [
       "api:charges/create",
       entry("api", "charges/create", {
@@ -279,7 +280,9 @@ describe("API page resolution", () => {
         version: "v2",
       }),
     ],
-    ["api:v1", entry("api", "v1", { coordinate: "root", version: "v1" })],
+    ["api:v1", entry("api", "v1", { coordinate: "api", version: "v1" })],
+    // `index` is reserved only at the top, so an operation can end in it.
+    ["api:search/index/2", entry("api", "search/index/2", { coordinate: "searchIndexTwo", version: "v2" })],
     [
       "api:v1/charges/create",
       entry("api", "v1/charges/create", {
@@ -411,6 +414,49 @@ describe("API page resolution", () => {
     assert.deepEqual(missing, { status: "not-found" });
     assert.deepEqual(unknown, { status: "not-found" });
     assert.deepEqual(rootAlias, { status: "not-found" });
+  });
+
+  test("resolves the home's later parts to the home, on request or built", async () => {
+    const request = await resolveApiPage(context("/reference/api/index/2/", "index/2"), {}, dependencies);
+    const versioned = await resolveApiPage(context("/reference/api/v1/index/3/", "v1/index/3"), {}, dependencies);
+    const built = await resolveApiPage(
+      context("/api/index/2/", "index/2", { collection: "api", version: "v2", coordinate: "api", homePart: 2 }),
+      {},
+      dependencies,
+    );
+    for (const [result, part, version] of [
+      [request, 2, "v2"],
+      [versioned, 3, "v1"],
+      [built, 2, "v2"],
+    ] as const) {
+      assert.equal(result.status, "found");
+      if (result.status !== "found") continue;
+      assert.equal(result.page.coordinate, "api");
+      assert.equal(result.page.version, version);
+      assert.equal(result.page.homePart, part);
+    }
+  });
+
+  test("a page whose own URL ends in index/<n> is that page, not a part", async () => {
+    const request = await resolveApiPage(context("/reference/api/search/index/2/", "search/index/2"), {}, dependencies);
+    const built = await resolveApiPage(
+      context("/api/search/index/2/", "search/index/2", { collection: "api", version: "v2", coordinate: "searchIndexTwo" }),
+      {},
+      dependencies,
+    );
+    for (const result of [request, built]) {
+      assert.equal(result.status, "found");
+      if (result.status !== "found") continue;
+      assert.equal(result.page.coordinate, "searchIndexTwo");
+      assert.equal(result.page.homePart, undefined);
+    }
+  });
+
+  test("only the home has later parts, numbered from 2", async () => {
+    for (const slug of ["charges/create/index/2", "index/1", "index/02", "missing/index/2"]) {
+      const result = await resolveApiPage(context(`/reference/api/${slug}/`, slug), {}, dependencies);
+      assert.deepEqual(result, { status: "not-found" }, slug);
+    }
   });
 
   test("preserves an unversioned API's null version", async () => {

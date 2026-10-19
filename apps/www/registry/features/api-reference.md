@@ -233,16 +233,18 @@ Write `src/pages/api/[...slug].astro`:
 ---
 import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
 import Header from "@/components/Header.astro";
-import { ApiLayout } from "@/components/ui/api-layout";
+import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
 export const prerender = true;
-export const getStaticPaths = getApiStaticPaths("api");
+export const getStaticPaths = getApiStaticPaths("api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
+const { page, nav, collection, version, coordinate, home } = result;
+// A later part of the API home's list: a page of its own, kept out of search.
+const part = home && home.part.number > 1 ? home.part : undefined;
 // The generated per-page card exists for the default version's version-free
 // URL; a non-default query-mode page (its href carries the version query) uses
 // the site's shared social image instead. The card path derives from the
@@ -255,10 +257,11 @@ const socialImage = new URL(page.href, Astro.url).search
 ---
 
 <BaseLayout
-  title={page.kind === "api" ? page.title : `${page.title} · API`}
+  title={part ? `${page.title}: endpoints ${part.start}–${part.end} · API` : page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
   markdownUrl={page.markdownHref}
   socialImage={socialImage}
+  noindex={part !== undefined}
   collection={collection}
   apiVersion={version ?? undefined}
   coordinate={coordinate}
@@ -266,7 +269,7 @@ const socialImage = new URL(page.href, Astro.url).search
   <Header showSidebar collection={collection}>
     <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
   </Header>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 ```
 
@@ -277,70 +280,21 @@ expanded flags and verb come pre-resolved on each `ApiNavItem`. For a large
 API (hundreds of operations), suggest `sidebar: "on-demand"` on the `api`
 entry so pages don't each carry the whole tree.
 
-### 4e. Scaffold the API home's routes
+### 4e. The API home's later parts
 
-The API home lists every endpoint of a version, a part of at most
-`API_HOME_CHUNK_SIZE` endpoints at a time. Later parts are pages of their own,
-which the home fetches as the reader scrolls and which a reader without script
-walks as ordinary pages; the filter reads a compact list of every endpoint.
-Both routes read the version's root page through `getApiHome`, and render the
-same way as the API pages: built on a static site, on request when the
-rendering policy renders the collection on request. Chunk pages are `noindex`.
+The API home lists every endpoint of a version, at most `API_HOME_CHUNK_SIZE`
+endpoints a part. Later parts are pages of their own, served by the same route
+at `/api/index/2/`, `/api/index/3/` and so on (`index` is a reserved segment,
+so no endpoint's URL can take it). The home fetches them as the reader
+scrolls, and a reader without script walks them as ordinary pages. They're
+`noindex` and left out of the sitemap and search. The filter reads the
+version's page list, which Nimbus writes; there's no route to add.
 
-Write the routes under `src/pages/nimbus-api/home/<collection>/`, with the
-collection name as the folder and in each call. For the `api` collection:
-
-<!-- api-reference-fixture:src/pages/nimbus-api/home/api/[version]/[chunk].astro -->
-```astro
----
-import { getApiHome, getApiHomeStaticPaths } from "@cloudflare/nimbus-docs/runtime";
-import Header from "@/components/Header.astro";
-import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
-import { VersionSwitcher } from "@/components/ui/version-switcher";
-import BaseLayout from "@/layouts/BaseLayout.astro";
-
-export const prerender = true;
-export const getStaticPaths = getApiHomeStaticPaths("api", "chunks", { size: API_HOME_CHUNK_SIZE });
-
-const home = await getApiHome(Astro, "api", { size: API_HOME_CHUNK_SIZE });
-if (home instanceof Response) return home;
-const { page, nav, chunk, chunks, collection, version, coordinate } = home;
----
-
-<BaseLayout
-  title={`${page.title}: endpoints ${chunk!.start}–${chunk!.end} · API`}
-  description={page.description}
-  noindex
-  collection={collection}
-  apiVersion={version ?? undefined}
->
-  <Header showSidebar collection={collection}>
-    <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
-  </Header>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={{ chunk: chunk!, chunks }} />
-</BaseLayout>
-```
-
-<!-- api-reference-fixture:src/pages/nimbus-api/home/api/[version]/index.json.ts -->
-```ts
-import type { APIRoute } from "astro";
-import { apiIndexRows, getApiHome, getApiHomeStaticPaths } from "@cloudflare/nimbus-docs/runtime";
-
-export const prerender = true;
-export const getStaticPaths = getApiHomeStaticPaths("api", "index");
-
-export const GET: APIRoute = async (context) => {
-  const home = await getApiHome(context, "api");
-  if (home instanceof Response) return home;
-  return new Response(JSON.stringify(apiIndexRows(home.page.index)), {
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-  });
-};
-```
-
-An unversioned API serves them under the version segment `default`. Without
-these routes, the home shows its first part and a link to a page that doesn't
-exist, so add them with the API route.
+The route passes the size to `getApiStaticPaths`, which builds one page per
+part. A route rendered on request has no `getStaticPaths`, so it passes the
+size to `getApiRoute` instead: `getApiRoute(Astro, { homeChunkSize:
+API_HOME_CHUNK_SIZE })`. Without it, parts hold 150 endpoints, the starter's
+default.
 
 ## 5. Optional — add to the sidebar
 

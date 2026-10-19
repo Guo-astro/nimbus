@@ -4,57 +4,60 @@
  * like a section page, with a filter.
  *
  * Large specs: the list is split into parts of at most `API_HOME_CHUNK_SIZE`
- * endpoints (`chunkApiIndex`). The first renders here; each later part is a
- * page of its own, fetched and appended about 1,500px before the reader
- * reaches the end. Without script, the list ends in a link to the next part.
- * The filter searches a compact list of every endpoint, fetched on first
- * focus, so it finds endpoints that haven't loaded. Coming back to the page
- * restores the parts that were loaded and the scroll position.
+ * endpoints, the size the API route passes to `getApiStaticPaths` and
+ * `getApiRoute`. The first renders here; each later part is a page of its own,
+ * served by the same route, fetched and appended about 1,500px before the
+ * reader reaches the end. Without script, the list ends in a link to the next
+ * part. The filter searches the version's page list, fetched on first focus,
+ * so it finds endpoints that haven't loaded. Coming back to the page restores
+ * the parts that were loaded and the scroll position.
  */
 import ApiHomeChunk from "./ApiHomeChunk.astro";
 import ApiOperationList from "./ApiOperationList.astro";
-import { API_HOME_CHUNK_SIZE } from "./home";
-import { apiHomeChunkHref, apiHomeIndexHref, apiIndexRows, chunkApiIndex, withBase } from "@cloudflare/nimbus-docs/runtime";
+import { apiIndexRows, withBase } from "@cloudflare/nimbus-docs/runtime";
+import type { ApiHome } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiRootPage } from "@cloudflare/nimbus-docs/api";
 
 interface Props {
   page: ApiRootPage;
-  version?: string | null;
+  home?: ApiHome;
 }
 
-const { page, version } = Astro.props;
+const { page, home } = Astro.props;
 const base = import.meta.env.BASE_URL;
-const chunks = chunkApiIndex(page.index, { size: API_HOME_CHUNK_SIZE });
-const total = chunks.at(-1)?.end ?? 0;
 const grouped = page.index.groups.some((group) => group.label !== null);
-const later = chunks.slice(1).map((chunk) => ({
-  href: withBase(apiHomeChunkHref(page.collection, version, chunk.number), base),
-  label: `Endpoints ${chunk.start}–${chunk.end} of ${total}`,
+const later = (home?.parts ?? []).slice(1).map((part) => ({
+  href: withBase(part.href, base),
+  label: `Endpoints ${part.start}–${part.end} of ${home!.total}`,
 }));
-const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.toUpperCase()))];
+const rows = apiIndexRows(page.index);
+const methods = [...new Set(rows.map(([method]) => method.toUpperCase()))];
+if (rows.length > 0 && !home) {
+  throw new Error("ApiHome: pass `home` from getApiRoute() to ApiLayout, as the api-reference recipe's route does.");
+}
 ---
 
-{chunks.length === 0 ? (
+{!home ? (
   <p class="nb-ix-none">No endpoints in this version.</p>
 ) : (
   <div
     data-slot="api-home"
     class="nb-ix"
     data-nb-ix
-    data-filter-src={withBase(apiHomeIndexHref(page.collection, version), base)}
+    data-filter-src={home.listHref && withBase(home.listHref, base)}
     data-base={base}
     data-later={JSON.stringify(later)}
   >
-    <div class="nb-ix-bar">
+    <div class="nb-ix-bar" hidden={!home.listHref}>
       <label class="nb-ix-filter">
         <svg viewBox="0 0 256 256" aria-hidden="true"><circle cx="116" cy="116" r="72" fill="none" stroke="currentColor" stroke-width="20" /><path d="M168 168l52 52" stroke="currentColor" stroke-width="20" stroke-linecap="round" /></svg>
         <span class="sr-only">Filter endpoints</span>
-        <input type="search" placeholder={`Filter ${total} endpoints`} autocomplete="off" spellcheck="false" data-nb-ix-input />
+        <input type="search" placeholder={`Filter ${home.total} endpoints`} autocomplete="off" spellcheck="false" data-nb-ix-input />
       </label>
     </div>
 
     <div data-nb-ix-feed>
-      <ApiHomeChunk chunk={chunks[0]!} grouped={grouped} />
+      <ApiHomeChunk chunk={home.part} grouped={grouped} />
     </div>
 
     {later.length > 0 && (
@@ -81,9 +84,9 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
 
 <script>
   import { navigate } from "astro:transitions/client";
+  import { loadNavList, matchNavList, type NavListRow } from "@cloudflare/nimbus-docs/client";
 
   type Later = { href: string; label: string };
-  type Row = [method: string, path: string, label: string, href: string, section: string];
 
   const LIMIT = 200;
 
@@ -101,7 +104,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     // Fixed now: by the time a back/forward navigation saves, location already
     // names the next page.
     const stateKey = `nb-ix:${location.pathname}${location.search}`;
-    // Filter rows carry hrefs before the site's base, as the page's own do.
+    // List rows carry urls before the site's base, as the page's own do.
     const base = (root.dataset.base ?? "/").replace(/\/$/, "");
     const based = (href: string) => (href.startsWith("/") ? `${base}${href}` : href);
 
@@ -221,18 +224,15 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
     );
 
     // ---- Filter: every endpoint, loaded or not ----
-    let rows: Row[] | null = null;
-    let fetching: Promise<Row[] | null> | null = null;
-    const getRows = () =>
+    let rows: NavListRow[] | null = null;
+    const getRows = (): Promise<NavListRow[] | null> =>
       rows
         ? Promise.resolve(rows)
-        : (fetching ??= fetch(root.dataset.filterSrc!)
-            .then((r) => (r.ok ? (r.json() as Promise<Row[]>) : Promise.reject(new Error(String(r.status)))))
-            .then((r) => (rows = r))
-            .catch(() => {
-              fetching = null;
-              return null;
-            }));
+        : root.dataset.filterSrc
+          ? loadNavList(root.dataset.filterSrc)
+              .then((list) => (rows = list.filter((row) => row.method)))
+              .catch(() => null)
+          : Promise.resolve(null);
     const templates = new Map(
       [...root.querySelectorAll<HTMLTemplateElement>("template[data-nb-ix-row]")].map((t) => [t.dataset.nbIxRow!, t]),
     );
@@ -242,16 +242,16 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
       note.hidden = !showNote;
       status.textContent = text;
     };
-    const render = (matches: Row[]) => {
+    const render = (matches: NavListRow[]) => {
       const shown = matches.slice(0, LIMIT);
       const ul = (fallback?.content.querySelector("ul")?.cloneNode(false) as HTMLUListElement | undefined) ?? document.createElement("ul");
-      for (const [method, path, label, href] of shown) {
-        const template = templates.get(method.toUpperCase()) ?? fallback;
+      for (const { method, path, title, url } of shown) {
+        const template = templates.get(method!.toUpperCase()) ?? fallback;
         const li = template!.content.querySelector("li")!.cloneNode(true) as HTMLLIElement;
         const a = li.querySelector("a")!;
-        a.href = based(href);
-        a.querySelector("span")!.textContent = label;
-        li.querySelector("code")!.textContent = path;
+        a.href = based(url);
+        a.querySelector("span")!.textContent = title;
+        li.querySelector("code")!.textContent = path ?? "";
         ul.append(li);
       }
       list.replaceChildren(...(shown.length ? [ul] : []));
@@ -285,7 +285,7 @@ const methods = [...new Set(apiIndexRows(page.index).map(([method]) => method.to
         retry.hidden = false;
         return;
       }
-      render(all.filter((row) => current.every((t) => row.join(" ").toLowerCase().includes(t))));
+      render(matchNavList(all, current.join(" ")));
     };
     retry.addEventListener("click", () => void apply());
     input.addEventListener("focus", () => void getRows(), { once: true });

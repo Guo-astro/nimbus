@@ -1,6 +1,6 @@
 /**
  * The API home's list in pages: one rule for where chunks break, shared by the
- * home page and its chunk routes so they always agree. Pure and dependency-free,
+ * home page and its later parts so they always agree. Pure and dependency-free,
  * so request-rendered routes don't load the spec parser to use it.
  */
 import { toDocumentHref } from "../url.js";
@@ -205,15 +205,63 @@ export function apiIndexRows(index: ApiRootIndex): ApiIndexRow[] {
   return rows;
 }
 
-const homeBase = (collection: string, version: string | null | undefined) =>
-  `/nimbus-api/home/${encodeURIComponent(collection)}/${encodeURIComponent(version ?? "default")}`;
+/** The segment the home's later parts are served under: `<home>/index/<n>/`. */
+export const API_HOME_PART_SEGMENT = "index";
 
-/** Where chunk `number` (2 or more) of an API version's home is served, before `base`. */
-export function apiHomeChunkHref(collection: string, version: string | null | undefined, number: number): string {
-  return toDocumentHref(`${homeBase(collection, version)}/${number}/`);
+const PART_ID = new RegExp(`^(?:(.+)/)?${API_HOME_PART_SEGMENT}/([2-9]|[1-9][0-9]+)$`, "u");
+
+/** The home and part a page id names (`index/2`, `v2/index/3`), or `null`. */
+export function parseApiHomePart(id: string): { homeId: string; part: number } | null {
+  const match = PART_ID.exec(id);
+  return match ? { homeId: match[1] ?? "index", part: Number(match[2]) } : null;
 }
 
-/** Where an API version's filter rows are served, before `base`. */
-export function apiHomeIndexHref(collection: string, version: string | null | undefined): string {
-  return `${homeBase(collection, version)}/index.json`;
+/** Where part `number` of the home at `homeHref` is served, keeping its query
+ *  and following the site's trailing slash, like every other API link. */
+export function apiHomePartHref(homeHref: string, number: number): string {
+  if (number === 1) return homeHref;
+  const at = homeHref.search(/[?#]/u);
+  const [path, rest] = at === -1 ? [homeHref, ""] : [homeHref.slice(0, at), homeHref.slice(at)];
+  return toDocumentHref(`${path.replace(/\/$/u, "")}/${API_HOME_PART_SEGMENT}/${number}${rest}`);
+}
+
+export interface ApiHomePartLink {
+  number: number;
+  start: number;
+  end: number;
+  /** Root-relative, without the site base, like every API href. */
+  href: string;
+}
+
+/** The API home's list as one page shows it: its part, and where every part is. */
+export interface ApiHome {
+  /** The part this page shows: 1 on the home itself. */
+  part: ApiIndexChunk;
+  parts: ApiHomePartLink[];
+  /** Endpoints across every part. */
+  total: number;
+  /** Every page of the version (`title`, `method`, `path`, `url`), for the
+   *  filter. Root-relative, without the site base. */
+  listHref?: string;
+}
+
+/** The home's view for part `number`, or `null` when the list has no such part. */
+export function apiHome(
+  index: ApiRootIndex,
+  options: { homeHref: string; part: number; size?: number; listHref?: string },
+): ApiHome | null {
+  const chunks = chunkApiIndex(index, { size: options.size });
+  const part = chunks[options.part - 1];
+  if (!part) return null;
+  return {
+    part,
+    parts: chunks.map(({ number, start, end }) => ({
+      number,
+      start,
+      end,
+      href: apiHomePartHref(options.homeHref, number),
+    })),
+    total: chunks.at(-1)!.end,
+    ...(options.listHref ? { listHref: options.listHref } : {}),
+  };
 }

@@ -25,22 +25,20 @@ import { authFields } from "./auth";
 import { cn } from "@/lib/cn";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiPageProps, ApiResponseView } from "@cloudflare/nimbus-docs/api";
-import { apiHomeChunkHref, type ApiIndexChunk } from "@cloudflare/nimbus-docs/runtime";
+import type { ApiHome as ApiHomeView } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   page: ApiPageProps;
-  /** The API version this page belongs to; the API home loads its later chunks by it. */
-  version?: string | null;
-  /** On an API home chunk route: the part to show, and every part. */
-  home?: { chunk: ApiIndexChunk; chunks: ApiIndexChunk[] };
+  /** On the API home and its later parts, from `getApiRoute`: the part to
+   *  show, and every part. */
+  home?: ApiHomeView;
 }
 
-const { page, version, home } = Astro.props;
-// A chunk page: one part of the API home's list, as a page of its own, so a
+const { page, home } = Astro.props;
+// A later part: one part of the API home's list, as a page of its own, so a
 // reader without script can walk the whole list.
-const homeChunk = page.kind === "api" ? home?.chunk : undefined;
-const homeTotal = home?.chunks.at(-1)?.end ?? 0;
-const homeNext = homeChunk && home?.chunks[homeChunk.number];
+const homeChunk = page.kind === "api" && home && home.part.number > 1 ? home.part : undefined;
+const homeNext = homeChunk && home?.parts[homeChunk.number];
 const title = homeChunk ? `${page.title}: endpoints ${homeChunk.start}–${homeChunk.end}` : page.title;
 const markdownUrl = page.markdownHref;
 
@@ -353,7 +351,7 @@ const deprecationHtml = page.deprecated
     </>
   )}
 
-  {page.kind === "api" && !homeChunk && <ApiHome page={page} version={version} />}
+  {page.kind === "api" && !homeChunk && <ApiHome page={page} home={home} />}
 
   {page.kind === "api" && homeChunk && (
     <>
@@ -361,8 +359,8 @@ const deprecationHtml = page.deprecated
       <nav aria-label="Endpoint list" class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
         <a href={withBase(page.href, import.meta.env.BASE_URL)} class="font-medium text-foreground underline-offset-4 hover:underline">All endpoints</a>
         {homeNext && (
-          <a href={withBase(apiHomeChunkHref(page.collection, version, homeNext.number), import.meta.env.BASE_URL)} class="font-medium text-foreground underline-offset-4 hover:underline">
-            Next: endpoints {homeNext.start}–{homeNext.end} of {homeTotal}
+          <a href={withBase(homeNext.href, import.meta.env.BASE_URL)} class="font-medium text-foreground underline-offset-4 hover:underline">
+            Next: endpoints {homeNext.start}–{homeNext.end} of {home!.total}
           </a>
         )}
       </nav>

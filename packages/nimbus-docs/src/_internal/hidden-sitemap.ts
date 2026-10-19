@@ -1,9 +1,11 @@
 // Hidden-version sitemap exclusion — @astrojs/sitemap has no version awareness,
 // so the integration injects the filter this module builds. With the auto-
 // noindex in NimbusHead, hidden versions stay out of search while direct links
-// keep working.
+// keep working. The API home's later parts (`<home>/index/<n>/`) are left out
+// the same way: they repeat the home's list.
 
 import type { NimbusConfig } from "../types.js";
+import { API_HOME_PART_SEGMENT } from "./api/home-index.js";
 import { resolveAllApiCollections } from "./api/resolve-versions.js";
 import type { MountContext } from "./collection-mount.js";
 
@@ -32,6 +34,9 @@ export function makeHiddenSitemapFilter(
   context: MountContext,
 ): (url: string) => boolean {
   const prefixes = hiddenVersionPrefixes(config, base, context);
+  const b = base.replace(/\/$/, "");
+  const homes = new Set(resolveAllApiCollections(config.api, context).map((target) => `${b}${target.mountPath}`.replace(/\/$/, "")));
+  const homePart = new RegExp(`^(.*)/${API_HOME_PART_SEGMENT}/\\d+$`, "u");
   return (url: string): boolean => {
     let pathname: string;
     try {
@@ -40,6 +45,8 @@ export function makeHiddenSitemapFilter(
       pathname = url;
     }
     const p = pathname.replace(/\/$/, "") || "/";
+    const home = homePart.exec(p)?.[1];
+    if (home !== undefined && homes.has(home)) return false;
     return !prefixes.some((pre) => p === pre || p.startsWith(`${pre}/`));
   };
 }

@@ -1,8 +1,8 @@
 /**
- * The sidebar filter's list of one API version's pages, for
- * `sidebar: "on-demand"`, whose pages carry only part of the tree. Written at
- * build time beside the page assets and named by its hash, so an unchanged
- * version keeps its file.
+ * The list of one API version's pages, for the API home's filter and for the
+ * sidebar filter under `sidebar: "on-demand"`, whose pages carry only part of
+ * the tree. Written at build time beside the page assets and named by its
+ * hash, so an unchanged version keeps its file.
  */
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -36,9 +36,14 @@ export function apiNavList(
 // collection → version ("" when unversioned) → filename. On globalThis: the
 // integration and the content loader can load separate copies of this module.
 type ApiNavListManifest = Record<string, Record<string, string>>;
-const REGISTRY = Symbol.for("@cloudflare/nimbus-docs/api-nav-lists/v1");
+interface ApiNavListRegistry {
+  all: ApiNavListManifest;
+  /** The versions whose sidebar is `on-demand`. */
+  sidebar: ApiNavListManifest;
+}
+const REGISTRY = Symbol.for("@cloudflare/nimbus-docs/api-nav-lists/v2");
 const globals = globalThis as typeof globalThis & {
-  [REGISTRY]?: Map<string, ApiNavListManifest>;
+  [REGISTRY]?: Map<string, ApiNavListRegistry>;
 };
 const manifests = (globals[REGISTRY] ??= new Map());
 
@@ -47,14 +52,24 @@ export function recordApiNavList(
   collection: string,
   version: string | null,
   filename: string,
+  onDemandSidebar: boolean,
 ): void {
-  const manifest = manifests.get(preparedMarkdownRootKey(root)) ?? {};
-  (manifest[collection] ??= {})[version ?? ""] = filename;
-  manifests.set(preparedMarkdownRootKey(root), manifest);
+  const key = preparedMarkdownRootKey(root);
+  const registry = manifests.get(key) ?? { all: {}, sidebar: {} };
+  (registry.all[collection] ??= {})[version ?? ""] = filename;
+  if (onDemandSidebar) (registry.sidebar[collection] ??= {})[version ?? ""] = filename;
+  else delete registry.sidebar[collection]?.[version ?? ""];
+  manifests.set(key, registry);
 }
 
+/** Every version's list. */
 export function getApiNavListManifest(root: URL | string): ApiNavListManifest {
-  return manifests.get(preparedMarkdownRootKey(root)) ?? {};
+  return manifests.get(preparedMarkdownRootKey(root))?.all ?? {};
+}
+
+/** The lists of versions whose sidebar is `on-demand`. */
+export function getApiSidebarListManifest(root: URL | string): ApiNavListManifest {
+  return manifests.get(preparedMarkdownRootKey(root))?.sidebar ?? {};
 }
 
 export function apiNavListFiles(root: URL | string): string[] {

@@ -20,10 +20,10 @@ export interface RouteExports {
   staticPaths: boolean;
 }
 
-/** A route's script: an `.astro` file's frontmatter, or the whole file. `undefined` when the frontmatter can't be found. */
+/** A route's script: an `.astro` file's frontmatter, which opens the file, or the whole file. `undefined` for an `.astro` file with none. */
 export function routeCode(file: string, source: string): RouteCode | undefined {
   if (!file.endsWith(".astro")) return { code: source, start: 0 };
-  const frontmatter = /^(\s*---\r?\n)([\s\S]*?)(^---)/mu.exec(source);
+  const frontmatter = /^(\s*---\r?\n)((?:[\s\S]*?\r?\n)?)---/u.exec(source);
   return frontmatter ? { code: frontmatter[2]!, start: frontmatter[1]!.length } : undefined;
 }
 
@@ -49,10 +49,10 @@ export function readRouteExports(sourceFile: ts.SourceFile): RouteExports {
   return { prerenders, staticPaths };
 }
 
-/** A route file's exports; `undefined` when it has no readable script. */
-export function readRouteFileExports(file: string, source: string): RouteExports | undefined {
+/** A route file's exports: none for an `.astro` file without frontmatter. */
+export function readRouteFileExports(file: string, source: string): RouteExports {
   const script = routeCode(file, source);
-  return script && readRouteExports(parseRouteCode(script.code));
+  return script ? readRouteExports(parseRouteCode(script.code)) : { prerenders: [], staticPaths: false };
 }
 
 function isExported(statement: ts.Statement): boolean {

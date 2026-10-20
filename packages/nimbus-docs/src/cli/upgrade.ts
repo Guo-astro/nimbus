@@ -330,7 +330,7 @@ function routeFilesInSiteMode(cwd: string, srcRoot: string): (file: string, text
     const route = routes.get(file);
     if (!route || text === null) return text;
     const exports = readRouteFileExports(route.file, route.source);
-    const mode = exports && fileRouteMode(exports, route.target.output);
+    const mode = fileRouteMode(exports, route.target.output);
     if (!mode) return text;
     const edit = setRouteFileMode(file, text, { ...route.target, mode });
     return edit.status === "updated" ? edit.source : text;

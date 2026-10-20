@@ -23,6 +23,7 @@ import {
 import {
   agentManifest as manifest,
   agentSites,
+  REQUEST_DOCS_PAGE,
   siteApp,
   SMALLCO_SPEC,
   type AgentSite,
@@ -257,7 +258,7 @@ test("reports URLs a prerendered owner skipped but did not generate", () => {
 
 async function buildSite(
   pages: Record<string, string>,
-  options: Pick<AgentSiteOptions, "conflict" | "server" | "logLevel"> = {},
+  options: Pick<AgentSiteOptions, "conflict" | "server" | "logLevel" | "rendering"> = {},
 ): Promise<AgentSite> {
   return sites.buildSite(
     {
@@ -436,8 +437,8 @@ test("a partial override fails the build when prerender conflicts are errors", a
 
 test("a shared route rendered on request builds without Markdown files", async () => {
   const site = await buildSite(
-    { "src/pages/[...slug]/index.md.ts": SHARED_MD.replace("prerender = true", "prerender = false") },
-    { server: true, logLevel: "warn" },
+    { ...REQUEST_DOCS_PAGE, "src/pages/[...slug]/index.md.ts": SHARED_MD.replace("prerender = true", "prerender = false") },
+    { server: true, logLevel: "warn", rendering: { default: "request" } },
   );
   assert.doesNotMatch(site.logs, /not prerendered/);
   await assert.rejects(readFile(path.join(site.root, "dist/guide/index.md"), "utf8"));
@@ -446,6 +447,7 @@ test("a shared route rendered on request builds without Markdown files", async (
 test("a re-exported factory rendered on request serves by URL, 404s unknown paths, and 500s without details", async () => {
   const site = await buildSite(
     {
+      ...REQUEST_DOCS_PAGE,
       "src/lib/markdown.ts": `import { markdownRoute } from ${moduleUrl("../src/agent-endpoints.ts")};
 export const route = markdownRoute();
 `,
@@ -454,7 +456,7 @@ export const prerender = false;
 export const GET = route.GET;
 `,
     },
-    { server: true, logLevel: "warn" },
+    { server: true, logLevel: "warn", rendering: { default: "request" } },
   );
   // A request-rendered shared route is normal operation now — agent files
   // follow the rendering policy — so the build warns about nothing.

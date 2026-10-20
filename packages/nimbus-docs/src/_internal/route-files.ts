@@ -36,7 +36,7 @@ export interface RouteFilePlan {
   writes: boolean;
 }
 
-export type RouteFilesPlan = { ok: true; files: RouteFilePlan[] } | { ok: false; reason: string };
+export type RouteFilesPlan = { ok: true; configured: boolean; files: RouteFilePlan[] } | { ok: false; reason: string };
 
 export interface ProjectRouteFile {
   /** Project-relative, `/`-separated. */
@@ -48,7 +48,7 @@ export interface ProjectRouteFile {
 }
 
 export type ProjectRouteFiles =
-  | { ok: true; overridden: boolean; files: ProjectRouteFile[] }
+  | { ok: true; configured: boolean; files: ProjectRouteFile[] }
   | { ok: false; reason: string };
 
 /** Every managed route file in a project, with the mode `rendering` gives it. */
@@ -99,7 +99,7 @@ export function projectRouteFiles(cwd: string, srcDirOverride?: string): Project
       subject: routeFileSubject(collection),
     };
   });
-  return { ok: true, overridden: config.rendering !== undefined, files };
+  return { ok: true, configured: config.rendering !== undefined, files };
 }
 
 /** Every managed route file that doesn't match `rendering`, with its edit. */
@@ -108,18 +108,18 @@ export function planRouteFiles(cwd: string, srcDirOverride?: string): RouteFiles
   if (!project.ok) return project;
   const files: RouteFilePlan[] = [];
   for (const { file, source, target, subject } of project.files) {
-    const mismatch = routeFileMismatch({ file, source, output: target.output, expected: target.mode, overridden: project.overridden });
+    const mismatch = routeFileMismatch({ file, source, output: target.output, expected: target.mode });
     if (!mismatch) continue;
     const edit = setRouteFileMode(file, source, target);
     files.push({
       file,
       mismatch,
-      problem: describeRouteFileMismatch(mismatch, subject),
+      problem: describeRouteFileMismatch(mismatch, subject, project.configured),
       edit,
       writes: edit.status !== "unchanged" && edit.source !== source,
     });
   }
-  return { ok: true, files };
+  return { ok: true, configured: project.configured, files };
 }
 
 /** Write every edit the helper could make, including part of a manual one; the rest is left for the author. */

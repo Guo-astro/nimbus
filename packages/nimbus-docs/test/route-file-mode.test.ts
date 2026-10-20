@@ -166,6 +166,39 @@ const result = await getApiRoute(Astro, "api", options);
   assert.equal(edit.status, "manual");
   if (edit.status === "manual") {
     assert.doesNotMatch(edit.source, /export const getStaticPaths/);
-    assert.match(edit.todo, /getApiStaticPaths\("api", options\).*imports only/s);
+    assert.match(edit.todo, /Export them .* or write them inline, then add `export const getStaticPaths = getApiStaticPaths\("api", options\);`/s);
   }
+});
+
+test("API options from exported constants are copied into getStaticPaths, below them", () => {
+  const request = `---
+import { API_HOME_CHUNK_SIZE, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+
+export const options = { homeChunkSize: API_HOME_CHUNK_SIZE };
+const result = await getApiRoute(Astro, "api", options);
+---
+`;
+  const page = { collection: "api", kind: "api", moved: false } as const;
+  const built = apply("src/pages/api/[...slug].astro", request, { mode: "build", output: "static", page });
+  assert.equal(
+    built,
+    `---
+import { getApiStaticPaths, API_HOME_CHUNK_SIZE, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+
+export const options = { homeChunkSize: API_HOME_CHUNK_SIZE };
+export const getStaticPaths = getApiStaticPaths("api", options);
+const result = await getApiRoute(Astro, "api", options);
+---
+`,
+  );
+  assert.equal(apply("src/pages/api/[...slug].astro", built, { mode: "request", output: "server", page }), request);
+});
+
+test("an expression prerender on a built route without getStaticPaths names both edits", () => {
+  const source = '---\nexport const prerender = import.meta.env.PROD;\nconst page = await getCollectionPage(Astro, "sdk");\n---\n';
+  const page = { collection: "sdk", kind: "collection", moved: false } as const;
+  const edit = setRouteFileMode("src/pages/sdk/[...slug].astro", source, { mode: "build", output: "server", page });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual")
+    assert.match(edit.todo, /set it to `export const prerender = true;`\. Then add `export const getStaticPaths = getCollectionStaticPaths\("sdk"\);`/);
 });

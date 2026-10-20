@@ -46,7 +46,7 @@ test("check reports each route file rendering overrides, and the fix leaves noth
     assert.ok(plan.ok);
     assert.deepEqual(applyRouteFiles(dir, plan.files).updated.sort(), DYNAMIC);
     assert.deepEqual(await codes(dir), []);
-    assert.deepEqual(planRouteFiles(dir), { ok: true, files: [] });
+    assert.deepEqual(planRouteFiles(dir), { ok: true, configured: true, files: [] });
     assert.equal(
       fs.readFileSync(path.join(dir, "src/pages/[...slug]/index.md.ts"), "utf8"),
       'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const { GET } = markdownRoute();\n',
@@ -130,13 +130,19 @@ test("a moved request route gets the page helper's argument, and a customized on
   }
 });
 
-test("without rendering, route files are checked against building ahead of time", async () => {
+test("without rendering, route files are checked against building ahead of time, with one info finding", async () => {
   const dir = project({ output: "server" });
   try {
     const all = ROUTES.map((route) => `src/pages/${route}`).sort();
     assert.deepEqual((await codes(dir)).sort(), all.map((file) => `warn ${file}`).sort());
-    const message = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/llms.txt.ts")?.message;
-    assert.equal(message, "src/pages/llms.txt.ts: file renders on request; with no `rendering`, Nimbus builds it ahead of time. To keep it on request, set `rendering`.");
+    const result = await runChecks(dir, STRUCTURE);
+    const message = result.findings.find((f) => f.file === "src/pages/llms.txt.ts")?.message;
+    assert.equal(message, "src/pages/llms.txt.ts: file renders on request, Nimbus builds it ahead of time.");
+    assert.deepEqual(
+      result.findings.filter((f) => f.code === "nimbus/rendering-default").map((f) => f.severity),
+      ["info"],
+    );
+    assert.ok(!result.scopes.some((scope) => scope.notes.some((note) => note.code === "nimbus/rendering-default")));
     const plan = planRouteFiles(dir);
     assert.ok(plan.ok);
     applyRouteFiles(dir, plan.files);
@@ -176,6 +182,41 @@ test("a route naming two collections gets one error, not a follow-on rendering o
   try {
     const errors = (await runChecks(dir, STRUCTURE)).findings.filter((f) => f.severity === "error").map((f) => f.code);
     assert.deepEqual(errors, ["nimbus/collection-route-mismatch"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a file whose frontmatter isn't at the top is reported, never rewritten", async () => {
+  const body = "<p>a</p>\n---\n<p>b</p>\n---\n";
+  const dir = project({ output: "static", rendering: '{ collections: { docs: "build" } }', files: { "src/pages/[...slug].astro": body } });
+  try {
+    assert.ok((await codes(dir)).includes("error src/pages/[...slug].astro"));
+    const plan = planRouteFiles(dir);
+    assert.ok(plan.ok);
+    const { manual } = applyRouteFiles(dir, plan.files);
+    assert.deepEqual(manual.map((entry) => entry.file), ["src/pages/[...slug].astro"]);
+    assert.equal(fs.readFileSync(path.join(dir, "src/pages/[...slug].astro"), "utf8"), body);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a collection added since the last build gets a note, not an error", async () => {
+  const dir = project({
+    output: "static",
+    rendering: '{ collections: { docs: "build", sdk: "build" } }',
+    files: {
+      ".nimbus/page-collections.json": JSON.stringify({ version: 1, collections: ["docs"], mdxFiles: [] }),
+      "src/pages/sdk/[...slug].astro":
+        '---\nimport { getCollectionStaticPaths, getCollectionPage } from "@cloudflare/nimbus-docs/runtime";\n\nexport const getStaticPaths = getCollectionStaticPaths("sdk");\n\nconst page = await getCollectionPage(Astro, "sdk");\n---\n',
+    },
+  });
+  try {
+    const result = await runChecks(dir, STRUCTURE);
+    assert.ok(!result.findings.some((f) => f.code === "nimbus/rendering-policy-invalid"));
+    const notes = result.scopes.flatMap((scope) => scope.notes);
+    assert.ok(notes.some((note) => note.code === "nimbus/page-collections-unconfirmed" && /"sdk" isn't in the last build's/.test(note.reason)));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -26,6 +26,7 @@ import {
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
 import { planRouteFiles } from "../_internal/route-files.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -426,9 +427,17 @@ async function checkRequestRendering(
   // without it, collections it can't confirm stay unchecked.
   if (pageCollections !== null) {
     const pageSet = new Set(pageCollections);
-    const unknown = Object.keys(config.rendering.collections ?? {}).filter(
+    const unlisted = Object.keys(config.rendering.collections ?? {}).filter(
       (collection) => !pageSet.has(collection),
     );
+    // One with a route is likely added since the last build, which checks it.
+    const unknown = unlisted.filter((collection) => !canonicalCollections.includes(collection));
+    const unbuilt = unlisted.filter((collection) => canonicalCollections.includes(collection));
+    if (unbuilt.length > 0)
+      notes.push(skippedNote(
+        "nimbus/page-collections-unconfirmed",
+        `${unbuilt.map((collection) => `"${collection}"`).join(", ")} ${unbuilt.length === 1 ? "isn't" : "aren't"} in the last build's page collections yet; the next build checks ${unbuilt.length === 1 ? "it" : "them"}.`,
+      ));
     for (const collection of unknown) {
       findings.push({
         scope: "structure",
@@ -518,6 +527,8 @@ function checkRouteFiles(
     notes.push(skippedNote("nimbus/route-files-skipped", `Route file modes weren't checked: ${plan.reason}.`));
     return;
   }
+  if (!plan.configured && plan.files.length > 0)
+    findings.push({ scope: "structure", code: "nimbus/rendering-default", severity: "info", message: DEFAULT_RENDERING_NOTE, fixable: false });
   for (const { file, mismatch, problem, edit, writes } of plan.files) {
     const manual = edit.status === "manual";
     findings.push({

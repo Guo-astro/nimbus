@@ -43,49 +43,46 @@ export interface RouteFileMismatch {
   /** `undefined` when its `prerender` is an expression. */
   fileMode?: RenderingMode;
   mode: RenderingMode;
-  /** The build applies `mode` over the file's own: `rendering` is set. */
-  overridden: boolean;
 }
 
 /**
- * How a managed route file disagrees with the mode Nimbus gives it: the one
- * `rendering` sets, or `"build"` without it. Only with `rendering` set does
- * the build apply that mode over the file's own.
+ * How a managed route file disagrees with the mode `rendering` gives it,
+ * which the build applies over the file's own. Without `rendering`, that's
+ * `"build"`, as for `rendering: { default: "build" }`.
  */
 export function routeFileMismatch(input: {
   file: string;
   source: string;
   output: AstroOutput;
   expected: RenderingMode;
-  overridden: boolean;
 }): RouteFileMismatch | null {
   const exports = readRouteFileExports(input.file, input.source);
-  if (!exports) return null;
   const fileMode = fileRouteMode(exports, input.output);
-  const base = { ...(fileMode ? { fileMode } : {}), mode: input.expected, overridden: input.overridden };
-  const builds = input.overridden ? input.expected === "build" : fileMode === "build";
-  if (builds && isDynamicRoute(input.file) && !exports.staticPaths) return { kind: "missing-paths", ...base };
+  const base = { ...(fileMode ? { fileMode } : {}), mode: input.expected };
+  if (input.expected === "build" && isDynamicRoute(input.file) && !exports.staticPaths) return { kind: "missing-paths", ...base };
   if (fileMode === undefined) return null;
   if (fileMode !== input.expected) return { kind: "mode", ...base };
   if (input.expected === "request" && exports.staticPaths) return { kind: "ignored-paths", ...base };
   return null;
 }
 
-/** What's wrong with a file, for the build's warning and `check`; `subject` is its collection, or "it". */
-export function describeRouteFileMismatch(mismatch: RouteFileMismatch, subject: string): string {
+/**
+ * What's wrong with a file, for the build's warning and `check`; `subject` is
+ * its collection, or "it". `configured` is whether the site sets `rendering`.
+ */
+export function describeRouteFileMismatch(mismatch: RouteFileMismatch, subject: string, configured: boolean): string {
+  const policy = configured ? "`rendering`" : "Nimbus";
   const when = (mode: RenderingMode) => (mode === "build" ? "ahead of time" : "on request");
   const verb = (mode: RenderingMode) => (mode === "build" ? "builds" : "renders");
-  if (mismatch.kind === "missing-paths")
-    return mismatch.overridden
-      ? `\`rendering\` builds ${subject} ahead of time, but the file has no getStaticPaths`
-      : "file builds ahead of time, but has no getStaticPaths";
+  if (mismatch.kind === "missing-paths") return `${policy} builds ${subject} ahead of time, but the file has no getStaticPaths`;
   if (mismatch.kind === "ignored-paths") return "file renders on request, so Astro ignores its getStaticPaths";
   const fileMode = mismatch.fileMode!;
-  return mismatch.overridden
-    ? `file ${verb(fileMode)} ${when(fileMode)}, \`rendering\` ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`
-    : `file ${verb(fileMode)} ${when(fileMode)}; with no \`rendering\`, Nimbus ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}` +
-        (fileMode === "request" ? ". To keep it on request, set `rendering`" : "");
+  return `file ${verb(fileMode)} ${when(fileMode)}, ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`;
 }
+
+/** Said once with route-file problems on a site without `rendering`. */
+export const DEFAULT_RENDERING_NOTE =
+  "With no `rendering` set, Nimbus builds every route it manages ahead of time; set `rendering` to render some on request.";
 
 /**
  * The collections `rendering` can name before content sync: `docs`, version

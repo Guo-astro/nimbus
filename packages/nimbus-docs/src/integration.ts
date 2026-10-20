@@ -213,6 +213,7 @@ import {
 import {
   agentRendering,
   agentRouteModeAt,
+  DEFAULT_RENDERING_NOTE,
   describeRouteFileMismatch,
   renderingCollections,
   routeFileMismatch,
@@ -221,6 +222,7 @@ import {
   type AstroOutput,
   type RouteFileMismatch,
 } from "./_internal/route-modes.js";
+import { planRouteFiles } from "./_internal/route-files.js";
 import {
   collectionLabel,
   collectionMountPrefix,
@@ -2207,8 +2209,6 @@ export function nimbus(
                   "      return typeof result === \"function\" ? result.bind(target) : result;",
                   "    },",
                   "  });",
-                  // A request-rendered root route has no getStaticPaths to forward.
-                  ...(mode === "build" ? ["export const getStaticPaths = route.getStaticPaths;"] : []),
                   "export const GET = (context) => route.GET(forward(context));",
                   "",
                 ].join("\n"),
@@ -2308,15 +2308,7 @@ export function nimbus(
         }
         if (hasRootLlmsFull && !spreadDirHolds(pagesRoot, "llms-full.txt")) {
           const pattern = "/[...section]/llms-full.txt";
-          // Without a policy, the section files render like the root file.
-          const declared = /export\s+const\s+prerender\s*=\s*(true|false)\b/u.exec(
-            fs.readFileSync(rootLlmsFullFile, "utf8"),
-          )?.[1];
-          const mode: RenderingMode = config.rendering
-            ? policy.default
-            : (declared ?? String(astroConfig.output !== "server")) === "true"
-              ? "build"
-              : "request";
+          const mode: RenderingMode = policy.default;
           const entrypoint = routeModuleFor("section-llms-full-route", mode);
           injectRoute({ pattern, entrypoint, prerender: mode === "build" });
           if (config.rendering) {
@@ -3015,20 +3007,19 @@ export function nimbus(
           return;
         }
         // Page routes and project-owned agent routes that call a Nimbus
-        // agent factory follow `rendering`, which wins over their own
-        // `prerender`. Custom routes keep their own.
+        // agent factory follow `rendering` (`"build"` without it), which wins
+        // over their own `prerender`. Custom routes keep their own.
         const page = managedPageRoutes.get(component);
         const expected = page?.mode ?? agentRouteMode(component, agentModesForSetup);
         if (!expected) return;
-        const overridden = renderingRoutes.has(component) || agentRouteMode(component) !== undefined;
-        if (overridden) route.prerender = expected === "build";
+        route.prerender = expected === "build";
         let source: string;
         try {
           source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
         } catch {
           return; // Unreadable route: Astro reports it.
         }
-        const mismatch = routeFileMismatch({ file: route.component, source, output: astroOutputForSetup, expected, overridden });
+        const mismatch = routeFileMismatch({ file: route.component, source, output: astroOutputForSetup, expected });
         if (mismatch) routeFileMismatches.set(route.component, { ...mismatch, subject: page?.subject ?? "it" });
         else routeFileMismatches.delete(route.component);
       },
@@ -3555,25 +3546,57 @@ export function nimbus(
         for (const file of routeFileMismatches.keys()) if (!entrypoints.has(file)) routeFileMismatches.delete(file);
         const mismatched = [...routeFileMismatches].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
         const unbuildable = mismatched.filter(([, mismatch]) => mismatch.kind === "missing-paths");
+        // What `check --fix` can't do for a file, so the advice doesn't loop.
+        const manual = new Map<string, string>();
+        if (mismatched.length > 0) {
+          const plan = planRouteFiles(projectRootForBuild);
+          for (const entry of plan.ok ? plan.files : [])
+            if (entry.edit.status === "manual") manual.set(entry.file, entry.edit.todo);
+        }
+        const fixCommand = `\`${invocation("check --fix", projectRootForBuild)}\``;
+        const lines = (files: Array<[string, RouteFileMismatch & { subject: string }]>, problem: boolean) =>
+          files
+            .map(([file, mismatch]) => {
+              const step = manual.get(file);
+              const text = problem ? describeRouteFileMismatch(mismatch, mismatch.subject, config.rendering !== undefined) : "";
+              return `  ${file}${text ? `: ${text}` : ""}${step ? `${text ? ". " : ": "}${step}` : ""}`;
+            })
+            .join("\n");
+        const runFix = (files: Array<[string, unknown]>, what: string) =>
+          files.some(([file]) => !manual.has(file)) ? `Run ${fixCommand} to ${what}.` : "";
+        const policy = config.rendering ? "`rendering`" : "Nimbus";
+        const defaults = config.rendering ? "" : DEFAULT_RENDERING_NOTE;
         if (building && unbuildable.length > 0) {
+          const one = unbuildable.length === 1;
           throw authorError(
-            `${unbuildable.map(([file]) => file).join(", ")} ${unbuildable.length === 1 ? "is a dynamic route" : "are dynamic routes"} ` +
-              `built ahead of time with no getStaticPaths, so Astro can't build ${unbuildable.length === 1 ? "it" : "them"}. ` +
-              `Run \`${invocation("check --fix", projectRootForBuild)}\` to add getStaticPaths. ` +
+            [
+              `${one ? "A dynamic route is" : "Dynamic routes are"} built ahead of time with no getStaticPaths, ` +
+                `so Astro can't build ${one ? "it" : "them"}:`,
+              lines(unbuildable, false),
+              runFix(unbuildable, "add getStaticPaths"),
+              defaults,
               "See https://nimbus-docs.com/configuration/#mix-build-and-request-rendering",
+            ]
+              .filter(Boolean)
+              .join("\n"),
           );
         }
-        const report = mismatched.map(([file, mismatch]) => `  ${file}: ${describeRouteFileMismatch(mismatch, mismatch.subject)}`).join("\n");
+        const report = lines(mismatched, true);
         if (report && report !== reportedRouteFileMismatches) {
-          const overridden = mismatched.some(([, mismatch]) => mismatch.overridden);
+          const one = mismatched.length === 1;
+          const astroWarning = mismatched.some(([, mismatch]) => mismatch.mode === "request")
+            ? "Until then, Astro may warn that getStaticPaths is ignored and suggest `export const prerender = true`: " +
+              `${policy} decides, so that line won't help.`
+            : "";
           logger.warn(
-            `${mismatched.length} route file${mismatched.length === 1 ? " doesn't" : "s don't"} match how Nimbus renders ` +
-              `${mismatched.length === 1 ? "it" : "them"}${overridden ? "; `rendering` wins at build" : ""}:\n` +
-              `${report}\nRun \`${invocation("check --fix", projectRootForBuild)}\` to update ${mismatched.length === 1 ? "it" : "them"}.` +
-              (mismatched.some(([, mismatch]) => mismatch.overridden && mismatch.mode === "request")
-                ? " Until then, Astro may warn that getStaticPaths is ignored and suggest `export const prerender = true`: " +
-                  "`rendering` decides, so that line won't help."
-                : ""),
+            [
+              `${mismatched.length} route file${one ? " doesn't" : "s don't"} match ${config.rendering ? "`rendering`, which wins at build" : `how Nimbus builds ${one ? "it" : "them"}`}:`,
+              report,
+              [runFix(mismatched, `update ${one ? "it" : "them"}`), astroWarning].filter(Boolean).join(" "),
+              defaults,
+            ]
+              .filter(Boolean)
+              .join("\n"),
           );
         }
         reportedRouteFileMismatches = report;

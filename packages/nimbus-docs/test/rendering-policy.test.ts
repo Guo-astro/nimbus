@@ -921,7 +921,7 @@ test("the rendering default does not reach collections the config does not name"
   assert.equal(blog.prerender, true);
 });
 
-test("omitted rendering policy leaves existing route decisions untouched", async (t) => {
+test("omitted rendering policy builds the routes Nimbus manages, as default build does", async (t) => {
   const integration = await setupIntegration(t, undefined, "build");
   const docs = { component: "src/pages/[...slug].astro", prerender: false };
   const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
@@ -929,7 +929,7 @@ test("omitted rendering policy leaves existing route decisions untouched", async
   await integration.routeSetup({ route: docs } as never);
   await integration.routeSetup({ route: blog } as never);
 
-  assert.equal(docs.prerender, false);
+  assert.equal(docs.prerender, true);
   assert.equal(blog.prerender, true);
   assert.equal(integration.injectedRoutes.length, 3);
 
@@ -1523,7 +1523,7 @@ test("route files that don't match rendering get one warning listing them", asyn
   assert.match(
     warnings[0]!,
     new RegExp(
-      "^1 route file doesn't match how Nimbus renders it; `rendering` wins at build:\n" +
+      "^1 route file doesn't match `rendering`, which wins at build:\n" +
         "  src/pages/\\[\\.\\.\\.slug\\]\\.astro: file builds ahead of time, `rendering` renders docs on request\n" +
         "Run `.*check --fix` to update it\\. Until then, Astro may warn that getStaticPaths is ignored",
       "u",
@@ -1577,6 +1577,24 @@ test("a built dynamic route with no getStaticPaths fails the build, naming the f
   await integration.routeSetup({ route: { component: "src/pages/llms.txt.ts", prerender: true } } as never);
   assert.throws(
     () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
-    /src\/pages\/\[\.\.\.slug\]\.astro is a dynamic route built ahead of time with no getStaticPaths.*check --fix.*configuration\/#mix-build-and-request-rendering/s,
+    /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths\..*configuration\/#mix-build-and-request-rendering/s,
+  );
+});
+
+test("a built dynamic route only an author can fix gets its own step, not the fix command", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { output: "server", integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\nexport const prerender = import.meta.env.PROD;\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /^A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro: Its `prerender` is an expression[^\n]*\nSee https:\/\/nimbus-docs\.com\//u);
+      return true;
+    },
   );
 });

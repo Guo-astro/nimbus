@@ -123,7 +123,7 @@ rendering: {
 
 Every override must name a registered collection with its own canonical catch-all route. Nimbus fails the build for unknown collection names rather than silently ignoring them.
 
-`rendering` wins at build: Nimbus renders each canonical route, and its Markdown and `llms.txt` routes, in the configured mode, and warns when a route file says otherwise. Run `nimbus-docs check --fix` to update the files. It sets each route's `prerender` line, keeps `getStaticPaths` on built routes only, and names the collection in a collection route's page helper, such as `getCollectionPage(Astro, "sdk")`. `add adapter-*` and the scaffolder update them for you. Without `rendering`, `check` compares route files with building ahead of time, though at build each file's own `prerender` still decides.
+`rendering` wins at build: Nimbus renders each canonical route, and its Markdown and `llms.txt` routes, in the configured mode, and warns when a route file says otherwise. Run `nimbus-docs check --fix` to update the files. It sets each route's `prerender` line, keeps `getStaticPaths` on built routes only, and names the collection in a collection route's page helper, such as `getCollectionPage(Astro, "sdk")`. `add adapter-*` and the scaffolder update them for you. Without `rendering`, each of those routes is built ahead of time, as with `default: "build"`, whatever its `prerender` line says. Your own routes, such as a 404 page, keep their `prerender`.
 
 A built route with a dynamic segment, such as `[...slug].astro`, must export `getStaticPaths`. Astro can't build it otherwise, so the build fails and names the file.
 

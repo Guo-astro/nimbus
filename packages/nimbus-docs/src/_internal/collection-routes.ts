@@ -13,6 +13,7 @@ import path from "node:path";
 import ts from "typescript";
 
 import { collectionMountPrefix, NO_ROUTES, PRIMARY_COLLECTION, type MountContext, type VersionInfo } from "./collection-mount.js";
+import { routeCode } from "./route-exports.js";
 import { isStaticPathsHelper, PAGE_HELPERS, takesCollection } from "./route-helpers.js";
 import type { SidebarConfigItem } from "../types.js";
 
@@ -141,7 +142,7 @@ export interface RouteRead {
  * `getStaticPaths`, top-level ones only when exported, as Astro requires.
  */
 export function readRoute(source: string): RouteRead {
-  const code = /^\s*---\r?\n([\s\S]*?)\r?\n---/u.exec(source)?.[1];
+  const code = routeCode("route.astro", source)?.code;
   if (code === undefined) return { usesHelper: false };
   // A program skips files with extensions it doesn't know, such as `.astro`.
   const name = "route.ts";

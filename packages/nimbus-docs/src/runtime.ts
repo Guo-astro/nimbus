@@ -1397,11 +1397,9 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
  * Configure custom partial IDs through `markdown.partialResolver` on the Nimbus
  * integration so the resolver stays out of request-time Worker bundles.
  */
-export async function getDocsPageProps(
-  astro: AstroGlobal,
-  ...extra: []
-): Promise<ProsePageProps<"docs">> {
-  rejectBadPageHelperArgument("getDocsPageProps", (extra as unknown[])[0]);
+export function getDocsPageProps(astro: AstroGlobal): Promise<ProsePageProps<"docs">>;
+export async function getDocsPageProps(astro: AstroGlobal, ...extra: unknown[]): Promise<ProsePageProps<"docs">> {
+  rejectBadPageHelperArgument("getDocsPageProps", extra[0]);
   const page = await resolveProseRoute<"docs">(
     astro,
     PRIMARY_COLLECTION,
@@ -1418,11 +1416,9 @@ export async function getDocsPageProps(
   return page;
 }
 
-export function getDocsPage(
-  astro: AstroGlobal,
-  ...extra: []
-): Promise<ProsePageProps<"docs"> | Response> {
-  rejectBadPageHelperArgument("getDocsPage", (extra as unknown[])[0]);
+export function getDocsPage(astro: AstroGlobal): Promise<ProsePageProps<"docs"> | Response>;
+export function getDocsPage(astro: AstroGlobal, ...extra: unknown[]): Promise<ProsePageProps<"docs"> | Response> {
+  rejectBadPageHelperArgument("getDocsPage", extra[0]);
   return resolveProseRoute(
     astro,
     PRIMARY_COLLECTION,

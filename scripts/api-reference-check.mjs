@@ -1330,6 +1330,43 @@ async function assertArtifactsAndSmoke(dist) {
       resultLinks.some((href) => href?.includes("/api/charges/create")),
       "Pagefind cannot find the representative operation",
     );
+
+    // Scrolling the home loads every later part, even ones too short to move
+    // its link out of range.
+    await page.goto(`${staticSite.origin}/api/`, { waitUntil: "networkidle" });
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const parts = homeParts.length + 1;
+    await page
+      .waitForFunction((n) => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length === n, parts, { timeout: 10_000 })
+      .catch(() => {});
+    const shown = await page.locator("[data-nb-ix-feed] [data-api-home-chunk]").count();
+    assert(shown === parts, `scrolling the API home showed ${shown} of its ${parts} parts`);
+
+    // A part that arrives while a filter hides the list doesn't pull in the
+    // rest; clearing the filter resumes loading.
+    assert(parts >= 3, "the API home needs three parts to check loading under a filter");
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    const requested = [];
+    await page.route("**/api/index/*/", async (route) => {
+      requested.push(new URL(route.request().url()).pathname);
+      if (requested.length === 1) await held;
+      await route.continue();
+    });
+    await page.goto(`${staticSite.origin}/api/`);
+    await page.waitForFunction(() => document.querySelector("[data-nb-ix-more-label]")?.textContent?.startsWith("Loading"));
+    await page.locator("[data-nb-ix-input]").fill("charge");
+    release();
+    await page.waitForFunction(() => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length >= 2);
+    await page.waitForTimeout(500);
+    assert(requested.length === 1, `filtering the API home still loaded ${requested.join(", ")}`);
+    await page.locator("[data-nb-ix-input]").fill("");
+    await page
+      .waitForFunction((n) => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length === n, parts, { timeout: 10_000 })
+      .catch(() => {});
+    const resumed = await page.locator("[data-nb-ix-feed] [data-api-home-chunk]").count();
+    assert(resumed === parts, `clearing the API home's filter showed ${resumed} of its ${parts} parts`);
+    await page.unroute("**/api/index/*/");
     assert(
       browserErrors.length === 0,
       `Chromium reported errors: ${browserErrors.join("; ")}`,

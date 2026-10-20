@@ -123,11 +123,13 @@ if (rows.length > 0 && !home) {
     const leave = new AbortController();
 
     // ---- The list, a part at a time ----
+    const ahead = 1500;
     const loadNext = (): Promise<void> => {
       if (loading) return loading;
       if (loaded >= later.length) return Promise.resolve();
       const next = later[loaded]!;
       if (moreLabel) moreLabel.textContent = "Loading more endpoints…";
+      let appended = false;
       loading = fetch(next.href)
         .then((r) => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
         .then((html) => {
@@ -135,6 +137,7 @@ if (rows.length > 0 && !home) {
           if (!chunk) throw new Error("no chunk");
           feed.append(document.adoptNode(chunk));
           loaded++;
+          appended = true;
           document.dispatchEvent(new Event("nb:toc-headings"));
           const after = later[loaded];
           if (after && more && moreLabel) {
@@ -151,12 +154,15 @@ if (rows.length > 0 && !home) {
         })
         .finally(() => {
           loading = null;
+          // A short part can leave the visible link in range, where the observer won't fire again.
+          if (appended && more?.isConnected && !more.hidden && more.getBoundingClientRect().top < innerHeight + ahead)
+            void loadNext();
         });
       return loading;
     };
     const observer = more
       ? new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && void loadNext(), {
-          rootMargin: "0px 0px 1500px 0px",
+          rootMargin: `0px 0px ${ahead}px 0px`,
         })
       : null;
     if (more) observer!.observe(more);

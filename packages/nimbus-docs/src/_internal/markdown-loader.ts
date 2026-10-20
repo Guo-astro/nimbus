@@ -14,8 +14,11 @@ import {
   isPreparedMarkdownLoadActive,
   preparedMarkdownCollectionCapability,
   preparedMarkdownRootKey,
+  isPreparedMarkdownLazyHeadings,
   runPreparedMarkdownTransaction,
+  setPreparedHeadingsRenderer,
 } from "./prepared-markdown-registry.js";
+import type { PreparedHeadingsRenderer } from "./prepared-markdown-registry.js";
 import { renderPreparedMarkdown } from "./markdown-processor-decorator.js";
 import { transparentProxy } from "./transparent-proxy.js";
 
@@ -480,8 +483,7 @@ export function prepareMarkdownLoader<T extends Loader>(
           "renderMarkdown",
           context,
         ) as LoaderContext["renderMarkdown"];
-        for (const entry of sourceEntries) {
-          if (typeof entry.body !== "string") continue;
+        const renderHeadings: PreparedHeadingsRenderer = async (entry) => {
           const fileURL = entry.filePath
             ? new URL(entry.filePath, context.config.root)
             : undefined;
@@ -492,7 +494,24 @@ export function prepareMarkdownLoader<T extends Loader>(
                 fileURL ? { fileURL } : undefined,
               ]) as ReturnType<LoaderContext["renderMarkdown"]>,
           );
-          headings.set(entry.id, rendered.metadata?.headings ?? []);
+          return rendered.metadata?.headings ?? [];
+        };
+        if (isPreparedMarkdownLazyHeadings(root)) {
+          // Rendering every body only for its headings scales startup and
+          // every save with the doc count; a page's headings are rendered
+          // when it is first requested instead.
+          setPreparedHeadingsRenderer(root, context.collection, renderHeadings);
+        } else {
+          for (const entry of sourceEntries) {
+            if (typeof entry.body !== "string") continue;
+            headings.set(
+              entry.id,
+              await renderHeadings({
+                body: entry.body,
+                filePath: entry.filePath,
+              }),
+            );
+          }
         }
         const rollback = publish?.();
         let committed: boolean;

@@ -64,6 +64,23 @@ Each later part is its own page, fetched as the reader nears the end; without Ja
 
 The parts and the filter's list come from two routes the [recipe](/api-reference/openapi/setup#install-with-the-recipe) writes under `src/pages/nimbus-api/home/<collection>/`, served at `/nimbus-api/home/<collection>/<version>/<n>/` and `…/<version>/index.json`, with `default` as the version of an unversioned API. They render like the collection's pages, built or on request, and the part pages are `noindex`.
 
+To build your own page from the whole reference, read a version's root page with `getApiRoot` from `@cloudflare/nimbus-docs/runtime`; leave out `version` for the default. Its `index` holds every operation and webhook exactly once, each with its `method`, `path` and link. `apiIndexRows(index)` flattens it, and `chunkApiIndex(index, { size })` splits it the way the home does.
+
+```astro title="src/pages/endpoints.astro"
+---
+import { apiIndexRows, getApiRoot, withBase } from "@cloudflare/nimbus-docs/runtime";
+
+const root = await getApiRoot(Astro, { collection: "api" });
+const rows = root ? apiIndexRows(root.index) : [];
+---
+
+<ul>
+  {rows.map(([method, path, label, href]) => (
+    <li><a href={withBase(href, import.meta.env.BASE_URL)}>{label}</a> <code>{method} {path}</code></li>
+  ))}
+</ul>
+```
+
 ## Render on request
 
 API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:

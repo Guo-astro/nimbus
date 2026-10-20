@@ -302,7 +302,8 @@ rendering: {
 ```
 
 Use `"request"` to render it like the rest of a request-rendered site, or
-`"build"` to prerender it. Without a `rendering` option, skip this step.
+`"build"` to prerender it. Without a `rendering` option, skip this step: Nimbus
+builds it ahead of time.
 
 The route in 4c is written for a site built ahead of time on
 `output: "static"`. Then run `nimbus-docs check --fix`, so it matches the

@@ -215,6 +215,7 @@ import {
   agentRouteModeAt,
   DEFAULT_RENDERING_NOTE,
   describeRouteFileMismatch,
+  isDynamicRoute,
   renderingCollections,
   routeFileMismatch,
   routeFileSubject,
@@ -3549,8 +3550,12 @@ export function nimbus(
         // What `check --fix` can't do for a file, so the advice doesn't loop.
         const manual = new Map<string, string>();
         if (mismatched.length > 0) {
-          const plan = planRouteFiles(projectRootForBuild);
-          for (const entry of plan.ok ? plan.files : [])
+          // Advice only: if planning fails, the build still reports the files.
+          let plan: ReturnType<typeof planRouteFiles> | undefined;
+          try {
+            plan = planRouteFiles(projectRootForBuild);
+          } catch {}
+          for (const entry of plan?.ok ? plan.files : [])
             if (entry.edit.status === "manual") manual.set(entry.file, entry.edit.todo);
         }
         const fixCommand = `\`${invocation("check --fix", projectRootForBuild)}\``;
@@ -3562,8 +3567,13 @@ export function nimbus(
               return `  ${file}${text ? `: ${text}` : ""}${step ? `${text ? ". " : ": "}${step}` : ""}`;
             })
             .join("\n");
-        const runFix = (files: Array<[string, unknown]>, what: string) =>
-          files.some(([file]) => !manual.has(file)) ? `Run ${fixCommand} to ${what}.` : "";
+        // `what` takes "it", "them", or "the other(s)" beside files --fix can't change.
+        const runFix = (files: Array<[string, unknown]>, what: (target: string) => string) => {
+          const fixable = files.filter(([file]) => !manual.has(file)).length;
+          if (fixable === 0) return "";
+          const target = fixable < files.length ? (fixable === 1 ? "the other" : "the others") : files.length === 1 ? "it" : "them";
+          return `Run ${fixCommand} to ${what(target)}.`;
+        };
         const policy = config.rendering ? "`rendering`" : "Nimbus";
         const defaults = config.rendering ? "" : DEFAULT_RENDERING_NOTE;
         if (building && unbuildable.length > 0) {
@@ -3573,7 +3583,7 @@ export function nimbus(
               `${one ? "A dynamic route is" : "Dynamic routes are"} built ahead of time with no getStaticPaths, ` +
                 `so Astro can't build ${one ? "it" : "them"}:`,
               lines(unbuildable, false),
-              runFix(unbuildable, "add getStaticPaths"),
+              runFix(unbuildable, (target) => `add getStaticPaths to ${target}`),
               defaults,
               "See https://nimbus-docs.com/configuration/#mix-build-and-request-rendering",
             ]
@@ -3584,7 +3594,12 @@ export function nimbus(
         const report = lines(mismatched, true);
         if (report && report !== reportedRouteFileMismatches) {
           const one = mismatched.length === 1;
-          const astroWarning = mismatched.some(([, mismatch]) => mismatch.mode === "request")
+          // Astro warns about a dynamic route that renders on request with getStaticPaths.
+          const astroWarning = mismatched.some(
+            ([file, mismatch]) =>
+              mismatch.kind === "ignored-paths" ||
+              (mismatch.kind === "mode" && mismatch.fileMode === "build" && isDynamicRoute(file)),
+          )
             ? "Until then, Astro may warn that getStaticPaths is ignored and suggest `export const prerender = true`: " +
               `${policy} decides, so that line won't help.`
             : "";
@@ -3592,7 +3607,7 @@ export function nimbus(
             [
               `${mismatched.length} route file${one ? " doesn't" : "s don't"} match ${config.rendering ? "`rendering`, which wins at build" : `how Nimbus builds ${one ? "it" : "them"}`}:`,
               report,
-              [runFix(mismatched, `update ${one ? "it" : "them"}`), astroWarning].filter(Boolean).join(" "),
+              [runFix(mismatched, (target) => `update ${target}`), astroWarning].filter(Boolean).join(" "),
               defaults,
             ]
               .filter(Boolean)

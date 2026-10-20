@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -39,8 +40,9 @@ test("check reports each route file rendering overrides, and the fix leaves noth
   const dir = project({ output: "server", rendering: '{ default: "request" }' });
   try {
     assert.deepEqual(await codes(dir), DYNAMIC.map((file) => `warn ${file}`));
-    const message = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/[...slug].astro")?.message;
-    assert.equal(message, "src/pages/[...slug].astro: file renders on request, so Astro ignores its getStaticPaths.");
+    const finding = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/[...slug].astro");
+    assert.equal(finding?.message, "src/pages/[...slug].astro: file renders on request, so Astro ignores its getStaticPaths.");
+    assert.match(finding?.fix?.suggestion ?? "", /^run `.*nimbus-docs check --fix` to update it$/);
 
     const plan = planRouteFiles(dir);
     assert.ok(plan.ok);
@@ -217,6 +219,88 @@ test("a collection added since the last build gets a note, not an error", async 
     assert.ok(!result.findings.some((f) => f.code === "nimbus/rendering-policy-invalid"));
     const notes = result.scopes.flatMap((scope) => scope.notes);
     assert.ok(notes.some((note) => note.code === "nimbus/page-collections-unconfirmed" && /"sdk" isn't in the last build's/.test(note.reason)));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a prerender set by an expression is reported, with the step to take", async () => {
+  const dir = project({
+    output: "server",
+    rendering: '{ default: "request" }',
+    files: {
+      "src/pages/llms.txt.ts":
+        'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const prerender = import.meta.env.PROD;\nexport const { GET } = llmsRoute();\n',
+    },
+  });
+  try {
+    const finding = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/llms.txt.ts");
+    assert.equal(finding?.severity, "warn");
+    assert.equal(
+      finding?.message,
+      "src/pages/llms.txt.ts: file sets `prerender` with an expression, but `rendering` renders it on request whatever it says.",
+    );
+    assert.equal(finding?.fixable, false);
+    assert.match(finding?.fix?.suggestion ?? "", /Its `prerender` is an expression.*remove it\./);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("getStaticPaths exported from a list counts in a .ts endpoint", async () => {
+  const dir = project({
+    output: "static",
+    rendering: '{ collections: { docs: "build" } }',
+    files: {
+      "src/pages/[...slug]/index.md.ts":
+        'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nconst { GET, getStaticPaths } = markdownRoute();\nexport { GET, getStaticPaths };\n',
+    },
+  });
+  try {
+    assert.deepEqual(await codes(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("without rendering, every collection a route names is built, not only docs", async () => {
+  const route =
+    '---\nimport { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";\n\nconst page = await getCollectionPage(Astro, "sdk");\n---\n';
+  const dir = project({
+    output: "server",
+    files: { "src/content.config.ts": "export const collections = { docs: {}, sdk: {} };\n", "src/pages/sdk/[...slug].astro": route },
+  });
+  try {
+    const message = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/sdk/[...slug].astro")?.message;
+    assert.equal(message, 'src/pages/sdk/[...slug].astro: Nimbus builds "sdk" ahead of time, but the file has no getStaticPaths.');
+    const plan = planRouteFiles(dir);
+    assert.ok(plan.ok);
+    applyRouteFiles(dir, plan.files);
+    assert.equal(
+      fs.readFileSync(path.join(dir, "src/pages/sdk/[...slug].astro"), "utf8"),
+      '---\nimport { getCollectionStaticPaths, getCollectionPage } from "@cloudflare/nimbus-docs/runtime";\n\nexport const prerender = true;\nexport const getStaticPaths = getCollectionStaticPaths("sdk");\n\nconst page = await getCollectionPage(Astro, "sdk");\n---\n',
+    );
+    assert.deepEqual(await codes(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("check --fix names a file it only partly updated, and what's left", () => {
+  const dir = project({
+    output: "server",
+    rendering: '{ default: "request" }',
+    files: { "src/pages/[...slug].astro": "---\nexport const prerender = true;\nexport async function getStaticPaths() { return []; }\n---\n" },
+  });
+  try {
+    const cli = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+    const res = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), cli, "check", "--structure", "--fix"], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1" },
+    });
+    assert.match(res.stdout, /partly updated src\/pages\/\[\.\.\.slug\]\.astro; still to do: Remove its getStaticPaths export/, res.stdout + res.stderr);
+    assert.doesNotMatch(res.stdout, /updated src\/pages\/\[\.\.\.slug\]\.astro, /);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

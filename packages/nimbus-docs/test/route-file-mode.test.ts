@@ -166,7 +166,7 @@ const result = await getApiRoute(Astro, "api", options);
   assert.equal(edit.status, "manual");
   if (edit.status === "manual") {
     assert.doesNotMatch(edit.source, /export const getStaticPaths/);
-    assert.match(edit.todo, /Export them .* or write them inline, then add `export const getStaticPaths = getApiStaticPaths\("api", options\);`/s);
+    assert.match(edit.todo, /read `options`, which getStaticPaths can't see.*Export it \(`export const options = …`\), then run check --fix again\./s);
   }
 });
 
@@ -201,4 +201,208 @@ test("an expression prerender on a built route without getStaticPaths names both
   assert.equal(edit.status, "manual");
   if (edit.status === "manual")
     assert.match(edit.todo, /set it to `export const prerender = true;`\. Then add `export const getStaticPaths = getCollectionStaticPaths\("sdk"\);`/);
+});
+
+test("a collection name held in a constant isn't passed twice", () => {
+  const request = `---
+import { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
+
+export const name = "sdk";
+const page = await getCollectionPage(Astro, name);
+---
+`;
+  const page = { collection: "sdk", kind: "collection", moved: true } as const;
+  const built = apply("src/pages/kit/[...slug].astro", request, { mode: "build", output: "static", page });
+  assert.match(built, /getCollectionPage\(Astro, name\);/);
+  assert.match(built, /export const getStaticPaths = getCollectionStaticPaths\("sdk"\);/);
+  assert.equal(apply("src/pages/kit/[...slug].astro", built, { mode: "request", output: "server", page }), request);
+});
+
+test("an API route with its name in a constant keeps its options in both helpers", () => {
+  const request = `---
+import { API_HOME_CHUNK_SIZE, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+
+export const COLLECTION = "api";
+const result = await getApiRoute(Astro, COLLECTION, { homeChunkSize: API_HOME_CHUNK_SIZE });
+---
+`;
+  const page = { collection: "api", kind: "api", moved: false } as const;
+  const built = apply("src/pages/api/[...slug].astro", request, { mode: "build", output: "static", page });
+  assert.match(built, /export const getStaticPaths = getApiStaticPaths\("api", \{ homeChunkSize: API_HOME_CHUNK_SIZE \}\);/);
+  assert.match(built, /getApiRoute\(Astro, COLLECTION, \{ homeChunkSize: API_HOME_CHUNK_SIZE \}\);/);
+  assert.equal(apply("src/pages/api/[...slug].astro", built, { mode: "request", output: "server", page }), request);
+});
+
+test("page helper arguments Nimbus can't read become a manual step, not a guess", () => {
+  const source = `---
+import { getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+import { settings } from "../lib/api";
+
+const result = await getApiRoute(Astro, settings);
+---
+`;
+  const page = { collection: "api", kind: "api", moved: false } as const;
+  const edit = setRouteFileMode("src/pages/api/[...slug].astro", source, { mode: "build", output: "static", page });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.match(edit.source, /getApiRoute\(Astro, settings\)/);
+    assert.match(edit.todo, /aren't a collection name and options Nimbus can read/);
+  }
+});
+
+test("a prerender sharing a statement with GET is left whole, with a step", () => {
+  const source = 'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const prerender = true, GET = llmsRoute().GET;\n';
+  const edit = setRouteFileMode("llms.txt.ts", source, { mode: "request", output: "server" });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.equal(edit.source, source);
+    assert.match(edit.todo, /shares a statement with other exports/);
+  }
+});
+
+test("a prerender sharing a line with other statements goes alone", () => {
+  const source = 'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const prerender = true; export const { GET } = llmsRoute();\n';
+  assert.equal(
+    apply("llms.txt.ts", source, { mode: "request", output: "server" }),
+    'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const { GET } = llmsRoute();\n',
+  );
+  const page = "---\nexport const prerender = true; const label = \"Docs\";\n---\n<h1>{label}</h1>\n";
+  assert.equal(apply("index.astro", page, { mode: "request", output: "server" }), '---\nconst label = "Docs";\n---\n<h1>{label}</h1>\n');
+});
+
+test("a partial edit keeps what shares a line with prerender", () => {
+  const source =
+    'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const prerender = true; export const GET = markdownRoute().GET;\nexport function getStaticPaths() { return []; }\n';
+  const edit = setRouteFileMode("[...slug]/index.md.ts", source, { mode: "request", output: "server" });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.match(edit.source, /^export const GET = markdownRoute\(\)\.GET;$/mu);
+    assert.doesNotMatch(edit.source, /prerender/);
+    assert.match(edit.todo, /Remove its getStaticPaths export/);
+  }
+});
+
+test("a moved route keeps the getStaticPaths that names its collection when its helper's arguments can't be read", () => {
+  const source = `---
+import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { options } from "../../lib/api";
+
+export const getStaticPaths = getApiStaticPaths("api", options);
+const result = await getApiRoute(Astro, options);
+---
+`;
+  const page = { collection: "api", kind: "api", moved: true } as const;
+  const edit = setRouteFileMode("src/pages/reference/[...slug].astro", source, { mode: "request", output: "server", page });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.equal(edit.source, source);
+    assert.match(edit.todo, /Pass "api" to its page helper first/);
+  }
+});
+
+test("a prerender exported from a list is left for the author, not declared twice", () => {
+  const source = 'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nconst prerender = false;\nexport { prerender };\nexport const { GET } = llmsRoute();\n';
+  const edit = setRouteFileMode("llms.txt.ts", source, { mode: "build", output: "server" });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.equal(edit.source, source);
+    assert.match(edit.todo, /exports `prerender` from a list/);
+  }
+});
+
+test("a wrapped factory gets the step it needs, not a fix that changes nothing", () => {
+  const source = 'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nconst route = markdownRoute();\nexport const GET = route.GET;\n';
+  const edit = setRouteFileMode("[...slug]/index.md.ts", source, { mode: "build", output: "static" });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual")
+    assert.match(edit.todo, /export getStaticPaths from the factory that makes its GET, such as `export const getStaticPaths = route\.getStaticPaths;`/);
+});
+
+test("getStaticPaths in an export list counts in a .ts endpoint", () => {
+  const source = 'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nconst { GET, getStaticPaths } = markdownRoute();\nexport { GET, getStaticPaths };\n';
+  assert.deepEqual(setRouteFileMode("[...slug]/index.md.ts", source, { mode: "build", output: "static" }), { status: "unchanged" });
+});
+
+test("API options that read globals such as Math are copied, not called hidden", () => {
+  const request = `---
+import { API_HOME_CHUNK_SIZE, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+
+const result = await getApiRoute(Astro, "api", { homeChunkSize: Math.min(API_HOME_CHUNK_SIZE, 100) });
+---
+`;
+  const page = { collection: "api", kind: "api", moved: false } as const;
+  const built = apply("src/pages/api/[...slug].astro", request, { mode: "build", output: "static", page });
+  assert.match(built, /export const getStaticPaths = getApiStaticPaths\("api", \{ homeChunkSize: Math\.min\(API_HOME_CHUNK_SIZE, 100\) \}\);/);
+});
+
+test("a comment quoting the prerender line is left alone; the declaration is edited", () => {
+  const source =
+    'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\n// Remove export const prerender = false; when switching modes.\nexport const prerender = false;\nexport const { GET } = llmsRoute();\n';
+  assert.equal(
+    apply("llms.txt.ts", source, { mode: "build", output: "server" }),
+    'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nexport const prerender = true;\n\n// Remove export const prerender = false; when switching modes.\nexport const { GET } = llmsRoute();\n',
+  );
+});
+
+test("dropping an unused helper import keeps an import beside it", () => {
+  const source = `---
+import { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime"; import "../../lib/instrumentation";
+import { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
+
+export const getStaticPaths = getCollectionStaticPaths("sdk");
+
+const page = await getCollectionPage(Astro, "sdk");
+---
+`;
+  const page = { collection: "sdk", kind: "collection", moved: false } as const;
+  assert.equal(
+    apply("src/pages/sdk/[...slug].astro", source, { mode: "request", output: "server", page }),
+    `---
+import "../../lib/instrumentation";
+import { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
+
+const page = await getCollectionPage(Astro, "sdk");
+---
+`,
+  );
+});
+
+test("a helper import spread over lines loses only the unused name", () => {
+  const source = `---
+import {
+  getCollectionStaticPaths,
+  getCollectionPage,
+} from "@cloudflare/nimbus-docs/runtime";
+
+export const getStaticPaths = getCollectionStaticPaths("sdk");
+
+const page = await getCollectionPage(Astro, "sdk");
+---
+`;
+  const page = { collection: "sdk", kind: "collection", moved: false } as const;
+  assert.equal(
+    apply("src/pages/sdk/[...slug].astro", source, { mode: "request", output: "server", page }),
+    `---
+import {
+  getCollectionPage,
+} from "@cloudflare/nimbus-docs/runtime";
+
+const page = await getCollectionPage(Astro, "sdk");
+---
+`,
+  );
+});
+
+test("dropping the only named helper beside a default import keeps the default", () => {
+  for (const [imports, kept] of [
+    ['import nimbus, { getDocsStaticPaths } from "@cloudflare/nimbus-docs";', 'import nimbus from "@cloudflare/nimbus-docs";'],
+    ['import nimbus, {\n  getDocsStaticPaths,\n} from "@cloudflare/nimbus-docs";', 'import nimbus from "@cloudflare/nimbus-docs";'],
+    ['import nimbus,{getDocsStaticPaths}from "@cloudflare/nimbus-docs";', 'import nimbus from "@cloudflare/nimbus-docs";'],
+  ]) {
+    const source = `---\n${imports}\n\nexport const getStaticPaths = getDocsStaticPaths;\n\nconsole.log(nimbus);\n---\n`;
+    assert.equal(
+      apply("src/pages/[...slug].astro", source, { mode: "request", output: "server", page: docs }),
+      `---\n${kept}\n\nconsole.log(nimbus);\n---\n`,
+    );
+  }
 });

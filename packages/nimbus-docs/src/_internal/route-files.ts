@@ -137,11 +137,18 @@ export function applyRouteFiles(cwd: string, plan: RouteFilePlan[]): { updated: 
 }
 
 /** Plan and write in one step: what the scaffolder and `add adapter-*` run after setting `rendering`. */
-export function alignRouteFiles(cwd: string): { updated: string[]; manual: Array<{ file: string; todo: string }>; skipped?: string } {
+export function alignRouteFiles(cwd: string): {
+  updated: string[];
+  manual: Array<{ file: string; todo: string }>;
+  /** Whether the site sets `rendering`; `undefined` when Nimbus couldn't read the config. */
+  configured?: boolean;
+  skipped?: string;
+} {
   const plan = planRouteFiles(cwd);
   if (!plan.ok) return { updated: [], manual: [], skipped: plan.reason };
   const { updated, manual } = applyRouteFiles(cwd, plan.files);
   return {
+    configured: plan.configured,
     updated,
     manual: manual.map((entry) => ({ file: entry.file, todo: entry.edit.status === "manual" ? entry.edit.todo : "" })),
   };

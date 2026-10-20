@@ -27,6 +27,7 @@ import {
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
 import { planRouteFiles } from "../_internal/route-files.js";
 import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
+import { invocation } from "../cli/pm.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -540,7 +541,7 @@ function checkRouteFiles(
       fixable: writes,
       fix: manual
         ? { kind: writes ? "route-file" : "suggestion", path: file, suggestion: edit.todo }
-        : { kind: "route-file", path: file, suggestion: "update the file to match how Nimbus renders it" },
+        : { kind: "route-file", path: file, suggestion: `run \`${invocation("check --fix", cwd)}\` to update it` },
     });
   }
 }

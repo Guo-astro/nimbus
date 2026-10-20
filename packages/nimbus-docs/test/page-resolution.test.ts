@@ -15,6 +15,7 @@ import type { ApiSpec } from "../src/types.js";
 import { collectionsByFolder } from "../src/_internal/collection-mount.js";
 import {
   getApiPage,
+  getApiRoute,
   getCollectionPageProps,
   getDocsPageProps,
 } from "../src/index.js";
@@ -105,7 +106,23 @@ test("collection page helpers take the collection name, and still reject the rem
   );
   await assert.rejects(
     () => getDocsPageProps({ props: {} } as never, "blog" as never),
-    /getDocsPageProps\(Astro\) always serves docs.*getCollectionPage\(Astro, "blog"\)/,
+    /getDocsPageProps\(Astro\) always serves docs.*getCollectionPageProps\(Astro, "blog"\)/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "docs" as never),
+    /Drop the argument: getDocsPageProps\(Astro\)\./,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk", "sdk" as never),
+    /getCollectionPageProps takes \(Astro, collection\), but was passed 1 more argument\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", "api" as never),
+    /getApiRoute takes \(Astro, collection, options\), with options last\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", {}, {} as never),
+    /getApiRoute takes \(Astro, collection, options\), but was passed 1 more argument\./,
   );
   await assert.rejects(
     () => getCollectionPageProps({ props: {} } as never, undefined),

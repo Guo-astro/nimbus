@@ -38,8 +38,10 @@ export interface RouteFileMismatch {
    * `ignored-paths`: it renders on request with `getStaticPaths`.
    * `missing-paths`: it builds a dynamic route with no `getStaticPaths`,
    * which Astro can't do.
+   * `expression`: it sets `prerender` with an expression, which the mode
+   * Nimbus gives it overrides.
    */
-  kind: "mode" | "ignored-paths" | "missing-paths";
+  kind: "mode" | "ignored-paths" | "missing-paths" | "expression";
   /** `undefined` when its `prerender` is an expression. */
   fileMode?: RenderingMode;
   mode: RenderingMode;
@@ -60,7 +62,8 @@ export function routeFileMismatch(input: {
   const fileMode = fileRouteMode(exports, input.output);
   const base = { ...(fileMode ? { fileMode } : {}), mode: input.expected };
   if (input.expected === "build" && isDynamicRoute(input.file) && !exports.staticPaths) return { kind: "missing-paths", ...base };
-  if (fileMode === undefined) return null;
+  // Two `prerender` exports don't compile, so the build reports those itself.
+  if (fileMode === undefined) return exports.prerenders.length === 1 ? { kind: "expression", ...base } : null;
   if (fileMode !== input.expected) return { kind: "mode", ...base };
   if (input.expected === "request" && exports.staticPaths) return { kind: "ignored-paths", ...base };
   return null;
@@ -76,6 +79,8 @@ export function describeRouteFileMismatch(mismatch: RouteFileMismatch, subject: 
   const verb = (mode: RenderingMode) => (mode === "build" ? "builds" : "renders");
   if (mismatch.kind === "missing-paths") return `${policy} builds ${subject} ahead of time, but the file has no getStaticPaths`;
   if (mismatch.kind === "ignored-paths") return "file renders on request, so Astro ignores its getStaticPaths";
+  if (mismatch.kind === "expression")
+    return `file sets \`prerender\` with an expression, but ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)} whatever it says`;
   const fileMode = mismatch.fileMode!;
   return `file ${verb(fileMode)} ${when(fileMode)}, ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`;
 }
@@ -87,7 +92,8 @@ export const DEFAULT_RENDERING_NOTE =
 /**
  * The collections `rendering` can name before content sync: `docs`, version
  * and API collections, and every key in `rendering.collections`, each with a
- * route at its URL.
+ * route at its URL. Without `rendering`, also every collection a route file
+ * names, so Nimbus builds them all.
  */
 export function renderingCollections(input: {
   rendering: RenderingConfig | undefined;
@@ -102,6 +108,7 @@ export function renderingCollections(input: {
     ...input.versions.map((version) => `${PRIMARY_COLLECTION}-${version}`),
     ...input.apiCollections,
     ...Object.keys(input.rendering?.collections ?? {}),
+    ...(input.rendering === undefined ? input.mountContext.routes.keys() : []),
   ]);
   return [...candidates].filter((collection) => {
     const component = canonicalCollectionRouteComponent(input.srcDir, collection, input.mountContext, input.projectRoot);
@@ -175,7 +182,7 @@ export type ManagedRouteFile = (RouteFileBase & { kind: "page"; collection: stri
 
 /** How a route file's problem names what it serves: `docs`, `"sdk"`, or `it` for an agent route. */
 export function routeFileSubject(collection: string | undefined): string {
-  return collection === undefined ? "it" : collection === PRIMARY_COLLECTION ? "docs" : `"${collection}"`;
+  return collection === undefined ? "it" : `"${collection}"`;
 }
 
 /**

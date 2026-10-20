@@ -22,7 +22,7 @@ export interface RouteExports {
 
 /** A route's script: an `.astro` file's frontmatter, which opens the file, or the whole file. `undefined` for an `.astro` file with none. */
 export function routeCode(file: string, source: string): RouteCode | undefined {
-  if (!file.endsWith(".astro")) return { code: source, start: 0 };
+  if (!isAstroFile(file)) return { code: source, start: 0 };
   const frontmatter = /^(\s*---\r?\n)((?:[\s\S]*?\r?\n)?)---/u.exec(source);
   return frontmatter ? { code: frontmatter[2]!, start: frontmatter[1]!.length } : undefined;
 }
@@ -31,9 +31,13 @@ export function parseRouteCode(code: string): ts.SourceFile {
   return ts.createSourceFile("route.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
 
-export function readRouteExports(sourceFile: ts.SourceFile): RouteExports {
+/**
+ * `namedExports` counts `export { getStaticPaths }` and re-exports, which a
+ * `.ts` endpoint can use but `.astro` frontmatter can't.
+ */
+export function readRouteExports(sourceFile: ts.SourceFile, namedExports = false): RouteExports {
   const prerenders: PrerenderExport[] = [];
-  let staticPaths = false;
+  let staticPaths = namedExports && exportedNames(sourceFile).has("getStaticPaths");
   for (const statement of sourceFile.statements) {
     if (!isExported(statement)) continue;
     if (ts.isFunctionDeclaration(statement) && statement.name?.text === "getStaticPaths") staticPaths = true;
@@ -52,7 +56,28 @@ export function readRouteExports(sourceFile: ts.SourceFile): RouteExports {
 /** A route file's exports: none for an `.astro` file without frontmatter. */
 export function readRouteFileExports(file: string, source: string): RouteExports {
   const script = routeCode(file, source);
-  return script ? readRouteExports(parseRouteCode(script.code)) : { prerenders: [], staticPaths: false };
+  return script ? readRouteExports(parseRouteCode(script.code), !isAstroFile(file)) : { prerenders: [], staticPaths: false };
+}
+
+export function isAstroFile(file: string): boolean {
+  return file.endsWith(".astro");
+}
+
+/** Every name the code exports, from declarations and `export { … }` lists. */
+export function exportedNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      const clause = statement.exportClause;
+      if (clause && ts.isNamedExports(clause)) for (const element of clause.elements) names.add(element.name.text);
+      continue;
+    }
+    if (!isExported(statement)) continue;
+    if (ts.isVariableStatement(statement))
+      for (const declaration of statement.declarationList.declarations) for (const name of boundNames(declaration.name)) names.add(name);
+    else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text);
+  }
+  return names;
 }
 
 function isExported(statement: ts.Statement): boolean {

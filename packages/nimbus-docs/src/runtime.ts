@@ -1543,11 +1543,14 @@ async function assertRouteServesCollection(
  *
  *   const { entry, Content, headings } = await getCollectionPageProps(Astro, "sdk");
  */
+export function getCollectionPageProps<C extends string>(astro: AstroGlobal, collection?: C): Promise<ProsePageProps<C>>;
 export async function getCollectionPageProps<C extends string>(
   astro: AstroGlobal,
   collection?: C,
+  ...extra: unknown[]
 ): Promise<ProsePageProps<C>> {
   rejectBadPageHelperArgument("getCollectionPageProps", collection, true);
+  rejectExtraArguments("getCollectionPageProps", "(Astro, collection)", extra);
   const page = await resolveProseRoute<C>(
     astro,
     collection,
@@ -1563,11 +1566,14 @@ export async function getCollectionPageProps<C extends string>(
   return page;
 }
 
+export function getCollectionPage<C extends string>(astro: AstroGlobal, collection?: C): Promise<ProsePageProps<C> | Response>;
 export function getCollectionPage<C extends string>(
   astro: AstroGlobal,
   collection?: C,
+  ...extra: unknown[]
 ): Promise<ProsePageProps<C> | Response> {
   rejectBadPageHelperArgument("getCollectionPage", collection, true);
+  rejectExtraArguments("getCollectionPage", "(Astro, collection)", extra);
   return resolveProseRoute(
     astro,
     collection,
@@ -1579,12 +1585,21 @@ export function getCollectionPage<C extends string>(
 /** `second` is the helper's second argument: a collection name, where the helper takes one, or nothing. */
 function rejectBadPageHelperArgument(helper: string, second: unknown, takesCollection = false): void {
   if (second === undefined || (takesCollection && typeof second === "string")) return;
-  if (typeof second === "string")
-    throw new Error(`${helper}(Astro) always serves docs and takes no collection. For "${second}", use getCollectionPage(Astro, "${second}").`);
+  if (typeof second === "string") {
+    const instead = helper.replace("Docs", "Collection");
+    throw new Error(
+      `${helper}(Astro) always serves docs and takes no collection. ` +
+        (second === PRIMARY_COLLECTION ? `Drop the argument: ${helper}(Astro).` : `For "${second}", use ${instead}(Astro, "${second}").`),
+    );
+  }
   throw new Error(
     `${helper}(Astro, options) was removed in Nimbus 0.13. ` +
       "Run `npx @cloudflare/nimbus-docs migrate` to move partialHeadings.resolvePartialId to the integration's markdown.partialResolver option.",
   );
+}
+
+function rejectExtraArguments(helper: string, takes: string, extra: readonly unknown[]): void {
+  if (extra.length > 0) throw new Error(`${helper} takes ${takes}, but was passed ${extra.length} more argument${extra.length === 1 ? "" : "s"}.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1726,8 +1741,10 @@ export async function getApiPage(
   astro: AstroGlobal,
   collectionOrOptions?: string | ApiHomeOptions,
   maybeOptions?: ApiHomeOptions,
+  ...extra: unknown[]
 ): Promise<ApiRouteProps> {
-  const [collection, options] = apiRouteArguments(collectionOrOptions, maybeOptions);
+  rejectExtraArguments("getApiPage", "(Astro, collection, options)", extra);
+  const [collection, options] = apiRouteArguments("getApiPage", collectionOrOptions, maybeOptions);
   const props = astro.props as {
     collection?: string;
     version?: string | null;
@@ -1761,7 +1778,10 @@ export function getApiRoute(
   astro: AstroGlobal,
   collectionOrOptions?: string | ApiHomeOptions,
   maybeOptions?: ApiHomeOptions,
+  ...extra: unknown[]
 ): Promise<ApiRouteProps | Response> {
+  rejectExtraArguments("getApiRoute", "(Astro, collection, options)", extra);
+  const [collection, options] = apiRouteArguments("getApiRoute", collectionOrOptions, maybeOptions);
   const props = astro.props as {
     collection?: string;
     coordinate?: string;
@@ -1775,7 +1795,6 @@ export function getApiRoute(
         "Ensure your route uses `getStaticPaths = getApiStaticPaths(<collection>)`.",
     );
   }
-  const [collection, options] = apiRouteArguments(collectionOrOptions, maybeOptions);
   return resolveApiRoute(astro, collection, options).catch((error: unknown) => {
     if (error instanceof Error && error.name === "PageAssetReadOverloadError") {
       return new Response("Temporarily busy", {
@@ -1831,9 +1850,12 @@ export async function getApiRoot(
 // `(Astro, options)` and `(Astro, collection, options)` both stay valid: the
 // collection lets a request-rendered route away from its default URL name it.
 function apiRouteArguments(
+  helper: string,
   collectionOrOptions: string | ApiHomeOptions | undefined,
   options: ApiHomeOptions | undefined,
 ): [string | undefined, ApiHomeOptions] {
+  if ((options !== undefined && typeof collectionOrOptions !== "string") || typeof options === "string")
+    throw new Error(`${helper} takes (Astro, collection, options), with options last.`);
   return typeof collectionOrOptions === "string"
     ? [collectionOrOptions, options ?? {}]
     : [undefined, collectionOrOptions ?? {}];

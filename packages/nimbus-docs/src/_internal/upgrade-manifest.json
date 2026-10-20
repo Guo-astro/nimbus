@@ -994,9 +994,9 @@
       "mode": "optional",
       "changeset": "route-files-follow-rendering",
       "summary": "Route files can say how they render: `nimbus-docs check --fix` writes the mode `rendering` gives each managed route, and the build warns when a file disagrees.",
-      "affected": "Every site: a built dynamic route with no getStaticPaths now fails the build. A site with server output, with or without `rendering`, may also have route files that say a different mode than Nimbus gives them.",
+      "affected": "Sites with server output, or with a built dynamic route that has no getStaticPaths, which now fails the build. A server site's route files may say a different mode than Nimbus gives them.",
       "instructions": [
-        "No action is needed on a site with `rendering`, or on a static site: URLs and output stay the same. On a server site without `rendering`, a Markdown or llms.txt route that says `export const prerender = false` is now built ahead of time, as `rendering: { default: \"build\" }` builds it; set `rendering` to keep it on request.",
+        "URLs and output stay the same on a static site and on a site with `rendering`; route files that disagree only bring a build warning until check --fix updates them. On a server site without `rendering`, every route Nimbus manages is now built ahead of time, including a collection route such as src/pages/sdk/[...slug].astro and a Markdown or llms.txt route that says `export const prerender = false`; set `rendering` to keep one on request.",
         "To clear the build's warning, run nimbus-docs check --fix. It sets or removes each managed route's `prerender` line, removes getStaticPaths from request-rendered routes and adds it to built ones, and names the collection in a collection route's page helper, such as getCollectionPage(Astro, \"sdk\"). For files it can't fully edit, it makes what changes it can and lists the rest.",
         "A route that builds a dynamic URL, such as src/pages/[...slug].astro, must export getStaticPaths; the build now fails and names a built one that doesn't.",
         "nimbus-docs outdated and diff compare starter route files in your site's mode, so a route edited only by check --fix no longer shows as a local change."

@@ -188,8 +188,11 @@ async function applyFixes(
   if (routeFiles.size > 0 && !ctx.signal.aborted) {
     const plan = planRouteFiles(cwd, ctx.srcDir);
     if (plan.ok) {
-      const { updated } = applyRouteFiles(cwd, plan.files.filter((entry) => routeFiles.has(entry.file)));
-      if (updated.length > 0) applied.push(`updated ${updated.join(", ")}`);
+      const { updated, manual } = applyRouteFiles(cwd, plan.files.filter((entry) => routeFiles.has(entry.file)));
+      const partly = new Map(manual.map((entry) => [entry.file, entry.edit.status === "manual" ? entry.edit.todo : ""]));
+      const whole = updated.filter((file) => !partly.has(file));
+      if (whole.length > 0) applied.push(`updated ${whole.join(", ")}`);
+      for (const file of updated.filter((file) => partly.has(file))) applied.push(`partly updated ${file}; still to do: ${partly.get(file)}`);
     }
   }
 

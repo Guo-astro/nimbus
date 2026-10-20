@@ -16,8 +16,8 @@ import {
   type PageRouteKind,
   type StaticPathsHelper,
 } from "./route-helpers.js";
-import { parseRouteCode, readRouteExports, routeCode } from "./route-exports.js";
-import type { AstroOutput } from "./route-modes.js";
+import { exportedNames, isAstroFile, parseRouteCode, readRouteExports, routeCode } from "./route-exports.js";
+import { isDynamicRoute, routeFileMismatch, type AstroOutput } from "./route-modes.js";
 
 const RUNTIME = "@cloudflare/nimbus-docs/runtime";
 // Agent factories whose routes are dynamic, so a built one exports its paths.
@@ -46,18 +46,72 @@ export type RouteFileEdit =
 export function setRouteFileMode(file: string, source: string, target: RouteFileTarget): RouteFileEdit {
   const script = routeCode(file, source);
   if (!script) return { status: "manual", source, todo: "It has no frontmatter opening the file (`---` on the first line) for Nimbus to edit." };
-  const { code, todo } = editCode(script.code, target);
+  const { code, todo } = editCode(script.code, target, !isAstroFile(file));
   const next = source.slice(0, script.start) + code + source.slice(script.start + script.code.length);
+  // The editor never removes another name the file declares or exports, never leaves code that stops
+  // parsing, and never stops short of a match.
+  const kept = topLevelNames(parseRouteCode(code));
+  const unsafe =
+    [...topLevelNames(parseRouteCode(script.code))].some((name) => !STATE_EXPORTS.has(name) && !kept.has(name)) ||
+    (!syntaxErrors(script.code) && syntaxErrors(code));
+  const shapeTodo = `Nimbus can't edit this file's shape: ${neededState(file, script.code, target)}.`;
+  if (unsafe) return { status: "manual", source, todo: todo ?? shapeTodo };
   if (todo) return { status: "manual", source: next, todo };
+  if (routeFileMismatch({ file, source: next, output: target.output, expected: target.mode }))
+    return { status: "manual", source, todo: shapeTodo };
   return next === source ? { status: "unchanged" } : { status: "updated", source: next };
 }
 
-function editCode(input: string, target: RouteFileTarget): { code: string; todo?: string } {
+const STATE_EXPORTS = new Set(["prerender", "getStaticPaths"]);
+
+function syntaxErrors(code: string): boolean {
+  return (ts.transpileModule(code, { reportDiagnostics: true }).diagnostics ?? []).length > 0;
+}
+
+/** The names the code declares or exports at the top level, imports aside. */
+function topLevelNames(sourceFile: ts.SourceFile): Set<string> {
+  const names = exportedNames(sourceFile);
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement))
+      for (const d of statement.declarationList.declarations) for (const name of bindingNames(d.name)) names.add(name);
+    else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text);
+  }
+  return names;
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) => (ts.isOmittedExpression(element) ? [] : bindingNames(element.name)));
+}
+
+/** What a file needs to be in `target`'s mode, for one Nimbus can't edit. */
+function neededState(file: string, code: string, target: RouteFileTarget): string {
   const build = target.mode === "build";
-  const { prerenders, staticPaths } = readRouteExports(parseRouteCode(input));
+  const { prerenders, staticPaths } = readRouteExports(parseRouteCode(code), !isAstroFile(file));
+  const wanted = build === (target.output === "server") ? build : undefined;
+  const steps: string[] = [];
+  if (wanted !== undefined && prerenders[0]?.value !== wanted) steps.push(`set \`export const prerender = ${wanted};\``);
+  if (wanted === undefined && prerenders.length > 0) steps.push("remove its `prerender` line");
+  if (!build && staticPaths) steps.push("remove its getStaticPaths export");
+  if (build && isDynamicRoute(file) && !staticPaths)
+    steps.push(
+      target.page
+        ? `add \`export const getStaticPaths = ${staticPathsFor(target.page.collection, target.page.kind)};\``
+        : "export getStaticPaths from the factory that makes its GET, such as `export const getStaticPaths = route.getStaticPaths;`",
+    );
+  return steps.join(", and ");
+}
+
+function editCode(input: string, target: RouteFileTarget, namedExports: boolean): { code: string; todo?: string } {
+  const build = target.mode === "build";
+  const { prerenders, staticPaths } = readRouteExports(parseRouteCode(input), namedExports);
   const agents = [...input.matchAll(AGENT_LINE)];
   const paths = helperPathsExports(input);
   if (prerenders.length > 1) return { code: input, todo: "It sets `prerender` more than once; keep one line." };
+  if (!prerenders[0] && exportedNames(parseRouteCode(input)).has("prerender"))
+    return { code: input, todo: "It exports `prerender` from a list; declare it as `export const prerender = …;`, which Nimbus can edit." };
+  if (prerenders[0] && prerenders[0].statement.declarationList.declarations.length > 1)
+    return { code: input, todo: "Its `prerender` shares a statement with other exports; give it a statement of its own (`export const prerender = …;`)." };
   if (prerenders[0] && prerenders[0].value === undefined) {
     const line = build === (target.output === "server") ? `set it to \`export const prerender = ${build};\`` : "remove it";
     const factory = agents[0]?.[3];
@@ -67,11 +121,19 @@ function editCode(input: string, target: RouteFileTarget): { code: string; todo?
       : target.page
         ? ` Then add \`export const getStaticPaths = ${staticPathsFor(target.page.collection, target.page.kind)};\`.`
         : ` Then export getStaticPaths from its factory: \`export const { GET, getStaticPaths } = ${factory}();\`.`;
-    return { code: input, todo: `Its \`prerender\` is an expression, so Nimbus can't tell how it renders: ${line}.${paths}` };
+    return { code: input, todo: `Its \`prerender\` is an expression: ${line}.${paths}` };
   }
   if (agents.length + paths.length > 1) return { code: input, todo: "It exports getStaticPaths more than once." };
 
-  let code = prerenders[0] ? removeLine(input, lineOf(input, prerenders[0].statement)) : input;
+  // A moved route's getStaticPaths may be the only place it names its collection.
+  const unread = target.page?.kind !== "docs" && pageHelperCalls(input).some((call) => helperArguments(call).named === undefined);
+  if (!build && paths.length && target.page?.moved && unread)
+    return {
+      code: input,
+      todo: `Pass "${target.page.collection}" to its page helper first, such as getApiRoute(Astro, "${target.page.collection}", options): its getStaticPaths is the only place it names the collection.`,
+    };
+
+  let code = prerenders[0] ? removeNode(input, prerenders[0].statement) : input;
   let addPaths: string | undefined;
   let reads = new Set<string>();
   let todo: string | undefined;
@@ -80,7 +142,7 @@ function editCode(input: string, target: RouteFileTarget): { code: string; todo?
     code = code.replace(line, `${start}${build && AGENT_PATHS.has(factory!) ? ", getStaticPaths" : ""} ${end}`);
   } else if (paths.length) {
     if (!build) {
-      code = removeLine(code, paths[0]!.line);
+      code = removeNode(code, helperPathsExports(code)[0]!.statement);
       code = dropUnusedImport(code, paths[0]!.helper);
     }
   } else if (staticPaths) {
@@ -109,14 +171,14 @@ function editCode(input: string, target: RouteFileTarget): { code: string; todo?
 }
 
 /** `export const getStaticPaths = <helper>(…)` statements, as the starter writes them. */
-function helperPathsExports(code: string): { line: string; helper: StaticPathsHelper }[] {
+function helperPathsExports(code: string): { statement: ts.Statement; helper: StaticPathsHelper }[] {
   return parseRouteCode(code).statements.flatMap((statement) => {
     if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
     const [declaration, ...rest] = statement.declarationList.declarations;
     if (rest.length || !declaration || !ts.isIdentifier(declaration.name) || declaration.name.text !== "getStaticPaths") return [];
     const value = declaration.initializer;
     const helper = value && helperIn(value);
-    return helper ? [{ line: lineOf(code, statement), helper }] : [];
+    return helper ? [{ statement, helper }] : [];
   });
 }
 
@@ -140,27 +202,27 @@ function builtStaticPaths(
 ): { value: string; reads: Set<string> } | { todo: string } {
   const paths = staticPathsFor(page.collection, page.kind);
   if (page.kind !== "api") return { value: paths, reads: new Set() };
-  const options = pageHelperCalls(code)
-    .flatMap((call) => call.arguments.slice(1))
-    .find((argument) => !ts.isStringLiteralLike(argument));
+  const calls = pageHelperCalls(code).map(helperArguments);
+  if (calls.some((call) => call.named === undefined))
+    return { todo: `Its page helper's arguments aren't a collection name and options Nimbus can read. Add \`export const getStaticPaths = ${paths};\`, passing the page helper's options too.` };
+  const options = calls.find((call) => call.options)?.options;
   if (!options) return { value: paths, reads: new Set() };
   const value = `${paths.slice(0, -1)}, ${options.getText()})`;
-  const reads = exportedConstantsRead(options);
-  if (reads) return { value, reads };
+  const { reads, hidden } = namesRead(options);
+  if (hidden.size === 0) return { value, reads };
+  const names = [...hidden].map((name) => `\`${name}\``).join(", ");
   return {
     todo:
-      "Its page helper's options use names getStaticPaths can't read, since Astro runs it apart from the rest of the file. " +
-      `Export them (\`export const options = …\`) or write them inline, then add \`export const getStaticPaths = ${value};\`.`,
+      `Its page helper's options read ${names}, which getStaticPaths can't see: Astro runs it apart from the rest of the file. ` +
+      `Export ${hidden.size === 1 ? "it" : "them"} (\`export const ${[...hidden][0]} = …\`), then run check --fix again.`,
   };
 }
 
-const GLOBALS = new Set(["undefined", "Infinity", "NaN"]);
-
 /**
- * The exported top-level constants `node` reads, or `undefined` when it reads
- * a name other than those and imports, which `getStaticPaths` can't see.
+ * The names `node` reads: exported top-level constants, which `getStaticPaths`
+ * can see, and `hidden` ones, other than those and imports, which it can't.
  */
-function exportedConstantsRead(node: ts.Node): Set<string> | undefined {
+function namesRead(node: ts.Node): { reads: Set<string>; hidden: Set<string> } {
   const imported = new Set<string>();
   const exported = new Set<string>();
   for (const statement of node.getSourceFile().statements) {
@@ -177,19 +239,49 @@ function exportedConstantsRead(node: ts.Node): Set<string> | undefined {
     if (bindings && ts.isNamespaceImport(bindings)) imported.add(bindings.name.text);
     if (bindings && ts.isNamedImports(bindings)) for (const e of bindings.elements) if (!e.isTypeOnly) imported.add(e.name.text);
   }
+  const topLevel = topLevelNames(node.getSourceFile());
   const reads = new Set<string>();
-  let only = true;
+  const hidden = new Set<string>();
   const visit = (child: ts.Node): void => {
     const parent = child.parent;
     const isName = (ts.isPropertyAssignment(parent) || ts.isPropertyAccessExpression(parent)) && parent.name === child;
-    if (ts.isIdentifier(child) && !isName && !GLOBALS.has(child.text) && !imported.has(child.text)) {
+    // A global, such as `Math`, unless the file declares the name itself.
+    const global = (name: string) => Object.hasOwn(globalThis, name) && !topLevel.has(name);
+    if (ts.isIdentifier(child) && !isName && !global(child.text) && !imported.has(child.text)) {
       if (exported.has(child.text)) reads.add(child.text);
-      else only = false;
+      else hidden.add(child.text);
     }
     ts.forEachChild(child, visit);
   };
   visit(node);
-  return only ? reads : undefined;
+  return { reads, hidden };
+}
+
+/**
+ * What a page helper is passed after `Astro`: whether it names the collection
+ * (a string, or a top-level const holding one), and its options (an object, or
+ * a const holding one). `named` is `undefined` when Nimbus can't tell.
+ */
+function helperArguments(call: ts.CallExpression): { named?: boolean; options?: ts.Expression } {
+  const [, second, third] = call.arguments;
+  if (!second) return { named: false };
+  const kind = valueKind(second);
+  if (kind === "string") return { named: true, ...(third ? { options: third } : {}) };
+  if (kind === "object" && !third) return { named: false, options: second };
+  return {};
+}
+
+function valueKind(node: ts.Expression, depth = 0): "string" | "object" | undefined {
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression;
+  if (ts.isStringLiteralLike(node)) return "string";
+  if (ts.isObjectLiteralExpression(node)) return "object";
+  if (!ts.isIdentifier(node) || depth > 8) return undefined;
+  for (const statement of node.getSourceFile().statements) {
+    if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+    for (const d of statement.declarationList.declarations)
+      if (ts.isIdentifier(d.name) && d.name.text === node.text && d.initializer) return valueKind(d.initializer, depth + 1);
+  }
+  return undefined;
 }
 
 function pageHelperCalls(code: string): ts.CallExpression[] {
@@ -203,11 +295,19 @@ function pageHelperCalls(code: string): ts.CallExpression[] {
 }
 
 
-/** Remove a whole line, and a blank line it leaves doubled. */
-function removeLine(code: string, line: string): string {
-  const at = code.indexOf(line);
-  const before = code.slice(0, at);
-  let after = code.slice(at + line.length);
+/**
+ * Remove a node of `code`'s own parse, and its line once nothing else is on
+ * it, with a blank line that leaves doubled.
+ */
+function removeNode(code: string, node: ts.Node): string {
+  const at = node.getStart();
+  const to = node.getEnd();
+  const start = code.lastIndexOf("\n", at - 1) + 1;
+  const newline = code.indexOf("\n", to);
+  const end = newline === -1 ? code.length : newline;
+  if ((code.slice(start, at) + code.slice(to, end)).trim() !== "") return code.slice(0, at) + code.slice(to).replace(/^[ \t]+/u, "");
+  const before = code.slice(0, start);
+  let after = code.slice(newline === -1 ? end : end + 1);
   if ((before === "" || before.endsWith("\n\n")) && /^\r?\n/u.test(after)) after = after.replace(/^\r?\n/u, "");
   return before + after;
 }
@@ -255,20 +355,16 @@ function dropUnusedImport(code: string, name: string): string {
     const index = bindings.elements.findIndex((item) => item.name.text === name && !item.propertyName);
     if (index === -1) continue;
     const element = bindings.elements[index]!;
-    if (bindings.elements.length === 1 && !statement.importClause?.name) return removeLine(code, lineOf(code, statement));
-    if (bindings.getText().includes("\n")) return removeLine(code, lineOf(code, element));
+    if (bindings.elements.length === 1) {
+      // `import nimbus, { name }`: keep the default import.
+      const fallback = statement.importClause?.name;
+      return fallback ? `${code.slice(0, fallback.getEnd())} ${code.slice(bindings.getEnd()).trimStart()}` : removeNode(code, statement);
+    }
     const next = bindings.elements[index + 1];
     const [from, to] = next ? [element.getStart(), next.getStart()] : [bindings.elements[index - 1]!.getEnd(), element.getEnd()];
     return code.slice(0, from) + code.slice(to);
   }
   return code;
-}
-
-/** The full line(s) a node spans, with the newline after. */
-function lineOf(code: string, node: ts.Node): string {
-  const start = code.lastIndexOf("\n", node.getStart() - 1) + 1;
-  const end = code.indexOf("\n", node.getEnd());
-  return code.slice(start, end === -1 ? code.length : end + 1);
 }
 
 /** Add `name` to the runtime import, or a new import after the last one. */
@@ -304,8 +400,7 @@ function nameCollectionInHelpers(code: string, collection: string): string | und
   if (calls.length === 0) return undefined;
   let out = code;
   for (const call of calls.reverse()) {
-    const named = call.arguments[1];
-    if (call.arguments.length === 0 || (named && ts.isStringLiteralLike(named))) continue;
+    if (call.arguments.length === 0 || helperArguments(call).named !== false) continue;
     const at = call.arguments[0]!.getEnd();
     out = `${out.slice(0, at)}, ${JSON.stringify(collection)}${out.slice(at)}`;
     const type = call.typeArguments?.length === 1 ? call.typeArguments[0]! : undefined;

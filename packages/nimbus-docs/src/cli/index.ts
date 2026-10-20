@@ -29,6 +29,7 @@ import mri from "mri";
 import * as p from "@clack/prompts";
 
 import { ADAPTER_IDS, type AdapterId } from "../_internal/adapters.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
 import {
   cloudflareRequestRenderingAgentRecipe,
   installAdapter,
@@ -759,7 +760,7 @@ async function runAdapterInstall(
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
   const handOff = agentSession && outcome.requestRendering === "unresolved";
-  if (!handOff) appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
+  if (!handOff) appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering, outcome.routeFiles.configured);
   if (outcome.routeFiles.updated.length > 0) {
     lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match how Nimbus renders them`);
   }
@@ -784,9 +785,10 @@ function appendRequestRenderingStatus(
   adapter: AdapterId,
   label: string,
   status: "inserted" | "explicit" | "unresolved" | undefined,
+  configured: boolean | undefined,
 ): void {
   if (adapter !== "cloudflare") {
-    lines.push("Rendering behavior follows the policy in your Nimbus config.");
+    lines.push(configured === false ? DEFAULT_RENDERING_NOTE : "Rendering follows the `rendering` policy in your Nimbus config.");
     return;
   }
   if (status === "inserted") {

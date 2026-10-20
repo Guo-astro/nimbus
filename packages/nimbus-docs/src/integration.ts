@@ -1364,7 +1364,7 @@ export function nimbus(
           : undefined;
         const pageAssetsBuild =
           await import("./_internal/api/page-assets-build.js");
-        const { getApiNavListManifest } =
+        const { getApiNavListManifest, getApiSidebarListManifest } =
           await import("./_internal/api/nav-list.js");
         pageAssetsBuild.clearApiPageAssetManifest(astroConfig.root);
         clientDirectory = astroConfig.build?.client ?? clientDirectory;
@@ -2982,7 +2982,8 @@ export function nimbus(
               virtualConfigPlugin(config, {
                 getPageAssets: () =>
                   pageAssetsBuild.getApiPageAssetManifest(projectRoot),
-                getNavLists: () => getApiNavListManifest(projectRoot),
+                getNavLists: () => getApiSidebarListManifest(projectRoot),
+                getApiLists: () => getApiNavListManifest(projectRoot),
                 getIndexedCollections: getPageCollectionsForBuild,
                 getBuildSlice: async () => {
                   const layout = sliceLayoutForBuild;
@@ -3098,21 +3099,6 @@ export function nimbus(
           route.prerender = mode === "build";
           noteStaticPaths(mode);
           return;
-        }
-        // An API home's chunk and index routes, which the api-reference recipe
-        // writes under src/pages/nimbus-api/home/<collection>/, render like
-        // that collection's pages.
-        if (renderingRoutes.size > 0) {
-          const relative = path
-            .relative(path.join(srcDirForBuild, "pages"), path.resolve(projectRootForBuild, component))
-            .replaceAll("\\", "/");
-          const home = /^nimbus-api\/home\/([^/[\]]+)\//u.exec(relative)?.[1];
-          const homeMode = home ? compiledPolicyForBuild?.collections[home] : undefined;
-          if (homeMode) {
-            route.prerender = homeMode === "build";
-            noteStaticPaths(homeMode);
-            return;
-          }
         }
         // Project-owned agent route files are policy-managed when they call
         // a Nimbus agent factory: the policy wins over their `prerender`

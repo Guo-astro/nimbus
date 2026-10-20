@@ -1070,7 +1070,7 @@ export const getStaticPaths = getApiStaticPaths("qapi");
 
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
+const { page, nav, collection, version, coordinate, home } = result;
 ---
 
 <BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref}>
@@ -1083,7 +1083,7 @@ const { page, nav, collection, version, coordinate } = result;
   <nav data-feasibility-picker-no-coordinate>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
   </nav>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 `);
   const contentConfig = join(site, "src/content.config.ts");

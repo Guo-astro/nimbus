@@ -705,9 +705,15 @@ export async function getSidebar(
 
   // 2. Isolate further to a boundary sub-tree (if configured). Runs after
   //    scope, over the already-materialized (mutable) tree.
+  const overviewLabel =
+    config.sidebar?.indexDisplay === "overview-leaf"
+      ? typeof config.sidebar.overviewLabel === "string"
+        ? config.sidebar.overviewLabel
+        : "Overview"
+      : undefined;
   const boundaries = config.sidebar?.isolate?.boundaries;
   if (boundaries && boundaries.length > 0) {
-    tree = isolateToBoundary(tree, currentSlug, boundaries);
+    tree = isolateToBoundary(tree, currentSlug, boundaries, overviewLabel);
   }
 
   // 3. Consumer transform (call-site). Ctx is derived read-only from the
@@ -720,13 +726,9 @@ export async function getSidebar(
   // 4. Overview-leaf display mode (opt-in) — runs last so it sees the
   //    transform's output (e.g. badges keyed off `indexHref`) and only
   //    reshapes this returned tree, never the cached structural one.
-  if (config.sidebar?.indexDisplay === "overview-leaf") {
-    const label =
-      typeof config.sidebar.overviewLabel === "string"
-        ? config.sidebar.overviewLabel
-        : "Overview";
+  if (overviewLabel !== undefined) {
     const sectionSlug = currentSlug.split("/").filter(Boolean)[0] ?? "";
-    tree = applyOverviewLeaf(tree, sectionSlug, label);
+    tree = applyOverviewLeaf(tree, sectionSlug, overviewLabel);
   }
 
   return tree;
@@ -1619,7 +1621,11 @@ export interface ApiVersionInfo {
  *   export const prerender = true;
  *   export const getStaticPaths = getApiStaticPaths("api");
  */
-export function getApiStaticPaths(collection: import("astro:content").CollectionKey | (string & {})): GetStaticPaths {
+export function getApiStaticPaths(
+  collection: import("astro:content").CollectionKey | (string & {}),
+  options: ApiHomeOptions = {},
+): GetStaticPaths {
+  const { homeChunkSize } = options;
   return async (options) => {
     await assertRouteServesCollection(collection, options?.routePattern, "getApiStaticPaths");
     const apiCollections = await loadApiCollections();
@@ -1629,23 +1635,41 @@ export function getApiStaticPaths(collection: import("astro:content").Collection
       );
     }
     const entries = await getVisibleEntries([collection]);
-    return entries.map((entry) => {
+    const paths: Array<{ params: { slug: string | undefined }; props: Record<string, unknown> }> = [];
+    for (const entry of entries) {
       const data = entry.data as { coordinate?: string; version?: string };
       if (!data.coordinate) {
         throw new Error(
           `nimbus-docs: API entry "${entry.id}" in collection "${collection}" is missing its coordinate.`,
         );
       }
-      return {
-        params: { slug: entry.id === "index" ? undefined : entry.id },
-        props: {
-          collection,
-          version: data.version ?? null,
-          coordinate: data.coordinate,
-        },
+      const props = {
+        collection,
+        version: data.version ?? null,
+        coordinate: data.coordinate,
+        ...(homeChunkSize === undefined ? {} : { homeChunkSize }),
       };
-    });
+      paths.push({ params: { slug: entry.id === "index" ? undefined : entry.id }, props });
+      if (homeChunkSize === undefined || data.coordinate !== collection) continue;
+      // The home's later parts, each a page of its own.
+      const { page } = await renderApiEntry(undefined, collection, props.version, collection, entry);
+      if (page.kind !== "api") continue;
+      const { chunkApiIndex, API_HOME_PART_SEGMENT } = await import("./_internal/api/home-index.js");
+      const parts = chunkApiIndex(page.index, { size: homeChunkSize }).length;
+      for (let n = 2; n <= parts; n++) {
+        const slug = `${entry.id === "index" ? "" : `${entry.id}/`}${API_HOME_PART_SEGMENT}/${n}`;
+        paths.push({ params: { slug }, props: { ...props, homePart: n } });
+      }
+    }
+    return paths;
   };
+}
+
+/** How the API home splits its list: `homeChunkSize` endpoints per part.
+ *  Without it, the home lists every endpoint on one page. A built route passes
+ *  the same value to `getApiStaticPaths` and `getApiRoute`. */
+export interface ApiHomeOptions {
+  homeChunkSize?: number;
 }
 
 /**
@@ -1673,6 +1697,8 @@ interface ApiRouteProps {
   collection: string;
   version: string | null;
   coordinate: string;
+  /** On the API home and its later parts: the part shown, and every part. */
+  home?: import("./_internal/api/home-index.js").ApiHome;
 }
 
 declare const __NIMBUS_BUILD_ID__: string;
@@ -1689,7 +1715,7 @@ const THIN_API_ENTRIES =
   typeof __NIMBUS_THIN_API_ENTRIES__ !== "undefined" &&
   __NIMBUS_THIN_API_ENTRIES__;
 
-export async function getApiPage(astro: AstroGlobal): Promise<ApiRouteProps> {
+export async function getApiPage(astro: AstroGlobal, options: ApiHomeOptions = {}): Promise<ApiRouteProps> {
   const props = astro.props as {
     collection?: string;
     version?: string | null;
@@ -1701,7 +1727,7 @@ export async function getApiPage(astro: AstroGlobal): Promise<ApiRouteProps> {
         "Ensure your route uses `getStaticPaths = getApiStaticPaths(<collection>)`.",
     );
   }
-  const result = await resolveApiRoute(astro);
+  const result = await resolveApiRoute(astro, options);
   if (result instanceof Response) {
     throw new Error(
       `getApiPage(): could not resolve request path "${astro.url.pathname}". ` +
@@ -1715,6 +1741,7 @@ export async function getApiPage(astro: AstroGlobal): Promise<ApiRouteProps> {
  * misses as responses that Astro can pass through to custom error pages. */
 export function getApiRoute(
   astro: AstroGlobal,
+  options: ApiHomeOptions = {},
 ): Promise<ApiRouteProps | Response> {
   const props = astro.props as {
     collection?: string;
@@ -1729,7 +1756,7 @@ export function getApiRoute(
         "Ensure your route uses `getStaticPaths = getApiStaticPaths(<collection>)`.",
     );
   }
-  return resolveApiRoute(astro).catch((error: unknown) => {
+  return resolveApiRoute(astro, options).catch((error: unknown) => {
     if (error instanceof Error && error.name === "PageAssetReadOverloadError") {
       return new Response("Temporarily busy", {
         status: 503,
@@ -1742,30 +1769,18 @@ export function getApiRoute(
 
 export {
   API_INDEX_CHUNK_SIZE,
-  apiHomeChunkHref,
-  apiHomeIndexHref,
   apiIndexRows,
   chunkApiIndex,
 } from "./_internal/api/home-index.js";
 export type {
+  ApiHome,
+  ApiHomePartLink,
   ApiIndexChunk,
   ApiIndexChunkGroup,
   ApiIndexChunkList,
   ApiIndexChunkSection,
   ApiIndexRow,
 } from "./_internal/api/home-index.js";
-
-// The version an API home route names: `default` for an unversioned API, a
-// declared version id otherwise. `undefined` when it names neither.
-async function apiHomeVersion(
-  collection: string,
-  segment: string | undefined,
-): Promise<string | null | undefined> {
-  if (!(await loadApiCollections()).includes(collection)) return undefined;
-  const versions = await getApiVersions(collection);
-  if (!versions) return segment === "default" ? null : undefined;
-  return versions.find((v) => v.version === segment)?.version;
-}
 
 /**
  * The root page of one API version: its servers, sections, and `index` of every
@@ -1793,90 +1808,9 @@ export async function getApiRoot(
   return page.kind === "api" ? page : null;
 }
 
-/**
- * `getStaticPaths` for the API home's routes: `"chunks"` gives one path per
- * later chunk of each version's home (`[version]/[chunk]`), `"index"` one per
- * version for its filter rows (`[version]`). An unversioned API's version
- * segment is `default`. Pass the `size` the home page chunks by.
- */
-export function getApiHomeStaticPaths(
-  collection: string,
-  route: "chunks" | "index",
-  options: { size?: number } = {},
-): GetStaticPaths {
-  return async () => {
-    if (!(await loadApiCollections()).includes(collection)) {
-      throw new Error(
-        `nimbus-docs: getApiHomeStaticPaths("${collection}") found no matching \`api\` entry in the Nimbus config (astro.config.*).`,
-      );
-    }
-    // A partial build that leaves the collection out has no pages to read.
-    if ((await loadEmptyCollections()).includes(collection)) return [];
-    const { chunkApiIndex } = await import("./_internal/api/home-index.js");
-    const versions = (await getApiVersions(collection))?.map((v) => v.version) ?? [null];
-    const paths: Array<{ params: Record<string, string>; props: Record<string, unknown> }> = [];
-    for (const version of versions) {
-      const segment = version ?? "default";
-      if (route === "index") {
-        paths.push({ params: { version: segment }, props: { collection, version } });
-        continue;
-      }
-      const root = await getApiRoot(undefined, { collection, version });
-      const count = root ? chunkApiIndex(root.index, options).length : 0;
-      for (let n = 2; n <= count; n++) {
-        paths.push({ params: { version: segment, chunk: String(n) }, props: { collection, version } });
-      }
-    }
-    return paths;
-  };
-}
-
-/**
- * Resolve an API home route (`[version]/[chunk]` or `[version]`): the version's
- * root page and navigation, as `getApiRoute` returns them, plus the home's
- * chunks and the requested one. A version or chunk that doesn't exist is a
- * `404` response.
- */
-export async function getApiHome(
-  astro: RouteContext,
-  collection: string,
-  options: { size?: number } = {},
-): Promise<
-  | (ApiRouteProps & {
-      page: import("./api/index.js").ApiRootPage;
-      chunks: import("./_internal/api/home-index.js").ApiIndexChunk[];
-      chunk?: import("./_internal/api/home-index.js").ApiIndexChunk;
-    })
-  | Response
-> {
-  const notFound = () => new Response(null, { status: 404, statusText: "Not found" });
-  const version = await apiHomeVersion(collection, astro.params.version);
-  if (version === undefined) return notFound();
-  const { page, nav } = await renderApiEntry(astro, collection, version, collection);
-  if (page.kind !== "api") return notFound();
-  const { chunkApiIndex } = await import("./_internal/api/home-index.js");
-  const chunks = chunkApiIndex(page.index, options);
-  let chunk: (typeof chunks)[number] | undefined;
-  if (astro.params.chunk !== undefined) {
-    const n = Number(astro.params.chunk);
-    chunk = Number.isInteger(n) && n >= 2 && String(n) === astro.params.chunk ? chunks[n - 1] : undefined;
-    if (!chunk) return notFound();
-  }
-  const { navLists } = await import("virtual:nimbus/config");
-  const list = navLists?.[collection]?.[version ?? ""];
-  return {
-    page,
-    nav: list ? { ...nav, listHref: `/_nimbus/pages/${list}` } : nav,
-    collection,
-    version,
-    coordinate: collection,
-    chunks,
-    ...(chunk ? { chunk } : {}),
-  };
-}
-
 async function resolveApiRoute(
   astro: AstroGlobal,
+  options: ApiHomeOptions,
 ): Promise<ApiRouteProps | Response> {
   const result = await resolveApiPage(
     pageResolutionContext(astro),
@@ -1905,17 +1839,35 @@ async function resolveApiRoute(
     return proseResolutionResponse(astro, result);
   }
   await assertRouteServesCollection(result.page.collection, astro.routePattern, "getApiStaticPaths");
-  // An on-demand sidebar's filter reads this version's page list.
-  const { navLists } = await import("virtual:nimbus/config");
-  const list = navLists?.[result.page.collection]?.[result.page.version ?? ""];
+  const { page, nav, collection, version, coordinate, homePart } = result.page;
+  // The version's page list: an on-demand sidebar's filter and the home's read it.
+  const { navLists, apiLists } = await import("virtual:nimbus/config");
+  const listHref = (lists: typeof navLists | undefined) => {
+    const file = lists?.[collection]?.[version ?? ""];
+    return file ? `/_nimbus/pages/${file}` : undefined;
+  };
+  const sidebarList = listHref(navLists);
+  let home: ApiRouteProps["home"];
+  if (page.kind === "api") {
+    const { apiHome } = await import("./_internal/api/home-index.js");
+    const props = astro.props as { coordinate?: string; homeChunkSize?: number };
+    const size = options.homeChunkSize;
+    if (props.coordinate !== undefined && props.homeChunkSize !== size) {
+      throw new Error(
+        `nimbus-docs: the API home's homeChunkSize is ${props.homeChunkSize ?? "unset"} in getApiStaticPaths("${collection}") but ${size ?? "unset"} in getApiRoute. Pass API_HOME_CHUNK_SIZE to both, as the api-reference recipe's route does.`,
+      );
+    }
+    home = apiHome(page.index, { homeHref: page.href, part: homePart ?? 1, size, listHref: listHref(apiLists) }) ?? undefined;
+    if (!home && homePart) return proseResolutionResponse(astro, { status: "not-found" });
+  }
   return {
-    page: result.page.page,
-    nav: list
-      ? { ...result.page.nav, listHref: `/_nimbus/pages/${list}` }
-      : result.page.nav,
-    collection: result.page.collection,
-    version: result.page.version,
-    coordinate: result.page.coordinate,
+    // A later part repeats the home's list; it has no Markdown version.
+    page: homePart ? { ...page, markdownHref: undefined } : page,
+    nav: sidebarList ? { ...nav, listHref: sidebarList } : nav,
+    collection,
+    version,
+    coordinate,
+    ...(home ? { home } : {}),
   };
 }
 

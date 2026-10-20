@@ -63,7 +63,7 @@ interface HarRequestInput {
   method: string;
   url: string;
   httpVersion: string;
-  cookies: [];
+  cookies: HarField[];
   headers: HarField[];
   queryString: HarField[];
   postData?: { mimeType: string; text: string; params?: HarPostField[]; parts?: MultipartPart[] };
@@ -409,13 +409,13 @@ function convert(
     const first = Array.isArray(out) ? out[0] : out;
     if (typeof first !== "string" || first.length === 0) return undefined;
     let source = first;
-    // httpsnippet leaves a shell-safe URL unquoted, and markers are shell-safe.
-    // `<` is not, so quote the whole URL while it still holds markers.
+    // httpsnippet leaves a shell-safe URL or cookie unquoted, and markers are
+    // shell-safe. `<` is not, so quote the whole argument while it still holds markers.
     // For a body containing `'` it writes a heredoc with an unquoted delimiter,
     // where the shell would expand `$`, backticks, and backslashes in the body.
     if (lang.target === "shell") {
-      source = source.replace(/(--url )([^'\s]+)/, (m, flag: string, url: string) =>
-        [...placeholders.keys()].some((marker) => url.includes(marker)) ? `${flag}'${url}'` : m,
+      source = source.replace(/(--(?:url|cookie) )([^'\s]+)/g, (m, flag: string, value: string) =>
+        [...placeholders.keys()].some((marker) => value.includes(marker)) ? `${flag}'${value}'` : m,
       );
       const visible = unquotedShell(source);
       const heredoc = /(?:^|\n)[ \t]*--data[ \t]+(@- <<EOF\n)/.exec(visible);
@@ -674,13 +674,14 @@ function buildHar(
     (p.in === "header" ? headers : queryString).push(field);
   }
 
-  applyAuth(headers, queryString, input, placeholder);
+  const cookies: HarField[] = [];
+  applyAuth({ headers, queryString, cookies }, input, placeholder);
 
   const har: HarRequestInput = {
     method: input.method.toUpperCase(),
     url: withPath(base, filledPath),
     httpVersion: "HTTP/1.1",
-    cookies: [],
+    cookies,
     headers,
     queryString,
     headersSize: -1,
@@ -1182,8 +1183,7 @@ function scalarText(value: unknown): string | undefined {
 // present the simplest valid call carries no credentials and the sample injects
 // none. Otherwise the first alternative wins, honoring the spec's ordering.
 function applyAuth(
-  headers: HarField[],
-  queryString: HarField[],
+  { headers, queryString, cookies }: Pick<HarRequestInput, "headers" | "queryString" | "cookies">,
   input: OperationSampleInput,
   placeholder: (name: string) => string,
 ): void {
@@ -1203,7 +1203,7 @@ function applyAuth(
       });
     } else if (type === "apikey" && scheme.name) {
       const field = { name: scheme.name, value: placeholder(scheme.name) };
-      (scheme.in === "query" ? queryString : headers).push(field);
+      (scheme.in === "query" ? queryString : scheme.in === "cookie" ? cookies : headers).push(field);
     } else if (type === "oauth2" || type === "openidconnect") {
       headers.push({ name: "Authorization", value: "Bearer <token>" });
     }

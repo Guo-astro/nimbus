@@ -312,7 +312,7 @@ const shikiCssHref = withBase(
 {ogImage && <meta name="twitter:image" content={ogImage} />}
 {ogImage && ogImageAlt && <meta name="twitter:image:alt" content={ogImageAlt} />}
 
-{structuredData && <script type="application/ld+json" set:html={structuredData} />}
+{structuredData && <script type="application/ld+json" set:html={structuredData.replaceAll("<", "\\u003c")} />}
 
 {mergedHead.map(({ tag: Tag, attrs = {}, content }) =>
   content

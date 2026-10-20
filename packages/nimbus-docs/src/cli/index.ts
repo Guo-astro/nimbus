@@ -747,6 +747,8 @@ async function runAdapterInstall(
   }
 
   for (const warning of outcome.warnings) p.log.warn(warning);
+  for (const { file, todo } of outcome.routeFiles.manual)
+    p.log.warn(`${file} doesn't match \`rendering\` and isn't in the starter's shape. ${todo}`);
 
   const lines =
     outcome.status === "noop"
@@ -756,6 +758,9 @@ async function runAdapterInstall(
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
+  if (outcome.routeFiles.updated.length > 0) {
+    lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match \`rendering\``);
+  }
   const handOff = agentSession && outcome.requestRendering === "unresolved";
   if (handOff) {
     lines.push("Next: finish the request-rendering configuration with the recipe below.");

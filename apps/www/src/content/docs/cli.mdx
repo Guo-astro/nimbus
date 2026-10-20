@@ -186,7 +186,7 @@ Each file is one of: **clean to pull** (upstream changed, you didn't), **added/r
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro --apply" />
 
-`--apply` is explicit and per-file, rejects symlink/path escapes, and rechecks the clean preimage or absence before writing — it never merges. It records the tag it took the file from in `nimbus.json` (`templatesTagByFile`), so later diffs compare that file from there. Review with `git diff` afterward. Pass `--to <templates-vX.Y.Z>` to target a specific tag, or `--template-dir <path>` to compare offline against a local checkout.
+`--apply` is explicit and per-file, rejects symlink/path escapes, and rechecks the clean preimage or absence before writing — it never merges. It records the tag it took the file from in `nimbus.json` (`templatesTagByFile`), so later diffs compare that file from there. Review with `git diff` afterward. Starter route files are compared in your site's rendering mode, so a route updated by `check --fix` doesn't show as your change. Pass `--to <templates-vX.Y.Z>` to target a specific tag, or `--template-dir <path>` to compare offline against a local checkout.
 
 ## `nimbus-docs check`
 
@@ -197,6 +197,8 @@ pnpm nimbus-docs check
 ```
 
 Pass `--env`, `--structure`, `--migrations`, `--lint`, or `--types` to run only those categories. `--fix` applies the fixes it can make safely and asks before any fix that needs a value or installs a dependency. Without a terminal it skips the questions and installs only with `--yes`. `--quiet` shows errors only.
+
+With a [`rendering` policy](/configuration#mix-build-and-request-rendering), `check` reports each route file whose mode disagrees with it (`nimbus/route-file-mode`), and `--fix` updates the file. A route it can't edit is listed with what to change.
 
 `--types` type-checks your `.ts` and `.tsx` files with your own TypeScript. It doesn't read `.astro` files; run `astro check` for those.
 

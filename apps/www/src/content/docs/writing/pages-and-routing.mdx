@@ -116,7 +116,6 @@ A collection is served where its route file is. Put the route at `src/pages/prod
 import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { getCollectionPage, getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("sdk");
 
 const page = await getCollectionPage(Astro);
@@ -128,7 +127,7 @@ const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
 `nimbus-docs add new-collection` writes the whole route for you. Relative imports such as the layout's grow one `../` per folder level.
 
-Nimbus reads the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
+Nimbus reads the collection from the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. A route rendered on request has no `getStaticPaths`, so it names the collection in its page helper instead: `getCollectionPage(Astro, "sdk")`, and likewise `getCollectionPageProps`, `getApiRoute` and `getApiPage`. If a route names it in both, the names must match. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
 
 A route Nimbus can't read, such as a wrapper imported from another module, keeps the collection at its default URL. The build and `check` warn about one in a nested folder (`nimbus/collection-unread-route`), and its pages fail the build when they render, naming the route.
 

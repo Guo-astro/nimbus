@@ -218,10 +218,9 @@ import {
 } from "@cloudflare/nimbus-docs/runtime";
 import { components } from "@/components";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("<collection>");
 
-const page = await getCollectionPage<"<collection>">(Astro);
+const page = await getCollectionPage(Astro, "<collection>");
 if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
@@ -305,6 +304,15 @@ rendering: {
 Use `"request"` to render it like the rest of a request-rendered site, or
 `"build"` to prerender it. Without a `rendering` option, skip this step.
 
+The route in 4c is written for a site built ahead of time on
+`output: "static"`. Then run `nimbus-docs check --fix`, so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
+
 ## 5. Adding a docs version? Stop and use `nimbus-docs add new-version`
 
 If the user's intent is to add a **version of the docs** (a frozen
@@ -386,14 +394,16 @@ Ask the user whether to replace, skip, or show a diff first. The
   to a Nimbus site. Blogs, API references, changelogs, glossaries, versioned
   docs siblings — all the same shape underneath.
 - The framework helpers `getCollectionStaticPaths(collection)` and
-  `getCollectionPage<C>(astro)` are sibling functions to
+  `getCollectionPage(astro, collection)` are sibling functions to
   `getDocsStaticPaths`/`getDocsPageProps`. Use the `Collection` variants in
   scaffolded routes; the `Docs` variants stay for the primary route only.
 - The route file's folder sets the URL: primary `docs` is served at the root,
   a docs version at `/<version-slug>/`, and every other collection where its
   route is (`/<collection>/` by default). Every URL helper follows it, so
   keep `getStaticPaths` as `export const getStaticPaths =
-  getCollectionStaticPaths("<collection>")` with a string literal.
+  getCollectionStaticPaths("<collection>")`, and the page helper's
+  collection as a string literal: a request-rendered route has no
+  `getStaticPaths`, so Nimbus finds its collection there.
 - Do not try to register the collection automatically without the user's
   go-ahead in step 3 (the plan). The plan-then-confirm step is what turns
   this from an opaque codegen into a transparent edit.

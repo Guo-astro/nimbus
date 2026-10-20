@@ -17,6 +17,7 @@ import { loadMaterializedConfig } from "../check/authoring.js";
 import { findMdxFiles, fixPaths } from "../lint/index.js";
 import { pageCollectionLintScope } from "../lint/collection-scope.js";
 import { leaseCurrentSources } from "../_internal/content-sources.js";
+import { applyRouteFiles, planRouteFiles } from "../_internal/route-files.js";
 import {
   ALL_SCOPES,
   exitCodeFor,
@@ -85,6 +86,7 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
         scopes,
         signal: ac.signal,
         skipped,
+        srcDir: flags.srcDir,
       });
     } finally {
       process.off("SIGINT", onSigint);
@@ -133,6 +135,7 @@ interface FixContext {
   scopes: CheckScopes;
   signal: AbortSignal;
   skipped: Set<FixSkip>;
+  srcDir?: string;
 }
 
 async function applyFixes(
@@ -166,6 +169,7 @@ async function applyFixes(
     sources.release();
   }
 
+  const routeFiles = new Set<string>();
   for (const f of result.findings) {
     if (ctx.signal.aborted) break;
     if (!f.fixable || !f.fix) continue;
@@ -176,6 +180,16 @@ async function applyFixes(
       case "install-dep":
         await fixInstallDep(cwd, f.fix.package ?? "", f.fix.dev === true, ctx, applied);
         break;
+      case "route-file":
+        routeFiles.add(f.fix.path ?? "");
+        break;
+    }
+  }
+  if (routeFiles.size > 0 && !ctx.signal.aborted) {
+    const plan = planRouteFiles(cwd, ctx.srcDir);
+    if (plan.ok) {
+      const { updated } = applyRouteFiles(cwd, plan.files.filter((entry) => routeFiles.has(entry.file)));
+      if (updated.length > 0) applied.push(`updated ${updated.join(", ")} to match \`rendering\``);
     }
   }
 

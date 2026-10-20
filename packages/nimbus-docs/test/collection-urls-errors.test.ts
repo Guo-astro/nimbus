@@ -81,7 +81,7 @@ test("the guard stops a helper the build didn't see from serving a collection at
     ),
   };
   await assert.rejects(sites.buildSite(files, { packageImports: true }), (error: Error) => {
-    assert.match(error.message, /the route under \/wrong serves collection "sdk", but "sdk" is served from \/sdk/);
+    assert.match(error.message, /couldn't read the getStaticPaths in src\/pages\/wrong\/\[\.\.\.slug\]\.astro, so "sdk" is still served from \/sdk/);
     assert.match(error.message, DOCS_LINK);
     return true;
   });
@@ -120,7 +120,7 @@ test("a wrapper that drops Astro's options is still caught when its pages render
     ),
   };
   await assert.rejects(sites.buildSite(files, { packageImports: true }), (error: Error) => {
-    assert.match(error.message, /the route under \/products\/kit serves collection "sdk", but "sdk" is served from \/sdk/);
+    assert.match(error.message, /couldn't read the getStaticPaths in src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro, so "sdk" is still served from \/sdk/);
     assert.match(error.message, DOCS_LINK);
     return true;
   });
@@ -156,8 +156,9 @@ if (result instanceof Response) return result;
   await assert.rejects(
     sites.buildSite(files, { packageImports: true, api: [{ collection: "api", spec: "./spec.json" }] }),
     (error: Error) => {
-      assert.match(error.message, /the route under \/reference\/api serves collection "api", but "api" is served from \/api/);
+      assert.match(error.message, /couldn't read the getStaticPaths in src\/pages\/reference\/api\/\[\.\.\.slug\]\.astro, so "api" is still served from \/api/);
       assert.match(error.message, /getApiStaticPaths\("api"\)/);
+      assert.match(error.message, /getApiRoute\(Astro, "api"\)/);
       return true;
     },
   );

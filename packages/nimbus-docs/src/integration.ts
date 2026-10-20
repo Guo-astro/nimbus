@@ -40,7 +40,6 @@ import type {
   MdastPluginInput,
 } from "satteri";
 import sitemap from "@astrojs/sitemap";
-import ts from "typescript";
 import {
   configureAdmonitions,
   type AdmonitionOptions,
@@ -212,6 +211,17 @@ import {
   routeComponentKeys,
 } from "./_internal/rendering-policy.js";
 import {
+  agentRendering,
+  agentRouteModeAt,
+  describeRouteFileMismatch,
+  renderingCollections,
+  routeFileMismatch,
+  routeFileSubject,
+  type AgentRendering,
+  type AstroOutput,
+  type RouteFileMismatch,
+} from "./_internal/route-modes.js";
+import {
   collectionLabel,
   collectionMountPrefix,
   COLLECTION_URLS_DOCS,
@@ -222,7 +232,6 @@ import {
 } from "./_internal/collection-mount.js";
 import { entryRouteUrl } from "./_internal/astro-slug.js";
 import {
-  isRequiredCanonicalRouteComponent,
   normalizeRouteEntrypoint,
   normalizeSourceRouteEntrypoint,
   STARTER_ROUTE_INVENTORY,
@@ -310,39 +319,6 @@ const REQUEST_ROUTE_INVENTORY_ENTRYPOINT = new URL(
 const initialDevWatchers = new Map<string, { close(): Promise<void> }>();
 
 type AgentEndpointAssetsModule = typeof import("./_internal/agent-endpoint-assets.js");
-
-/**
- * Whether a route module exports `getStaticPaths` (an `.astro` route from its
- * frontmatter). Astro warns only then, not when the name is just mentioned.
- */
-function exportsGetStaticPaths(file: string, source: string): boolean {
-  const code = file.endsWith(".astro")
-    ? (/^\s*---\r?\n([\s\S]*?)\r?\n---/u.exec(source)?.[1] ?? "")
-    : source;
-  const { statements } = ts.createSourceFile(file, code, ts.ScriptTarget.Latest);
-  return statements.some((statement) => {
-    if (ts.isExportDeclaration(statement)) {
-      const clause = statement.exportClause;
-      return (
-        !statement.isTypeOnly &&
-        clause !== undefined &&
-        ts.isNamedExports(clause) &&
-        clause.elements.some((element) => !element.isTypeOnly && element.name.text === "getStaticPaths")
-      );
-    }
-    const exported =
-      ts.canHaveModifiers(statement) &&
-      ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword);
-    if (!exported) return false;
-    if (ts.isFunctionDeclaration(statement)) return statement.name?.text === "getStaticPaths";
-    return (
-      ts.isVariableStatement(statement) &&
-      statement.declarationList.declarations.some(
-        (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === "getStaticPaths",
-      )
-    );
-  });
-}
 
 /** Whether an endpoint serves the site's llms-full.txt, by path or by call. */
 function servesLlmsFull(
@@ -623,10 +599,14 @@ export function nimbus(
   let clientDirectory = new URL("file:///tmp/nimbus-client/");
   let serverDirectory = new URL("file:///tmp/nimbus-server/");
   let resolvedRoutesForBuild: ResolvedRouteLike[] = [];
-  // Request-rendered-by-policy routes that export `getStaticPaths`, which
-  // Astro warns about; see `astro:routes:resolved`.
-  let policyRoutesWithStaticPaths = new Set<string>();
-  let reportedPolicyRoutesWithStaticPaths = "";
+  // Managed route files that don't say what `rendering` gives them; see
+  // `astro:routes:resolved`.
+  let routeFileMismatches = new Map<string, RouteFileMismatch & { subject: string }>();
+  let reportedRouteFileMismatches = "";
+  // The mode `rendering` gives each collection's page route file, by
+  // component key, and the subject its warning names.
+  let managedPageRoutes = new Map<string, { mode: RenderingMode; subject: string }>();
+  let astroOutputForSetup: AstroOutput = "static";
   let endpointRoutesForBuild: EndpointRouteRecord[] = [];
   // Whether a route serves llms-full.txt; unknown until routes resolve.
   let servesFullDocument: boolean | undefined;
@@ -690,11 +670,9 @@ export function nimbus(
   // routes take the default, and mounted agent routes take their mount's
   // mode (project-owned files via `astro:route:setup`, injected ones at
   // injection).
-  let agentRenderingForBuild: {
-    rootMode: RenderingMode;
-    defaultMode: RenderingMode;
-    mountModes: Map<string, RenderingMode>;
-  } | null = null;
+  let agentRenderingForBuild: AgentRendering | null = null;
+  // The same modes with or without `rendering`, for the route-file checks.
+  let agentModesForSetup: AgentRendering | null = null;
   // Parsed MDX-validation inputs, run against the page and partials
   // collections once the record exists. `null` when validation is off.
   let mdxValidationForBuild: {
@@ -1129,15 +1107,13 @@ export function nimbus(
   };
 
   /**
-   * The rendering mode for a project-owned agent route file, or `undefined`
-   * when the route isn't one (wrong shape, no factory call, or an unknown
-   * mount). Shapes: the root routes (`[...slug]/index.md.ts`,
-   * `[...slug]/index.mdx.ts`, `[section]/llms.txt.ts`) take the root
-   * collection's mode; the site-wide `llms.txt.ts` and `llms-full.txt.ts`
-   * take the default; `<mount>/…` takes the mount's mode.
+   * The mode `policy` gives a project-owned agent route file, or `undefined`
+   * when the route isn't one (see `agentRouteModeAt`).
    */
-  const agentRouteMode = (component: string): RenderingMode | undefined => {
-    const policy = agentRenderingForBuild;
+  const agentRouteMode = (
+    component: string,
+    policy: AgentRendering | null = agentRenderingForBuild,
+  ): RenderingMode | undefined => {
     if (!policy) return undefined;
     let resolved = component;
     if (resolved.startsWith("file:")) {
@@ -1161,33 +1137,13 @@ export function nimbus(
       .relative(realOf(path.join(srcDirForBuild, "pages")), realOf(absolute))
       .replaceAll("\\", "/");
     if (relative.startsWith("..")) return undefined;
-    const parts = relative.split("/");
-    const file = parts.at(-1) ?? "";
-    const isMarkdownFile = /^index\.mdx?\.[cm]?[jt]s$/u.test(file);
-    const isLlmsFile = /^llms(?:-full)?\.txt\.[cm]?[jt]s$/u.test(file);
-    if (!isMarkdownFile && !isLlmsFile) return undefined;
-    // The parameter name is the author's choice; only the shape matters.
-    const isSpread = (segment: string) => /^\[\.\.\..+\]$/u.test(segment);
-    const isParam = (segment: string) => /^\[.+\]$/u.test(segment);
-    const folders = parts.slice(0, -1);
-    const mountMode = (mount: string[]) =>
-      mount.some(isParam) ? undefined : policy.mountModes.get(`/${mount.join("/")}`);
-    let mode: RenderingMode | undefined;
-    if (folders.length === 0 && isLlmsFile) {
-      mode = policy.defaultMode;
-    } else if (isMarkdownFile && folders.length > 0 && isSpread(folders.at(-1)!)) {
-      mode = folders.length === 1 ? policy.rootMode : mountMode(folders.slice(0, -1));
-    } else if (file.startsWith("llms.txt.") && folders.length > 0) {
-      mode = folders.length === 1 && isParam(folders[0]!) ? policy.rootMode : mountMode(folders);
-    }
-    if (!mode) return undefined;
     let source: string;
     try {
       source = fs.readFileSync(absolute, "utf8");
     } catch {
       return undefined;
     }
-    return sharedMarkdownRouteSurface(source) ? mode : undefined;
+    return agentRouteModeAt(relative, source, policy);
   };
 
   return {
@@ -1904,7 +1860,9 @@ export function nimbus(
         }
 
         renderingRoutes = new Map();
-        policyRoutesWithStaticPaths = new Set();
+        managedPageRoutes = new Map();
+        routeFileMismatches = new Map();
+        astroOutputForSetup = astroConfig.output === "server" ? "server" : "static";
         requestRenderingConfigured = false;
         requestRenderingCollections = new Set();
         contentRoutePatternsForBuild = new Set();
@@ -1919,36 +1877,17 @@ export function nimbus(
             route.entrypoint,
           )!,
         }));
-        // Anything decided before content sync comes only from config:
-        // `rendering` covers `docs`, version collections, API collections,
-        // and every key in `rendering.collections`. `rendering.default`
-        // can't reach collections the config doesn't name; after sync, a
-        // page collection with a catch-all route the policy doesn't cover
-        // fails the build (see `runPostSyncPageChecks`).
-        const candidates = new Set([
-          PRIMARY_COLLECTION,
-          ...(config.versions?.others ?? []).map(
-            (version) => `docs-${version}`,
-          ),
-          ...apiCollections,
-          ...Object.keys(config.rendering?.collections ?? {}),
-        ]);
-        const canonicalCollections = [...candidates].filter((collection) => {
-          const component = canonicalCollectionRouteComponent(
-            srcDir,
-            collection,
-            mountContextForBuild,
-            projectRoot,
-          );
-          return (
-            (config.rendering !== undefined &&
-              isRequiredCanonicalRouteComponent(
-                projectRoot,
-                srcDir,
-                component,
-              )) ||
-            fs.existsSync(component)
-          );
+        // Anything decided before content sync comes only from config.
+        // `rendering.default` can't reach collections the config doesn't
+        // name; after sync, a page collection with a catch-all route the
+        // policy doesn't cover fails the build (see `runPostSyncPageChecks`).
+        const canonicalCollections = renderingCollections({
+          rendering: config.rendering,
+          versions: config.versions?.others ?? [],
+          apiCollections,
+          srcDir,
+          projectRoot,
+          mountContext: mountContextForBuild,
         });
         const policy = compileRenderingPolicy(
           config.rendering,
@@ -1975,10 +1914,12 @@ export function nimbus(
             mountContextForBuild,
             projectRoot,
           );
-          if (config.rendering) {
-            for (const key of routeComponentKeys(projectRoot, component)) {
-              renderingRoutes.set(key, mode);
-            }
+          for (const key of routeComponentKeys(projectRoot, component)) {
+            if (config.rendering) renderingRoutes.set(key, mode);
+            managedPageRoutes.set(key, {
+              mode,
+              subject: routeFileSubject(collection),
+            });
           }
           const mount = collectionMountPrefix(collection, mountContextForBuild);
           const moved = movedCollectionRoute(collection, mountContextForBuild);
@@ -2033,21 +1974,10 @@ export function nimbus(
           }
           return pathToFileURL(file);
         };
+        agentModesForSetup = agentRendering(policy, mountContextForBuild);
         agentRenderingForBuild = null;
         if (config.rendering) {
-          const mountModes = new Map<string, RenderingMode>();
-          for (const [collection, mode] of Object.entries(policy.collections)) {
-            const mount = collectionMountPrefix(collection, mountContextForBuild);
-            // The root collection's agent routes are the project's own root
-            // route files, handled through `astro:route:setup`.
-            if (mount && mount !== "/") mountModes.set(mount, mode);
-          }
-          agentRenderingForBuild = {
-            rootMode:
-              policy.collections[PRIMARY_COLLECTION] ?? policy.default,
-            defaultMode: policy.default,
-            mountModes,
-          };
+          agentRenderingForBuild = agentModesForSetup;
           const hiddenVersionMounts = new Set(
             (config.versions?.hidden ?? []).map((version) => `/${version}`),
           );
@@ -2210,7 +2140,7 @@ export function nimbus(
                   dirHasRouteFile(path.join(mount.slice(1), entry.name), kind),
               );
           };
-          for (const [mount, mode] of mountModes) {
+          for (const [mount, mode] of agentModesForSetup.mountModes) {
             // Astro ranks the mount's page route above the root routes, so
             // the mount serves its own split llms-full.txt files unless both
             // render at build time (the root llms-full.txt follows the default).
@@ -3083,34 +3013,23 @@ export function nimbus(
           route.prerender = true;
           return;
         }
-        const noteStaticPaths = (mode: RenderingMode) => {
-          if (mode !== "request") return;
-          try {
-            const source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
-            if (exportsGetStaticPaths(route.component, source)) {
-              policyRoutesWithStaticPaths.add(route.component);
-            }
-          } catch {
-            // Unreadable route: Astro reports it.
-          }
-        };
-        const mode = renderingRoutes.get(component);
-        if (mode) {
-          route.prerender = mode === "build";
-          noteStaticPaths(mode);
-          return;
+        // Page routes and project-owned agent routes that call a Nimbus
+        // agent factory follow `rendering`, which wins over their own
+        // `prerender`. Custom routes keep their own.
+        const page = managedPageRoutes.get(component);
+        const expected = page?.mode ?? agentRouteMode(component, agentModesForSetup);
+        if (!expected) return;
+        const overridden = renderingRoutes.has(component) || agentRouteMode(component) !== undefined;
+        if (overridden) route.prerender = expected === "build";
+        let source: string;
+        try {
+          source = fs.readFileSync(path.resolve(projectRootForBuild, route.component), "utf8");
+        } catch {
+          return; // Unreadable route: Astro reports it.
         }
-        // Project-owned agent route files are policy-managed when they call
-        // a Nimbus agent factory: the policy wins over their `prerender`
-        // export, the same way it wins for page routes, so copied starter
-        // files keep working unchanged. Custom routes that call no factory
-        // keep their own `prerender`.
-        if (!agentRenderingForBuild) return;
-        const agentMode = agentRouteMode(component);
-        if (agentMode) {
-          route.prerender = agentMode === "build";
-          noteStaticPaths(agentMode);
-        }
+        const mismatch = routeFileMismatch({ file: route.component, source, output: astroOutputForSetup, expected, overridden });
+        if (mismatch) routeFileMismatches.set(route.component, { ...mismatch, subject: page?.subject ?? "it" });
+        else routeFileMismatches.delete(route.component);
       },
       "astro:config:done": ({
         injectTypes,
@@ -3630,16 +3549,26 @@ export function nimbus(
         }
       },
       "astro:routes:resolved": ({ routes, logger }) => {
-        // Astro's own warning advises `export const prerender`, which the
-        // rendering policy overrides. Say so once per change of the set.
-        const staticPaths = [...policyRoutesWithStaticPaths].sort().join(", ");
-        if (staticPaths && staticPaths !== reportedPolicyRoutesWithStaticPaths) {
-          logger.info(
-            `The rendering policy renders ${staticPaths} on request, so Astro ignores ${policyRoutesWithStaticPaths.size === 1 ? "its" : "their"} getStaticPaths(). ` +
-              "That's expected, and so are Astro's warnings below: the policy decides, whatever a route's `export const prerender` says. Set `rendering` in the Nimbus config to change it.",
+        // A route file deleted or renamed in dev no longer has a mismatch.
+        const entrypoints = new Set(routes.map((route) => route.entrypoint));
+        for (const file of routeFileMismatches.keys()) if (!entrypoints.has(file)) routeFileMismatches.delete(file);
+        const mismatched = [...routeFileMismatches].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+        const unbuildable = mismatched.filter(([, mismatch]) => mismatch.kind === "missing-paths");
+        if (building && unbuildable.length > 0) {
+          throw authorError(
+            `${unbuildable.map(([file]) => file).join(", ")} ${unbuildable.length === 1 ? "is a dynamic route" : "are dynamic routes"} ` +
+              "that `rendering` builds ahead of time, with no getStaticPaths, so Astro can't build " +
+              `${unbuildable.length === 1 ? "it" : "them"}. Run \`nimbus-docs check --fix\` to restore the line.`,
           );
         }
-        reportedPolicyRoutesWithStaticPaths = staticPaths;
+        const report = mismatched.map(([file, mismatch]) => `  ${file}: ${describeRouteFileMismatch(mismatch, mismatch.subject)}`).join("\n");
+        if (report && report !== reportedRouteFileMismatches) {
+          logger.warn(
+            `${mismatched.length} route file${mismatched.length === 1 ? " doesn't" : "s don't"} match \`rendering\`; the config wins at build:\n` +
+              `${report}\nRun \`nimbus-docs check --fix\` to update ${mismatched.length === 1 ? "it" : "them"}.`,
+          );
+        }
+        reportedRouteFileMismatches = report;
         markdownRoutes.update(
           recordMarkdownRoutes(
             routes,

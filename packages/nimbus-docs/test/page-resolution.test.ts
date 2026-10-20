@@ -90,6 +90,21 @@ test("public static helpers preserve missing-prop diagnostics", async () => {
   );
 });
 
+test("collection page helpers take the collection name, and still reject the removed options object", async () => {
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk"),
+    /expected `entry` in Astro\.props/,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, {} as never),
+    /getCollectionPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "docs" as never),
+    /getDocsPageProps\(Astro, options\) was removed/,
+  );
+});
+
 describe("prose page resolution", () => {
   const entries = new Map([
     ["docs:index", entry("docs", "index")],
@@ -228,6 +243,12 @@ describe("prose page resolution", () => {
     }
     const landing = await resolveProsePage(context("/products/kit/", undefined, {}, "/products/kit/[...slug]"), {}, dependencies);
     assert.equal(landing.status, "found");
+  });
+
+  test("a request route's page helper names its collection", async () => {
+    const result = await resolveProsePage(context("/products/kit/setup/", "setup", {}, "/products/kit/[...slug]"), { collection: "sdk" }, dependencies);
+    assert.equal(result.status, "found");
+    if (result.status === "found") assert.equal(result.page.identity.collection, "sdk");
   });
 
   test("resolves a request route by its folder, nested, under a base, or a kept copy", async () => {

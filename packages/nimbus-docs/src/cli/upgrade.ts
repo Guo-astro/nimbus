@@ -13,6 +13,9 @@ import { gt, lt, minVersion, prerelease, satisfies, valid, validRange } from "se
 
 import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
+import { setRouteFileMode } from "../_internal/route-file-mode.js";
+import { projectRouteFiles } from "../_internal/route-files.js";
+import { fileRouteMode } from "../_internal/route-modes.js";
 import { resolveUpgradeBaseline, selectUpgradeEntries, siteScope, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
 import {
   latestTemplatesTag,
@@ -231,6 +234,7 @@ interface Gathered {
   /** The tag a file is compared from: its own `diff --apply` tag, else `templatesTag`. */
   baseTag: (treeFile: string) => string;
   readBase: (treeFile: string) => string | null;
+  readUpstream: (treeFile: string) => string | null;
   findings: StarterFinding[];
   compatibility: StarterCompatibility | null;
   cleanup: () => void;
@@ -254,6 +258,9 @@ async function gatherStarter(
   const upstreamTag = flags.templateDir ? recorded : (flags.to ?? (await source.latestTag()));
   const perFile = nimbus.templatesTagByFile ?? {};
   const baseTag = (treeFile: string): string => perFile[treeFile] ?? recorded;
+  const inSiteMode = routeFilesInSiteMode(cwd, srcRoot);
+  const readTree = (dir: string, treeFile: string): string | null =>
+    inSiteMode(starterProjectPath(srcRoot, treeFile), readTreeFile(dir, treeFile));
 
   // One tree per distinct tag: the recorded one, upstream, and every tag a
   // file was applied from.
@@ -279,8 +286,8 @@ async function gatherStarter(
       srcRoot,
       baseFiles: [...baseFiles],
       upstreamFiles: listStarterFiles(upstreamDir),
-      readBase: (t) => readTreeFile(dirOf(baseTag(t)), t),
-      readUpstream: (t) => readTreeFile(upstreamDir, t),
+      readBase: (t) => readTree(dirOf(baseTag(t)), t),
+      readUpstream: (t) => readTree(upstreamDir, t),
       readDisk: (file) => {
         const abs = join(cwd, file);
         const unsafe = validateApplyPath(cwd, abs);
@@ -298,10 +305,27 @@ async function gatherStarter(
     upstreamTag,
     upstreamDir,
     baseTag,
-    readBase: (t) => readTreeFile(trees.get(baseTag(t))!.dir, t),
+    readBase: (t) => readTree(trees.get(baseTag(t))!.dir, t),
+    readUpstream: (t) => readTree(upstreamDir, t),
     findings,
     compatibility: starterCompatibility(upstreamDir, upstreamTag, cwd),
     cleanup,
+  };
+}
+
+/**
+ * The starter writes its route files for a site that builds every page; a
+ * site whose `rendering` differs keeps them in its own mode. Starter files are
+ * read in the mode of the site's copy, so only real edits show as drift.
+ */
+function routeFilesInSiteMode(cwd: string, srcRoot: string): (file: string, text: string | null) => string | null {
+  const project = projectRouteFiles(cwd, srcRoot);
+  const routes = new Map(project.ok ? project.files.map((route) => [route.file, route]) : []);
+  return (file, text) => {
+    const route = routes.get(file);
+    if (!route || text === null) return text;
+    const edit = setRouteFileMode(file, text, { ...route.target, mode: fileRouteMode(route.source, route.target.output) });
+    return edit.status === "updated" ? edit.source : text;
   };
 }
 
@@ -725,7 +749,7 @@ export async function diffCommand(
     const chunks: string[] = [];
     for (const f of targets) {
       const base = g.readBase(f.treeFile);
-      const upstream = readTreeFile(g.upstreamDir, f.treeFile);
+      const upstream = g.readUpstream(f.treeFile);
       const disk = readDisk(cwd, f);
       let label: string;
       let left: string;
@@ -822,7 +846,7 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     return;
   }
   const base = g.readBase(target.treeFile);
-  const upstream = readTreeFile(g.upstreamDir, target.treeFile);
+  const upstream = g.readUpstream(target.treeFile);
   const disk = existsSync(abs) ? readFileSync(abs, "utf8") : null;
   if (target.status === "added") {
     if (disk !== null || upstream === null) {

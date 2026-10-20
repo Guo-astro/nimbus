@@ -168,7 +168,8 @@ async function requestCollection(
     dependencies.warn(
       `nimbus-docs: the route ${context.routePattern} renders on request, but no page collection is served from ` +
         `${route.folder || "/"}. Page collections come from docsCollection() or withNimbusMarkdown(). To serve one here, ` +
-        `call its route helper in this route's exported getStaticPaths; otherwise move the route to /<name>. ` +
+        `name it in this route's page helper, such as getCollectionPage(Astro, "<name>"), or its exported getStaticPaths; ` +
+        `otherwise move the route to /<name>. ` +
         `See ${COLLECTION_URLS_DOCS}.`,
     );
   }

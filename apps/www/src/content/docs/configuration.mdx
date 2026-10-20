@@ -74,6 +74,8 @@ export default defineConfig({
 | `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
 | `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
 
+`"build"` is what Astro calls prerendered, and `"request"` what it calls on-demand rendered. `rendering` applies to Nimbus's collections only: every other route keeps its own `prerender` export.
+
 Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
 
 #### Enable request rendering
@@ -121,7 +123,9 @@ rendering: {
 
 Every override must name a registered collection with its own canonical catch-all route. Nimbus fails the build for unknown collection names rather than silently ignoring them.
 
-Keep `export const prerender = true` and `getStaticPaths` in canonical route files: Nimbus switches each route to the configured mode. Astro still logs "getStaticPaths() ignored in dynamic page" for routes rendered on request. The warning is expected and needs no change.
+`rendering` wins at build: Nimbus renders each canonical route, and its Markdown and `llms.txt` routes, in the configured mode, and warns when a route file says otherwise. Run `nimbus-docs check --fix` to update the files. It sets each route's `prerender` line, keeps `getStaticPaths` on built routes only, and passes the collection to the page helper of a request-rendered route served away from its default URL, such as `getCollectionPage(Astro, "sdk")`. `add adapter-*` and the scaffolder update them for you.
+
+A built route with a dynamic segment, such as `[...slug].astro`, must export `getStaticPaths`. Astro can't build it otherwise, so the build fails and names the file.
 
 Request-rendered routes are still added to the sitemap and Pagefind search index during the production build. Nimbus uses the content source to create those build-time discovery files; no extra sitemap or search configuration is required.
 

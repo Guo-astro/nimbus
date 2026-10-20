@@ -25,6 +25,7 @@ import {
   parseContentCollections,
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
+import { planRouteFiles } from "../_internal/route-files.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -89,6 +90,7 @@ export async function checkStructure(
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
   }
+  checkRouteFiles(cwd, findings, notes, parsed, srcDirOverride);
   await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir, built);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
@@ -498,6 +500,36 @@ async function checkRequestRendering(
       "`nimbus-docs check` doesn't verify request-rendered pages, even after a build; a passing production build is the gate for them",
   });
   return true;
+}
+
+/** Each managed route file that doesn't say what `rendering` gives it; `--fix` rewrites it. */
+function checkRouteFiles(
+  cwd: string,
+  findings: CheckFinding[],
+  notes: Note[],
+  parsed: ConfigParseResult,
+  srcDirOverride: string | undefined,
+): void {
+  if (!parsed.ok) return;
+  const plan = planRouteFiles(cwd, srcDirOverride);
+  if (!plan.ok) {
+    notes.push(skippedNote("nimbus/route-files-skipped", `Route file modes weren't checked: ${plan.reason}.`));
+    return;
+  }
+  for (const { file, mismatch, problem, edit } of plan.files) {
+    const manual = edit.status === "manual";
+    findings.push({
+      scope: "structure",
+      code: "nimbus/route-file-mode",
+      severity: mismatch.kind === "missing-paths" ? "error" : "warn",
+      file,
+      message: `${file}: ${problem}.`,
+      fixable: !manual,
+      fix: manual
+        ? { kind: "suggestion", path: file, suggestion: edit.todo }
+        : { kind: "route-file", path: file, suggestion: "update the file to match `rendering`" },
+    });
+  }
 }
 
 function checkConfigZod(

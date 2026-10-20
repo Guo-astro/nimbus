@@ -11,23 +11,20 @@ import type { RenderingConfig, RenderingMode } from "../types.js";
 import { collectionMountPrefix, PRIMARY_COLLECTION, type MountContext } from "./collection-mount.js";
 import { sharedMarkdownRouteSurface } from "./markdown-routes-plugin.js";
 import { canonicalCollectionRouteComponent, type CompiledRenderingPolicy } from "./rendering-policy.js";
+import { readRouteFileExports, type RouteExports } from "./route-exports.js";
 import { isRequiredCanonicalRouteComponent } from "./route-ownership.js";
 
 export type AstroOutput = "static" | "server";
 
-// Astro's own reading of a route's mode (`core/routing/prerender.js`).
-const PRERENDER = /^\s*export\s+const\s+prerender\s*=\s*(true|false);?/m;
-
-/** A route file's own mode, by Astro's rule: its `prerender` line, else the `output` default. */
-export function fileRouteMode(source: string, output: AstroOutput): RenderingMode {
-  const match = PRERENDER.exec(source);
-  if (match) return match[1] === "true" ? "build" : "request";
-  return output === "server" ? "request" : "build";
-}
-
-/** Whether Astro warns that a request-rendered route's `getStaticPaths()` is ignored: its substring test. */
-export function warnsIgnoredStaticPaths(file: string, source: string): boolean {
-  return /\.(?:astro|js|ts)$/u.test(file) && source.includes("getStaticPaths");
+/**
+ * A route file's own mode, by Astro's rule: its `prerender` export, else the
+ * `output` default. `undefined` when `prerender` is set by an expression.
+ */
+export function fileRouteMode(exports: RouteExports, output: AstroOutput): RenderingMode | undefined {
+  if (exports.prerenders.length === 0) return output === "server" ? "request" : "build";
+  const [only] = exports.prerenders;
+  if (exports.prerenders.length > 1 || only!.value === undefined) return undefined;
+  return only!.value ? "build" : "request";
 }
 
 /** A route Astro can build only from `getStaticPaths`: one with a `[param]` or `[...spread]` segment. */
@@ -37,19 +34,23 @@ export function isDynamicRoute(file: string): boolean {
 
 export interface RouteFileMismatch {
   /**
-   * `mode`: `rendering` overrides the file's mode. `ignored-paths`: it renders
-   * on request with `getStaticPaths`. `missing-paths`: it builds a dynamic
-   * route with no `getStaticPaths`, which Astro can't do.
+   * `mode`: the file's mode differs from the one Nimbus gives it.
+   * `ignored-paths`: it renders on request with `getStaticPaths`.
+   * `missing-paths`: it builds a dynamic route with no `getStaticPaths`,
+   * which Astro can't do.
    */
   kind: "mode" | "ignored-paths" | "missing-paths";
-  fileMode: RenderingMode;
+  /** `undefined` when its `prerender` is an expression. */
+  fileMode?: RenderingMode;
   mode: RenderingMode;
+  /** The build applies `mode` over the file's own: `rendering` is set. */
+  overridden: boolean;
 }
 
 /**
- * How a managed route file disagrees with the mode `rendering` gives it.
- * `overridden` is whether the build applies that mode over the file's own,
- * which it does only when `rendering` is set.
+ * How a managed route file disagrees with the mode Nimbus gives it: the one
+ * `rendering` sets, or `"build"` without it. Only with `rendering` set does
+ * the build apply that mode over the file's own.
  */
 export function routeFileMismatch(input: {
   file: string;
@@ -58,13 +59,15 @@ export function routeFileMismatch(input: {
   expected: RenderingMode;
   overridden: boolean;
 }): RouteFileMismatch | null {
-  const fileMode = fileRouteMode(input.source, input.output);
-  const mode = input.overridden ? input.expected : fileMode;
-  if (mode === "build" && isDynamicRoute(input.file) && !input.source.includes("getStaticPaths"))
-    return { kind: "missing-paths", fileMode, mode };
-  if (fileMode !== mode) return { kind: "mode", fileMode, mode };
-  if (mode === "request" && warnsIgnoredStaticPaths(input.file, input.source))
-    return { kind: "ignored-paths", fileMode, mode };
+  const exports = readRouteFileExports(input.file, input.source);
+  if (!exports) return null;
+  const fileMode = fileRouteMode(exports, input.output);
+  const base = { ...(fileMode ? { fileMode } : {}), mode: input.expected, overridden: input.overridden };
+  const builds = input.overridden ? input.expected === "build" : fileMode === "build";
+  if (builds && isDynamicRoute(input.file) && !exports.staticPaths) return { kind: "missing-paths", ...base };
+  if (fileMode === undefined) return null;
+  if (fileMode !== input.expected) return { kind: "mode", ...base };
+  if (input.expected === "request" && exports.staticPaths) return { kind: "ignored-paths", ...base };
   return null;
 }
 
@@ -73,12 +76,15 @@ export function describeRouteFileMismatch(mismatch: RouteFileMismatch, subject: 
   const when = (mode: RenderingMode) => (mode === "build" ? "ahead of time" : "on request");
   const verb = (mode: RenderingMode) => (mode === "build" ? "builds" : "renders");
   if (mismatch.kind === "missing-paths")
-    return `\`rendering\` builds ${subject} ahead of time, but the file has no getStaticPaths`;
+    return mismatch.overridden
+      ? `\`rendering\` builds ${subject} ahead of time, but the file has no getStaticPaths`
+      : "file builds ahead of time, but has no getStaticPaths";
   if (mismatch.kind === "ignored-paths") return "file renders on request, so Astro ignores its getStaticPaths";
-  return (
-    `file ${verb(mismatch.fileMode)} ${when(mismatch.fileMode)}, ` +
-    `\`rendering\` ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`
-  );
+  const fileMode = mismatch.fileMode!;
+  return mismatch.overridden
+    ? `file ${verb(fileMode)} ${when(fileMode)}, \`rendering\` ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`
+    : `file ${verb(fileMode)} ${when(fileMode)}; with no \`rendering\`, Nimbus ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}` +
+        (fileMode === "request" ? ". To keep it on request, set `rendering`" : "");
 }
 
 /**

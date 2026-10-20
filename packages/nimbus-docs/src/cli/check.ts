@@ -189,11 +189,11 @@ async function applyFixes(
     const plan = planRouteFiles(cwd, ctx.srcDir);
     if (plan.ok) {
       const { updated } = applyRouteFiles(cwd, plan.files.filter((entry) => routeFiles.has(entry.file)));
-      if (updated.length > 0) applied.push(`updated ${updated.join(", ")} to match \`rendering\``);
+      if (updated.length > 0) applied.push(`updated ${updated.join(", ")}`);
     }
   }
 
-  if (applied.length > 0 && ctx.interactive) {
+  if (applied.length > 0 && !ctx.wantJson) {
     p.log.success(`Applied:\n  ${applied.join("\n  ")}`);
   }
 }

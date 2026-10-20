@@ -13,7 +13,6 @@ import { decideCollectionMounts, findCollectionRoutes } from "./collection-route
 import { resolveMigrationSrcDir } from "./migrations.js";
 import { parseAstroConfigFields, parseNimbusConfig } from "./parse-nimbus-config.js";
 import { setRouteFileMode, type RouteFileEdit, type RouteFileTarget } from "./route-file-mode.js";
-import { staticPathsFor } from "./route-helpers.js";
 import {
   describeRouteFileMismatch,
   managedRouteFiles,
@@ -33,6 +32,8 @@ export interface RouteFilePlan {
   problem: string;
   /** The edit to the mode `rendering` gives it. */
   edit: RouteFileEdit;
+  /** The edit changes the file: a full one, or the part a manual edit could make. */
+  writes: boolean;
 }
 
 export type RouteFilesPlan = { ok: true; files: RouteFilePlan[] } | { ok: false; reason: string };
@@ -84,14 +85,11 @@ export function projectRouteFiles(cwd: string, srcDirOverride?: string): Project
 
   const files = managedRouteFiles({ srcDir, projectRoot: cwd, policy, mountContext }).map((managed): ProjectRouteFile => {
     const collection = managed.kind === "page" ? managed.collection : undefined;
-    const page = collection === undefined
+    const page: RouteFileTarget["page"] = collection === undefined
       ? undefined
       : {
           collection,
-          paths: staticPathsFor(
-            collection,
-            collection === PRIMARY_COLLECTION ? "docs" : apiCollections.includes(collection) ? "api" : "collection",
-          ),
+          kind: collection === PRIMARY_COLLECTION ? "docs" : apiCollections.includes(collection) ? "api" : "collection",
           moved: movedCollectionRoute(collection, mountContext) !== undefined,
         };
     return {
@@ -112,25 +110,28 @@ export function planRouteFiles(cwd: string, srcDirOverride?: string): RouteFiles
   for (const { file, source, target, subject } of project.files) {
     const mismatch = routeFileMismatch({ file, source, output: target.output, expected: target.mode, overridden: project.overridden });
     if (!mismatch) continue;
+    const edit = setRouteFileMode(file, source, target);
     files.push({
       file,
       mismatch,
       problem: describeRouteFileMismatch(mismatch, subject),
-      edit: setRouteFileMode(file, source, target),
+      edit,
+      writes: edit.status !== "unchanged" && edit.source !== source,
     });
   }
   return { ok: true, files };
 }
 
-/** Write each planned edit the helper could make; the rest are left for the author. */
+/** Write every edit the helper could make, including part of a manual one; the rest is left for the author. */
 export function applyRouteFiles(cwd: string, plan: RouteFilePlan[]): { updated: string[]; manual: RouteFilePlan[] } {
   const updated: string[] = [];
   const manual: RouteFilePlan[] = [];
   for (const entry of plan) {
-    if (entry.edit.status === "updated") {
+    if (entry.writes && entry.edit.status !== "unchanged") {
       fs.writeFileSync(path.join(cwd, entry.file), entry.edit.source);
       updated.push(entry.file);
-    } else if (entry.edit.status === "manual") manual.push(entry);
+    }
+    if (entry.edit.status === "manual") manual.push(entry);
   }
   return { updated, manual };
 }

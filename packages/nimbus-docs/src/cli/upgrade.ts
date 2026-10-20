@@ -15,6 +15,7 @@ import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
 import { setRouteFileMode } from "../_internal/route-file-mode.js";
 import { projectRouteFiles } from "../_internal/route-files.js";
+import { readRouteFileExports } from "../_internal/route-exports.js";
 import { fileRouteMode } from "../_internal/route-modes.js";
 import { resolveUpgradeBaseline, selectUpgradeEntries, siteScope, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
 import {
@@ -235,6 +236,8 @@ interface Gathered {
   baseTag: (treeFile: string) => string;
   readBase: (treeFile: string) => string | null;
   readUpstream: (treeFile: string) => string | null;
+  /** The site's copy of a starter file, read in its mode like the starter's. */
+  readSite: (file: string) => string | null;
   findings: StarterFinding[];
   compatibility: StarterCompatibility | null;
   cleanup: () => void;
@@ -261,6 +264,12 @@ async function gatherStarter(
   const inSiteMode = routeFilesInSiteMode(cwd, srcRoot);
   const readTree = (dir: string, treeFile: string): string | null =>
     inSiteMode(starterProjectPath(srcRoot, treeFile), readTreeFile(dir, treeFile));
+  const readSite = (file: string): string | null => {
+    const abs = join(cwd, file);
+    const unsafe = validateApplyPath(cwd, abs);
+    if (unsafe) throw new Error(`Unsafe starter path ${file}: ${unsafe}.`);
+    return inSiteMode(file, existsSync(abs) ? readFileSync(abs, "utf8") : null);
+  };
 
   // One tree per distinct tag: the recorded one, upstream, and every tag a
   // file was applied from.
@@ -288,12 +297,7 @@ async function gatherStarter(
       upstreamFiles: listStarterFiles(upstreamDir),
       readBase: (t) => readTree(dirOf(baseTag(t)), t),
       readUpstream: (t) => readTree(upstreamDir, t),
-      readDisk: (file) => {
-        const abs = join(cwd, file);
-        const unsafe = validateApplyPath(cwd, abs);
-        if (unsafe) throw new Error(`Unsafe starter path ${file}: ${unsafe}.`);
-        return existsSync(abs) ? readFileSync(abs, "utf8") : null;
-      },
+      readDisk: readSite,
     });
   } catch (err) {
     cleanup();
@@ -307,6 +311,7 @@ async function gatherStarter(
     baseTag,
     readBase: (t) => readTree(trees.get(baseTag(t))!.dir, t),
     readUpstream: (t) => readTree(upstreamDir, t),
+    readSite,
     findings,
     compatibility: starterCompatibility(upstreamDir, upstreamTag, cwd),
     cleanup,
@@ -314,9 +319,9 @@ async function gatherStarter(
 }
 
 /**
- * The starter writes its route files for a site that builds every page; a
- * site whose `rendering` differs keeps them in its own mode. Starter files are
- * read in the mode of the site's copy, so only real edits show as drift.
+ * Route files are compared in the mode of the site's copy, both the starter's
+ * and the site's own, so a mode switch or a redundant `prerender` line from an
+ * older starter doesn't show as an edit.
  */
 function routeFilesInSiteMode(cwd: string, srcRoot: string): (file: string, text: string | null) => string | null {
   const project = projectRouteFiles(cwd, srcRoot);
@@ -324,7 +329,10 @@ function routeFilesInSiteMode(cwd: string, srcRoot: string): (file: string, text
   return (file, text) => {
     const route = routes.get(file);
     if (!route || text === null) return text;
-    const edit = setRouteFileMode(file, text, { ...route.target, mode: fileRouteMode(route.source, route.target.output) });
+    const exports = readRouteFileExports(route.file, route.source);
+    const mode = exports && fileRouteMode(exports, route.target.output);
+    if (!mode) return text;
+    const edit = setRouteFileMode(file, text, { ...route.target, mode });
     return edit.status === "updated" ? edit.source : text;
   };
 }
@@ -750,7 +758,7 @@ export async function diffCommand(
     for (const f of targets) {
       const base = g.readBase(f.treeFile);
       const upstream = g.readUpstream(f.treeFile);
-      const disk = readDisk(cwd, f);
+      const disk = g.readSite(f.file);
       let label: string;
       let left: string;
       let right: string;
@@ -848,6 +856,7 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
   const base = g.readBase(target.treeFile);
   const upstream = g.readUpstream(target.treeFile);
   const disk = existsSync(abs) ? readFileSync(abs, "utf8") : null;
+  const site = g.readSite(target.file);
   if (target.status === "added") {
     if (disk !== null || upstream === null) {
       p.log.error(`Refusing to --apply ${target.file}: the path is no longer absent or upstream vanished.`);
@@ -857,14 +866,14 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     mkdirSync(dirname(abs), { recursive: true });
     writeFileAtomic(abs, upstream, { overwrite: false });
   } else if (target.status === "removed") {
-    if (base === null || disk !== base || upstream !== null) {
+    if (base === null || site !== base || upstream !== null) {
       p.log.error(`Refusing to --apply ${target.file}: the clean removal preimage changed.`);
       process.exitCode = 1;
       return;
     }
     fs.unlinkSync(abs);
   } else {
-    if (base === null || upstream === null || disk !== base) {
+    if (base === null || upstream === null || site !== base) {
       p.log.error(`Refusing to --apply ${target.file}: the clean update preimage changed.`);
       process.exitCode = 1;
       return;
@@ -943,13 +952,6 @@ function requireRecord(cwd: string): NimbusJson {
     process.exit(1);
   }
   return nimbus;
-}
-
-function readDisk(cwd: string, f: StarterFinding): string | null {
-  const abs = join(cwd, f.file);
-  const unsafe = validateApplyPath(cwd, abs);
-  if (unsafe) throw new Error(`Unsafe starter path ${f.file}: ${unsafe}.`);
-  return existsSync(abs) ? readFileSync(abs, "utf8") : null;
 }
 
 /**

@@ -479,6 +479,8 @@ async function checkRequestRendering(
     );
     hasRequestRoute = Object.values(policy.collections).includes("request");
   } catch (err) {
+    // A collection route error already says why a collection has no route.
+    if (findings.some((f) => f.severity === "error" && f.code.startsWith("nimbus/collection-"))) return false;
     findings.push({
       scope: "structure",
       code: "nimbus/rendering-policy-invalid",
@@ -516,7 +518,7 @@ function checkRouteFiles(
     notes.push(skippedNote("nimbus/route-files-skipped", `Route file modes weren't checked: ${plan.reason}.`));
     return;
   }
-  for (const { file, mismatch, problem, edit } of plan.files) {
+  for (const { file, mismatch, problem, edit, writes } of plan.files) {
     const manual = edit.status === "manual";
     findings.push({
       scope: "structure",
@@ -524,10 +526,10 @@ function checkRouteFiles(
       severity: mismatch.kind === "missing-paths" ? "error" : "warn",
       file,
       message: `${file}: ${problem}.`,
-      fixable: !manual,
+      fixable: writes,
       fix: manual
-        ? { kind: "suggestion", path: file, suggestion: edit.todo }
-        : { kind: "route-file", path: file, suggestion: "update the file to match `rendering`" },
+        ? { kind: writes ? "route-file" : "suggestion", path: file, suggestion: edit.todo }
+        : { kind: "route-file", path: file, suggestion: "update the file to match how Nimbus renders it" },
     });
   }
 }

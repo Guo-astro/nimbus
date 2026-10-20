@@ -1400,7 +1400,7 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
 export async function getDocsPageProps(
   astro: AstroGlobal,
 ): Promise<ProsePageProps<"docs">> {
-  rejectRemovedPartialHeadingOptions("getDocsPageProps", arguments.length);
+  rejectBadPageHelperArgument("getDocsPageProps", arguments[1]);
   const page = await resolveProseRoute<"docs">(
     astro,
     PRIMARY_COLLECTION,
@@ -1420,7 +1420,7 @@ export async function getDocsPageProps(
 export function getDocsPage(
   astro: AstroGlobal,
 ): Promise<ProsePageProps<"docs"> | Response> {
-  rejectRemovedPartialHeadingOptions("getDocsPage", arguments.length);
+  rejectBadPageHelperArgument("getDocsPage", arguments[1]);
   return resolveProseRoute(
     astro,
     PRIMARY_COLLECTION,
@@ -1549,7 +1549,7 @@ export async function getCollectionPageProps<C extends string>(
   astro: AstroGlobal,
   collection?: C,
 ): Promise<ProsePageProps<C>> {
-  rejectRemovedPartialHeadingOptions("getCollectionPageProps", arguments.length, collection);
+  rejectBadPageHelperArgument("getCollectionPageProps", collection, true);
   const page = await resolveProseRoute<C>(
     astro,
     collection,
@@ -1569,7 +1569,7 @@ export function getCollectionPage<C extends string>(
   astro: AstroGlobal,
   collection?: C,
 ): Promise<ProsePageProps<C> | Response> {
-  rejectRemovedPartialHeadingOptions("getCollectionPage", arguments.length, collection);
+  rejectBadPageHelperArgument("getCollectionPage", collection, true);
   return resolveProseRoute(
     astro,
     collection,
@@ -1578,8 +1578,11 @@ export function getCollectionPage<C extends string>(
   );
 }
 
-function rejectRemovedPartialHeadingOptions(helper: string, argumentCount: number, collection?: unknown): void {
-  if (argumentCount <= 1 || typeof collection === "string") return;
+/** `second` is the helper's second argument: a collection name, where the helper takes one, or nothing. */
+function rejectBadPageHelperArgument(helper: string, second: unknown, takesCollection = false): void {
+  if (second === undefined || (takesCollection && typeof second === "string")) return;
+  if (typeof second === "string")
+    throw new Error(`${helper}(Astro) always serves docs and takes no collection. For "${second}", use getCollectionPage(Astro, "${second}").`);
   throw new Error(
     `${helper}(Astro, options) was removed in Nimbus 0.13. ` +
       "Run `npx @cloudflare/nimbus-docs migrate` to move partialHeadings.resolvePartialId to the integration's markdown.partialResolver option.",

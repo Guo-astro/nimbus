@@ -994,10 +994,10 @@
       "mode": "optional",
       "changeset": "route-files-follow-rendering",
       "summary": "Route files can say how they render: `nimbus-docs check --fix` writes the mode `rendering` gives each managed route, and the build warns when a file disagrees.",
-      "affected": "Sites with a `rendering` policy whose route files still carry the starter's `export const prerender = true` or getStaticPaths on request-rendered routes.",
+      "affected": "Every site: a built dynamic route with no getStaticPaths now fails the build. A site with server output, with or without `rendering`, may also have route files that say a different mode than Nimbus gives them.",
       "instructions": [
-        "No action is needed: `rendering` still wins at build, so URLs and output don't change.",
-        "To clear the build's warning, run nimbus-docs check --fix. It sets or removes each managed route's `prerender` line, removes getStaticPaths from request-rendered routes and adds it to built ones, and passes the collection to the page helper of a request-rendered route served away from its default URL, such as getCollectionPage(Astro, \"sdk\"). Files it can't edit are listed with what to change.",
+        "No action is needed: how each route renders doesn't change, so URLs and output stay the same.",
+        "To clear the build's warning, run nimbus-docs check --fix. It sets or removes each managed route's `prerender` line, removes getStaticPaths from request-rendered routes and adds it to built ones, and names the collection in a collection route's page helper, such as getCollectionPage(Astro, \"sdk\"). For files it can't fully edit, it makes what changes it can and lists the rest.",
         "A route that builds a dynamic URL, such as src/pages/[...slug].astro, must export getStaticPaths; the build now fails and names a built one that doesn't.",
         "nimbus-docs outdated and diff compare starter route files in your site's mode, so a route edited only by check --fix no longer shows as a local change."
       ],

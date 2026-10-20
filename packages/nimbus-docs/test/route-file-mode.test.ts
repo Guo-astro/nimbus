@@ -7,11 +7,10 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { setRouteFileMode, type RouteFileTarget } from "../src/_internal/route-file-mode.js";
-import { staticPathsFor } from "../src/_internal/route-helpers.js";
 
 const pages = fileURLToPath(new URL("../../nimbus-starter-source/src/pages/", import.meta.url));
 const starter = (file: string) => fs.readFileSync(path.join(pages, file), "utf8");
-const docs = { collection: "docs", paths: "getDocsStaticPaths", moved: false };
+const docs = { collection: "docs", kind: "docs", moved: false } as const;
 
 function apply(file: string, source: string, target: RouteFileTarget): string {
   const edit = setRouteFileMode(file, source, target);
@@ -46,7 +45,7 @@ export const getStaticPaths = getCollectionStaticPaths("sdk");
 const page = await getCollectionPage<"sdk">(Astro);
 ---
 `;
-  const page = { collection: "sdk", paths: staticPathsFor("sdk", "collection"), moved: true };
+  const page = { collection: "sdk", kind: "collection" as const, moved: true };
   const request = apply("src/pages/products/kit/[...slug].astro", built, { mode: "request", output: "server", page });
   assert.equal(
     request,
@@ -75,7 +74,7 @@ test("an API route keeps its home options across a mode switch", () => {
     fileURLToPath(new URL("../../../scripts/fixtures/api-reference/src/pages/api/[...slug].astro", import.meta.url)),
     "utf8",
   );
-  const page = { collection: "api", paths: staticPathsFor("api", "api"), moved: false };
+  const page = { collection: "api", kind: "api" as const, moved: false };
   const file = "src/pages/api/[...slug].astro";
   const request = apply(file, recipe, { mode: "request", output: "server", page });
   assert.doesNotMatch(request, /getStaticPaths|getApiStaticPaths/);
@@ -92,7 +91,7 @@ export const getStaticPaths = getApiStaticPaths("rest", { homeChunkSize: 50 });
 const result = await getApiRoute(Astro, { homeChunkSize: 50 });
 ---
 `;
-  const page = { collection: "rest", paths: staticPathsFor("rest", "api"), moved: true };
+  const page = { collection: "rest", kind: "api" as const, moved: true };
   const file = "src/pages/reference/[...slug].astro";
   const request = apply(file, built, { mode: "request", output: "server", page });
   assert.match(request, /getApiRoute\(Astro, "rest", \{ homeChunkSize: 50 \}\)/);
@@ -116,4 +115,57 @@ export async function getStaticPaths() { return []; }
 
   const twice = "export const prerender = true;\nexport const prerender = false;\n";
   assert.equal(setRouteFileMode("llms.txt.ts", twice, { mode: "build", output: "static" }).status, "manual");
+});
+
+test("a prerender set by an expression is left for the author, never doubled", () => {
+  for (const line of ["export const prerender = import.meta.env.PROD;", "export const prerender: boolean = true;"]) {
+    const source = `import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\n${line}\nexport const { GET } = llmsRoute();\n`;
+    const edit = setRouteFileMode("src/pages/llms.txt.ts", source, { mode: "request", output: "server" });
+    if (line.includes("PROD")) {
+      assert.equal(edit.status, "manual");
+      if (edit.status === "manual") assert.match(edit.todo, /expression.*remove it/);
+    } else {
+      assert.equal(edit.status, "updated");
+      if (edit.status === "updated") assert.doesNotMatch(edit.source, /prerender/);
+    }
+  }
+});
+
+test("a collection route names its collection in the page helper whenever it's edited", () => {
+  const request = `---
+import { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
+
+const page = await getCollectionPage(Astro);
+---
+`;
+  const page = { collection: "blog", kind: "collection", moved: false } as const;
+  assert.equal(
+    apply("src/pages/blog/[...slug].astro", request, { mode: "build", output: "server", page }),
+    `---
+import { getCollectionStaticPaths, getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
+
+export const prerender = true;
+export const getStaticPaths = getCollectionStaticPaths("blog");
+
+const page = await getCollectionPage(Astro, "blog");
+---
+`,
+  );
+});
+
+test("API options built from local names aren't copied into getStaticPaths", () => {
+  const request = `---
+import { getApiRoute } from "@cloudflare/nimbus-docs/runtime";
+
+const options = { homeChunkSize: 50 };
+const result = await getApiRoute(Astro, "api", options);
+---
+`;
+  const page = { collection: "api", kind: "api", moved: false } as const;
+  const edit = setRouteFileMode("src/pages/api/[...slug].astro", request, { mode: "build", output: "static", page });
+  assert.equal(edit.status, "manual");
+  if (edit.status === "manual") {
+    assert.doesNotMatch(edit.source, /export const getStaticPaths/);
+    assert.match(edit.todo, /getApiStaticPaths\("api", options\).*imports only/s);
+  }
 });

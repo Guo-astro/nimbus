@@ -581,3 +581,38 @@ test("starter route files compare in the site's own rendering mode", async () =>
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an untouched static site's redundant prerender lines from an older starter aren't drift", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-starter-redundant-"));
+  const route = "src/pages/llms.txt.ts";
+  const head = 'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\n';
+  const old = `${head}export const prerender = true;\nexport const { GET } = llmsRoute();\n`;
+  const write = (dir: string, files: Record<string, string>) => {
+    for (const [file, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), content);
+    }
+  };
+  write(path.join(root, "templates-v0.1.0"), { [route]: old });
+  write(path.join(root, "templates-v0.2.0"), { [route]: `${head}export const { GET } = llmsRoute();\n` });
+  const project = path.join(root, "site");
+  write(project, {
+    "astro.config.ts":
+      'import nimbus from "@cloudflare/nimbus-docs";\n' +
+      'export default { output: "static", integrations: [nimbus({ site: "https://docs.example.com", title: "X", search: false })] };\n',
+    "src/content/docs/index.mdx": "---\ntitle: Home\n---\n",
+    [route]: old,
+    "nimbus.json": JSON.stringify({ templatesTag: "templates-v0.1.0", variant: "starter", components: [] }),
+  });
+  const source: TemplateSource = {
+    resolve: async (tag) => ({ dir: path.join(root, tag), cleanup: () => {} }),
+    latestTag: async () => "templates-v0.2.0",
+  };
+  try {
+    const outdated = await gatherOutdated(project, { json: true }, source);
+    assert.deepEqual(outdated.starter, []);
+    assert.doesNotMatch((await runDiff(route, {}, { cwd: project, source })).stdout, /prerender/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

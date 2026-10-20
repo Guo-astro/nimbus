@@ -1519,11 +1519,16 @@ test("route files that don't match rendering get one warning listing them", asyn
   integration.routesResolved({ routes, logger } as never);
   integration.routesResolved({ routes, logger } as never);
 
-  assert.deepEqual(warnings, [
-    "1 route file doesn't match `rendering`; the config wins at build:\n" +
-      "  src/pages/[...slug].astro: file builds ahead of time, `rendering` renders docs on request\n" +
-      "Run `nimbus-docs check --fix` to update it.",
-  ]);
+  assert.equal(warnings.length, 1);
+  assert.match(
+    warnings[0]!,
+    new RegExp(
+      "^1 route file doesn't match how Nimbus renders it; `rendering` wins at build:\n" +
+        "  src/pages/\\[\\.\\.\\.slug\\]\\.astro: file builds ahead of time, `rendering` renders docs on request\n" +
+        "Run `.*check --fix` to update it\\. Until then, Astro may warn that getStaticPaths is ignored",
+      "u",
+    ),
+  );
 });
 
 test("a route file removed in dev drops out of the warning", async (t) => {
@@ -1572,6 +1577,6 @@ test("a built dynamic route with no getStaticPaths fails the build, naming the f
   await integration.routeSetup({ route: { component: "src/pages/llms.txt.ts", prerender: true } } as never);
   assert.throws(
     () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
-    /src\/pages\/\[\.\.\.slug\]\.astro is a dynamic route that `rendering` builds ahead of time, with no getStaticPaths.*check --fix/s,
+    /src\/pages\/\[\.\.\.slug\]\.astro is a dynamic route built ahead of time with no getStaticPaths.*check --fix.*configuration\/#mix-build-and-request-rendering/s,
   );
 });

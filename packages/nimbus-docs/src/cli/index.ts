@@ -748,7 +748,7 @@ async function runAdapterInstall(
 
   for (const warning of outcome.warnings) p.log.warn(warning);
   for (const { file, todo } of outcome.routeFiles.manual)
-    p.log.warn(`${file} doesn't match \`rendering\` and isn't in the starter's shape. ${todo}`);
+    p.log.warn(`${file} doesn't match how Nimbus renders it and isn't in the starter's shape. ${todo}`);
 
   const lines =
     outcome.status === "noop"
@@ -758,15 +758,12 @@ async function runAdapterInstall(
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
-  if (outcome.routeFiles.updated.length > 0) {
-    lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match \`rendering\``);
-  }
   const handOff = agentSession && outcome.requestRendering === "unresolved";
-  if (handOff) {
-    lines.push("Next: finish the request-rendering configuration with the recipe below.");
-  } else {
-    appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
+  if (!handOff) appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
+  if (outcome.routeFiles.updated.length > 0) {
+    lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match how Nimbus renders them`);
   }
+  if (handOff) lines.push("Next: finish the request-rendering configuration with the recipe below.");
   if (outcome.status === "applied") lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
   p.outro(lines.join("\n"));
   if (handOff) process.stdout.write(cloudflareRequestRenderingAgentRecipe());

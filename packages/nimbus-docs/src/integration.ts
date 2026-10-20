@@ -2207,7 +2207,8 @@ export function nimbus(
                   "      return typeof result === \"function\" ? result.bind(target) : result;",
                   "    },",
                   "  });",
-                  "export const getStaticPaths = route.getStaticPaths;",
+                  // A request-rendered root route has no getStaticPaths to forward.
+                  ...(mode === "build" ? ["export const getStaticPaths = route.getStaticPaths;"] : []),
                   "export const GET = (context) => route.GET(forward(context));",
                   "",
                 ].join("\n"),
@@ -3557,15 +3558,22 @@ export function nimbus(
         if (building && unbuildable.length > 0) {
           throw authorError(
             `${unbuildable.map(([file]) => file).join(", ")} ${unbuildable.length === 1 ? "is a dynamic route" : "are dynamic routes"} ` +
-              "that `rendering` builds ahead of time, with no getStaticPaths, so Astro can't build " +
-              `${unbuildable.length === 1 ? "it" : "them"}. Run \`nimbus-docs check --fix\` to restore the line.`,
+              `built ahead of time with no getStaticPaths, so Astro can't build ${unbuildable.length === 1 ? "it" : "them"}. ` +
+              `Run \`${invocation("check --fix", projectRootForBuild)}\` to add getStaticPaths. ` +
+              "See https://nimbus-docs.com/configuration/#mix-build-and-request-rendering",
           );
         }
         const report = mismatched.map(([file, mismatch]) => `  ${file}: ${describeRouteFileMismatch(mismatch, mismatch.subject)}`).join("\n");
         if (report && report !== reportedRouteFileMismatches) {
+          const overridden = mismatched.some(([, mismatch]) => mismatch.overridden);
           logger.warn(
-            `${mismatched.length} route file${mismatched.length === 1 ? " doesn't" : "s don't"} match \`rendering\`; the config wins at build:\n` +
-              `${report}\nRun \`nimbus-docs check --fix\` to update ${mismatched.length === 1 ? "it" : "them"}.`,
+            `${mismatched.length} route file${mismatched.length === 1 ? " doesn't" : "s don't"} match how Nimbus renders ` +
+              `${mismatched.length === 1 ? "it" : "them"}${overridden ? "; `rendering` wins at build" : ""}:\n` +
+              `${report}\nRun \`${invocation("check --fix", projectRootForBuild)}\` to update ${mismatched.length === 1 ? "it" : "them"}.` +
+              (mismatched.some(([, mismatch]) => mismatch.overridden && mismatch.mode === "request")
+                ? " Until then, Astro may warn that getStaticPaths is ignored and suggest `export const prerender = true`: " +
+                  "`rendering` decides, so that line won't help."
+                : ""),
           );
         }
         reportedRouteFileMismatches = report;

@@ -100,8 +100,16 @@ test("collection page helpers take the collection name, and still reject the rem
     /getCollectionPageProps\(Astro, options\) was removed/,
   );
   await assert.rejects(
-    () => getDocsPageProps({ props: {} } as never, "docs" as never),
+    () => getDocsPageProps({ props: {} } as never, {} as never),
     /getDocsPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "blog" as never),
+    /getDocsPageProps\(Astro\) always serves docs.*getCollectionPage\(Astro, "blog"\)/,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, undefined),
+    /expected `entry` in Astro\.props/,
   );
 });
 

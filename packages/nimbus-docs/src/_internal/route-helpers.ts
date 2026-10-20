@@ -1,5 +1,5 @@
 // The runtime helpers a collection's page route calls. A new `*StaticPaths`
-// page helper needs a row here; route-helpers.test.ts fails until it has one.
+// or page helper belongs here; route-helpers.test.ts fails until it is.
 
 export type PageRouteKind = "docs" | "collection" | "api";
 

@@ -29,6 +29,13 @@ test("every page-route static-paths helper has a row", () => {
   );
 });
 
-test("every page helper is a runtime export", () => {
-  for (const helper of PAGE_HELPERS) assert.ok(exported.has(helper), helper);
+test("the page helpers are the runtime exports that take Astro and a collection", () => {
+  const takesCollection = runtime.statements.flatMap((statement) => {
+    if (!ts.isFunctionDeclaration(statement) || !statement.body || !statement.name || !exported.has(statement.name.text)) return [];
+    const [astro, second] = statement.parameters;
+    const astroType = astro?.type?.getText(runtime);
+    const secondName = second && ts.isIdentifier(second.name) ? second.name.text : "";
+    return astroType === "AstroGlobal" && secondName.startsWith("collection") ? [statement.name.text] : [];
+  });
+  assert.deepEqual(takesCollection.sort(), [...PAGE_HELPERS].sort());
 });

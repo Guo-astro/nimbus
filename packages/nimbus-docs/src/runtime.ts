@@ -1399,8 +1399,9 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
  */
 export async function getDocsPageProps(
   astro: AstroGlobal,
+  ...extra: []
 ): Promise<ProsePageProps<"docs">> {
-  rejectBadPageHelperArgument("getDocsPageProps", arguments[1]);
+  rejectBadPageHelperArgument("getDocsPageProps", (extra as unknown[])[0]);
   const page = await resolveProseRoute<"docs">(
     astro,
     PRIMARY_COLLECTION,
@@ -1419,8 +1420,9 @@ export async function getDocsPageProps(
 
 export function getDocsPage(
   astro: AstroGlobal,
+  ...extra: []
 ): Promise<ProsePageProps<"docs"> | Response> {
-  rejectBadPageHelperArgument("getDocsPage", arguments[1]);
+  rejectBadPageHelperArgument("getDocsPage", (extra as unknown[])[0]);
   return resolveProseRoute(
     astro,
     PRIMARY_COLLECTION,

@@ -257,7 +257,7 @@ if (rows.length > 0 && !home) {
         const li = template!.content.querySelector("li")!.cloneNode(true) as HTMLLIElement;
         const a = li.querySelector("a")!;
         a.href = based(url);
-        a.querySelector("span")!.textContent = title;
+        a.querySelector("[data-slot=api-operation-name]")!.textContent = title;
         li.querySelector("code")!.textContent = path ?? "";
         ul.append(li);
       }

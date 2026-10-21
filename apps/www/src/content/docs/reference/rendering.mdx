@@ -83,7 +83,7 @@ Request rendering changes when HTML is made, not what's discoverable. The sitema
 - Every name in `rendering.collections` must be a registered collection with its own catch-all route. An unknown name fails the build.
 - `default` covers `docs`, version collections, API collections, and the site-wide `llms.txt` and `llms-full.txt`; each collection's Markdown and section `llms.txt` routes follow that collection's mode. Without `rendering`, every route Nimbus manages is built ahead of time, whatever its `prerender` line says. Once `rendering` is set, any other page collection with its own catch-all route, such as a `blog`, must be listed in `collections`.
 - A built route with a dynamic segment, such as `[...slug].astro`, must export `getStaticPaths`. Astro can't build it otherwise, so the build fails and names the file.
-- Generated API references render on request only on Cloudflare. On other adapters, keep API collections set to `"build"`. See [Large APIs](/api-reference/large-apis#render-on-request) for large APIs and many versions.
+- Generated API references render on request only on Cloudflare, except one with [`bundle: false`](/api-reference/large-apis#many-versions), which also works on Node. On other adapters, keep API collections set to `"build"`. See [Large APIs](/api-reference/large-apis#render-on-request) for large APIs and many versions.
 
 ## Next steps
 

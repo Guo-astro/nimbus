@@ -1,96 +1,59 @@
 # Nimbus
 
-**Docs sites you own, where humans and agents are both first-class.**
+**The authoring tool for docs.**
 
-Nimbus scaffolds a complete Astro documentation site into your repo — layouts, components, styles, routes, content — as real files you edit from the first commit. The invisible plumbing ships as an npm package; everything you see and shape is yours.
+Write in your editor, your repo, or the tools your team already uses, or hand the page to an agent. Nimbus turns it into an Astro docs site whose layouts, components and content live in your repo. Every page is held to the same standard, whoever wrote it, and published for people and for agents.
 
 Docs: [nimbus-docs.com](https://nimbus-docs.com)
 
-## Quickstart
+## Start
+
+Requires Node.js 22.12.0 or later.
 
 ```sh
-npx @cloudflare/create-nimbus-docs@latest my-docs
+npx @cloudflare/create-nimbus-docs@latest my-docs --yes --package-manager npm
 cd my-docs
-pnpm install
-pnpm dev
+npm run dev
 ```
 
-Open the printed URL, edit anything under `src/`, and the page reloads. You now own a full docs site.
+The scaffolder writes the whole site into `my-docs`: layouts, components, styles, routes and content. Start with `src/content/docs/index.mdx`.
 
-The scaffolder asks a few questions (output mode, deploy target or adapter, package manager, starter or empty content). Skip them with `--yes`:
+## Pages worth reading
 
-```sh
-npx @cloudflare/create-nimbus-docs@latest my-docs --yes
-```
+- MDX components for code blocks, steps, cards, tabs, reusable snippets and interactive diagrams.
+- An API reference generated from an OpenAPI 3.x spec, with as many API versions as you publish.
+- Search, docs versions side by side, and pages loaded from other Git repositories or Notion.
 
-Interactive runs let you pick the package manager for your project. With `--yes` it defaults to npm — add `--package-manager pnpm` (or `yarn`/`bun`) to choose another.
+## Quality that holds
 
-## Everyday commands
+- Config, frontmatter and MDX components are validated as the site builds, with errors that name the file and what to change.
+- `nimbus-docs lint` catches authoring mistakes with rules you configure in `astro.config.ts`. It reports without blocking the build, so drafts still render.
+- `nimbus-docs check` looks at the environment, structure, content, types and pending upgrades without building, and `--fix` applies the safe fixes.
 
-Run these inside your project:
+## Built for agents
 
-| Command | What it does |
-| --- | --- |
-| `pnpm dev` | Dev server with hot reload |
-| `pnpm build` | Build using the selected output mode and adapter |
-| `pnpm preview` | Preview the built site |
-| `pnpm typecheck` | Type-check (`astro check`) |
-| `pnpm lint:docs` | Lint prose + MDX (add `--fix` to autofix) |
+- **Agents author.** `nimbus-docs add` copies components into your repo as source. Features arrive as recipes your coding agent reads, adapts to your project and applies, and `check --json` gives it findings to act on.
+- **Any agent, or none.** Recipes are Markdown and findings are JSON, so they work with the agent you prefer, or you can follow them yourself.
+- **Agents read.** Published pages have Markdown versions, the site publishes `llms.txt` and `llms-full.txt`, and it can serve Agent Skills, WebMCP search and a remote MCP server.
 
 ## Deploy
 
-Static by default — `pnpm build` emits `dist/`, which you can host anywhere.
+Sites are static by default: `npm run build`, then host the output anywhere. Rendering pages on request and the remote MCP server need a server adapter; see [Deploy](https://nimbus-docs.com/deploy).
 
-Choose Cloudflare server output during scaffolding to render canonical content collection routes on request. Existing projects can wire the adapter, then hand the project-specific rendering edit to a coding agent:
+## Packages
 
-```sh
-pnpm exec nimbus-docs add adapter-cloudflare
-pnpm exec nimbus-docs add adapter-cloudflare --print | claude
-```
-
-Cloudflare is the first-class target: the default scaffold ships a `wrangler.jsonc`.
-
-```sh
-pnpm build
-pnpm run deploy      # wrangler deploy to Cloudflare
-```
-
-## Add on demand
-
-Pull optional components, utilities, and agent-handoff features from the registry — each lands in your repo as source you own:
-
-```sh
-pnpm dlx @cloudflare/nimbus-docs add dialog
-pnpm dlx @cloudflare/nimbus-docs add 404-page
-```
-
-Components and utilities copy in as editable files. Features hand off a recipe your coding agent reads, adapts to your project, and applies.
-
-## What you get
-
-- **Owned source** — layouts, components, content collections, styles, and theme tokens, all editable.
-- **Documentation for agents** — a clean Markdown version of every discoverable page, a prepared MDX source version of every discoverable authored page, `/llms.txt`, `/llms-full.txt`, JSON-LD, sitemap, `robots.txt`, and per-page OG images. Coding agents can read your docs as well as a browser does, by default.
-- **A reader experience** — full-text search, light/dark theming, accessible navigation, breadcrumbs, pagination, and a mobile sidebar.
-- **Authoring guardrails** — prose-and-structure linting, an MDX component validator, and config validation that fails with human-readable errors.
-- **Versioned docs, when you need them** — parallel versions with alternates, canonical links, and automatic redirects.
-
-## Why Nimbus
-
-**You own every file.** The scaffolder writes your layouts, components, and design tokens once, then steps back. Change a Tailwind class, restructure a layout, delete what you don't need — it's your codebase, not a dependency you theme around.
-
-**Humans and agents are both first-class.** Agent-readable formats ship by default, not as add-ons, so coding agents and the wider agent web consume your docs as cleanly as people do.
-
-## Built on
-
-[Astro 7](https://astro.build) · Sätteri (Rust-based markdown) · Tailwind v4 · optional React 19. Static output deploys anywhere; request-rendered server output currently targets Cloudflare.
+| Package | What it is |
+| --- | --- |
+| [`@cloudflare/create-nimbus-docs`](./packages/create-nimbus-docs) | Creates a new site. |
+| [`@cloudflare/nimbus-docs`](./packages/nimbus-docs) | The Astro integration and the `nimbus-docs` CLI. |
 
 ## Status
 
-**Work in progress.** Nimbus is pre-1.0 (`0.x`) and moving fast. You can build real sites with it today, but the public surface can still change between minor releases and there are rough edges. Pin your versions and check each package's changelog before upgrading.
+Nimbus is pre-1.0 and moving fast. You can build real sites with it today, but the public surface can still change between minor releases. Pin your versions and read each package's changelog before upgrading.
 
 ## Contributing
 
-Nimbus works from issues and discussions, not drive-by PRs — a maintainer approves your issue or discussion first, then your PRs stay open. See [CONTRIBUTING.md](./CONTRIBUTING.md) to start, and [`CLAUDE.md`](./CLAUDE.md) for architecture and agent-facing context.
+Start with an issue or a discussion. Once a maintainer approves it, your pull requests go through normal review. See [CONTRIBUTING.md](./CONTRIBUTING.md), and [CLAUDE.md](./CLAUDE.md) for the architecture and agent context.
 
 ## License
 

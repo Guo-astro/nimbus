@@ -5,18 +5,21 @@
  *   create-nimbus-docs [dir] [flags]
  *
  * Flags:
+ *   --template <site>      What's at the root: docs (default) or api.
+ *   --api [spec]           Add an API reference, from a spec file or the sample.
  *   --deploy <target>      Static-output deploy target (cloudflare|other).
  *   --adapter <id>         Server-output adapter; selects `output: "server"`.
  *   --yes, -y              Use defaults, skip prompts.
  *   --skip-install         Don't run package-manager install after scaffold.
  *   --package-manager <pm> Package manager (npm|pnpm|yarn|bun). Auto-detected if omitted.
  *   --git, --no-git        Initialize a git repository, or don't.
- *   --template-dir <path>  Scaffold from a local template directory (offline).
+ *   --template-dir <path>  Scaffold from a local folder (offline).
  *   --help, -h
  *   --version, -v
  */
 
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { extname, resolve } from "node:path";
 import * as p from "@clack/prompts";
 import mri from "mri";
 import { scaffold, ScaffoldError, type ScaffoldResult } from "./scaffold.js";
@@ -26,7 +29,9 @@ import {
   type AdapterId,
   type ContentMode,
   type PackageManager,
+  type SiteTemplate,
 } from "./prompts.js";
+import { specProblem } from "./transformers/site.js";
 
 const INTRO = "Create a Nimbus docs site";
 let introShown = false;
@@ -50,7 +55,7 @@ declare const __APP_VERSION__: string;
 declare const __MIN_NODE_VERSION__: string;
 
 const BOOLEAN_FLAGS = ["yes", "help", "version", "skip-install", "git"];
-const STRING_FLAGS = ["package-manager", "deploy", "adapter", "content", "template-dir"];
+const STRING_FLAGS = ["package-manager", "deploy", "adapter", "content", "template", "api", "template-dir"];
 const SHORT_FLAGS: Record<string, string> = { y: "yes", h: "help", v: "version" };
 const argv = process.argv.slice(2);
 // npm needs `--` before the arguments, and pnpm passes a leading one through
@@ -112,14 +117,20 @@ if (args.help) {
     dir                    Project directory (default: prompted, my-docs)
 
   Flags:
+    --template <site>      docs | api (default: docs) — what's at the root;
+                           api makes a site that is only an API reference
+    --api [spec]           Add an API reference at /api (at / with
+                           --template api), from your OpenAPI 3.x file
+                           (.yaml, .yml, .json) or a sample. Put the
+                           directory first: create-nimbus-docs my-docs --api
     --deploy <target>      cloudflare | other (default: cloudflare) — static output
     --adapter <id>         ${ADAPTER_IDS.join(" | ")} — server output
-    --content <mode>       starter | empty   (default: starter)
+    --content <mode>       starter | empty   (default: starter) — docs pages
     --yes, -y              Use defaults for everything
     --skip-install         Skip dependency install
     --package-manager <pm> npm | pnpm | yarn | bun (default: the one running this)
     --git, --no-git        Initialize git, or skip it
-    --template-dir <path>  Scaffold from a local template directory (no network)
+    --template-dir <path>  Scaffold from a local folder (offline)
     --help, -h
     --version, -v
 `);
@@ -159,6 +170,33 @@ if (content !== undefined && !CONTENT_MODES.includes(content as ContentMode)) {
   die(`Unknown content "${content}". Expected one of: ${CONTENT_MODES.join(", ")}.`);
 }
 
+const TEMPLATES = ["docs", "api"] as const;
+const template = args.template as string | undefined;
+if (template !== undefined && !TEMPLATES.includes(template as SiteTemplate)) {
+  die(`Unknown template "${template}". Expected one of: ${TEMPLATES.join(", ")}.`);
+}
+
+// \`--api\` alone uses the sample spec; mri reads a bare string flag as "".
+// A value that isn't a spec file is most often the directory after the flag,
+// unless it names a file.
+const apiFlag = args.api as string | string[] | undefined;
+if (Array.isArray(apiFlag)) die("Pass --api once.");
+const apiProblem = apiFlag ? specProblem(apiFlag) : undefined;
+if (apiFlag && apiProblem) {
+  die(
+    /\.(?:ya?ml|json)$/i.test(apiFlag)
+      ? `--api ${JSON.stringify(apiFlag)}: ${resolve(apiFlag)} ${apiProblem}. Pass an OpenAPI 3.x file, or --api alone for a sample.`
+      : extname(apiFlag) || existsSync(apiFlag)
+        ? `--api ${JSON.stringify(apiFlag)} isn't an OpenAPI file: pass a .yaml, .yml or .json, or --api alone for a sample.`
+        : `--api ${JSON.stringify(apiFlag)} isn't an OpenAPI file: pass an existing .yaml, .yml or .json, ` +
+          `or put the project directory first (create-nimbus-docs ${shellArg(apiFlag)} --api).`,
+  );
+}
+
+if (template === "api" && content !== undefined) {
+  die(`--content doesn't apply to --template api: a site that is only the API reference has no docs pages. Leave out --content.`);
+}
+
 const PACKAGE_MANAGERS = ["npm", "pnpm", "yarn", "bun"] as const;
 const packageManager = args["package-manager"] as string | undefined;
 if (packageManager !== undefined && !PACKAGE_MANAGERS.includes(packageManager as PackageManager)) {
@@ -179,6 +217,8 @@ const responses = await getPromptResponses({
   deploy: deploy as "cloudflare" | "other" | undefined,
   adapter: adapter as AdapterId | undefined,
   content: content as ContentMode | undefined,
+  template: template as SiteTemplate | undefined,
+  api: apiFlag === undefined ? undefined : { spec: apiFlag ? resolve(apiFlag) : null },
   packageManager: packageManager as PackageManager | undefined,
   git: args.git,
 });
@@ -206,8 +246,16 @@ if (result.install === "failed") {
   process.exit(1);
 }
 
+// Where the reference landed and which file feeds it, since that's the first thing to change.
+const api = result.site?.api;
+const apiLine = api
+  ? `  The API reference is at ${result.site?.template === "api" ? "/" : "/api"}, from ` +
+    (responses.site?.api && responses.site.api.spec === null ? `the sample spec in ${api.spec}: replace it with yours.` : `${api.spec}.`) +
+    "\n\n"
+  : "";
+
 p.outro(`
-  Done. Next steps:
+${apiLine}  Done. Next steps:
 
 ${nextSteps.join("\n")}
 `);

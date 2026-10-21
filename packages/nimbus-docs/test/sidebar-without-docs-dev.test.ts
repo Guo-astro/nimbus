@@ -1,6 +1,7 @@
 // `astro dev` follows content.config.ts: adding a `docs` collection puts its
 // pages in the sidebar without a restart, and removing it takes them out.
-// Dev always queries `docs`; only a build skips it on a site without one.
+// A site whose content.config.ts declares no `docs` doesn't query it, in dev
+// as in a build.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -50,5 +51,17 @@ test("dev adds and removes docs pages in the sidebar as content.config.ts declar
 
     await edit(`guides: collection("./src/content/guides")`);
     await until("Intro out of the sidebar", labels, (value) => !value.includes("Intro"));
+  });
+});
+
+test("dev doesn't query docs on a site without it", { timeout: 240_000 }, async () => {
+  const files = {
+    "src/content.config.ts": config(`guides: collection("./src/content/guides")`),
+    "src/content/guides/start.md": "---\ntitle: Start\n---\nStart.\n",
+    "src/pages/index.astro": PAGE,
+  };
+  await withDevSite(files, {}, async ({ serves, since }) => {
+    await serves("/", "labels:");
+    assert.doesNotMatch(since(0), /The collection "docs" does not exist/);
   });
 });

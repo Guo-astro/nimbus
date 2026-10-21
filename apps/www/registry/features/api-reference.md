@@ -18,6 +18,10 @@ version of every page, and automatic `llms.txt` indexes and `llms-full.txt`.
 The render is Nimbus's own — the spec is parsed once per build and projected
 into a stable view-model. There is no third-party reference renderer.
 
+A new site can start with the reference instead: `create-nimbus-docs --api`
+adds it at `/api`, and `--template api` makes it the whole site. Both write
+what this recipe writes.
+
 **For hand-authored API docs, this is the wrong recipe.** If the user wants to
 write their API docs by hand as MDX pages (prose, curated examples, no spec),
 that's a plain content tree — use `nimbus-docs add new-collection` and pick

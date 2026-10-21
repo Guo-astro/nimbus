@@ -223,7 +223,7 @@ export interface TemplateSource {
 
 function templateSource(nimbus: NimbusJson, flags: UpgradeFlags): TemplateSource {
   return {
-    resolve: (tag) => resolveTemplateTree({ variant: nimbus.variant, tag, templateDir: flags.templateDir }),
+    resolve: (tag) => resolveTemplateTree({ variant: nimbus.variant, tag, templateDir: flags.templateDir, site: nimbus.site }),
     latestTag: latestTemplatesTag,
   };
 }

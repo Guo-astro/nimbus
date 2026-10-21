@@ -659,6 +659,12 @@ async function assertRecipeFixtureParity() {
       `${path} drifted from its marked block in apps/www/registry/features/api-reference.md`,
     );
   }
+  // The scaffolder writes the same route for \`--api\` and \`--template api\`.
+  const scaffolded = join(ROOT, "packages", "nimbus-starter-source", "parts", "api", "src", "pages", "api", "[...slug].astro");
+  assert(
+    (await readFile(scaffolded, "utf8")) === (await readFile(join(OVERLAY, "src/pages/api/[...slug].astro"), "utf8")),
+    "the starter's API part route drifted from the api-reference recipe's route",
+  );
 }
 
 async function applyOverlay() {

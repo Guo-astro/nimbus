@@ -135,3 +135,29 @@ test("every components.ts import resolves to a real file", () => {
       "fix the import in packages/nimbus-starter-source/src/components.ts, or restore the file.",
   );
 });
+
+// The scaffolder's API part installs `api-layout` as `add` would: the
+// registry-only components in its closure, and its pinned peers.
+test("the starter's API part installs the api-layout closure and its peers", async () => {
+  const { STARTER_MANIFEST } = await import(resolve(STARTER, "starter.manifest.mjs"));
+  const registryOnly = new Set(starterList("registryOnlyComponents"));
+  const closure = new Set<string>();
+  const visit = (slug: string) => {
+    if (closure.has(slug)) return;
+    closure.add(slug);
+    const entry = (MANIFESTS as Record<string, ManifestEntry>)[slug];
+    for (const dep of (entry && "registryDependencies" in entry ? entry.registryDependencies : undefined) ?? []) visit(dep);
+  };
+  visit("api-layout");
+  assert.deepEqual(
+    [...STARTER_MANIFEST.apiPart.components].sort(),
+    [...closure].filter((slug) => registryOnly.has(slug)).sort(),
+  );
+  const pinned = Object.fromEntries(
+    (MANIFESTS["api-layout"] as ManifestEntry & { dependencies: string[] }).dependencies.map((spec) => {
+      const at = spec.lastIndexOf("@");
+      return [spec.slice(0, at), spec.slice(at + 1)];
+    }),
+  );
+  assert.deepEqual(STARTER_MANIFEST.apiPart.dependencies, pinned);
+});

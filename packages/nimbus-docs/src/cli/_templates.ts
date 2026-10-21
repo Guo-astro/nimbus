@@ -5,9 +5,11 @@
  * invoke `cleanup()` in a `finally` so temp dirs don't leak on error.
  */
 
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
+
+import { composeSiteFiles, type SiteRecord } from "../_internal/site-parts.js";
 
 const TEMPLATES_REPO = "cloudflare/nimbus";
 const VARIANT_DIR: Record<string, string> = { starter: "template", empty: "template-empty" };
@@ -50,7 +52,26 @@ export async function resolveTemplateTree(opts: {
   variant: string | null | undefined;
   tag: string;
   templateDir?: string;
+  /** The site's parts: the tree is composed the way the scaffolder composed it. */
+  site?: SiteRecord;
 }): Promise<FetchedTree> {
+  const tree = await fetchVariantTree(opts);
+  if (!opts.site?.api) return tree;
+  // Compose a copy: a local tree is the caller's, and serves later reads as it is.
+  const dir = mkdtempSync(join(tmpdir(), "nimbus-site-"));
+  try {
+    cpSync(tree.dir, dir, { recursive: true });
+    composeSiteFiles(dir, opts.site);
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    tree.cleanup();
+    throw err;
+  }
+  tree.cleanup();
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+async function fetchVariantTree(opts: { variant: string | null | undefined; tag: string; templateDir?: string }): Promise<FetchedTree> {
   const sub = variantDir(opts.variant);
 
   if (opts.templateDir) {

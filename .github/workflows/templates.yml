@@ -11,6 +11,7 @@ on:
       - "packages/create-nimbus-docs/**"
       - "packages/nimbus-docs/**"
       - "scripts/templates-check.mjs"
+      - "scripts/site-parts-check.mjs"
       - "scripts/templates-pm-check.mjs"
       - "scripts/release.mjs"
       - "scripts/release.test.mjs"
@@ -24,6 +25,7 @@ on:
       - "packages/create-nimbus-docs/**"
       - "packages/nimbus-docs/**"
       - "scripts/templates-check.mjs"
+      - "scripts/site-parts-check.mjs"
       - "scripts/templates-pm-check.mjs"
       - "scripts/release.mjs"
       - "scripts/release.test.mjs"
@@ -67,6 +69,23 @@ jobs:
   # Scaffold + install a variant under pnpm@latest, so a build-scripts gate
   # regression fails a PR instead of a user. The monorepo's pin to pnpm 9
   # predates the gate, so the pnpm-9 checks above can't catch it.
+  site-parts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Scaffold, build and check sites with an API reference
+        run: node scripts/site-parts-check.mjs
+
   templates-modern-pnpm:
     runs-on: ubuntu-latest
     strategy:

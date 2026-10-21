@@ -2944,9 +2944,8 @@ export function nimbus(
                   ogCard: OG_CARD,
                   imageSizes: socialImageSizes,
                 },
-                ...(building
-                  ? { getPrimaryCollectionAbsent: () => declaresNoCollection(contentConfigPath, PRIMARY_COLLECTION) }
-                  : {}),
+                // Dev too: a content.config.ts edit reloads every module, so the answer can't go stale.
+                getPrimaryCollectionAbsent: () => declaresNoCollection(contentConfigPath, PRIMARY_COLLECTION),
                 contentConfigPath,
               }),
               ...(options.icons !== false

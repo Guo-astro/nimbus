@@ -263,6 +263,9 @@ test("canonical route keys respect collection mounts and custom srcDir", () => {
   );
 });
 
+// A collection route with its paths, as built routes need.
+const ROUTE_STUB = "---\nexport const getStaticPaths = paths;\n---\n";
+
 async function setupIntegration(
   t: TestContext,
   rendering?: RenderingConfig,
@@ -271,6 +274,7 @@ async function setupIntegration(
   api?: NimbusConfig["api"],
   integrationOptions: Partial<NimbusIntegrationOptions> & {
     omitCanonicalDocsRoute?: boolean;
+    files?: Record<string, string>;
   } = {},
   base = "",
   trailingSlash: "always" | "never" | "ignore" = "ignore",
@@ -290,17 +294,18 @@ async function setupIntegration(
   );
   await write("src/content.config.ts", contentConfig);
   await write("src/components.ts", "export const components = {};\n");
-  const { omitCanonicalDocsRoute = false, ...options } = integrationOptions;
+  const { omitCanonicalDocsRoute = false, files = {}, ...options } = integrationOptions;
   if (!omitCanonicalDocsRoute) {
-    await write("src/pages/[...slug].astro", "---\n---\n");
+    await write("src/pages/[...slug].astro", ROUTE_STUB);
   }
-  await write("src/pages/blog/[...slug].astro", "---\n---\n");
-  await write("src/pages/v1/[...slug].astro", "---\n---\n");
-  await write("src/pages/api/[...slug].astro", "---\n---\n");
+  await write("src/pages/blog/[...slug].astro", ROUTE_STUB);
+  await write("src/pages/v1/[...slug].astro", ROUTE_STUB);
+  await write("src/pages/api/[...slug].astro", ROUTE_STUB);
   await write(
     "src/content/docs/index.mdx",
     "# Docs\n\n```js\nconst requestRendered = true;\n```\n",
   );
+  for (const [file, body] of Object.entries(files)) await write(file, body);
 
   const integration = nimbus(
     {
@@ -466,7 +471,7 @@ async function generateRequestSitemap(
     ...resolvedNimbusRoutes(integration.injectedRoutes, renderingMode),
     ...sitemapRoutes,
   ];
-  integration.routesResolved({ routes } as never);
+  integration.routesResolved({ routes, logger: buildLogger } as never);
 
   const sitemapIntegration = integration.configUpdates
     .flatMap(
@@ -858,6 +863,7 @@ test("request inventory is removed before downstream build failures", async (t) 
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "build"),
+    logger: buildLogger,
   } as never);
   const dist = path.join(integration.root, "dist");
   const inventory = path.join(dist, "_nimbus/request-route-inventory.json");
@@ -917,15 +923,17 @@ test("the rendering default does not reach collections the config does not name"
   assert.equal(blog.prerender, true);
 });
 
-test("omitted rendering policy leaves existing route decisions untouched", async (t) => {
-  const integration = await setupIntegration(t, undefined, "build");
+test("omitted rendering policy builds every route Nimbus manages, collections included", async (t) => {
+  const integration = await setupIntegration(t, undefined, "build", undefined, undefined, {
+    files: { "src/pages/blog/[...slug].astro": '---\nimport { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = getCollectionStaticPaths("blog");\n---\n' },
+  });
   const docs = { component: "src/pages/[...slug].astro", prerender: false };
-  const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
+  const blog = { component: "src/pages/blog/[...slug].astro", prerender: false };
 
   await integration.routeSetup({ route: docs } as never);
   await integration.routeSetup({ route: blog } as never);
 
-  assert.equal(docs.prerender, false);
+  assert.equal(docs.prerender, true);
   assert.equal(blog.prerender, true);
   assert.equal(integration.injectedRoutes.length, 3);
 
@@ -936,6 +944,7 @@ test("omitted rendering policy leaves existing route decisions untouched", async
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "build"),
+    logger: buildLogger,
   } as never);
   const dist = path.join(integration.root, "dist");
   await mkdir(path.join(dist, "_nimbus"), { recursive: true });
@@ -1221,6 +1230,7 @@ test("configured request routes are explained to the build invariant", async (t)
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "request"),
+    logger: buildLogger,
   } as never);
   const preparedRoot = preparedMarkdownRootKey(integration.root);
   for (const [collection, entries] of [
@@ -1493,37 +1503,169 @@ test("the build writes .nimbus/page-collections.json for nimbus-docs check", asy
   });
 });
 
-test("policy-rendered routes that export getStaticPaths get one explaining line", async (t) => {
+const resolvedRoutes = (...components: string[]) => components.map((entrypoint) => ({ entrypoint, type: "page", segments: [], params: [] }));
+
+test("route files that don't match rendering get one warning listing them", async (t) => {
   const integration = await setupIntegration(t, {
     default: "request",
     collections: { docs: "request", blog: "build" },
   });
-  // A glob string that looks like a comment opener mustn't hide the export.
-  const withStaticPaths =
-    '---\nconst pages = import.meta.glob("/src/*.md");\nexport function getStaticPaths() { return []; }\n/* one entry per page */\n---\n';
-  const mentionsOnly = "---\n// getStaticPaths isn't needed: this renders on request.\n---\n";
-  await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), mentionsOnly, "utf8");
-  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), withStaticPaths, "utf8");
-  await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), withStaticPaths, "utf8");
-  await integration.routeSetup({
-    route: { component: "src/pages/[...slug].astro", prerender: true },
-  } as never);
-  await integration.routeSetup({
-    route: { component: "src/pages/blog/[...slug].astro", prerender: false },
-  } as never);
-  await integration.routeSetup({
-    route: { component: "src/pages/v1/[...slug].astro", prerender: true },
-  } as never);
-  const infos: string[] = [];
-  const logger = { info: (message: string) => infos.push(message), warn() {}, error() {}, debug() {} };
-  integration.routesResolved({ routes: [], logger } as never);
-  integration.routesResolved({ routes: [], logger } as never);
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "request", collections: { docs: "request", blog: "build" } } })] };\n',
+    "utf8",
+  );
+  const built =
+    '---\nimport { getDocsStaticPaths } from "@cloudflare/nimbus-docs";\nexport const prerender = true;\nexport const getStaticPaths = getDocsStaticPaths;\n---\n';
+  const request = "---\nexport const prerender = false;\n---\n";
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), built, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), built, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), request, "utf8");
+  for (const component of ["src/pages/[...slug].astro", "src/pages/blog/[...slug].astro", "src/pages/v1/[...slug].astro"])
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  const warnings: string[] = [];
+  const logger = { info() {}, warn: (message: string) => warnings.push(message), error() {}, debug() {} };
+  const routes = resolvedRoutes("src/pages/[...slug].astro", "src/pages/blog/[...slug].astro", "src/pages/v1/[...slug].astro");
+  integration.routesResolved({ routes, logger } as never);
+  integration.routesResolved({ routes, logger } as never);
 
-  // Only the request-rendered docs route; the blog renders at build.
-  assert.equal(infos.length, 1);
-  assert.match(infos[0]!, /renders src\/pages\/\[\.\.\.slug\]\.astro on request/);
-  assert.doesNotMatch(infos[0]!, /blog/);
-  // A comment mentioning getStaticPaths isn't an export; Astro doesn't warn.
-  assert.doesNotMatch(infos[0]!, /v1/);
-  assert.match(infos[0]!, /the policy decides, whatever a route's `export const prerender` says/);
+  assert.equal(warnings.length, 1);
+  assert.match(
+    warnings[0]!,
+    new RegExp(
+      "^1 route file doesn't match `rendering`, which wins at build:\n" +
+        "  src/pages/\\[\\.\\.\\.slug\\]\\.astro: file builds ahead of time, `rendering` renders \"docs\" on request\n" +
+        "Run `.*check --fix` to update it\\. Until then, Astro may warn that getStaticPaths is ignored",
+      "u",
+    ),
+  );
+});
+
+test("a route file removed in dev drops out of the warning", async (t) => {
+  const integration = await setupIntegration(t, { default: "request", collections: { docs: "request", blog: "request" } });
+  const built = "---\nexport const prerender = true;\n---\n";
+  const [docs, blog] = ["src/pages/[...slug].astro", "src/pages/blog/[...slug].astro"];
+  for (const component of [docs, blog]) {
+    await writeFile(path.join(integration.root, component), built, "utf8");
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  }
+  const warnings: string[] = [];
+  const logger = { info() {}, warn: (message: string) => warnings.push(message), error() {}, debug() {} };
+  integration.routesResolved({ routes: resolvedRoutes(docs, blog), logger } as never);
+  integration.routesResolved({ routes: resolvedRoutes(docs), logger } as never);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0]!, /^2 route files/);
+  assert.match(warnings[1]!, /^1 route file doesn't match/);
+  assert.doesNotMatch(warnings[1]!, /blog/);
+});
+
+test("a request-rendered route with getStaticPaths is reported, whatever its prerender line", async (t) => {
+  const integration = await setupIntegration(t, { default: "request" });
+  await writeFile(
+    path.join(integration.root, "src/pages/[...slug].astro"),
+    "---\nexport const getStaticPaths = paths;\n---\n",
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  const warnings: string[] = [];
+  integration.routesResolved({
+    routes: resolvedRoutes("src/pages/[...slug].astro"),
+    logger: { info() {}, warn: (m: string) => warnings.push(m), error() {}, debug() {} },
+  } as never);
+  assert.match(warnings[0] ?? "", /src\/pages\/\[\.\.\.slug\]\.astro: file builds ahead of time, `rendering` renders "docs" on request/);
+});
+
+test("a built dynamic route with no getStaticPaths fails the build, naming the fix", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
+  await writeFile(
+    path.join(integration.root, "src/pages/llms.txt.ts"),
+    'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const { GET } = llmsRoute();\n',
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  await integration.routeSetup({ route: { component: "src/pages/llms.txt.ts", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
+    /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths to it\..*configuration\/#mix-build-and-request-rendering/s,
+  );
+});
+
+test("when check --fix can't plan the edits, the advice says to edit by hand and why", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(path.join(integration.root, "astro.config.ts"), "export default makeConfig();\n", "utf8");
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /check --fix` can't edit route files here \(the Nimbus config can't be read statically\), so edit it by hand\./u);
+      assert.doesNotMatch(error.message, /Run `/u);
+      return true;
+    },
+  );
+});
+
+test("a built dynamic route only an author can fix gets its own step, not the fix command", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { output: "server", integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\nexport const prerender = import.meta.env.PROD;\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /^A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro: Its `prerender` is an expression[^\n]*\nSee https:\/\/nimbus-docs\.com\//u);
+      return true;
+    },
+  );
+});
+
+test("a build error listing files --fix can and can't change says which the command covers", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { output: "server", integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  const markdown = "src/pages/[...slug]/index.md.ts";
+  await mkdir(path.join(integration.root, "src/pages/[...slug]"), { recursive: true });
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\nexport const prerender = import.meta.env.PROD;\n---\n", "utf8");
+  await writeFile(
+    path.join(integration.root, markdown),
+    'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = true;\nexport const { GET } = markdownRoute();\n',
+    "utf8",
+  );
+  for (const component of ["src/pages/[...slug].astro", markdown])
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", markdown), logger: buildLogger } as never),
+    /Dynamic routes are built ahead of time with no getStaticPaths[\s\S]*\nRun .*check --fix.* to add getStaticPaths to the other\.\n/u,
+  );
+});
+
+test("the Astro hint about ignored getStaticPaths comes only with a file Astro warns about", async (t) => {
+  const integration = await setupIntegration(t, { default: "request", collections: { docs: "request", blog: "request" } });
+  const llmsFull = "src/pages/llms-full.txt.ts";
+  await writeFile(
+    path.join(integration.root, llmsFull),
+    'import { llmsFullRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = true;\nexport const { GET } = llmsFullRoute();\n',
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: llmsFull, prerender: true } } as never);
+  const warnings: string[] = [];
+  integration.routesResolved({
+    routes: resolvedRoutes(llmsFull),
+    logger: { info() {}, warn: (m: string) => warnings.push(m), error() {}, debug() {} },
+  } as never);
+  assert.match(warnings[0] ?? "", /llms-full\.txt\.ts: file builds ahead of time/);
+  assert.doesNotMatch(warnings[0] ?? "", /Astro may warn/);
 });

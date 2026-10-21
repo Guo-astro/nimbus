@@ -198,3 +198,23 @@ export const collections = {
     fs.rmSync(unreadable, { recursive: true, force: true });
   }
 });
+
+test("a request route with no getStaticPaths is found through its page helper's collection", async () => {
+  const dir = project({}, {
+    files: {
+      "src/content/docs/index.mdx": "---\ntitle: Home\n---\n",
+      "src/pages/products/kit/[...slug].astro":
+        '---\nimport { getCollectionPage } from "@cloudflare/nimbus-docs/runtime";\nconst page = await getCollectionPage(Astro, "sdk");\n---\n',
+    },
+  });
+  try {
+    const result = await runChecks(dir, STRUCTURE);
+    assert.deepEqual(
+      result.collections?.find(({ name }) => name === "sdk"),
+      { name: "sdk", url: "/products/kit", source: "src/pages/products/kit/[...slug].astro", moved: true },
+    );
+    assert.deepEqual(result.findings.filter((f) => f.code.startsWith("nimbus/collection-")).map((f) => f.code), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

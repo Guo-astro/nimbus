@@ -25,6 +25,9 @@ import {
   parseContentCollections,
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
+import { planRouteFiles } from "../_internal/route-files.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
+import { invocation } from "../cli/pm.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -89,6 +92,7 @@ export async function checkStructure(
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
   }
+  checkRouteFiles(cwd, findings, notes, parsed, srcDirOverride);
   await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir, built);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
@@ -424,9 +428,17 @@ async function checkRequestRendering(
   // without it, collections it can't confirm stay unchecked.
   if (pageCollections !== null) {
     const pageSet = new Set(pageCollections);
-    const unknown = Object.keys(config.rendering.collections ?? {}).filter(
+    const unlisted = Object.keys(config.rendering.collections ?? {}).filter(
       (collection) => !pageSet.has(collection),
     );
+    // One with a route is likely added since the last build, which checks it.
+    const unknown = unlisted.filter((collection) => !canonicalCollections.includes(collection));
+    const unbuilt = unlisted.filter((collection) => canonicalCollections.includes(collection));
+    if (unbuilt.length > 0)
+      notes.push(skippedNote(
+        "nimbus/page-collections-unconfirmed",
+        `${unbuilt.map((collection) => `"${collection}"`).join(", ")} ${unbuilt.length === 1 ? "isn't" : "aren't"} in the last build's page collections yet; the next build checks ${unbuilt.length === 1 ? "it" : "them"}.`,
+      ));
     for (const collection of unknown) {
       findings.push({
         scope: "structure",
@@ -477,6 +489,8 @@ async function checkRequestRendering(
     );
     hasRequestRoute = Object.values(policy.collections).includes("request");
   } catch (err) {
+    // A collection route error already says why a collection has no route.
+    if (findings.some((f) => f.severity === "error" && f.code.startsWith("nimbus/collection-"))) return false;
     findings.push({
       scope: "structure",
       code: "nimbus/rendering-policy-invalid",
@@ -498,6 +512,38 @@ async function checkRequestRendering(
       "`nimbus-docs check` doesn't verify request-rendered pages, even after a build; a passing production build is the gate for them",
   });
   return true;
+}
+
+/** Each managed route file that doesn't say what `rendering` gives it; `--fix` rewrites it. */
+function checkRouteFiles(
+  cwd: string,
+  findings: CheckFinding[],
+  notes: Note[],
+  parsed: ConfigParseResult,
+  srcDirOverride: string | undefined,
+): void {
+  if (!parsed.ok) return;
+  const plan = planRouteFiles(cwd, srcDirOverride);
+  if (!plan.ok) {
+    notes.push(skippedNote("nimbus/route-files-skipped", `Route file modes weren't checked: ${plan.reason}.`));
+    return;
+  }
+  if (!plan.configured && plan.files.length > 0)
+    findings.push({ scope: "structure", code: "nimbus/rendering-default", severity: "info", message: DEFAULT_RENDERING_NOTE, fixable: false });
+  for (const { file, mismatch, problem, edit, writes } of plan.files) {
+    const manual = edit.status === "manual";
+    findings.push({
+      scope: "structure",
+      code: "nimbus/route-file-mode",
+      severity: mismatch.kind === "missing-paths" ? "error" : "warn",
+      file,
+      message: `${file}: ${problem}.`,
+      fixable: writes,
+      fix: manual
+        ? { kind: writes ? "route-file" : "suggestion", path: file, suggestion: edit.todo }
+        : { kind: "route-file", path: file, suggestion: `run \`${invocation("check --fix", cwd)}\` to update it` },
+    });
+  }
 }
 
 function checkConfigZod(

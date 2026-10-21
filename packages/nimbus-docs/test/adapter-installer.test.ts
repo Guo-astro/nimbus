@@ -617,3 +617,31 @@ test("does not warn about a switch on a same-adapter re-run", async () => {
     "idempotent re-run must not emit a switch warning",
   );
 });
+
+test("brings the starter's route files in step with the request rendering it sets", async () => {
+  const dir = scratch();
+  const starter = new URL("../../nimbus-starter-source/", import.meta.url);
+  project(dir, { config: readFileSync(new URL("astro.config.ts", starter), "utf8") });
+  const routes = ["[...slug].astro", "[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts", "llms.txt.ts", "llms-full.txt.ts"];
+  for (const route of routes) {
+    mkdirSync(join(dir, "src/pages", route, ".."), { recursive: true });
+    writeFileSync(join(dir, "src/pages", route), readFileSync(new URL(`src/pages/${route}`, starter), "utf8"));
+  }
+  mkdirSync(join(dir, "src/content/docs"), { recursive: true });
+
+  const res = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(res.status, "applied");
+  if (res.status !== "applied") return;
+  assert.deepEqual(
+    res.routeFiles.updated.sort(),
+    routes.filter((route) => route.startsWith("[")).map((route) => `src/pages/${route}`).sort(),
+  );
+  for (const route of routes) {
+    const source = readFileSync(join(dir, "src/pages", route), "utf8");
+    assert.doesNotMatch(source, /prerender|getStaticPaths/, route);
+  }
+
+  const again = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(again.status, "noop");
+  if (again.status === "noop") assert.deepEqual(again.routeFiles.updated, []);
+});

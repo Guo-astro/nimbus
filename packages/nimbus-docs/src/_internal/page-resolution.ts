@@ -168,7 +168,8 @@ async function requestCollection(
     dependencies.warn(
       `nimbus-docs: the route ${context.routePattern} renders on request, but no page collection is served from ` +
         `${route.folder || "/"}. Page collections come from docsCollection() or withNimbusMarkdown(). To serve one here, ` +
-        `call its route helper in this route's exported getStaticPaths; otherwise move the route to /<name>. ` +
+        `name it in this route's page helper, such as getCollectionPage(Astro, "<name>"), or its exported getStaticPaths; ` +
+        `otherwise move the route to /<name>. ` +
         `See ${COLLECTION_URLS_DOCS}.`,
     );
   }
@@ -188,12 +189,12 @@ async function requestProseIdentity(
   const id = slug || "index";
   const versions = await dependencies.getVersions();
   const [first, ...rest] = slug ? slug.split("/") : [];
+  // Only the root route's slug carries a version's prefix; a version's own route starts below it.
   if (
     first &&
     versions?.others.includes(first) &&
-    ((!collection && isRootRoute(context)) ||
-      collection === PRIMARY_COLLECTION ||
-      collection === `${PRIMARY_COLLECTION}-${first}`)
+    isRootRoute(context) &&
+    (!collection || collection === PRIMARY_COLLECTION || collection === `${PRIMARY_COLLECTION}-${first}`)
   ) {
     return {
       collection: `${PRIMARY_COLLECTION}-${first}`,

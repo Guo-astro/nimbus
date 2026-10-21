@@ -27,7 +27,7 @@ export type TopStatus = "passed" | "failed" | "partial";
 export type Readiness = "buildable" | "blocked" | "unknown";
 
 export interface CheckFix {
-  kind: "set-config" | "install-dep" | "lint-fix" | "suggestion";
+  kind: "set-config" | "install-dep" | "lint-fix" | "route-file" | "suggestion";
   path?: string;
   package?: string;
   dev?: boolean;

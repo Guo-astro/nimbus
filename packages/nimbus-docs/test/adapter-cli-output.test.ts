@@ -379,3 +379,23 @@ export default {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("adapter-node on a site without rendering says Nimbus builds every route it manages", () => {
+  const config = `import nimbus from "@cloudflare/nimbus-docs";
+import node from "@astrojs/node";
+export default {
+  // nimbus:adapter
+  output: "server",
+  adapter: node({ mode: "standalone" }),
+  integrations: [nimbus({ site: "https://docs.example.com", title: "X" })],
+};
+`;
+  const result = runAdapter(
+    { "astro.config.ts": config, "package.json": JSON.stringify({ dependencies: { astro: "7.0.9", "@astrojs/node": "11.1.3" } }) },
+    NO_AGENT,
+    "adapter-node",
+  );
+  assert.equal(result.status, 0, result.output);
+  assert.match(result.output, /With no `rendering` set, Nimbus builds every route it manages ahead of time/);
+  assert.doesNotMatch(result.output, /follows the `rendering` policy/);
+});

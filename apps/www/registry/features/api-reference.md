@@ -201,7 +201,7 @@ fails the build with a message that names both files, and
 ### 4d. Scaffold the HTML route
 
 The route is thin: `getApiStaticPaths` enumerates one path per page, and
-`getApiRoute(Astro)` reads the page props and shared navigation prepared by the
+`getApiRoute(Astro, "api")` reads the page props and shared navigation prepared by the
 content loader, then marks the current navigation path active. It never reads
 or parses the OpenAPI source at request time. Hand both results to `ApiLayout`
 (installed in 4a). `ApiLayout` composes `ApiSidebar` (verb chips +
@@ -231,16 +231,15 @@ Write `src/pages/api/[...slug].astro`:
 <!-- api-reference-fixture:src/pages/api/[...slug].astro -->
 ```astro
 ---
-import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { getApiStaticPaths, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
 import Header from "@/components/Header.astro";
 import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
-export const prerender = true;
 export const getStaticPaths = getApiStaticPaths("api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 
-const result = await getApiRoute(Astro, { homeChunkSize: API_HOME_CHUNK_SIZE });
+const result = await getApiRoute(Astro, "api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 if (result instanceof Response) return result;
 const { page, nav, collection, version, coordinate, home } = result;
 // A later part of the API home's list: a page of its own, kept out of search.
@@ -272,6 +271,14 @@ const socialImage = new URL(page.href, Astro.url).search
   <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 ```
+
+The route is written for a site built ahead of time on `output: "static"`. Run
+`nimbus-docs check --fix` next, so it matches the site's `rendering` and
+`output`: a request-rendered route drops `getStaticPaths`, and a built route on
+`output: "server"` gets `export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
 
 The nav is handled by `ApiSidebar` inside `ApiLayout` — there's no separate
 `ApiNavList` to write. To customise the tree's look (icons, grouping, a

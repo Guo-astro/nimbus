@@ -60,6 +60,31 @@ test("a route's collection comes from its exported getStaticPaths, in every supp
   }
 });
 
+test("a request route names its collection in the page helper; disagreeing names are an error", () => {
+  const helpers = 'import { getCollectionPage, getCollectionStaticPaths, getApiRoute } from "@cloudflare/nimbus-docs/runtime";\n';
+  const cases: Array<[string, string | undefined, string[] | undefined]> = [
+    ['const page = await getCollectionPage(Astro, "sdk");', "sdk", undefined],
+    ['const name = "sdk";\nconst page = await getCollectionPage(Astro, name);', "sdk", undefined],
+    ['const page = await getApiRoute(Astro, "rest");', "rest", undefined],
+    ["const page = await getCollectionPage(Astro);", undefined, undefined],
+    ['export const getStaticPaths = getCollectionStaticPaths("sdk");\nconst page = await getCollectionPage(Astro, "sdk");', "sdk", undefined],
+    ['export const getStaticPaths = getCollectionStaticPaths("sdk");\nconst page = await getCollectionPage(Astro, "blog");', "sdk", ["sdk", "blog"]],
+  ];
+  for (const [frontmatter, collection, conflict] of cases) {
+    const read = readRoute(route(helpers + frontmatter));
+    assert.equal(read.collection, collection, frontmatter);
+    assert.deepEqual(read.conflict, conflict, frontmatter);
+    assert.equal(read.usesHelper, true, frontmatter);
+  }
+  const { errors } = decideCollectionMounts(
+    [{ collection: "sdk", folder: "/products/kit", file: "src/pages/products/kit/[...slug].astro", dynamic: false, conflict: ["sdk", "blog"] }],
+    null,
+    [],
+  );
+  assert.deepEqual(errors.map((error) => error.code), ["nimbus/collection-route-mismatch"]);
+  assert.match(errors[0]!.message, /names collections "sdk" and "blog"/);
+});
+
 test("route segments and patterns follow Astro's file routing", () => {
   assert.deepEqual(routeSegments("products/sdk/[...slug].astro"), ["products", "sdk", "[...slug]"]);
   assert.deepEqual(routeSegments("products/sdk/[...slug]/index.astro"), ["products", "sdk", "[...slug]"]);

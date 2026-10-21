@@ -12,6 +12,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { parse as parseYaml } from "yaml";
 
+import { alignRouteFiles } from "../_internal/route-files.js";
 import {
   ADAPTER_IDS,
   ADAPTER_RECIPES,
@@ -88,6 +89,7 @@ export type AdapterInstallOutcome =
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
+      routeFiles: ReturnType<typeof alignRouteFiles>;
     }
   | {
       status: "noop";
@@ -97,6 +99,7 @@ export type AdapterInstallOutcome =
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
+      routeFiles: ReturnType<typeof alignRouteFiles>;
     }
   | { status: "error"; code: AdapterInstallErrorCode; message: string };
 
@@ -139,13 +142,15 @@ Ensure the site uses the Cloudflare Astro adapter with server output, and defaul
 3. Ensure the project has a server-compatible Wrangler config. Preserve custom Wrangler settings; use \`nodejs_compat\` and do not configure a static assets directory for Nimbus server output.
 4. Find the default Nimbus integration imported from \`@cloudflare/nimbus-docs\`, then locate the config object passed as its first argument. Follow local imports if that config lives in another file.
 5. If the object has no \`rendering\` property, add \`rendering: { default: "request" }\`. If it already has a rendering policy, preserve it and report what it does instead of overwriting user intent.
-6. Do not add parser dependencies, magic comments, or broad formatting changes.
-7. Inspect the diff, run the project's build command, then run \`${invocation("check")}\` if available. Fix only failures caused by this change.
+6. Run \`${invocation("check --fix")}\` so the route files match \`rendering\`: request-rendered routes drop \`export const prerender\` and \`getStaticPaths\`. Apply by hand any edit it prints for a customized route file.
+7. Do not add parser dependencies, magic comments, or broad formatting changes.
+8. Inspect the diff, run the project's build command, then run \`${invocation("check")}\` if available. Fix only failures caused by this change.
 
 ## Acceptance
 
 - Astro uses \`output: "server"\` and \`@astrojs/cloudflare\`.
 - Nimbus defaults to request rendering, or an existing explicit rendering policy is preserved and reported.
+- \`${invocation("check")}\` reports no route file that doesn't match \`rendering\`.
 - The project build passes.
 `;
 }
@@ -332,6 +337,7 @@ export async function installAdapter(
     recordAdapterProvenance(cwd, adapter);
     const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
     return {
+      routeFiles: alignRouteFiles(cwd),
       status: "noop",
       adapter,
       configPath: fresh.path,
@@ -360,6 +366,7 @@ export async function installAdapter(
   const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
 
   return {
+    routeFiles: alignRouteFiles(cwd),
     status: "applied",
     adapter,
     configPath: fresh.path,

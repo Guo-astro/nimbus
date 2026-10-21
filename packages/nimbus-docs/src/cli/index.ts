@@ -29,6 +29,7 @@ import mri from "mri";
 import * as p from "@clack/prompts";
 
 import { ADAPTER_IDS, type AdapterId } from "../_internal/adapters.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
 import {
   cloudflareRequestRenderingAgentRecipe,
   installAdapter,
@@ -747,6 +748,8 @@ async function runAdapterInstall(
   }
 
   for (const warning of outcome.warnings) p.log.warn(warning);
+  for (const { file, todo } of outcome.routeFiles.manual)
+    p.log.warn(`${file} doesn't match how Nimbus renders it and isn't in the starter's shape. ${todo}`);
 
   const lines =
     outcome.status === "noop"
@@ -757,11 +760,11 @@ async function runAdapterInstall(
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
   const handOff = agentSession && outcome.requestRendering === "unresolved";
-  if (handOff) {
-    lines.push("Next: finish the request-rendering configuration with the recipe below.");
-  } else {
-    appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
+  if (!handOff) appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering, outcome.routeFiles.configured);
+  if (outcome.routeFiles.updated.length > 0) {
+    lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match how Nimbus renders them`);
   }
+  if (handOff) lines.push("Next: finish the request-rendering configuration with the recipe below.");
   if (outcome.status === "applied") lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
   p.outro(lines.join("\n"));
   if (handOff) process.stdout.write(cloudflareRequestRenderingAgentRecipe());
@@ -782,9 +785,10 @@ function appendRequestRenderingStatus(
   adapter: AdapterId,
   label: string,
   status: "inserted" | "explicit" | "unresolved" | undefined,
+  configured: boolean | undefined,
 ): void {
   if (adapter !== "cloudflare") {
-    lines.push("Rendering behavior follows the policy in your Nimbus config.");
+    lines.push(configured === false ? DEFAULT_RENDERING_NOTE : "Rendering follows the `rendering` policy in your Nimbus config.");
     return;
   }
   if (status === "inserted") {

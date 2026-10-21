@@ -67,14 +67,16 @@ export default defineConfig({
 
 ### Rendering policy
 
-`rendering` controls canonical content collection routes: the catch-all routes Nimbus uses for docs, API references, and other registered collections. It does not change custom files under `src/pages/`.
+`rendering` controls the routes Nimbus manages: the catch-all routes for docs, API references, and other registered collections, and the Markdown and `llms.txt` routes that serve them. Other files under `src/pages/` keep their own rendering.
 
 | Mode | Behavior | Deployment requirement |
 | --- | --- | --- |
 | `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
 | `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
 
-Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
+`"build"` is what Astro calls prerendered, and `"request"` what it calls on-demand rendered. Every other route, such as a 404 page, Open Graph images or `robots.txt`, keeps its own `prerender` export.
+
+Without `rendering`, Nimbus builds every route it manages ahead of time, every page collection's included. Once `rendering` is set, `default` covers docs, version and API collections, and each other page collection needs its own entry in `rendering.collections` (see below).
 
 #### Enable request rendering
 
@@ -95,7 +97,7 @@ Run the production build after changing output mode or rendering policy. It is t
 
 #### Mix build and request rendering
 
-`rendering.default` applies to `docs`, version collections, and API collections. `rendering.collections` sets a mode by Astro collection name, not by URL or version — and it is how any other page collection with its own catch-all route (a `blog`, say) gets a mode: the build fails after content sync if `rendering` is set and such a collection isn't listed.
+`rendering.default` applies to `docs`, version collections, API collections, and the site-wide `llms.txt` and `llms-full.txt`. Each collection's Markdown and section `llms.txt` routes follow that collection's mode. `rendering.collections` sets a mode by Astro collection name, not by URL or version — and it is how any other page collection with its own catch-all route (a `blog`, say) gets a mode: the build fails after content sync if `rendering` is set and such a collection isn't listed.
 
 Render most collections on request but keep an archive prerendered:
 
@@ -121,7 +123,9 @@ rendering: {
 
 Every override must name a registered collection with its own canonical catch-all route. Nimbus fails the build for unknown collection names rather than silently ignoring them.
 
-Keep `export const prerender = true` and `getStaticPaths` in canonical route files: Nimbus switches each route to the configured mode. Astro still logs "getStaticPaths() ignored in dynamic page" for routes rendered on request. The warning is expected and needs no change.
+`rendering` wins at build: Nimbus renders each canonical route, and its Markdown and `llms.txt` routes, in the configured mode, and warns when a route file says otherwise. Run `nimbus-docs check --fix` to update the files. It sets each route's `prerender` line, keeps `getStaticPaths` on built routes only, and names the collection in a collection route's page helper, such as `getCollectionPage(Astro, "sdk")`. `add adapter-*` and the scaffolder update them for you. Without `rendering`, they're all built ahead of time, whatever their `prerender` lines say.
+
+A built route with a dynamic segment, such as `[...slug].astro`, must export `getStaticPaths`. Astro can't build it otherwise, so the build fails and names the file.
 
 Request-rendered routes are still added to the sitemap and Pagefind search index during the production build. Nimbus uses the content source to create those build-time discovery files; no extra sitemap or search configuration is required.
 

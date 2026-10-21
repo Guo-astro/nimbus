@@ -1397,10 +1397,10 @@ export const getDocsStaticPaths: GetStaticPaths = async () => {
  * Configure custom partial IDs through `markdown.partialResolver` on the Nimbus
  * integration so the resolver stays out of request-time Worker bundles.
  */
-export async function getDocsPageProps(
-  astro: AstroGlobal,
-): Promise<ProsePageProps<"docs">> {
-  rejectRemovedPartialHeadingOptions("getDocsPageProps", arguments.length);
+export function getDocsPageProps(astro: AstroGlobal): Promise<ProsePageProps<"docs">>;
+export async function getDocsPageProps(astro: AstroGlobal, ...extra: unknown[]): Promise<ProsePageProps<"docs">> {
+  rejectBadPageHelperArgument("getDocsPageProps", extra[0]);
+  rejectExtraArguments("getDocsPageProps", "(Astro)", extra.length > 1 ? extra : []);
   const page = await resolveProseRoute<"docs">(
     astro,
     PRIMARY_COLLECTION,
@@ -1417,10 +1417,10 @@ export async function getDocsPageProps(
   return page;
 }
 
-export function getDocsPage(
-  astro: AstroGlobal,
-): Promise<ProsePageProps<"docs"> | Response> {
-  rejectRemovedPartialHeadingOptions("getDocsPage", arguments.length);
+export function getDocsPage(astro: AstroGlobal): Promise<ProsePageProps<"docs"> | Response>;
+export function getDocsPage(astro: AstroGlobal, ...extra: unknown[]): Promise<ProsePageProps<"docs"> | Response> {
+  rejectBadPageHelperArgument("getDocsPage", extra[0]);
+  rejectExtraArguments("getDocsPage", "(Astro)", extra.length > 1 ? extra : []);
   return resolveProseRoute(
     astro,
     PRIMARY_COLLECTION,
@@ -1519,8 +1519,10 @@ async function assertRouteServesCollection(
   throw new Error(
     (unread
       ? `nimbus-docs: Nimbus couldn't read the getStaticPaths in ${unread.file}, so "${collection}" is still served from ` +
-        `${servedFrom}. Export it as \`export const getStaticPaths = ${helper}("${collection}")\`, or return the helper's ` +
-        `paths from getStaticPaths itself, passing the name as a string literal or an exported const holding one.`
+        `${servedFrom}. Export it as \`export const getStaticPaths = ${helper}("${collection}")\`, return the helper's ` +
+        `paths from getStaticPaths itself, or pass the name to the page helper, ` +
+        `\`${helper === "getApiStaticPaths" ? "getApiRoute" : "getCollectionPage"}(Astro, "${collection}")\`. ` +
+        `Use a string literal or an exported const holding one.`
       : `nimbus-docs: the route under ${folder || "/"} serves collection "${collection}", but "${collection}" is served from ` +
         `${servedFrom}. Call ${helper}("${collection}") in the route file's exported getStaticPaths, or move the route.`) +
       ` See ${COLLECTION_URLS_DOCS}.`,
@@ -1538,18 +1540,22 @@ async function assertRouteServesCollection(
  * Headings from public `<Render file="..." />` partials are recursively
  * merged at build time. See `getDocsPageProps`.
  *
- * Pass the collection name as a type parameter for the entry's data
- * shape to narrow correctly:
+ * Pass the collection name for the entry's data shape to narrow, and so a
+ * request-rendered route away from the collection's default URL names it:
  *
- *   const { entry, Content, headings } = await getCollectionPageProps<"api">(Astro);
+ *   const { entry, Content, headings } = await getCollectionPageProps(Astro, "sdk");
  */
+export function getCollectionPageProps<C extends string>(astro: AstroGlobal, collection?: C): Promise<ProsePageProps<C>>;
 export async function getCollectionPageProps<C extends string>(
   astro: AstroGlobal,
+  collection?: C,
+  ...extra: unknown[]
 ): Promise<ProsePageProps<C>> {
-  rejectRemovedPartialHeadingOptions("getCollectionPageProps", arguments.length);
+  rejectBadPageHelperArgument("getCollectionPageProps", collection, true);
+  rejectExtraArguments("getCollectionPageProps", "(Astro, collection)", extra);
   const page = await resolveProseRoute<C>(
     astro,
-    undefined,
+    collection,
     "getCollectionPageProps(): expected `entry` in Astro.props. " +
       "Ensure your route uses `getStaticPaths = getCollectionStaticPaths(<collection>)`.",
   );
@@ -1562,24 +1568,40 @@ export async function getCollectionPageProps<C extends string>(
   return page;
 }
 
+export function getCollectionPage<C extends string>(astro: AstroGlobal, collection?: C): Promise<ProsePageProps<C> | Response>;
 export function getCollectionPage<C extends string>(
   astro: AstroGlobal,
+  collection?: C,
+  ...extra: unknown[]
 ): Promise<ProsePageProps<C> | Response> {
-  rejectRemovedPartialHeadingOptions("getCollectionPage", arguments.length);
+  rejectBadPageHelperArgument("getCollectionPage", collection, true);
+  rejectExtraArguments("getCollectionPage", "(Astro, collection)", extra);
   return resolveProseRoute(
     astro,
-    undefined,
+    collection,
     "getCollectionPageProps(): expected `entry` in Astro.props. " +
       "Ensure your route uses `getStaticPaths = getCollectionStaticPaths(<collection>)`.",
   );
 }
 
-function rejectRemovedPartialHeadingOptions(helper: string, argumentCount: number): void {
-  if (argumentCount <= 1) return;
+/** `second` is the helper's second argument: a collection name, where the helper takes one, or nothing. */
+function rejectBadPageHelperArgument(helper: string, second: unknown, takesCollection = false): void {
+  if (second === undefined || (takesCollection && typeof second === "string")) return;
+  if (typeof second === "string") {
+    const instead = helper.replace("Docs", "Collection");
+    throw new Error(
+      `${helper}(Astro) always serves docs and takes no collection. ` +
+        (second === PRIMARY_COLLECTION ? `Drop the argument: ${helper}(Astro).` : `For "${second}", use ${instead}(Astro, "${second}").`),
+    );
+  }
   throw new Error(
     `${helper}(Astro, options) was removed in Nimbus 0.13. ` +
       "Run `npx @cloudflare/nimbus-docs migrate` to move partialHeadings.resolvePartialId to the integration's markdown.partialResolver option.",
   );
+}
+
+function rejectExtraArguments(helper: string, takes: string, extra: readonly unknown[]): void {
+  if (extra.length > 0) throw new Error(`${helper} takes ${takes}, but was passed ${extra.length} more argument${extra.length === 1 ? "" : "s"}.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1715,7 +1737,16 @@ const THIN_API_ENTRIES =
   typeof __NIMBUS_THIN_API_ENTRIES__ !== "undefined" &&
   __NIMBUS_THIN_API_ENTRIES__;
 
-export async function getApiPage(astro: AstroGlobal, options: ApiHomeOptions = {}): Promise<ApiRouteProps> {
+export function getApiPage(astro: AstroGlobal, options?: ApiHomeOptions): Promise<ApiRouteProps>;
+export function getApiPage(astro: AstroGlobal, collection: string, options?: ApiHomeOptions): Promise<ApiRouteProps>;
+export async function getApiPage(
+  astro: AstroGlobal,
+  collectionOrOptions?: string | ApiHomeOptions,
+  maybeOptions?: ApiHomeOptions,
+  ...extra: unknown[]
+): Promise<ApiRouteProps> {
+  rejectExtraArguments("getApiPage", "(Astro, collection, options)", extra);
+  const [collection, options] = apiRouteArguments("getApiPage", collectionOrOptions, maybeOptions);
   const props = astro.props as {
     collection?: string;
     version?: string | null;
@@ -1727,7 +1758,7 @@ export async function getApiPage(astro: AstroGlobal, options: ApiHomeOptions = {
         "Ensure your route uses `getStaticPaths = getApiStaticPaths(<collection>)`.",
     );
   }
-  const result = await resolveApiRoute(astro, options);
+  const result = await resolveApiRoute(astro, collection, options);
   if (result instanceof Response) {
     throw new Error(
       `getApiPage(): could not resolve request path "${astro.url.pathname}". ` +
@@ -1739,10 +1770,20 @@ export async function getApiPage(astro: AstroGlobal, options: ApiHomeOptions = {
 
 /** Resolve a static or request-rendered API route, preserving redirects and
  * misses as responses that Astro can pass through to custom error pages. */
+export function getApiRoute(astro: AstroGlobal, options?: ApiHomeOptions): Promise<ApiRouteProps | Response>;
 export function getApiRoute(
   astro: AstroGlobal,
-  options: ApiHomeOptions = {},
+  collection: string,
+  options?: ApiHomeOptions,
+): Promise<ApiRouteProps | Response>;
+export function getApiRoute(
+  astro: AstroGlobal,
+  collectionOrOptions?: string | ApiHomeOptions,
+  maybeOptions?: ApiHomeOptions,
+  ...extra: unknown[]
 ): Promise<ApiRouteProps | Response> {
+  rejectExtraArguments("getApiRoute", "(Astro, collection, options)", extra);
+  const [collection, options] = apiRouteArguments("getApiRoute", collectionOrOptions, maybeOptions);
   const props = astro.props as {
     collection?: string;
     coordinate?: string;
@@ -1756,7 +1797,7 @@ export function getApiRoute(
         "Ensure your route uses `getStaticPaths = getApiStaticPaths(<collection>)`.",
     );
   }
-  return resolveApiRoute(astro, options).catch((error: unknown) => {
+  return resolveApiRoute(astro, collection, options).catch((error: unknown) => {
     if (error instanceof Error && error.name === "PageAssetReadOverloadError") {
       return new Response("Temporarily busy", {
         status: 503,
@@ -1808,13 +1849,28 @@ export async function getApiRoot(
   return page.kind === "api" ? page : null;
 }
 
+// `(Astro, options)` and `(Astro, collection, options)` both stay valid: the
+// collection lets a request-rendered route away from its default URL name it.
+function apiRouteArguments(
+  helper: string,
+  collectionOrOptions: string | ApiHomeOptions | undefined,
+  options: ApiHomeOptions | undefined,
+): [string | undefined, ApiHomeOptions] {
+  if ((options !== undefined && typeof collectionOrOptions !== "string") || typeof options === "string")
+    throw new Error(`${helper} takes (Astro, collection, options), with options last.`);
+  return typeof collectionOrOptions === "string"
+    ? [collectionOrOptions, options ?? {}]
+    : [undefined, collectionOrOptions ?? {}];
+}
+
 async function resolveApiRoute(
   astro: AstroGlobal,
+  routeCollection: string | undefined,
   options: ApiHomeOptions,
 ): Promise<ApiRouteProps | Response> {
   const result = await resolveApiPage(
     pageResolutionContext(astro),
-    {},
+    { collection: routeCollection },
     {
       getApiCollections: loadApiCollections,
       getCollectionAt,

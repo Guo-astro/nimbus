@@ -42,6 +42,11 @@ export function srcModule(relative: string): string {
   );
 }
 
+/** A docs page route rendered on request, for sites whose `rendering` serves docs that way. */
+export const REQUEST_DOCS_PAGE = {
+  "src/pages/[...slug].astro": `---\nimport { getDocsPage } from ${srcModule("index.ts")};\nconst page = await getDocsPage(Astro);\nif (page instanceof Response) return page;\n---\n<html><body>Page</body></html>`,
+};
+
 export const SMALLCO_SPEC = path.resolve(import.meta.dirname, "api/smallco.yaml");
 
 /** A minimal on-demand adapter: Astro's generated App behind the entrypoint. */

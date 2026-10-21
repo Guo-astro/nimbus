@@ -1289,6 +1289,10 @@ for (const component of [
   );
 }
 cpSync(FIXTURE, site, { recursive: true });
+// Builds switch `rendering` both ways, so dynamic routes keep getStaticPaths, as the fixture's page route does.
+for (const route of ["[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts"]) {
+  cpSync(join(STARTER, "pages", route), join(site, "src", "pages", route));
+}
 run("git", ["init", "--quiet"], { cwd: site });
 run("git", ["config", "user.name", "Nimbus Fixture"], { cwd: site });
 run("git", ["config", "user.email", "fixture@nimbus.test"], { cwd: site });

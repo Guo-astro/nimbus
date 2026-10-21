@@ -15,6 +15,7 @@ import type { ApiSpec } from "../src/types.js";
 import { collectionsByFolder } from "../src/_internal/collection-mount.js";
 import {
   getApiPage,
+  getApiRoute,
   getCollectionPageProps,
   getDocsPageProps,
 } from "../src/index.js";
@@ -87,6 +88,49 @@ test("public static helpers preserve missing-prop diagnostics", async () => {
   await assert.rejects(
     () => getApiPage({ props: {} } as never),
     /expected `collection` and `coordinate` in Astro\.props/,
+  );
+});
+
+test("collection page helpers take the collection name, and still reject the removed options object", async () => {
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk"),
+    /expected `entry` in Astro\.props/,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, {} as never),
+    /getCollectionPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, {} as never),
+    /getDocsPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "blog" as never),
+    /getDocsPageProps\(Astro\) always serves docs.*getCollectionPageProps\(Astro, "blog"\)/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "docs" as never),
+    /Drop the argument: getDocsPageProps\(Astro\)\./,
+  );
+  await assert.rejects(
+    () => (getDocsPageProps as (...args: unknown[]) => Promise<unknown>)({ props: {} }, undefined, "blog"),
+    /getDocsPageProps takes \(Astro\), but was passed 2 more arguments\./,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk", "sdk" as never),
+    /getCollectionPageProps takes \(Astro, collection\), but was passed 1 more argument\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", "api" as never),
+    /getApiRoute takes \(Astro, collection, options\), with options last\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", {}, {} as never),
+    /getApiRoute takes \(Astro, collection, options\), but was passed 1 more argument\./,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, undefined),
+    /expected `entry` in Astro\.props/,
   );
 });
 
@@ -215,6 +259,9 @@ describe("prose page resolution", () => {
       assert.equal(blogLeaf.page.identity.collection, "blog");
       assert.equal(blogLeaf.page.entry.id, "v1");
     }
+    // A version route that names its collection, as check --fix writes it.
+    const named = await resolveProsePage(context("/v1/v1/", "v1"), { collection: "docs-v1" }, dependencies);
+    assert.equal(named.status === "found" && named.page.entry.id, "v1");
   });
   test("an index path is not a second URL for a landing", async () => {
     for (const [pathname, slug, collection] of [
@@ -228,6 +275,12 @@ describe("prose page resolution", () => {
     }
     const landing = await resolveProsePage(context("/products/kit/", undefined, {}, "/products/kit/[...slug]"), {}, dependencies);
     assert.equal(landing.status, "found");
+  });
+
+  test("a request route's page helper names its collection", async () => {
+    const result = await resolveProsePage(context("/products/kit/setup/", "setup", {}, "/products/kit/[...slug]"), { collection: "sdk" }, dependencies);
+    assert.equal(result.status, "found");
+    if (result.status === "found") assert.equal(result.page.identity.collection, "sdk");
   });
 
   test("resolves a request route by its folder, nested, under a base, or a kept copy", async () => {

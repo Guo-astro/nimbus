@@ -425,3 +425,28 @@ module.exports = defineConfig({
     cleanup(cwd, tmpl);
   }
 });
+
+test("server scaffolds write route files that match the rendering they set", async () => {
+  const starterPages = new URL("../../nimbus-starter-source/src/pages/", import.meta.url);
+  const routes = ["[...slug].astro", "[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts", "llms.txt.ts", "llms-full.txt.ts"];
+  for (const adapter of ["cloudflare", "node"] as const) {
+    const cwd = makeCwd();
+    const tmpl = makeTemplate();
+    for (const route of routes) {
+      fs.mkdirSync(path.dirname(path.join(tmpl, "src/pages", route)), { recursive: true });
+      fs.copyFileSync(new URL(route, starterPages), path.join(tmpl, "src/pages", route));
+    }
+    try {
+      await scaffold({ ...BASE, output: "server", adapter, dir: "my-docs" }, internals(cwd, tmpl));
+      for (const route of routes) {
+        const source = fs.readFileSync(path.join(cwd, "my-docs", "src/pages", route), "utf8");
+        // Off Cloudflare only docs render on request; the site-wide llms files stay built.
+        const built = adapter === "node" && !route.startsWith("[");
+        assert.equal(/^export const prerender = true;$/m.test(source), built, `${adapter} ${route}`);
+        assert.doesNotMatch(source, /getStaticPaths/, `${adapter} ${route}`);
+      }
+    } finally {
+      cleanup(cwd, tmpl);
+    }
+  }
+});

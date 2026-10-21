@@ -77,7 +77,9 @@ collide with an existing collection, and must not be `docs` or `partials`
 (reserved). The reference is served where its route file is: by default
 `src/pages/<collection>/`, so `api` serves at `/api`. If the user wants another
 URL (`/reference/api`), put the routes in that folder instead; it can be
-nested, and every URL Nimbus builds for the reference follows. Substitute the
+nested, and every URL Nimbus builds for the reference follows. For a site that
+is only the reference, put them at `src/pages/` to serve it at the root; the
+site then needs no `docs` collection. Substitute the
 chosen folder for `api` in the route paths below, and the chosen name in the
 config and collection key.
 

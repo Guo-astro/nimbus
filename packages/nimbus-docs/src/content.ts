@@ -798,13 +798,13 @@ export function apiCollection(options?: ApiCollectionOptions): {
                 ...targetUrlFields(target),
               },
             );
-            if (target.sidebar === "on-demand")
-              await stageApiModelNavList(
-                rootDir,
-                collection,
-                target.version ?? null,
-                model,
-              );
+            await stageApiModelNavList(
+              rootDir,
+              collection,
+              target.version ?? null,
+              model,
+              target.sidebar === "on-demand",
+            );
           } catch (err) {
             // `ApiBuildError` already formats a pointed diagnostic list; fail
             // with it (plus which spec failed) as the author's error, no stack.

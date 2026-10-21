@@ -45,7 +45,7 @@ Each item in `versions`:
 
 ## Published spec
 
-Each collection publishes its spec as one self-contained JSON file at `/api/openapi.json`, with versions at their own mount path, and lists it in the site's API catalog. Set `publishSpec: false` on a collection, or on a single version, to keep that spec unpublished:
+Each collection publishes its spec as one self-contained JSON file at `/api/openapi.json` (`/openapi.json` for a reference at the root), with versions at their own mount path, and lists it in the site's API catalog. Set `publishSpec: false` on a collection, or on a single version, to keep that spec unpublished:
 
 ```ts title="astro.config.ts"
 api: [
@@ -69,7 +69,7 @@ For a collection named `api`, the reference integrates with these routes when th
 | `/api/llms.txt` | API-only `llms.txt` index. |
 | `/llms.txt` and `/llms-full.txt` | Site-wide page index and full Markdown documentation. |
 | `/nimbus-api/coordinates.json` | Public coordinate-to-URL manifest. |
-| `/nimbus-api/home/api/<version>/<n>/` and `…/index.json` | The [API home](/api-reference/large-apis#the-api-home)'s later parts (`noindex`) and its filter's list of endpoints. |
+| `/api/index/<n>/` | The [API home](/api-reference/large-apis#the-api-home)'s later parts (`noindex`). |
 | `/api/openapi.json` | The published spec; other versions at `/api/<version>/openapi.json`. See [Published spec](#published-spec). |
 | `/.well-known/api-catalog` and `/.well-known/ard.json` | The site's API catalog and discovery manifest, listing each visible version. |
 

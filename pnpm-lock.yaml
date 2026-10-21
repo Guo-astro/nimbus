@@ -42,7 +42,7 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
 
-  apps/demo-weather:
+  apps/demo:
     dependencies:
       '@astrojs/cloudflare':
         specifier: ~14.3.0
@@ -65,18 +65,15 @@ importers:
       '@readme/httpsnippet':
         specifier: 11.4.0
         version: 11.4.0
+      '@resvg/resvg-js':
+        specifier: ^2.6.2
+        version: 2.6.2
       '@scalar/openapi-parser':
         specifier: 0.28.12
         version: 0.28.12
       astro:
         specifier: 7.3.1
         version: 7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
-      astro-og-canvas:
-        specifier: ^0.13.0
-        version: 0.13.0(astro@7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
-      canvaskit-wasm:
-        specifier: ^0.41.1
-        version: 0.41.1
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -89,6 +86,9 @@ importers:
       react-dom:
         specifier: ^19.2.0
         version: 19.2.7(react@19.2.7)
+      satori:
+        specifier: ^0.26.0
+        version: 0.26.0
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.6.0
@@ -232,6 +232,9 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
+      yaml:
+        specifier: ^2.7.1
+        version: 2.9.0
     devDependencies:
       '@cloudflare/nimbus-docs':
         specifier: workspace:*
@@ -402,6 +405,9 @@ importers:
       '@readme/httpsnippet':
         specifier: ^11.4.0
         version: 11.4.0
+      '@resvg/resvg-js':
+        specifier: ^2.6.2
+        version: 2.6.2
       '@scalar/openapi-parser':
         specifier: ^0.28.12
         version: 0.28.12
@@ -432,6 +438,9 @@ importers:
       openapi-sampler:
         specifier: ^1.7.4
         version: 1.7.4
+      satori:
+        specifier: ^0.26.0
+        version: 0.26.0
       tsdown:
         specifier: ^0.20.3
         version: 0.20.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(typescript@5.9.3)
@@ -453,18 +462,18 @@ importers:
       '@iconify-json/ph':
         specifier: ^1.2.0
         version: 1.2.2
+      '@resvg/resvg-js':
+        specifier: ^2.6.2
+        version: 2.6.2
       astro:
         specifier: 7.3.1
         version: 7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
-      astro-og-canvas:
-        specifier: ^0.13.0
-        version: 0.13.0(astro@7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0))
-      canvaskit-wasm:
-        specifier: ^0.41.1
-        version: 0.41.1
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      satori:
+        specifier: ^0.26.0
+        version: 0.26.0
       sharp:
         specifier: ^0.35.4
         version: 0.35.4(@types/node@20.19.41)
@@ -2833,9 +2842,6 @@ packages:
   '@vscode/l10n@0.0.18':
     resolution: {integrity: sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ==}
 
-  '@webgpu/types@0.1.21':
-    resolution: {integrity: sha512-pUrWq3V5PiSGFLeLxoGqReTZmiiXwY3jRkIG5sLLKjyqNxrwm/04b4nw7LSmGWJcKk59XOM/YRTUwOzo4MMlow==}
-
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
     peerDependencies:
@@ -2933,11 +2939,6 @@ packages:
     resolution: {integrity: sha512-LElXdjswlqjWrPpJFg1Fx4wpkOCxj1TDHlSV4PlaRxHGWko024xICaa97ZkMfs6DRKlCguiAI+rbXv5GWwXIkg==}
     hasBin: true
 
-  astro-og-canvas@0.13.0:
-    resolution: {integrity: sha512-jcIDhE9OGIbd7LstZQ4CyzOpbbEKAlxJqEgdkVu6r26m7yJKlQjKysszfDxlox717cnCLPXKivyFjsufcq8sYA==}
-    peerDependencies:
-      astro: ^5.0.0 || ^6.0.0 || ^7.0.0
-
   astro@7.3.1:
     resolution: {integrity: sha512-A/bJYHtc6n0UAdROY9W948fW6lX0pnUA+JWKW+IGCXRyDIGN2MsXC0OlS8onZGJjr+sv8htemwOc9W5PBRXCkw==}
     engines: {node: '>=22.12.0', npm: '>=9.6.5', pnpm: '>=7.1.0'}
@@ -2958,9 +2959,6 @@ packages:
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
-
-  base-64@1.0.0:
-    resolution: {integrity: sha512-kwDPIFCGx0NZHog36dj+tHiwP4QMzsZ3AgMViUBKI0+V5n4U0ufTCUMhnQ04diaRI8EX/QcPfql7zlhZ7j4zgg==}
 
   base64-js@0.0.8:
     resolution: {integrity: sha512-3XSA2cR/h/73EzlXXdU6YNycmYI7+kicTxks4eJg2g39biHR84slg2+des+p7iHYhbRg/udIS4TD53WabcOUkw==}
@@ -3017,9 +3015,6 @@ packages:
 
   caniuse-lite@1.0.30001797:
     resolution: {integrity: sha512-l8xKG+gwAIExZGl9FrF7KUwuOmk6wbEPC9Xoy/RtnWv1XG0Q4LFlagaLpUv3Kiza3W/wm27zy0yWJEieYKAP6w==}
-
-  canvaskit-wasm@0.41.1:
-    resolution: {integrity: sha512-gO2rNMIE0lOQ8MaarM4qNeq2zZAEknAObKP2XAKidMSAY8P5sURGdFkrx1TSdHuBFqTf5w35JqjuUzjibqkD5g==}
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -3182,10 +3177,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  deterministic-object-hash@2.0.2:
-    resolution: {integrity: sha512-KxektNH63SrbfUyDiwXqRb1rLwKt33AmMv+5Nhsw1kqZ13SJBRTgZHtGbE+hH3a1mVW1cz+4pqSWVPAtLVXTzQ==}
-    engines: {node: '>=18'}
 
   devalue@5.9.0:
     resolution: {integrity: sha512-RWrqdArjvPbsATEhOPUo6Wndc/iWnkWKlhIrdlF3zMMYo/c3CVtoaVAyLtWxz5h8nSlkHzxnzV2uLydPXmtF+A==}
@@ -7709,8 +7700,6 @@ snapshots:
 
   '@vscode/l10n@0.0.18': {}
 
-  '@webgpu/types@0.1.21': {}
-
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
       acorn: 8.16.0
@@ -7791,13 +7780,6 @@ snapshots:
       pathe: 2.0.3
 
   astring@1.9.0: {}
-
-  astro-og-canvas@0.13.0(astro@7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)):
-    dependencies:
-      astro: 7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0)
-      canvaskit-wasm: 0.41.1
-      deterministic-object-hash: 2.0.2
-      entities: 8.0.0
 
   astro@7.3.1(@astrojs/markdown-remark@7.3.0)(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(@types/node@20.19.41)(jiti@2.7.0)(tsx@4.22.3)(yaml@2.9.0):
     dependencies:
@@ -7897,8 +7879,6 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  base-64@1.0.0: {}
-
   base64-js@0.0.8: {}
 
   baseline-browser-mapping@2.10.34: {}
@@ -7948,10 +7928,6 @@ snapshots:
   camelize@1.0.1: {}
 
   caniuse-lite@1.0.30001797: {}
-
-  canvaskit-wasm@0.41.1:
-    dependencies:
-      '@webgpu/types': 0.1.21
 
   ccount@2.0.1: {}
 
@@ -8085,10 +8061,6 @@ snapshots:
   detect-indent@6.1.0: {}
 
   detect-libc@2.1.2: {}
-
-  deterministic-object-hash@2.0.2:
-    dependencies:
-      base-64: 1.0.0
 
   devalue@5.9.0: {}
 

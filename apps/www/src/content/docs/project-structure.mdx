@@ -49,6 +49,8 @@ A scaffolded Nimbus project is a regular Astro project. Everything visible lives
 - **`pnpm-workspace.yaml`** — pnpm only, for its dependency build-script settings. Yarn sites get `.yarnrc.yml` instead.
 - **`wrangler.jsonc`** — only when you deploy to Cloudflare.
 
+A site with an API reference also has its spec at `src/api/`, its route at `src/pages/api/[...slug].astro`, and the reference components in `src/components/ui/`, recorded in `nimbus.json` like components from `nimbus-docs add`. A site that is only the reference has no `src/content/docs/`, and its route is `src/pages/[...slug].astro`. See [API reference](/api-reference/) to configure it.
+
 ## `nimbus.json` — the provenance record
 
 Alongside your files the scaffolder writes a small, CLI-managed **`nimbus.json`**. It records:

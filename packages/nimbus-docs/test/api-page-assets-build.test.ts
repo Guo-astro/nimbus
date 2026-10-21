@@ -708,3 +708,108 @@ test(
     await assertNavLists(request);
   },
 );
+
+/** An API-only site whose route at src/pages/[...slug].astro serves it at `/`, on request. */
+async function rootFixture(t: TestContext) {
+  const { root, options } = await fixture(t, true);
+  for (const name of ["src/pages", "src/content"])
+    await rm(path.join(root, name), { recursive: true, force: true });
+  const write = async (name: string, contents: string) => {
+    await mkdir(path.dirname(path.join(root, name)), { recursive: true });
+    await writeFile(path.join(root, name), contents);
+  };
+  await write(
+    "src/content.config.ts",
+    `import {defineCollection} from "astro:content";
+import {apiCollection} from ${JSON.stringify(pathToFileURL(path.join(SRC, "content.ts")).href)};
+export const collections={api:defineCollection(apiCollection())};`,
+  );
+  await write(
+    "src/pages/[...slug].astro",
+    `---
+import {getApiRoute} from "@cloudflare/nimbus-docs/runtime";
+const result=await getApiRoute(Astro,"api");if(result instanceof Response)return result;
+---
+<html><body><h1>{result.page.title}</h1><a class="md" href={result.page.markdownHref}>md</a></body></html>`,
+  );
+  await write(
+    "src/pages/[...slug]/index.md.ts",
+    'import {markdownRoute} from "@cloudflare/nimbus-docs/agent-endpoints";export const {GET}=markdownRoute();',
+  );
+  await write(
+    "src/pages/llms.txt.ts",
+    'import {llmsRoute} from "@cloudflare/nimbus-docs/agent-endpoints";export const {GET}=llmsRoute();',
+  );
+  const integration = nimbus(
+    {
+      site: "https://example.test",
+      title: "Root API",
+      search: false,
+      rendering: { default: "build", collections: { api: "request" } },
+      api: [
+        {
+          collection: "api",
+          versions: [
+            { version: "v2", spec: "./specs/v2.json", default: true },
+            { version: "v1", spec: "./specs/v1.json" },
+          ],
+        },
+      ],
+    },
+    { admonitions: false, sitemap: true, validateMdx: false },
+  );
+  return { root, options: { ...options, base: "/", integrations: [integration] } };
+}
+
+async function assertRootRequests(request: (path: string) => Promise<Response>) {
+  const home = await request("/");
+  assert.equal(home.status, 200);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /class="md" href="\/index\.md"/);
+  const operation = await request("/list-pets/");
+  assert.equal(operation.status, 200);
+  assert.match(await operation.text(), /List pets/);
+  assert.equal((await request("/v1/legacy-report/")).status, 200);
+  assert.equal((await request("/api/list-pets/")).status, 404);
+  const homeMarkdown = await request("/index.md");
+  assert.equal(homeMarkdown.status, 200);
+  assert.match(await homeMarkdown.text(), /Source: https:\/\/example\.test\/index\.md/);
+  const markdown = await request("/list-pets/index.md");
+  assert.equal(markdown.status, 200);
+  assert.match(await markdown.text(), /List pets/);
+  const llms = await request("/llms.txt");
+  assert.equal(llms.status, 200);
+  const llmsText = await llms.text();
+  assert.match(llmsText, /https:\/\/example\.test\/list-pets\//);
+  assert.ok(!llmsText.includes("/api/"), llmsText);
+  assert.ok(!llmsText.includes("legacy-report"), llmsText);
+}
+
+test(
+  "actual Workers adapter: an API served at the site root on request serves its Markdown and llms.txt in local workerd",
+  {
+    skip: !adapterRoot || process.env.NIMBUS_TEST_WORKER_ASSETS !== "1",
+    timeout: 180_000,
+  },
+  async (t) => {
+    let worker: { stop(): Promise<void>; fetch(path: string, options: unknown): Promise<Response> } | undefined;
+    t.after(() => worker?.stop());
+    const { root, options } = await rootFixture(t);
+    await build(options as never);
+    const configPath = (await files(path.join(root, "dist"))).find((file) => /wrangler\.json$/.test(file))!;
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    const wrangler = await import(
+      pathToFileURL(path.join(adapterRoot!, "node_modules/wrangler/wrangler-dist/cli.js")).href
+    );
+    worker = await wrangler.unstable_dev(path.resolve(path.dirname(configPath), config.main), {
+      config: configPath,
+      local: true,
+      bundle: false,
+      ip: "127.0.0.1",
+      port: 0,
+      logLevel: "error",
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true },
+    });
+    await assertRootRequests((pathname) => worker!.fetch(pathname, { redirect: "manual" }));
+  },
+);

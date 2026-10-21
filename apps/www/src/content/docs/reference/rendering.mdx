@@ -18,7 +18,7 @@ Every collection's pages are prerendered at build time unless you say otherwise.
 | `"build"` (default) | Once, during `astro build` | The site is static, or builds are fast enough |
 | `"request"` | When a reader requests them | Builds are slow, or you want [Markdown at page URLs](/ai/markdown-negotiation) or a [remote MCP server](/ai/remote-mcp) |
 
-The policy covers the routes Nimbus serves collections from. Your own files under `src/pages/` keep their own `prerender` setting.
+The policy covers the routes Nimbus serves collections from, and the Markdown and `llms.txt` routes that serve them. Your own files under `src/pages/` keep their own `prerender` setting.
 
 ## Prerequisites
 
@@ -56,7 +56,7 @@ The policy covers the routes Nimbus serves collections from. Your own files unde
     npm run build
     ```
 
-    Astro logs `getStaticPaths() ignored in dynamic page` for each request-rendered route. That's expected: leave `getStaticPaths` and `prerender` in the route files, and Nimbus switches each route to the mode the policy sets.
+    Nimbus renders each route in the mode the policy sets, and warns when a route file says otherwise. Run `nimbus-docs check --fix` to update the files: it sets each route's `prerender` line, keeps `getStaticPaths` on built routes only, and names the collection in a collection route's page helper, such as `getCollectionPage(Astro, "sdk")`. `add adapter-*` and the scaffolder update them for you.
   </Step>
 </Steps>
 
@@ -81,7 +81,8 @@ Request rendering changes when HTML is made, not what's discoverable. The sitema
 ## Rules the build enforces
 
 - Every name in `rendering.collections` must be a registered collection with its own catch-all route. An unknown name fails the build.
-- `default` covers `docs`, version collections and API collections. Once `rendering` is set, any other page collection with its own catch-all route, such as a `blog`, must be listed in `collections`.
+- `default` covers `docs`, version collections, API collections, and the site-wide `llms.txt` and `llms-full.txt`; each collection's Markdown and section `llms.txt` routes follow that collection's mode. Without `rendering`, every route Nimbus manages is built ahead of time, whatever its `prerender` line says. Once `rendering` is set, any other page collection with its own catch-all route, such as a `blog`, must be listed in `collections`.
+- A built route with a dynamic segment, such as `[...slug].astro`, must export `getStaticPaths`. Astro can't build it otherwise, so the build fails and names the file.
 - Generated API references render on request only on Cloudflare. On other adapters, keep API collections set to `"build"`. See [Large APIs](/api-reference/large-apis#render-on-request) for large APIs and many versions.
 
 ## Next steps

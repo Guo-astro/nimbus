@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { after, afterEach, before, test } from "node:test";
 
-import { agentSites, siteApp, srcModule } from "./fixtures/agent-site.ts";
+import { agentSites, REQUEST_DOCS_PAGE, siteApp, srcModule } from "./fixtures/agent-site.ts";
 
 const LIMIT = 1500;
 before(() => {
@@ -115,7 +115,7 @@ test("the old [section] llms route splits the same way, linking the site llms.tx
 });
 
 test("on request, every split file is served and no staged copy is over the limit", async () => {
-  const site = await sites.buildSite({ ...CONTENT, ...routes(false) }, { server: true });
+  const site = await sites.buildSite({ ...CONTENT, ...REQUEST_DOCS_PAGE, ...routes(false) }, { server: true, rendering: { default: "request" } });
   const app = await siteApp(site);
   const files = await crawl(async (url) => {
     const response = await app.render(new Request(`https://example.test/docs/${url}`));

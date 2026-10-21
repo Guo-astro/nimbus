@@ -86,7 +86,7 @@ function pageUrl(
   const base =
     target.versionMode === "query" ? target.familyPath : target.mountPath;
   const path = slug === "" ? base : `${base}/${slug}`;
-  return `${path}${apiVersionQuery(target)}`;
+  return `${path || "/"}${apiVersionQuery(target)}`;
 }
 
 /** Version-neutral build artifact; never embedded in request indexes. */

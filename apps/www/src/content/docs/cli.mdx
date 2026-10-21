@@ -223,7 +223,7 @@ For a clean update, addition or removal, the CLI can apply the change for one fi
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ui/aside/Aside.astro --apply" />
 
-`--apply` works one file at a time and never merges: it rechecks that the file is still unedited, then writes. It records the tag in `nimbus.json` (`templatesTagByFile`), so later diffs start from there. Review with `git diff` afterward.
+`--apply` works one file at a time and never merges: it rechecks that the file is still unedited, then writes. It records the tag in `nimbus.json` (`templatesTagByFile`), so later diffs start from there. Review with `git diff` afterward. Starter route files are compared in your site's rendering mode, so a route updated by `check --fix` doesn't show as your change.
 
 `--to <templates-vX.Y.Z>` compares against a specific tag, and `--template-dir <path>` against a local checkout.
 
@@ -236,6 +236,8 @@ pnpm nimbus-docs check
 ```
 
 Pass `--env`, `--structure`, `--migrations`, `--lint`, or `--types` to run only those categories. `--fix` applies the fixes it can make safely and asks before any fix that needs a value or installs a dependency. Without a terminal it skips the questions and installs only with `--yes`. `--quiet` shows errors only.
+
+`check` reports each route file Nimbus manages whose mode disagrees with [`rendering`](/reference/rendering) (`nimbus/route-file-mode`). Without `rendering`, that's building each of them ahead of time. `--fix` updates the file and lists every file it wrote. For a route it can't fully edit, it makes the changes it can and lists what's left.
 
 `--types` type-checks your `.ts` and `.tsx` files with your own TypeScript. It doesn't read `.astro` files; run `astro check` for those.
 

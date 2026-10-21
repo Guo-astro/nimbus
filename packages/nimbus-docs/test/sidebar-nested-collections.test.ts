@@ -429,7 +429,7 @@ describe("the rest of navigation follows the tree", () => {
     const scoped = scopeToCurrentSection(tree, setup);
     assert.ok(find(scoped, "dbt"));
     const isolated = isolateToBoundary(scoped, setup, ["integrations/connectors/dbt"]);
-    assert.deepEqual(isolated.map((i) => i.label), ["Setup", "Usage"]);
+    assert.deepEqual(isolated.map((i) => i.label), ["dbt", "Setup", "Usage"]);
   });
 
   test("overview-leaf, overviewLabel and defaultCollapsed", () => {

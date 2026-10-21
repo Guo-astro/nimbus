@@ -602,8 +602,7 @@ function resolveConfigItems(
             groupPrefix = prefix;
             autoRouteKey = toDocumentHref(prefix);
             folderKey = toRouteKey(prefix);
-            const insideFolder = depth(folderKey) >= 2;
-            if (insideFolder) landing = { entries: collectionEntries, prefix };
+            landing = { entries: collectionEntries, prefix };
           }
         }
       } else {
@@ -927,6 +926,7 @@ export function isolateToBoundary(
   items: SidebarItem[],
   currentPath: string,
   boundaries: string[],
+  overviewLabel?: string,
 ): SidebarItem[] {
   const currentKey = toRouteKey(currentPath);
   const segs = currentKey.split("/").filter(Boolean);
@@ -941,10 +941,34 @@ export function isolateToBoundary(
     // means `/a/b` can't collide with `/a/b-c`.
     const prefixKey = toRouteKey("/" + segs.slice(0, globSegs.length).join("/"));
     const group = findBoundaryGroup(items, prefixKey, currentKey);
-    if (group) return group.children;
+    if (group) return withLandingFirst(group, overviewLabel);
   }
 
   return items;
+}
+
+/**
+ * The isolated group's children, led by its landing: the rail replaces the
+ * group, so its heading link would otherwise vanish. Same eligibility as the
+ * overview-leaf lift; `overviewLabel` is set in that mode, which can no
+ * longer see the group.
+ */
+function withLandingFirst(group: SidebarGroupItem, overviewLabel: string | undefined): SidebarItem[] {
+  const href = group.indexHref;
+  if (!href || group.indexIsExternal || group._indexNeverActive) return group.children;
+  const key = toRouteKey(href);
+  if (group.children.some((child) => child.type === "link" && toRouteKey(child.href) === key)) {
+    return group.children;
+  }
+  const landing: SidebarLinkItem = {
+    type: "link",
+    label: overviewLabel === undefined ? group.label : (group._indexLabel ?? overviewLabel),
+    href,
+    isCurrent: group.indexIsCurrent === true,
+    order: Number.NEGATIVE_INFINITY,
+    ...(group.badge ? { badge: group.badge } : {}),
+  };
+  return [landing, ...group.children];
 }
 
 /**
@@ -1512,9 +1536,9 @@ function processHideChildren(items: SidebarItem[], entries: CollectionEntry[]): 
  *
  * The framework uses this to figure out which collections to load for
  * the sidebar — there's no separate `collections: string[]` config
- * field. The primary collection (`docs`) is always included by the
- * caller; this helper returns only the *extra* names referenced by
- * sidebar items.
+ * field. The caller adds the primary collection (`docs`) unless the site
+ * provably has none; this helper returns only the *extra* names referenced
+ * by sidebar items.
  */
 export function collectSidebarCollectionRefs(
   items: ConfigItem[] | undefined,
@@ -1533,6 +1557,16 @@ export function collectSidebarCollectionRefs(
   }
   walk(items);
   return [...found];
+}
+
+/** Whether the config reads the primary collection: a page slug or a `directory` autogenerate, at any depth. */
+export function sidebarReadsPrimary(items: ConfigItem[] | undefined): boolean {
+  return (items ?? []).some(
+    (item) =>
+      typeof item === "string" ||
+      ("autogenerate" in item && !("collection" in item.autogenerate)) ||
+      ("items" in item && sidebarReadsPrimary(item.items)),
+  );
 }
 
 /**

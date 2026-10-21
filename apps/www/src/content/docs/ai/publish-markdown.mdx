@@ -33,7 +33,6 @@ Create the clean Markdown version:
 ```ts title="src/pages/[...slug]/index.md.ts"
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = markdownRoute();
 ```
 
@@ -42,13 +41,12 @@ Create the MDX source version:
 ```ts title="src/pages/[...slug]/index.mdx.ts"
 import { markdownSourceRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = markdownSourceRoute();
 ```
 
 These two routes serve every collection, including docs versions, a blog at `/blog`, and API references. API pages have a `.md` version but no `.mdx` source. Pages in hidden versions have neither. Collections you add later need no new route files. To customize the output for some or all pages, see [Override a default](/ai/override-markdown).
 
-The `prerender = true` lines are the static default. With a [`rendering` policy](/reference/rendering), a page's Markdown follows its collection's rendering mode automatically: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files.
+On a static site these routes build ahead of time. With a [`rendering` policy](/reference/rendering), a page's Markdown follows its collection's rendering mode automatically: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files. Run `nimbus-docs check --fix` after changing the policy to write each route's mode into the file.
 
 ### 2. Add the site index
 
@@ -57,7 +55,6 @@ Create the site-wide discovery index:
 ```ts title="src/pages/llms.txt.ts"
 import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET } = llmsRoute();
 ```
 
@@ -68,7 +65,6 @@ Create the file containing all discoverable documentation:
 ```ts title="src/pages/llms-full.txt.ts"
 import { llmsFullRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
@@ -89,7 +85,6 @@ Create the route for paths such as `/writing/llms.txt` and `/reference/functions
 ```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
 

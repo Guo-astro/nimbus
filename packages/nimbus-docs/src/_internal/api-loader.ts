@@ -55,19 +55,20 @@ export {
 } from "./api/resolve-versions.js";
 export { prepareApiNav, preparedApiVersion } from "./api/prepared.js";
 
-/** Stage the sidebar filter's list for one bundled API version. */
+/** Stage the page list for one bundled API version. */
 export async function stageApiModelNavList(
   root: string,
   collection: string,
   version: string | null,
   model: ApiModel,
+  onDemandSidebar: boolean,
 ): Promise<void> {
   const list = apiNavList(
     getApiNav(model),
     operationPaths(unwrapModel(model)),
   );
   await stageApiNavList(root, list);
-  recordApiNavList(root, collection, version, list.filename);
+  recordApiNavList(root, collection, version, list.filename, onDemandSidebar);
 }
 
 /** Where a projected page's navigation is bounded. Omitted = the full tree. */

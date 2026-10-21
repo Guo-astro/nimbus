@@ -224,6 +224,19 @@ test("without a terminal, flags that answer every prompt need no --yes", () => {
   }
 });
 
+test("without a terminal, an API-only site needs no --content", () => {
+  const { cwd, output } = scaffoldWithoutTerminal([
+    "site", "--template", "api", "--package-manager", "npm", "--no-git", "--deploy", "other",
+    "--skip-install", "--template-dir", "missing-templates",
+  ]);
+  try {
+    assert.doesNotMatch(output, /No terminal/);
+    assert.match(output, /missing-templates/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("unknown --content and --package-manager values are rejected before scaffolding", () => {
   for (const [flag, value, expected] of [
     ["--content", "Starter", /Unknown content "Starter"\. Expected one of: starter, empty\./],

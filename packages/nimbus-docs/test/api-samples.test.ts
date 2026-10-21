@@ -333,6 +333,35 @@ describe("resilience — best-effort, never fatal", () => {
     assert.match(basicCurl.source, /Authorization: Basic <credentials>/);
   });
 
+  test("apiKey-in-cookie is sent as a cookie, quoted for the shell", async () => {
+    const tools = await loadSampleTools();
+    assert.ok(tools);
+
+    const samples = buildOperationSamples(tools, {
+      method: "get",
+      path: "/x",
+      auth: [[{ scheme: "session", scopes: [] }]],
+      securitySchemes: { session: { type: "apiKey", in: "cookie", name: "session" } },
+      params: [],
+    });
+    assert.deepEqual(
+      samples.map(({ lang, source }) => [lang, source]),
+      [
+        ["curl", "curl --request GET \\\n  --url '<base-url>/x' \\\n  --cookie 'session=<session>'"],
+        [
+          "typescript",
+          "const url = '<base-url>/x';\nconst options = {method: 'GET', headers: {cookie: 'session=<session>'}};\n\n" +
+            "fetch(url, options)\n  .then(res => res.json())\n  .then(json => console.log(json))\n  .catch(err => console.error(err));",
+        ],
+        [
+          "python",
+          'import requests\n\nurl = "<base-url>/x"\n\nheaders = {"cookie": "session=<session>"}\n\n' +
+            "response = requests.get(url, headers=headers)\n\nprint(response.text)",
+        ],
+      ],
+    );
+  });
+
   test("an empty security alternative wins: OR-of-AND means no credentials", async () => {
     const tools = await loadSampleTools();
     assert.ok(tools, "sample tools resolve — assertion is meaningful, not skipped");

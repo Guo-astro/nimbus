@@ -25,8 +25,14 @@ The scaffolder asks:
   <Step title="Directory">
     Where to create the project; press Enter for `my-docs`. Pass it as the first argument, such as `my-docs`, or `.` for the current folder. The folder must be new, empty, or hold only `.git`, such as a freshly cloned repository.
   </Step>
+  <Step title="What the site includes">
+    **Docs**, hand-written pages (the default); **Docs and an API reference**, with the docs at `/` and the reference, generated from an OpenAPI spec, at `/api`; or **API reference**, a site that is only the reference, at `/`. Flags: `--api` adds the reference, `--template api` makes it the whole site.
+  </Step>
+  <Step title="OpenAPI spec">
+    Asked when the site has an API reference: the path to your OpenAPI 3.x spec (`.yaml`, `.yml` or `.json`), or Enter for a sample to replace later. Flag: `--api <path>`.
+  </Step>
   <Step title="Starter content">
-    **Getting started guide + example pages**, or **Empty**, just the shell for your own content. Flag: `--content starter|empty`.
+    **Getting started guide + example pages**, or **Empty**, just the shell for your own content. A site that is only an API reference skips it and refuses the flag. Flag: `--content starter|empty`.
   </Step>
   <Step title="Package manager">
     npm, pnpm, yarn, or bun; the default is the one that runs the scaffolder. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
@@ -46,13 +52,17 @@ Pass `--yes` to accept every default, or `--help` to list every flag.
 
 Without a terminal, such as in CI or an agent, pass `--yes` or a flag for every question; otherwise the scaffolder exits and lists the flags it still needs. Unknown or conflicting flags stop it before it writes anything.
 
-If installing dependencies fails, the scaffolder keeps the project, prints the commands that finish the setup, and exits with status 1. To scaffold from a local template directory instead of downloading one, such as when working on templates offline, pass `--template-dir <path>`.
+If installing dependencies fails, the scaffolder keeps the project, prints the commands that finish the setup, and exits with status 1. To scaffold from a local folder instead of downloading the template, such as when working on templates offline, pass `--template-dir <path>`.
 
 With npm, put `--` before the arguments, or npm keeps the flags for itself:
 
 ```sh
 npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
+npm create @cloudflare/nimbus-docs@latest -- my-docs --api ./openapi.yaml   # docs + API reference
+npm create @cloudflare/nimbus-docs@latest -- my-docs --template api         # only an API reference
 ```
+
+Put the directory before `--api`: a value after the flag is read as the spec.
 
 
 ## What lands in your repo

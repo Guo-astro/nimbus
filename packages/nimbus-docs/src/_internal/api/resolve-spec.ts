@@ -39,8 +39,8 @@ export async function resolveSpecSource(
   rootDir: string,
 ): Promise<SpecSource> {
   const label = entry.label ?? entry.collection;
-  const mountPath = entry.mountPath ? { mountPath: entry.mountPath } : {};
-  const urlBase = entry.urlBasePath ? { urlBasePath: entry.urlBasePath } : {};
+  const mountPath = entry.mountPath !== undefined ? { mountPath: entry.mountPath } : {};
+  const urlBase = entry.urlBasePath !== undefined ? { urlBasePath: entry.urlBasePath } : {};
   const urlQuery = entry.urlQuery ? { urlQuery: entry.urlQuery } : {};
   const strict = entry.requireOperationId ? { requireOperationId: true as const } : {};
   const routes = entry.routes ? { routes: entry.routes } : {};

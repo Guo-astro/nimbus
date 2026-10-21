@@ -206,7 +206,7 @@ export function pageUrl(
   const base =
     target.versionMode === "query" ? target.familyPath : target.mountPath;
   const path = slug === "" ? base : `${base}/${slug}`;
-  return `${toDocumentHref(path)}${apiVersionQuery(target)}`;
+  return `${toDocumentHref(path || "/")}${apiVersionQuery(target)}`;
 }
 
 /** The `?version=` suffix a non-default query-mode target's links carry. */

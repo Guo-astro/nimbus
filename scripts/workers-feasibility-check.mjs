@@ -1070,7 +1070,7 @@ export const getStaticPaths = getApiStaticPaths("qapi");
 
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
+const { page, nav, collection, version, coordinate, home } = result;
 ---
 
 <BaseLayout title={page.title} collection={collection} apiVersion={version ?? undefined} coordinate={coordinate} markdownUrl={page.markdownHref}>
@@ -1083,7 +1083,7 @@ const { page, nav, collection, version, coordinate } = result;
   <nav data-feasibility-picker-no-coordinate>
     <VersionSwitcher variant="sidebar" apiCollection={collection} apiVersion={version} />
   </nav>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 `);
   const contentConfig = join(site, "src/content.config.ts");
@@ -1289,6 +1289,10 @@ for (const component of [
   );
 }
 cpSync(FIXTURE, site, { recursive: true });
+// Builds switch `rendering` both ways, so dynamic routes keep getStaticPaths, as the fixture's page route does.
+for (const route of ["[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts"]) {
+  cpSync(join(STARTER, "pages", route), join(site, "src", "pages", route));
+}
 run("git", ["init", "--quiet"], { cwd: site });
 run("git", ["config", "user.name", "Nimbus Fixture"], { cwd: site });
 run("git", ["config", "user.email", "fixture@nimbus.test"], { cwd: site });

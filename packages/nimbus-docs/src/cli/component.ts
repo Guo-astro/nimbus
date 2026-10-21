@@ -447,7 +447,7 @@ export function starterBaseline(
   nimbus: NimbusJson | null,
   srcRoot: string,
   templateDir?: string,
-  resolveTree = (tag: string) => resolveTemplateTree({ variant: nimbus?.variant, tag, templateDir }),
+  resolveTree = (tag: string) => resolveTemplateTree({ variant: nimbus?.variant, tag, templateDir, site: nimbus?.site }),
 ): StarterBaseline | null {
   const recorded = nimbus?.templatesTag;
   if (!nimbus || !recorded) return null;

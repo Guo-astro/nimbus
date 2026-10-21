@@ -11,7 +11,16 @@ Nimbus currently supports OpenAPI 3.x. Nimbus turns a local OpenAPI document int
 
 The OpenAPI document remains the source of truth. You do not create one MDX file per operation or schema.
 
-To see a finished reference, open the [weather demo](https://weather.nimbus-docs.com/api/): a Nimbus site with a 105-endpoint API in three versions, rendered on request on Cloudflare Workers.
+To see a finished reference, open the [weather demo](https://demo.nimbus-docs.com/api/): a Nimbus site with a 105-endpoint API in three versions, rendered on request on Cloudflare Workers.
+
+## Start a new site with it
+
+The scaffolder can set the reference up for you: `--api` adds it beside the docs, at `/api`, and `--template api` makes it the whole site, at `/`. Pass your spec with `--api ./openapi.yaml`, or leave it out for a sample. See [Scaffolder options](/reference/scaffolder-options/).
+
+```sh
+npm create @cloudflare/nimbus-docs@latest -- my-docs --api ./openapi.yaml
+npm create @cloudflare/nimbus-docs@latest -- my-docs --template api
+```
 
 ## Install with the recipe
 
@@ -62,8 +71,7 @@ Point the `api` entry's `spec` at the generated document, `./src/api/openapi.yam
 | `src/api/openapi.yaml` | The API contract and documentation source. |
 | `astro.config.ts` | Declares the specification, versions, routes, and rendering policy in the Nimbus config. |
 | `src/content.config.ts` | Registers the generated entries as an Astro content collection. |
-| `src/pages/api/[...slug].astro` | Renders API HTML through the user-owned API layout. |
-| `src/pages/nimbus-api/home/api/` | Serves the [API home](/api-reference/large-apis#the-api-home)'s later parts and its filter's list of endpoints. |
+| `src/pages/api/[...slug].astro` | Renders API HTML through the user-owned API layout, including the [API home](/api-reference/large-apis#the-api-home)'s later parts. |
 | `src/pages/[...slug]/index.md.ts` | The starter's shared Markdown route. Serves an alternate Markdown version of every API page. |
 | `src/components/ui/api-*/` | Owns the reference's appearance and interaction design. |
 
@@ -135,11 +143,11 @@ pnpm build
 Confirm that:
 
 1. The build reports the number of indexed API pages.
-2. `/api` and one operation page render.
+2. The reference's home and one operation page render: `/api`, or `/` in a site that is only the reference.
 3. The same operation's `/index.md` route returns Markdown.
-4. `/api/llms.txt` lists the reference pages.
+4. The reference's `llms.txt` lists its pages: `/api/llms.txt`, or `/llms.txt` at the root.
 5. `/nimbus-api/coordinates.json` contains a known operation ID.
-6. A prose `api.ref:` link resolves to the expected route.
+6. In a site with docs, a prose `api.ref:` link resolves to the expected route.
 
 For request rendering, test the production Worker locally with Wrangler rather than relying only on Astro's development server.
 

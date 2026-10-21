@@ -25,6 +25,9 @@ import {
   parseContentCollections,
 } from "../_internal/parse-content-collections.js";
 import { readPageCollectionsFile } from "../_internal/page-collections.js";
+import { planRouteFiles } from "../_internal/route-files.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
+import { invocation } from "../cli/pm.js";
 import {
   missingApiCollectionMessage,
   nonApiCollectionMessage,
@@ -71,10 +74,16 @@ export async function checkStructure(
   const notes: Note[] = [];
 
   const config = checkConfigZod(findings, notes, parsed);
-  const { context: mountContext, collections, srcDir } = checkCollectionUrls(cwd, findings, parsed, srcDirOverride);
+  const { context: mountContext, collections, srcDir, built } = await checkCollectionUrls(
+    cwd,
+    findings,
+    notes,
+    parsed,
+    srcDirOverride,
+  );
   await checkApiCollections(cwd, findings, notes, parsed, config);
   checkSourceReferences(cwd, findings, parsed, config);
-  const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config, mountContext, srcDir);
+  const requestRendering = await checkRequestRendering(cwd, findings, notes, parsed, config, mountContext, srcDir, built);
   if (parsed.ok && config) {
     const feature = serverAdapterFeature({
       unbundledApi: !parsed.unresolved.includes("api") && !!config.api?.some((entry) => entry.bundle === false),
@@ -83,7 +92,8 @@ export async function checkStructure(
     });
     if (feature) checkServerAdapter(cwd, findings, notes, feature);
   }
-  await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir);
+  checkRouteFiles(cwd, findings, notes, parsed, srcDirOverride);
+  await checkDuplicateRoutes(cwd, findings, snapshots, mountContext, parsed, srcDir, built);
   await checkMdxComponents(cwd, findings, notes, parsed);
   checkCloudflareTrailingSlash(cwd, findings);
 
@@ -267,13 +277,17 @@ function skippedNote(code: string, reason: string): Note {
   return { code, reason: `${reason} A build enforces them.`, requiresBuild: true };
 }
 
-/** The setup errors the build reports for collection routes, and the mount context they leave. */
-function checkCollectionUrls(
+/**
+ * The setup errors the build reports for collection routes, the mount context
+ * they leave, and the last build's page collections that still exist.
+ */
+async function checkCollectionUrls(
   cwd: string,
   findings: CheckFinding[],
+  notes: Note[],
   parsed: ConfigParseResult,
   srcDirOverride: string | undefined,
-): { context: MountContext; collections: CollectionUrl[]; srcDir: string } {
+): Promise<{ context: MountContext; collections: CollectionUrl[]; srcDir: string; built: string[] | null }> {
   const versions =
     parsed.ok && isVersionsObject(parsed.config.versions)
       ? { others: asStringArray(parsed.config.versions.others) }
@@ -290,7 +304,7 @@ function checkCollectionUrls(
         )
       : [];
   const { found, unread } = findCollectionRoutes(srcDir, cwd);
-  const { mounts, errors, warnings } = decideCollectionMounts(found, versions, apiCollections);
+  const { mounts, errors, warnings } = decideCollectionMounts(found, versions);
   for (const error of errors)
     findings.push({
       scope: "structure",
@@ -308,7 +322,14 @@ function checkCollectionUrls(
       fixable: false,
     });
   const context = { versions, routes: mounts };
-  const built = readPageCollectionsFile(cwd)?.collections;
+  const recorded = readPageCollectionsFile(cwd)?.collections;
+  const built = recorded
+    ? await liveCollections(recorded, srcDir, notes, [
+        ...(versions?.others ?? []).map((version) => `docs-${version}`),
+        ...apiCollections,
+        ...mounts.keys(),
+      ])
+    : null;
   const hasDocs = built ? built.includes("docs") : mounts.has("docs") || existsSync(path.join(srcDir, "content", "docs"));
   const names = [
     ...new Set([
@@ -333,7 +354,29 @@ function checkCollectionUrls(
       moved: url !== fallback,
     };
   });
-  return { context, collections, srcDir };
+  return { context, collections, srcDir, built };
+}
+
+/**
+ * Drop the recorded names that are no longer declared, served by a route, or
+ * a version or API collection. When `content.config.ts` can't be fully read,
+ * every name stays.
+ */
+async function liveCollections(
+  recorded: string[],
+  srcDir: string,
+  notes: Note[],
+  known: string[],
+): Promise<string[]> {
+  const declared = await parseContentCollections(path.join(srcDir, "content.config.ts"));
+  if (declared === null || !declared.complete) return recorded;
+  const live = new Set([...known, ...declared.names]);
+  for (const name of recorded.filter((name) => !live.has(name)))
+    notes.push({
+      code: "nimbus/page-collections-stale",
+      reason: `\`${name}\` is in the last build's collection list but no longer declared; run a build to refresh.`,
+    });
+  return recorded.filter((name) => live.has(name));
 }
 
 async function checkRequestRendering(
@@ -344,6 +387,7 @@ async function checkRequestRendering(
   config: NimbusConfig | null,
   mountContext: MountContext,
   srcDir: string,
+  pageCollections: string[] | null,
 ): Promise<boolean> {
   if (!parsed.ok || config === null) return false;
   if (parsed.unresolved.includes("rendering") || parsed.unresolved.includes("...spread")) {
@@ -382,12 +426,19 @@ async function checkRequestRendering(
   // The build's page-collection list, when the last build wrote one. With
   // it, `check` reports the same post-sync rendering errors the build does;
   // without it, collections it can't confirm stay unchecked.
-  const pageCollections = readPageCollectionsFile(cwd)?.collections ?? null;
   if (pageCollections !== null) {
     const pageSet = new Set(pageCollections);
-    const unknown = Object.keys(config.rendering.collections ?? {}).filter(
+    const unlisted = Object.keys(config.rendering.collections ?? {}).filter(
       (collection) => !pageSet.has(collection),
     );
+    // One with a route is likely added since the last build, which checks it.
+    const unknown = unlisted.filter((collection) => !canonicalCollections.includes(collection));
+    const unbuilt = unlisted.filter((collection) => canonicalCollections.includes(collection));
+    if (unbuilt.length > 0)
+      notes.push(skippedNote(
+        "nimbus/page-collections-unconfirmed",
+        `${unbuilt.map((collection) => `"${collection}"`).join(", ")} ${unbuilt.length === 1 ? "isn't" : "aren't"} in the last build's page collections yet; the next build checks ${unbuilt.length === 1 ? "it" : "them"}.`,
+      ));
     for (const collection of unknown) {
       findings.push({
         scope: "structure",
@@ -438,6 +489,8 @@ async function checkRequestRendering(
     );
     hasRequestRoute = Object.values(policy.collections).includes("request");
   } catch (err) {
+    // A collection route error already says why a collection has no route.
+    if (findings.some((f) => f.severity === "error" && f.code.startsWith("nimbus/collection-"))) return false;
     findings.push({
       scope: "structure",
       code: "nimbus/rendering-policy-invalid",
@@ -459,6 +512,38 @@ async function checkRequestRendering(
       "`nimbus-docs check` doesn't verify request-rendered pages, even after a build; a passing production build is the gate for them",
   });
   return true;
+}
+
+/** Each managed route file that doesn't say what `rendering` gives it; `--fix` rewrites it. */
+function checkRouteFiles(
+  cwd: string,
+  findings: CheckFinding[],
+  notes: Note[],
+  parsed: ConfigParseResult,
+  srcDirOverride: string | undefined,
+): void {
+  if (!parsed.ok) return;
+  const plan = planRouteFiles(cwd, srcDirOverride);
+  if (!plan.ok) {
+    notes.push(skippedNote("nimbus/route-files-skipped", `Route file modes weren't checked: ${plan.reason}.`));
+    return;
+  }
+  if (!plan.configured && plan.files.length > 0)
+    findings.push({ scope: "structure", code: "nimbus/rendering-default", severity: "info", message: DEFAULT_RENDERING_NOTE, fixable: false });
+  for (const { file, mismatch, problem, edit, writes } of plan.files) {
+    const manual = edit.status === "manual";
+    findings.push({
+      scope: "structure",
+      code: "nimbus/route-file-mode",
+      severity: mismatch.kind === "missing-paths" ? "error" : "warn",
+      file,
+      message: `${file}: ${problem}.`,
+      fixable: writes,
+      fix: manual
+        ? { kind: writes ? "route-file" : "suggestion", path: file, suggestion: edit.todo }
+        : { kind: "route-file", path: file, suggestion: `run \`${invocation("check --fix", cwd)}\` to update it` },
+    });
+  }
 }
 
 function checkConfigZod(
@@ -552,6 +637,7 @@ async function checkDuplicateRoutes(
   mountContext: MountContext,
   parsed: ConfigParseResult,
   srcDir: string,
+  built: string[] | null,
 ): Promise<void> {
   const contentRoot = path.join(srcDir, "content");
 
@@ -584,7 +670,7 @@ async function checkDuplicateRoutes(
   // since that build is checked too.
   const pageCollections = [
     ...new Set([
-      ...(readPageCollectionsFile(cwd)?.collections ?? ["docs"]),
+      ...(built ?? ["docs"]),
       ...(versions?.others ?? []).map((version) => `docs-${version}`),
       ...apiCollections,
       ...[...(placed ?? [])]
@@ -629,9 +715,8 @@ async function checkDuplicateRoutes(
   // The build's post-sync errors: a page under another collection's URL. A
   // collection a route helper serves is a page collection; `docs` is one
   // only when something confirms it (a site can serve another at the root).
-  const builtList = readPageCollectionsFile(cwd)?.collections;
-  const docsConfirmed = builtList
-    ? builtList.includes("docs")
+  const docsConfirmed = built
+    ? built.includes("docs")
     : placed?.has("docs") === true || existsSync(path.join(contentRoot, "docs"));
   const routedCollections = [...new Set([...pageCollections, ...mountContext.routes.keys()])].filter(
     (name) => name !== "docs" || docsConfirmed,

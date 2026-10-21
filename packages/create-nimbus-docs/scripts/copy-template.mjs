@@ -34,6 +34,7 @@
  * small.
  */
 
+import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +58,8 @@ const EXCLUDED_DIRS = new Set([
   // Templates dir holds per-variant content overrides for the generator.
   // It is internal to the source tree and never ships in a template.
   "templates",
+  // Site parts ship in `.nimbus-parts/` instead (writeSiteParts).
+  "parts",
 ]);
 
 const REGISTRY_ONLY_UI = new Set(STARTER_MANIFEST.registryOnlyComponents);
@@ -269,6 +272,169 @@ function assertTrackedRootFiles(targetDir, variantKey) {
   }
 }
 
+const SITE_PARTS_DIR = ".nimbus-parts";
+const SIDEBAR_BLOCK = `  // The home page leads the sidebar; every other page joins it automatically.
+  sidebar: {
+    items: ["index", { autogenerate: { collection: "docs" } }],
+  },
+`;
+const API_ENTRY = `  // The API reference, served where its route file is (src/pages/api/ → /api).
+  // See https://nimbus-docs.com/api-reference/
+  api: [
+    {
+      collection: "api",
+      spec: "./src/api/openapi.yaml",
+      routes: { convention: "resource-action-v2" },
+    },
+  ],
+`;
+
+/** \`nimbus-docs add\`'s registry hash: sorted, length-delimited path and content. */
+function registryHash(files) {
+  const hash = createHash("sha256");
+  for (const f of [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
+    hash.update(`${f.path.length}:${f.path}${f.content.length}:${f.content}`);
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
+
+function listFiles(dir, prefix = "") {
+  return readdirSync(join(dir, prefix), { withFileTypes: true })
+    .filter((entry) => entry.name !== ".DS_Store")
+    .flatMap((entry) => {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      return entry.isDirectory() ? listFiles(dir, rel) : [rel];
+    })
+    .sort();
+}
+
+/** `text` with `from` replaced, failing when the starter no longer has `from`. */
+function swap(text, from, to) {
+  if (!text.includes(from)) throw new Error(`[copy-template] AGENT.md no longer has the text the API part edits:\n${from}`);
+  return text.replace(from, to);
+}
+
+/**
+ * The agent guide for each shape of site with an API reference, derived from
+ * the starter's: where the spec, the route and the reference are, and, in a
+ * site that is only the reference, without the docs-writing sections.
+ */
+function agentGuides(guide) {
+  const apiSection = (mount, route, docs) => `## API reference
+
+The reference at \`${mount}\` is generated from \`src/api/openapi.yaml\`, an OpenAPI 3.x spec, through the \`api\` entry in \`astro.config.ts\` and the route \`${route}\`. Its pages, Markdown versions, search entries and \`llms.txt\` follow the spec: change the spec, not the pages.
+
+- Replace the spec: overwrite \`src/api/openapi.yaml\`, or point \`spec\` in the \`api\` entry at another local file, then build.
+- ${docs ? "Add a version, link an operation from prose with `api.ref:`, or" : "Add a version or"} change the reference's URLs: <https://nimbus-docs.com/api-reference/>.
+- Its components in \`src/components/ui/\` came from the registry; upgrade them like any registry component.
+
+`;
+  const layout = (text, contentConfig) =>
+    swap(
+      swap(text, "src/\n├── components.ts", "src/\n├── api/openapi.yaml         # the OpenAPI spec the API reference is generated from\n├── components.ts"),
+      "├── content.config.ts        # registers docsCollection() + partialsCollection()",
+      `├── content.config.ts        # registers ${contentConfig}`,
+    );
+  const beforeAgents = "## Agent interfaces\n";
+
+  let api = layout(guide, "docsCollection() + partialsCollection() + apiCollection()");
+  api = swap(api, "│   ├── [...slug].astro\n", "│   ├── [...slug].astro\n│   ├── api/[...slug].astro     # the API reference, at /api\n");
+  api = swap(
+    api,
+    "and the tabs show once there are two.",
+    "and the tabs show once there are two. With one, an API reference served away from `/` makes the tabs: Docs and API reference.",
+  );
+  api = swap(api, beforeAgents, apiSection("/api", "src/pages/api/[...slug].astro", true) + beforeAgents);
+
+  let only = layout(guide, "partialsCollection() + apiCollection()");
+  only = swap(only, "│   ├── docs/*.mdx\n", "");
+  only = swap(only, "│   ├── [...slug].astro\n", "│   ├── [...slug].astro         # the API reference, at /\n");
+  const cut = (text, from, until) => {
+    const start = text.indexOf(from);
+    const end = text.indexOf(until, start);
+    if (start === -1 || end === -1) throw new Error(`[copy-template] AGENT.md no longer has the section the API part removes: ${from}`);
+    return text.slice(0, start) + text.slice(end);
+  };
+  only = cut(only, "## Writing docs\n", "## Adding things\n");
+  only = cut(only, "## Sidebar\n", beforeAgents);
+  only = cut(only, "| New doc page |", "| New partial |");
+  only = swap(
+    only,
+    "`content.config.ts` registers `docsCollection()` (and `partialsCollection()` if used)",
+    "`content.config.ts` registers `apiCollection()` and `partialsCollection()`",
+  );
+  only = swap(only, "`data-pagefind-body` is on the docs main wrapper", "`data-pagefind-body` is on `ApiLayout`'s main wrapper");
+  only = swap(only, beforeAgents, apiSection("/", "src/pages/[...slug].astro", false) + beforeAgents);
+  return { api, only };
+}
+
+/**
+ * Write the variant's site parts into \`.nimbus-parts/\`: the files the API
+ * reference adds beside the docs or as the whole site, the rules for
+ * composing them (parts.json), and the registry components it installs. The
+ * scaffolder and \`nimbus-docs outdated\` both compose from these bytes.
+ */
+function writeSiteParts(targetDir) {
+  const out = join(targetDir, SITE_PARTS_DIR);
+  rmSync(out, { recursive: true, force: true });
+  const write = (rel, content) => {
+    mkdirSync(dirname(join(out, rel)), { recursive: true });
+    writeFileSync(join(out, rel), content);
+  };
+  cpSync(join(STARTER_DIR, "parts"), out, { recursive: true });
+
+  const config = readFileSync(join(targetDir, "astro.config.ts"), "utf8");
+  if (!config.includes(`${SIDEBAR_BLOCK}});`)) {
+    throw new Error("[copy-template] astro.config.ts no longer ends its Nimbus config with the sidebar block the API part edits");
+  }
+  write("api/astro.config.ts", config.replace(`${SIDEBAR_BLOCK}});`, `${SIDEBAR_BLOCK}${API_ENTRY}});`));
+  write(
+    "api-only/astro.config.ts",
+    config.replace(`${SIDEBAR_BLOCK}});`, `${API_ENTRY.replace("src/pages/api/ → /api", "src/pages/ → /")}});`),
+  );
+
+  const guides = agentGuides(readFileSync(join(targetDir, "AGENT.md"), "utf8"));
+  write("api/AGENT.md", guides.api);
+  write("api-only/AGENT.md", guides.only);
+
+  const { version } = JSON.parse(readFileSync(NIMBUS_PKG_JSON, "utf8"));
+  const components = STARTER_MANIFEST.apiPart.components.map((slug) => {
+    const dir = join(STARTER_DIR, "src", "components", "ui", slug);
+    const files = listFiles(dir).map((rel) => ({
+      path: `components/ui/${slug}/${rel}`,
+      content: readFileSync(join(dir, rel), "utf8"),
+    }));
+    for (const file of files) write(file.path, file.content);
+    return { slug, type: "registry:ui", version, hash: registryHash(files), files: files.map((f) => f.path) };
+  });
+
+  const route = "api/src/pages/api/[...slug].astro";
+  const manifest = {
+    schemaVersion: 1,
+    api: {
+      files: {
+        "src/pages/api/[...slug].astro": route,
+        "src/content.config.ts": "api/src/content.config.ts",
+        "astro.config.ts": "api/astro.config.ts",
+        "AGENT.md": "api/AGENT.md",
+      },
+      only: {
+        files: {
+          "src/pages/[...slug].astro": route,
+          "src/content.config.ts": "api-only/src/content.config.ts",
+          "astro.config.ts": "api-only/astro.config.ts",
+          "AGENT.md": "api-only/AGENT.md",
+        },
+        remove: ["src/content/docs"],
+      },
+      spec: { from: "api/src/api/openapi.yaml", to: "src/api/openapi.yaml" },
+      components,
+      dependencies: STARTER_MANIFEST.apiPart.dependencies,
+    },
+  };
+  write("parts.json", JSON.stringify(manifest, null, 2) + "\n");
+}
+
 /** The variant directory names, sourced from the manifest (order preserved). */
 export function variantNames() {
   return Object.keys(STARTER_MANIFEST.templates);
@@ -297,6 +463,7 @@ export function generateTemplates(outDir = DEFAULT_OUT_DIR) {
     pinNimbusDocsVersion(targetDir);
     writeReviewedBaseline(targetDir);
     writeBuildScriptsConfig(targetDir);
+    writeSiteParts(targetDir);
     assertTrackedRootFiles(targetDir, variant);
     generated.push(targetDir);
     console.log(`[copy-template] generated ${variant}/ → ${relative(REPO_ROOT, targetDir) || targetDir}`);

@@ -28,6 +28,8 @@ declare module "virtual:nimbus/config" {
   export const config: import("../types.js").RuntimeNimbusConfig;
   export const indexedCollections: readonly string[];
   export const emptyCollections: readonly string[];
+  /** Whether `content.config.ts` provably declares no `docs` collection. */
+  export const primaryCollectionAbsent: boolean;
   /**
    * The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice
    * without the root collection keeps its site-wide files under `prefix`
@@ -50,8 +52,10 @@ declare module "virtual:nimbus/config" {
   /** Whether the section `llms.txt` route serves nested sections (`[...section]`). */
   export const nestedLlmsSections: boolean;
   export const pageAssets: import("../_internal/api/page-assets-runtime.js").ApiPageAssetManifest;
-  /** collection → version ("" when unversioned) → sidebar filter list filename. */
+  /** collection → version ("" when unversioned) → page list filename, for versions with an on-demand sidebar. */
   export const navLists: Record<string, Record<string, string>>;
+  /** collection → version ("" when unversioned) → page list filename, for every version. */
+  export const apiLists: Record<string, Record<string, string>>;
   export const headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;

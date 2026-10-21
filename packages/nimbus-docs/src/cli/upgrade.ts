@@ -13,6 +13,10 @@ import { gt, lt, minVersion, prerelease, satisfies, valid, validRange } from "se
 
 import { unifiedDiff } from "./_diff.js";
 import { discoverMigrations } from "../_internal/migrations.js";
+import { setRouteFileMode } from "../_internal/route-file-mode.js";
+import { projectRouteFiles } from "../_internal/route-files.js";
+import { readRouteFileExports } from "../_internal/route-exports.js";
+import { fileRouteMode } from "../_internal/route-modes.js";
 import { resolveUpgradeBaseline, selectUpgradeEntries, siteScope, UPGRADE_MANIFEST, type UpgradeMode } from "../_internal/upgrades.js";
 import {
   latestTemplatesTag,
@@ -219,7 +223,7 @@ export interface TemplateSource {
 
 function templateSource(nimbus: NimbusJson, flags: UpgradeFlags): TemplateSource {
   return {
-    resolve: (tag) => resolveTemplateTree({ variant: nimbus.variant, tag, templateDir: flags.templateDir }),
+    resolve: (tag) => resolveTemplateTree({ variant: nimbus.variant, tag, templateDir: flags.templateDir, site: nimbus.site }),
     latestTag: latestTemplatesTag,
   };
 }
@@ -231,6 +235,9 @@ interface Gathered {
   /** The tag a file is compared from: its own `diff --apply` tag, else `templatesTag`. */
   baseTag: (treeFile: string) => string;
   readBase: (treeFile: string) => string | null;
+  readUpstream: (treeFile: string) => string | null;
+  /** The site's copy of a starter file, read in its mode like the starter's. */
+  readSite: (file: string) => string | null;
   findings: StarterFinding[];
   compatibility: StarterCompatibility | null;
   cleanup: () => void;
@@ -254,6 +261,15 @@ async function gatherStarter(
   const upstreamTag = flags.templateDir ? recorded : (flags.to ?? (await source.latestTag()));
   const perFile = nimbus.templatesTagByFile ?? {};
   const baseTag = (treeFile: string): string => perFile[treeFile] ?? recorded;
+  const inSiteMode = routeFilesInSiteMode(cwd, srcRoot);
+  const readTree = (dir: string, treeFile: string): string | null =>
+    inSiteMode(starterProjectPath(srcRoot, treeFile), readTreeFile(dir, treeFile));
+  const readSite = (file: string): string | null => {
+    const abs = join(cwd, file);
+    const unsafe = validateApplyPath(cwd, abs);
+    if (unsafe) throw new Error(`Unsafe starter path ${file}: ${unsafe}.`);
+    return inSiteMode(file, existsSync(abs) ? readFileSync(abs, "utf8") : null);
+  };
 
   // One tree per distinct tag: the recorded one, upstream, and every tag a
   // file was applied from.
@@ -279,14 +295,9 @@ async function gatherStarter(
       srcRoot,
       baseFiles: [...baseFiles],
       upstreamFiles: listStarterFiles(upstreamDir),
-      readBase: (t) => readTreeFile(dirOf(baseTag(t)), t),
-      readUpstream: (t) => readTreeFile(upstreamDir, t),
-      readDisk: (file) => {
-        const abs = join(cwd, file);
-        const unsafe = validateApplyPath(cwd, abs);
-        if (unsafe) throw new Error(`Unsafe starter path ${file}: ${unsafe}.`);
-        return existsSync(abs) ? readFileSync(abs, "utf8") : null;
-      },
+      readBase: (t) => readTree(dirOf(baseTag(t)), t),
+      readUpstream: (t) => readTree(upstreamDir, t),
+      readDisk: readSite,
     });
   } catch (err) {
     cleanup();
@@ -298,10 +309,31 @@ async function gatherStarter(
     upstreamTag,
     upstreamDir,
     baseTag,
-    readBase: (t) => readTreeFile(trees.get(baseTag(t))!.dir, t),
+    readBase: (t) => readTree(trees.get(baseTag(t))!.dir, t),
+    readUpstream: (t) => readTree(upstreamDir, t),
+    readSite,
     findings,
     compatibility: starterCompatibility(upstreamDir, upstreamTag, cwd),
     cleanup,
+  };
+}
+
+/**
+ * Route files are compared in the mode of the site's copy, both the starter's
+ * and the site's own, so a mode switch or a redundant `prerender` line from an
+ * older starter doesn't show as an edit.
+ */
+function routeFilesInSiteMode(cwd: string, srcRoot: string): (file: string, text: string | null) => string | null {
+  const project = projectRouteFiles(cwd, srcRoot);
+  const routes = new Map(project.ok ? project.files.map((route) => [route.file, route]) : []);
+  return (file, text) => {
+    const route = routes.get(file);
+    if (!route || text === null) return text;
+    const exports = readRouteFileExports(route.file, route.source);
+    const mode = fileRouteMode(exports, route.target.output);
+    if (!mode) return text;
+    const edit = setRouteFileMode(file, text, { ...route.target, mode });
+    return edit.status === "updated" ? edit.source : text;
   };
 }
 
@@ -725,8 +757,8 @@ export async function diffCommand(
     const chunks: string[] = [];
     for (const f of targets) {
       const base = g.readBase(f.treeFile);
-      const upstream = readTreeFile(g.upstreamDir, f.treeFile);
-      const disk = readDisk(cwd, f);
+      const upstream = g.readUpstream(f.treeFile);
+      const disk = g.readSite(f.file);
       let label: string;
       let left: string;
       let right: string;
@@ -822,8 +854,9 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     return;
   }
   const base = g.readBase(target.treeFile);
-  const upstream = readTreeFile(g.upstreamDir, target.treeFile);
+  const upstream = g.readUpstream(target.treeFile);
   const disk = existsSync(abs) ? readFileSync(abs, "utf8") : null;
+  const site = g.readSite(target.file);
   if (target.status === "added") {
     if (disk !== null || upstream === null) {
       p.log.error(`Refusing to --apply ${target.file}: the path is no longer absent or upstream vanished.`);
@@ -833,14 +866,14 @@ function applyOne(cwd: string, file: string | undefined, g: Gathered, targets: S
     mkdirSync(dirname(abs), { recursive: true });
     writeFileAtomic(abs, upstream, { overwrite: false });
   } else if (target.status === "removed") {
-    if (base === null || disk !== base || upstream !== null) {
+    if (base === null || site !== base || upstream !== null) {
       p.log.error(`Refusing to --apply ${target.file}: the clean removal preimage changed.`);
       process.exitCode = 1;
       return;
     }
     fs.unlinkSync(abs);
   } else {
-    if (base === null || upstream === null || disk !== base) {
+    if (base === null || upstream === null || site !== base) {
       p.log.error(`Refusing to --apply ${target.file}: the clean update preimage changed.`);
       process.exitCode = 1;
       return;
@@ -919,13 +952,6 @@ function requireRecord(cwd: string): NimbusJson {
     process.exit(1);
   }
   return nimbus;
-}
-
-function readDisk(cwd: string, f: StarterFinding): string | null {
-  const abs = join(cwd, f.file);
-  const unsafe = validateApplyPath(cwd, abs);
-  if (unsafe) throw new Error(`Unsafe starter path ${f.file}: ${unsafe}.`);
-  return existsSync(abs) ? readFileSync(abs, "utf8") : null;
 }
 
 /**

@@ -12,7 +12,7 @@ export const getStaticPaths = getApiStaticPaths("api");
 
 const result = await getApiRoute(Astro);
 if (result instanceof Response) return result;
-const { page, nav, coordinate } = result;
+const { page, nav, coordinate, home } = result;
 const requestProbe = Astro.request.headers.get("x-nimbus-probe") ?? "";
 ---
 
@@ -29,5 +29,5 @@ const requestProbe = Astro.request.headers.get("x-nimbus-probe") ?? "";
     data-feasibility-api-kind={page.kind}
     data-request-probe={requestProbe}
   ></span>
-  <ApiLayout page={page} nav={nav} collection="api" coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection="api" coordinate={coordinate} home={home} />
 </BaseLayout>

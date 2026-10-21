@@ -50,7 +50,7 @@ Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its en
 
 Every group page lists its operations and its subsections, and the [API home](#the-api-home) lists every operation, so all pages stay reachable in every mode.
 
-`"on-demand"` needs the `api-layout` and `api-sidebar` components from your installed release; the build names outdated files.
+`"on-demand"` needs the `api-layout` and `api-sidebar` components from your installed release; the build names outdated files. These components use the 0.19 starter's styles, so a site scaffolded before 0.19.0 adopts the redesigned starter first; `nimbus-docs migrate` lists its steps.
 
 ## The API home
 
@@ -60,9 +60,9 @@ Sections in no group come next, then untagged operations, then webhooks. The fil
 
 A large spec loads in parts. The page holds the first `API_HOME_CHUNK_SIZE` endpoints, 150 by default, set in `src/components/ui/api-layout/home.ts`. Sections stay whole where they fit.
 
-Each later part is its own page, fetched as the reader nears the end; without JavaScript, the list ends in a link to the next part. The filter loads a compact list of every endpoint on first focus, so it finds unloaded ones too, and shows up to 200 matches. Find-in-page only searches loaded parts.
+Each later part is its own page, fetched as the reader nears the end; without JavaScript, the list ends in a link to the next part. The filter loads the version's page list on first focus, so it finds unloaded ones too, and shows up to 200 matches. Find-in-page only searches loaded parts.
 
-The parts and the filter's list come from two routes the [recipe](/api-reference/openapi/setup#install-with-the-recipe) writes under `src/pages/nimbus-api/home/<collection>/`, served at `/nimbus-api/home/<collection>/<version>/<n>/` and `…/<version>/index.json`, with `default` as the version of an unversioned API. They render like the collection's pages, built or on request, and the part pages are `noindex`.
+The API route serves the later parts at `/api/index/2/`, `/api/index/3/` and so on, under the version's URL for a versioned API. They render like the API's other pages, built or on request, and are `noindex` and left out of the sitemap and search. The route passes `API_HOME_CHUNK_SIZE` as `homeChunkSize` to both `getApiStaticPaths`, which makes one page per part, and `getApiRoute`, which reads it on a route rendered on request; a built route fails the build if the two differ. Without it, the home lists every endpoint on one page. `getApiRoute` returns the result as `home`: the part a page shows, and the link to every part.
 
 To build your own page from the whole reference, read a version's root page with `getApiRoot` from `@cloudflare/nimbus-docs/runtime`; leave out `version` for the default. Its `index` holds every operation and webhook exactly once, each with its `method`, `path` and link. `apiIndexRows(index)` flattens it, and `chunkApiIndex(index, { size })` splits it the way the home does.
 
@@ -98,7 +98,7 @@ Then run the Cloudflare adapter installer. It keeps an existing rendering policy
 
 <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
 
-Astro then logs "getStaticPaths() ignored in dynamic page" for the request-rendered API route. The warning is expected; see [Choose build or request rendering](/reference/rendering).
+The installer also updates the API route file to render on request, dropping the `getStaticPaths` Astro would ignore. After changing `rendering` yourself, run `nimbus-docs check --fix`; see [Choose build or request rendering](/reference/rendering).
 
 The recipe's API catch-all uses Nimbus runtime helpers to resolve either mode. Alternate Markdown versions and `llms.txt` indexes follow the rendering policy too, serving content prepared at build time. Coordinate data, search records, and sitemaps stay build output, and requests read prepared content entries rather than parsing the OpenAPI document.
 

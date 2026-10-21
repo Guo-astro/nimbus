@@ -48,6 +48,7 @@ export interface VitePluginLike {
 export interface VirtualConfigExtras {
   getPageAssets?: () => Record<string, Record<string, string>>;
   getNavLists?: () => Record<string, Record<string, string>>;
+  getApiLists?: () => Record<string, Record<string, string>>;
   /**
    * The ordered page-collection list, read from the prepared-markdown
    * registry record. Awaited when the virtual module loads, which is after
@@ -61,6 +62,12 @@ export interface VirtualConfigExtras {
    * request. Empty in a full build and in dev.
    */
   getEmptyCollections?: () => Promise<readonly string[]>;
+  /**
+   * Whether `content.config.ts` provably declares no `docs`, so the sidebar
+   * doesn't query it. Builds only: dev keeps querying, since a config edit
+   * doesn't reach the running server's cached answer.
+   */
+  getPrimaryCollectionAbsent?: () => Promise<boolean>;
   /**
    * The partial build this is, or null: its collections and the prefix its
    * site-wide files live under (`""` for a root slice), with the Pagefind
@@ -157,12 +164,15 @@ export function virtualConfigPlugin(
         const indexedCollections = await extras.getIndexedCollections();
         const emptyCollections = (await extras.getEmptyCollections?.()) ?? [];
         const buildSlice = (await extras.getBuildSlice?.()) ?? null;
+        const primaryCollectionAbsent = (await extras.getPrimaryCollectionAbsent?.()) ?? false;
         return (
           `export const config = ${JSON.stringify(runtimeConfig)};\n` +
           `export const pageAssets = ${JSON.stringify(extras.getPageAssets?.() ?? {})};\n` +
           `export const navLists = ${JSON.stringify(extras.getNavLists?.() ?? {})};\n` +
+          `export const apiLists = ${JSON.stringify(extras.getApiLists?.() ?? {})};\n` +
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
           `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
+          `export const primaryCollectionAbsent = ${JSON.stringify(primaryCollectionAbsent)};\n` +
           `export const buildSlice = ${JSON.stringify(buildSlice)};\n` +
           `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? searchIndexLayout(null, [], { versions: null, routes: NO_ROUTES }, extras.base))};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +

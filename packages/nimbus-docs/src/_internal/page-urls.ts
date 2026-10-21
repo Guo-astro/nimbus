@@ -17,8 +17,8 @@ const OG_IMAGE_ROUTE = "/og/";
 
 /**
  * Nimbus's generated cards, which `NimbusHead` recognises by logical path:
- * the site card at `/og.png` and one `/og/<route>.png` per page, all at
- * astro-og-canvas's default size.
+ * the site card at `/og.png` and one `/og/<route>.png` per page, all at the
+ * starter's card size.
  */
 export const OG_CARD = {
   sitePath: "/og.png",
@@ -46,9 +46,9 @@ export function pageUrls(
 }
 
 /**
- * The astro-og-canvas `pages` key whose card is written at `ogImageUrl`. The
- * key keeps `.png` because astro-og-canvas's default slug replaces a key's
- * last extension: an extensionless `v1.2/guide` would lose `.2/guide`.
+ * The `getOgImagePages()` key whose card is written at `ogImageUrl`: its path
+ * under `/og/`, `.png` included. The starter's OG route passes it through as
+ * the `slug` parameter, so a dotted `v1.2/guide.png` keeps its dots.
  */
 export function ogImagePageKey(ogImageUrl: string): string {
   return ogImageUrl.slice(OG_IMAGE_ROUTE.length);

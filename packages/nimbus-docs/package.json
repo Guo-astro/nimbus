@@ -77,6 +77,10 @@
 			"types": "./dist/adapters.d.ts",
 			"import": "./dist/adapters.js"
 		},
+		"./site-parts": {
+			"types": "./dist/site-parts.d.ts",
+			"import": "./dist/site-parts.js"
+		},
 		"./client": {
 			"types": "./dist/client.d.ts",
 			"import": "./dist/client.js"
@@ -84,6 +88,10 @@
 		"./markdown": {
 			"types": "./dist/markdown.d.ts",
 			"import": "./dist/markdown.js"
+		},
+		"./og": {
+			"types": "./dist/og.d.ts",
+			"import": "./dist/og.js"
 		},
 		"./react": {
 			"types": "./dist/react.d.ts",
@@ -120,11 +128,13 @@
 	"peerDependencies": {
 		"@modelcontextprotocol/server": ">=2.3.0 <3.0.0",
 		"@readme/httpsnippet": ">=10.0.0",
+		"@resvg/resvg-js": ">=2.6.2 <3.0.0",
 		"@scalar/openapi-parser": ">=0.10.0 <1.0.0",
 		"astro": ">=7.2.6 <8.0.0",
 		"openapi-sampler": ">=1.5.0",
 		"react": ">=19.0.0",
-		"react-dom": ">=19.0.0"
+		"react-dom": ">=19.0.0",
+		"satori": ">=0.26.0 <0.27.0"
 	},
 	"peerDependenciesMeta": {
 		"@modelcontextprotocol/server": {
@@ -143,6 +153,12 @@
 			"optional": true
 		},
 		"openapi-sampler": {
+			"optional": true
+		},
+		"satori": {
+			"optional": true
+		},
+		"@resvg/resvg-js": {
 			"optional": true
 		}
 	},
@@ -197,6 +213,7 @@
 		"@mdx-js/mdx": "^3.1.1",
 		"@modelcontextprotocol/server": "2.3.0",
 		"@readme/httpsnippet": "^11.4.0",
+		"@resvg/resvg-js": "^2.6.2",
 		"@scalar/openapi-parser": "^0.28.12",
 		"@types/picomatch": "^4.0.3",
 		"@types/react": "^19.2.6",
@@ -207,6 +224,7 @@
 		"astro": "7.3.1",
 		"jsdom": "^29.1.1",
 		"openapi-sampler": "^1.7.4",
+		"satori": "^0.26.0",
 		"tsdown": "^0.20.3",
 		"tsx": "^4.22.3"
 	}

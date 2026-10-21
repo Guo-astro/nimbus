@@ -815,11 +815,30 @@
       "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts and src/pages/og.png.ts.",
       "instructions": [
         "No action is needed when you build from the site's folder.",
-        "Run nimbus-docs outdated. When src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts are all unmodified, apply all three with nimbus-docs diff <file> --apply; applying the config alone drops the font.",
-        "If you've edited any of them, add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to both routes' image options, importing publicDir and root from astro:config/server, then drop fonts from the config."
+        "To keep the astro-og-canvas cards and build from another folder, edit both routes by hand: add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to their image options, importing publicDir and root from astro:config/server, then drop fonts from _og-card-config.ts. Don't use nimbus-docs diff --apply on these files: the current starter replaces them with the branded-share-cards renderer.",
+        "To take the new cards instead, follow branded-share-cards; they resolve their fonts from the project too."
       ],
       "verify": [
         "From the parent folder, run astro build --root <site>; the build writes the OG cards."
+      ]
+    },
+    {
+      "id": "branded-share-cards",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "branded-share-cards",
+      "summary": "Optionally take the new share cards: the site's logo, the page's section and its title, on white.",
+      "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts.",
+      "instructions": [
+        "No action is needed: the existing cards keep building, at the same URLs.",
+        "Commit first. Copy src/pages/og/_card.ts, src/pages/og/_fonts/ and src/components/logo.ts from a newly scaffolded site, then update src/pages/og/[...slug].ts, src/pages/og.png.ts and src/components/Logo.astro with nimbus-docs diff <file> --apply, or merge them by hand if you edited them. _card.ts imports @cloudflare/nimbus-docs/og, which needs this release.",
+        "If your Logo.astro draws your own logo, move its SVG paths and viewBox size into logo.ts instead of taking the starter's cloud, so the header and the cards share one drawing. A logo that isn't a single-colour SVG needs its own drawing in _card.ts.",
+        "Search src/ for astro-og-canvas and _og-card-config before removing them. The changelog recipe's src/pages/og/changelog.png.ts imports both: replace its body with renderPageCard({ title: \"Changelog\" }) from ./_card, as the current changelog recipe does. Move any other card route of your own to renderPageCard or renderSiteCard the same way.",
+        "Then delete src/pages/og/_og-card-config.ts and public/fonts/Inter-Bold.ttf. In package.json, replace astro-og-canvas and canvaskit-wasm with satori and @resvg/resvg-js (the optional peers @cloudflare/nimbus-docs/og loads), then install."
+      ],
+      "verify": [
+        "Build the site; dist/og.png and dist/og/<page>.png show the logo, a hairline, the page's section and its title.",
+        "A page whose frontmatter sets socialImage still uses that image."
       ]
     },
     {
@@ -848,7 +867,7 @@
       "instructions": [
         "No action is needed: sites without agents.mcp are unchanged.",
         "To serve the server, add the server adapter for your host if the site has none (nimbus-docs add adapter-cloudflare, nimbus-docs add adapter-netlify, nimbus-docs add adapter-node or nimbus-docs add adapter-vercel), install @modelcontextprotocol/server@2, and set agents: { mcp: true } in the Nimbus config.",
-        "To show the Copy MCP URL action, run nimbus-docs diff src/components/ConnectMcp.astro --apply and nimbus-docs diff src/components/connect-mcp.client.ts --apply. diff needs a site on a released version; otherwise copy both files from a newly scaffolded site.",
+        "To show the Copy MCP URL action, run nimbus-docs diff src/components/ConnectMcp.astro --apply and nimbus-docs diff src/components/connect-mcp.client.ts --apply. diff needs a site on a released version; on a 0.19 preview, copy both files from a site newly scaffolded with the same preview.",
         "Then in src/layouts/DocsLayout.astro, import ConnectMcp from \"@/components/ConnectMcp.astro\" and and { capabilities } from \"virtual:nimbus/agent-capabilities\", and pass it to PageActions: <PageActions …>{capabilities.mcpUrl && <ConnectMcp />}</PageActions>, as the starter's DocsLayout.astro does (nimbus-docs diff src/layouts/DocsLayout.astro shows the change). The guard keeps its script off sites without the server. A PageActions copied before this release has no slot: update it with nimbus-docs add page-actions --overwrite, or render <ConnectMcp /> after it."
       ],
       "verify": [
@@ -897,7 +916,7 @@
       "affected": "Sites scaffolded before 0.19.0 that want the new look. Existing sites keep their current look until they adopt it.",
       "instructions": [
         "No action is needed: existing sites keep working and keep their look.",
-        "Commit first, then run nimbus-docs outdated. For files you haven't edited, nimbus-docs diff <file> --apply updates them; merge edited ones by hand. Update these together: src/styles/globals.css, src/styles/prose.css, src/layouts/DocsLayout.astro, src/layouts/BaseLayout.astro, src/components/Header.astro, and the new src/components/Logo.astro.",
+        "Commit first, then run nimbus-docs outdated. For files you haven't edited, nimbus-docs diff <file> --apply updates them; merge edited ones by hand. Update these together: src/styles/globals.css, src/styles/prose.css, src/layouts/DocsLayout.astro, src/layouts/BaseLayout.astro, src/components/Header.astro, and the new src/components/Logo.astro, src/components/ConnectMcp.astro and src/components/connect-mcp.client.ts. Before 0.19.0 is released, diff can't fetch them; copy them from a site newly scaffolded with the same 0.19 preview.",
         "Reinstall the changed components with nimbus-docs add <component> --overwrite: aside, steps, card, link-card, tabs, toc, search, page-actions, package-managers, pagination, badge and button. Badge and Button install src/lib/variants.ts with them.",
         "Component APIs only add options: Pagination takes prevLabel, nextLabel and keys, or PaginationLink and PaginationKey children, and its [ and ] keys work while focus is in the bar; Aside takes icon and title/icon slots; Card and LinkCard make title optional and take title slots; Step renders a list item inside Steps, which keeps content before the first Step above the list.",
         "Right-to-left: with dir=\"rtl\" on <html>, the layout mirrors and code stays left to right. Nothing changes for left-to-right sites."
@@ -949,8 +968,9 @@
       "instructions": [
         "No action is needed: existing API components keep working, and section and root pages only gain fields.",
         "Commit first, then update these together. Reinstall the layout with nimbus-docs add api-layout --overwrite, and review the change with git diff.",
+        "The reinstalled components, including the docs sidebar, use the 0.19 starter's styles. On a site scaffolded before 0.19.0, adopt the redesigned-starter entry first.",
         "ApiLayout no longer renders the version picker. In the API route (src/pages/api/[...slug].astro, or wherever yours is), pass it to the header: <Header showSidebar collection={collection}><VersionSwitcher slot=\"actions\" apiCollection={collection} apiVersion={version} coordinate={coordinate} /></Header>, importing VersionSwitcher from @/components/ui/version-switcher.",
-        "Add the API home's two routes from the api-reference recipe (https://nimbus-docs.com/api-reference/#the-api-home) under src/pages/nimbus-api/home/<collection>/, with your collection's name in the folder and in each call. Without them, a home with more than 150 endpoints links to parts that don't exist."
+        "In the same route, pass the API home's part size and its parts, as the api-reference recipe's route does (https://nimbus-docs.com/api-reference/#the-api-home): import API_HOME_CHUNK_SIZE from @/components/ui/api-layout, write getApiStaticPaths(\"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }) and getApiRoute(Astro, \"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }), and pass home from getApiRoute's result to ApiLayout as home={home}. On a later part (home.part.number > 1), give BaseLayout noindex and the part's title."
       ],
       "verify": [
         "The API home lists every endpoint, and the filter finds one by name, method or path.",
@@ -985,6 +1005,23 @@
       ],
       "verify": [
         "At 1440px a sidebar row's text sits at the same position on a docs page and an API page."
+      ]
+    },
+    {
+      "id": "route-files-follow-rendering",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "route-files-follow-rendering",
+      "summary": "Route files can say how they render: `nimbus-docs check --fix` writes the mode `rendering` gives each managed route, and the build warns when a file disagrees.",
+      "affected": "Sites with server output, or with a built dynamic route that has no getStaticPaths, which now fails the build. A server site's route files may say a different mode than Nimbus gives them.",
+      "instructions": [
+        "URLs and output stay the same on a static site and on a site with `rendering`; route files that disagree only bring a build warning until check --fix updates them. On a server site without `rendering`, every route Nimbus manages is now built ahead of time, including a collection route such as src/pages/sdk/[...slug].astro and a Markdown or llms.txt route that says `export const prerender = false`; set `rendering` to keep one on request.",
+        "To clear the build's warning, run nimbus-docs check --fix. It sets or removes each managed route's `prerender` line, removes getStaticPaths from request-rendered routes and adds it to built ones, and names the collection in a collection route's page helper, such as getCollectionPage(Astro, \"sdk\"). For files it can't fully edit, it makes what changes it can and lists the rest.",
+        "A route that builds a dynamic URL, such as src/pages/[...slug].astro, must export getStaticPaths; the build now fails and names a built one that doesn't.",
+        "nimbus-docs outdated and diff compare starter route files in your site's mode, so a route edited only by check --fix no longer shows as a local change."
+      ],
+      "verify": [
+        "Run nimbus-docs check and confirm it reports no nimbus/route-file-mode findings, then run the production build and confirm it prints no route file warning."
       ]
     },
     {

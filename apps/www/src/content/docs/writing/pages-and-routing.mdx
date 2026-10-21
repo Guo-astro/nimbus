@@ -51,7 +51,7 @@ Use `export const prerender = true` to emit a custom route as static output duri
 
 This boundary is not limited to `prerender`. Dynamic segments, endpoint methods, redirects and responses, and other native Astro route behavior remain controlled by the route itself. Nimbus only intervenes when a route claims the exact pattern of a configured canonical content route, package-injected infrastructure, an active feature, or a published content entry.
 
-Nimbus's `rendering` configuration controls canonical content-collection routes, not other files under `src/pages/`. Files scaffolded for `llms.txt`, Markdown alternates, Open Graph images, and `robots.txt` belong to your project and may use Astro's native rendering behavior like any other route.
+Nimbus's `rendering` configuration controls the routes it manages: each collection's catch-all route, and the scaffolded `llms.txt` and Markdown routes that call a Nimbus factory. Those files are yours to edit, but `rendering` decides how they render; `nimbus-docs check --fix` keeps them in step. Other files under `src/pages/`, such as Open Graph images and `robots.txt`, use Astro's native rendering behavior like any other route.
 
 ## Page modes
 

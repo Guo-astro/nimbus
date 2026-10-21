@@ -18,6 +18,10 @@ version of every page, and automatic `llms.txt` indexes and `llms-full.txt`.
 The render is Nimbus's own — the spec is parsed once per build and projected
 into a stable view-model. There is no third-party reference renderer.
 
+A new site can start with the reference instead: `create-nimbus-docs --api`
+adds it at `/api`, and `--template api` makes it the whole site. Both write
+what this recipe writes.
+
 **For hand-authored API docs, this is the wrong recipe.** If the user wants to
 write their API docs by hand as MDX pages (prose, curated examples, no spec),
 that's a plain content tree — use `nimbus-docs add new-collection` and pick
@@ -77,7 +81,9 @@ collide with an existing collection, and must not be `docs` or `partials`
 (reserved). The reference is served where its route file is: by default
 `src/pages/<collection>/`, so `api` serves at `/api`. If the user wants another
 URL (`/reference/api`), put the routes in that folder instead; it can be
-nested, and every URL Nimbus builds for the reference follows. Substitute the
+nested, and every URL Nimbus builds for the reference follows. For a site that
+is only the reference, put them at `src/pages/` to serve it at the root and
+follow 4f, which removes the docs part of the starter. Substitute the
 chosen folder for `api` in the route paths below, and the chosen name in the
 config and collection key.
 
@@ -104,6 +110,10 @@ Print a short, exact plan to the user **before** writing anything:
   stripped. The first build checks them (step 6).
 - Resulting URLs: `/api` (overview), `/api/<slug>` (each page), the matching
   `/api/<slug>/index.md` versions, and `/api/llms.txt`.
+- At the root (Q2): the route replaces the docs route at
+  `src/pages/[...slug].astro`, the `docs` collection and its sidebar entries
+  are removed (4f), and the URLs drop `/api`: `/`, `/<slug>`,
+  `/<slug>/index.md`, with the sections listed in `/llms.txt`.
 
 Wait for confirmation before executing.
 
@@ -201,7 +211,7 @@ fails the build with a message that names both files, and
 ### 4d. Scaffold the HTML route
 
 The route is thin: `getApiStaticPaths` enumerates one path per page, and
-`getApiRoute(Astro)` reads the page props and shared navigation prepared by the
+`getApiRoute(Astro, "api")` reads the page props and shared navigation prepared by the
 content loader, then marks the current navigation path active. It never reads
 or parses the OpenAPI source at request time. Hand both results to `ApiLayout`
 (installed in 4a). `ApiLayout` composes `ApiSidebar` (verb chips +
@@ -231,18 +241,19 @@ Write `src/pages/api/[...slug].astro`:
 <!-- api-reference-fixture:src/pages/api/[...slug].astro -->
 ```astro
 ---
-import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { getApiStaticPaths, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
 import Header from "@/components/Header.astro";
-import { ApiLayout } from "@/components/ui/api-layout";
+import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
-export const prerender = true;
-export const getStaticPaths = getApiStaticPaths("api");
+export const getStaticPaths = getApiStaticPaths("api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 
-const result = await getApiRoute(Astro);
+const result = await getApiRoute(Astro, "api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
+const { page, nav, collection, version, coordinate, home } = result;
+// A later part of the API home's list: a page of its own, kept out of search.
+const part = home && home.part.number > 1 ? home.part : undefined;
 // The generated per-page card exists for the default version's version-free
 // URL; a non-default query-mode page (its href carries the version query) uses
 // the site's shared social image instead. The card path derives from the
@@ -255,10 +266,11 @@ const socialImage = new URL(page.href, Astro.url).search
 ---
 
 <BaseLayout
-  title={page.kind === "api" ? page.title : `${page.title} · API`}
+  title={part ? `${page.title}: endpoints ${part.start}–${part.end} · API` : page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
   markdownUrl={page.markdownHref}
   socialImage={socialImage}
+  noindex={part !== undefined}
   collection={collection}
   apiVersion={version ?? undefined}
   coordinate={coordinate}
@@ -266,9 +278,18 @@ const socialImage = new URL(page.href, Astro.url).search
   <Header showSidebar collection={collection}>
     <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
   </Header>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 ```
+
+The route is written for a site built ahead of time on `output: "static"`. Run
+`nimbus-docs check --fix` next (at the root, after 4f), so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
 
 The nav is handled by `ApiSidebar` inside `ApiLayout` — there's no separate
 `ApiNavList` to write. To customise the tree's look (icons, grouping, a
@@ -277,70 +298,51 @@ expanded flags and verb come pre-resolved on each `ApiNavItem`. For a large
 API (hundreds of operations), suggest `sidebar: "on-demand"` on the `api`
 entry so pages don't each carry the whole tree.
 
-### 4e. Scaffold the API home's routes
+### 4e. The API home's later parts
 
-The API home lists every endpoint of a version, a part of at most
-`API_HOME_CHUNK_SIZE` endpoints at a time. Later parts are pages of their own,
-which the home fetches as the reader scrolls and which a reader without script
-walks as ordinary pages; the filter reads a compact list of every endpoint.
-Both routes read the version's root page through `getApiHome`, and render the
-same way as the API pages: built on a static site, on request when the
-rendering policy renders the collection on request. Chunk pages are `noindex`.
+The API home lists every endpoint of a version, at most `API_HOME_CHUNK_SIZE`
+endpoints a part. Later parts are pages of their own, served by the same route
+at `/api/index/2/`, `/api/index/3/` and so on (`index` is a reserved segment,
+so no endpoint's URL can take it). The home fetches them as the reader
+scrolls, and a reader without script walks them as ordinary pages. They're
+`noindex` and left out of the sitemap and search. The filter reads the
+version's page list, which Nimbus writes; there's no route to add.
 
-Write the routes under `src/pages/nimbus-api/home/<collection>/`, with the
-collection name as the folder and in each call. For the `api` collection:
+The route passes the size to both `getApiStaticPaths`, which builds one page
+per part, and `getApiRoute`, which reads it when the route renders on request.
+A built route fails the build if the two differ. Without it, the home lists every endpoint on
+one page.
 
-<!-- api-reference-fixture:src/pages/nimbus-api/home/api/[version]/[chunk].astro -->
-```astro
----
-import { getApiHome, getApiHomeStaticPaths } from "@cloudflare/nimbus-docs/runtime";
-import Header from "@/components/Header.astro";
-import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
-import { VersionSwitcher } from "@/components/ui/version-switcher";
-import BaseLayout from "@/layouts/BaseLayout.astro";
+### 4f. A site that is only the reference
 
-export const prerender = true;
-export const getStaticPaths = getApiHomeStaticPaths("api", "chunks", { size: API_HOME_CHUNK_SIZE });
+Skip this unless Q2 chose the root. The API takes the URLs the docs had, so
+the starter's docs part goes:
 
-const home = await getApiHome(Astro, "api", { size: API_HOME_CHUNK_SIZE });
-if (home instanceof Response) return home;
-const { page, nav, chunk, chunks, collection, version, coordinate } = home;
----
+1. Write the route from 4d to `src/pages/[...slug].astro`, replacing the docs
+   route there. Keep `src/pages/[...slug]/index.md.ts`, the `llms.txt` routes
+   and `src/pages/[...section]/llms.txt.ts`: they serve the API's Markdown and
+   indexes.
+2. In `src/content.config.ts`, remove `docs` and the imports only it uses.
+   Keep `partials`: `src/components/Render.astro` reads it.
 
-<BaseLayout
-  title={`${page.title}: endpoints ${chunk!.start}–${chunk!.end} · API`}
-  description={page.description}
-  noindex
-  collection={collection}
-  apiVersion={version ?? undefined}
->
-  <Header showSidebar collection={collection}>
-    <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
-  </Header>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={{ chunk: chunk!, chunks }} />
-</BaseLayout>
-```
+   ```ts
+   import { defineCollection } from "astro:content";
+   import { apiCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
 
-<!-- api-reference-fixture:src/pages/nimbus-api/home/api/[version]/index.json.ts -->
-```ts
-import type { APIRoute } from "astro";
-import { apiIndexRows, getApiHome, getApiHomeStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+   export const collections = {
+     partials: defineCollection(partialsCollection()),
+     api: defineCollection(apiCollection()),
+   };
+   ```
 
-export const prerender = true;
-export const getStaticPaths = getApiHomeStaticPaths("api", "index");
+3. Delete `src/content/docs/`.
+4. In the Nimbus config, remove `sidebar.items` entries that read the docs: page
+   slugs such as `"index"`, `{ autogenerate: { collection: "docs" } }` and
+   `directory` autogenerates. If nothing is left, remove `sidebar`. The API
+   pages draw their own navigation, so skip step 5.
 
-export const GET: APIRoute = async (context) => {
-  const home = await getApiHome(context, "api");
-  if (home instanceof Response) return home;
-  return new Response(JSON.stringify(apiIndexRows(home.page.index)), {
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-  });
-};
-```
-
-An unversioned API serves them under the version segment `default`. Without
-these routes, the home shows its first part and a link to a page that doesn't
-exist, so add them with the API route.
+Run `nimbus-docs check`: its Collection URLs list shows `api  /`. An API and a
+`docs` collection both at the root fail with `nimbus/collection-same-url`.
 
 ## 5. Optional — add to the sidebar
 
@@ -373,6 +375,11 @@ After writing all files, run the user's build command and confirm:
    `dist/llms.txt` includes `api` as a top-level section.
 5. `dist/llms-full.txt` embeds the generated API Markdown.
 
+At the root (4f), the same files sit without `api/`: `dist/index.html`,
+`dist/<slug>/index.html` and their `index.md`. `dist/llms.txt` lists the API's
+index and sections directly, and the build prints no warning about a `docs`
+collection.
+
 If the build fails on a route, read its message and fix the config, then
 build again until it passes. The engine is the only route calculator; never
 predict a slug yourself.
@@ -400,7 +407,8 @@ List any route-fallback warnings the build printed, each with the
 `routes.operations` override that pins it.
 
 Then tell the user the URLs to visit: `/api`, `/api/<slug>`,
-`/api/<slug>/index.md`, `/api/llms.txt`.
+`/api/<slug>/index.md`, `/api/llms.txt` (at the root: `/`, `/<slug>`,
+`/<slug>/index.md`, `/llms.txt`).
 
 **Case-only coordinate collisions:** if the spec has two names that differ only
 by case (e.g. `createResponse` and `CreateResponse`), Nimbus emits a build

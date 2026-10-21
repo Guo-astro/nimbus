@@ -127,3 +127,30 @@ describe("makeHiddenSitemapFilter", () => {
     assert.equal(all("https://x.dev/core/v1/"), true);
   });
 });
+
+describe("the API home's later parts", () => {
+  const cfg = config({
+    api: [
+      {
+        collection: "core",
+        versions: [
+          { version: "v2", spec: "v2.yaml", default: true },
+          { version: "v1", spec: "v1.yaml" },
+        ],
+      },
+    ],
+  });
+
+  test("are left out, under every version and the site base", () => {
+    const keep = makeHiddenSitemapFilter(cfg, "/docs/", DEFAULT_URLS);
+    assert.equal(keep("https://x.dev/docs/core/index/2/"), false);
+    assert.equal(keep("https://x.dev/docs/core/v1/index/3/"), false);
+  });
+
+  test("leave the home and every other page in", () => {
+    const keep = makeHiddenSitemapFilter(cfg, "/", DEFAULT_URLS);
+    assert.equal(keep("https://x.dev/core/"), true);
+    assert.equal(keep("https://x.dev/core/charges/index/2/"), true);
+    assert.equal(keep("https://x.dev/guide/index/2/"), true);
+  });
+});

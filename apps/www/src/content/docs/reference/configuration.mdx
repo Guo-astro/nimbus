@@ -67,18 +67,20 @@ export default defineConfig({
 
 ### Rendering policy
 
-`rendering` controls canonical content collection routes: the catch-all routes Nimbus uses for docs, API references, and other registered collections. It does not change custom files under `src/pages/`.
+`rendering` controls the routes Nimbus manages: the catch-all routes for docs, API references, and other registered collections, and the Markdown and `llms.txt` routes that serve them. Other files under `src/pages/` keep their own rendering.
 
 | Mode | Behavior | Deployment requirement |
 | --- | --- | --- |
 | `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
 | `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
 
-Omitting `rendering` is equivalent to `rendering: { default: "build" }`.
+`"build"` is what Astro calls prerendered, and `"request"` what it calls on-demand rendered. Every other route, such as a 404 page, Open Graph images or `robots.txt`, keeps its own `prerender` export.
+
+Without `rendering`, Nimbus builds every route it manages ahead of time, every page collection's included. Once `rendering` is set, `default` covers docs, version and API collections, and each other page collection needs its own entry in `rendering.collections` (see below).
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `rendering.default` | `"build"` \| `"request"` | `"build"` | Mode for `docs`, version collections and API collections. |
+| `rendering.default` | `"build"` \| `"request"` | `"build"` | Mode for `docs`, version collections, API collections, and the site-wide `llms.txt` and `llms-full.txt`. Each collection's Markdown and section `llms.txt` routes follow that collection's mode. |
 | `rendering.collections` | `Record<string, "build" \| "request">` | — | Mode by Astro collection name, not by URL or version. Every name must be a registered collection with its own catch-all route, and once `rendering` is set, every other page collection with its own catch-all route, such as a `blog`, must be listed. |
 
 To set up a server and choose modes, see [Choose build or request rendering](/reference/rendering).

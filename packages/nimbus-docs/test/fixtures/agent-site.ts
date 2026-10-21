@@ -20,6 +20,8 @@ export interface AgentSite {
 export interface AgentSiteOptions {
   conflict?: "error" | "warn" | "ignore";
   server?: boolean;
+  /** The test adapter's name; generated API pages render on request only under `@astrojs/cloudflare`. */
+  adapterName?: string;
   logLevel?: "silent" | "warn";
   versions?: { current: string; others: string[] };
   api?: unknown[];
@@ -42,16 +44,21 @@ export function srcModule(relative: string): string {
   );
 }
 
+/** A docs page route rendered on request, for sites whose `rendering` serves docs that way. */
+export const REQUEST_DOCS_PAGE = {
+  "src/pages/[...slug].astro": `---\nimport { getDocsPage } from ${srcModule("index.ts")};\nconst page = await getDocsPage(Astro);\nif (page instanceof Response) return page;\n---\n<html><body>Page</body></html>`,
+};
+
 export const SMALLCO_SPEC = path.resolve(import.meta.dirname, "api/smallco.yaml");
 
 /** A minimal on-demand adapter: Astro's generated App behind the entrypoint. */
-export function testAdapter(entrypoint: string): AstroIntegration {
+export function testAdapter(entrypoint: string, name = "test:adapter"): AstroIntegration {
   return {
-    name: "test:adapter",
+    name,
     hooks: {
       "astro:config:done": ({ setAdapter }) => {
         setAdapter({
-          name: "test:adapter",
+          name,
           entrypointResolution: "auto",
           serverEntrypoint: entrypoint,
           supportedAstroFeatures: { serverOutput: "stable" },
@@ -95,7 +102,7 @@ export function agentSites() {
         "server-entry.mjs",
         `import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n`,
       );
-      adapter = testAdapter(path.join(root, "server-entry.mjs"));
+      adapter = testAdapter(path.join(root, "server-entry.mjs"), options.adapterName);
     }
 
     const chunks: string[] = [];

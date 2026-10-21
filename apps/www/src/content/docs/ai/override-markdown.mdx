@@ -23,8 +23,6 @@ Call the shared route's `GET`, then change its response. This example adds a lic
 import type { APIRoute } from "astro";
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
 const route = markdownRoute();
 export const getStaticPaths = route.getStaticPaths;
 
@@ -51,8 +49,6 @@ import {
   markdownRoute,
   type MarkdownEndpointReference,
 } from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
 
 export const { getStaticPaths } = markdownRoute();
 
@@ -83,8 +79,6 @@ Astro gives a more specific route priority. Add a route file under a collection'
 import type { APIRoute } from "astro";
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
 const route = markdownRoute();
 export const getStaticPaths = route.getStaticPaths;
 
@@ -101,8 +95,6 @@ export const GET: APIRoute = async (context) => {
 Or write the route with the public helpers. The changelog recipe (`nimbus-docs add changelog`) adds `src/pages/changelog/[...slug]/index.md.ts`, which builds its own frontmatter with each entry's date and tags:
 
 ```ts title="src/pages/changelog/[...slug]/index.md.ts (abridged)"
-export const prerender = true;
-
 export const getStaticPaths = async () =>
   getMarkdownStaticPaths({ collection: "changelog", surface: "markdown" });
 
@@ -129,8 +121,6 @@ The starter's `llms.txt` routes call `llmsRoute()`, `llmsFullRoute()`, and `llms
 import type { APIRoute } from "astro";
 import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
 const route = llmsRoute();
 
 export const GET: APIRoute = async (context) => {
@@ -147,32 +137,50 @@ For section indexes, keep `llmsSectionRoute()`'s `getStaticPaths`, which lists e
 
 ## Customize OG cards
 
-The starter's `src/pages/og/[...slug].ts` passes `getOgImagePages()` to astro-og-canvas. The map has one entry per page, keyed so each card is written at that page's `ogImageUrl`, and each value is the page's `IndexedEntry`. Change the card's look in `src/pages/og/_og-card-config.ts`, or per page in `getImageOptions`. This example labels changelog cards:
+Each page's card shows the site's logo, the page's section and its title. Two parts draw it:
 
-```ts title="src/pages/og/[...slug].ts"
-import { getOgImagePages } from "@cloudflare/nimbus-docs/runtime";
-import { OGImageRoute } from "astro-og-canvas";
-import { ogCardConfig } from "./_og-card-config";
+- `src/pages/og/_card.ts` is the card's look: colours, fonts, sizes, layout. It's yours to edit.
+- `@cloudflare/nimbus-docs/og` is the mechanism: it loads the fonts, fits text to its lines by measuring it, and renders the PNG with [Satori](https://github.com/vercel/satori) and resvg. Its fixes arrive with Nimbus releases.
 
-export const prerender = true;
+The logo comes from `src/components/logo.ts`, the drawing the header's `Logo.astro` renders too. Replace it there and the header and every card change together. Keep it a single-colour mark: the card fills it with the text colour.
 
-export const { getStaticPaths, GET } = await OGImageRoute({
-  pages: await getOgImagePages(),
-  getImageOptions: (_path, page) => ({
-    title: page.collection === "changelog" ? `Changelog: ${page.title}` : page.title,
-    description: page.description ?? "",
-    ...ogCardConfig,
-  }),
-});
+### Change the look
+
+Colours and sizes are constants at the top of `_card.ts`. The title comes from `renderer.fit()`, which returns the largest size that sets it in the lines you allow, and a text block to place in the card:
+
+```ts title="src/pages/og/_card.ts"
+const heading = await renderer.fit(title, { width: COLUMN, sizes: [64, 56, 50, 44], lines: 3, style: TITLE });
+// heading.size, heading.text, and heading.node to put in the card
 ```
 
-Keep the route at `src/pages/og/[...slug].ts`, the map's keys, the default `getSlug`, and PNG output: page routes link to `ogImageUrl`, so a changed location, key, slug, or format leaves pages pointing at cards that don't exist. A page whose frontmatter sets `socialImage` uses that image instead, because the page route passes `entry.data.socialImage ?? ogImageUrl`.
+`style` takes typography only: `fontFamily`, `lineHeight`, `fontWeight`, `fontStyle`, `letterSpacing`, `color`, `textAlign` and `textTransform`. Put spacing and position on a wrapper around `heading.node`. For a different design, replace the element tree in `card()`; `fit()` is optional.
+
+### Add a font for another script
+
+The card's Inter draws Latin, Greek and Cyrillic. For titles in other scripts, such as Chinese or Japanese, add a TTF or OTF font that covers them to `fonts` in `createCardRenderer()`. A character the first font lacks is drawn from the next one that has it. Until then, the build warns once that cards contain text the fonts don't draw. Right-to-left titles aren't supported.
+
+### Change a card's text
+
+`src/pages/og/[...slug].ts` lists the cards from `getOgImagePages()`, keyed so each one is written at its page's `ogImageUrl`. Each value is the page's `IndexedEntry`. The section above the title comes from `getPageSection(page)`: the page's nearest parent in its breadcrumbs. This example labels changelog cards instead:
+
+```ts title="src/pages/og/[...slug].ts"
+export const GET: APIRoute<{ page: Page }> = async ({ props: { page } }) => {
+  const section = page.collection === "changelog" ? "What's new" : await getPageSection(page);
+  return new Response(await renderPageCard({ section, title: page.title }), {
+    headers: { "Content-Type": "image/png" },
+  });
+};
+```
+
+Keep the route at `src/pages/og/[...slug].ts`, the map's keys as the `slug` parameter, and PNG output. Page routes link to `ogImageUrl`, so a changed location, key or format leaves pages pointing at cards that don't exist.
+
+A page whose frontmatter sets `socialImage` uses that image instead, because the page route passes `entry.data.socialImage ?? ogImageUrl`.
 
 ## What an override changes
 
 An override changes only what that route serves. `llms-full.txt` and hosted MCP keep the Markdown Nimbus generates.
 
-The shared routes and routes that use `markdownRoute()` or `markdownSourceRoute()` must keep `export const prerender = true`. The build fails if one is rendered on request.
+The shared routes and routes that call an agent factory render the same way as the pages they describe: ahead of time on a static site, and in their collection's mode with a [`rendering` policy](/reference/rendering). `nimbus-docs check --fix` writes that mode into the file; for a route it can't edit, such as a wrapped one, it says what to change.
 
 Call the factory in the route file itself, as above. Nimbus finds it by reading the route file, as Astro does for `prerender`, so a factory re-exported from another module isn't checked at startup.
 

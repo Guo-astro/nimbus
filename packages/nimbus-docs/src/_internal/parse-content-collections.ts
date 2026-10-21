@@ -104,10 +104,13 @@ export async function parseContentCollections(
     else complete = false;
   }
 
-  // Any later reference but a type can change the object: a mutation, an
-  // alias (`const registered = collections`), or a call that receives it.
-  const remainder = stripStrings(stripped.slice(objectEnd + 1)).replace(/\btypeof\s+collections\b/g, "");
-  if (/\bcollections\b/.test(remainder)) {
+  // Any other reference but a type can change the object: a mutation, an
+  // alias (`const registered = collections`), a call that receives it, or a
+  // helper declared above that registers into it.
+  const outside = stripStrings(
+    `${stripped.slice(0, prefixMatch.index)}\n${stripped.slice(objectEnd + 1)}`,
+  ).replace(/\btypeof\s+collections\b/g, "");
+  if (/\bcollections\b/.test(outside)) {
     complete = false;
   }
 

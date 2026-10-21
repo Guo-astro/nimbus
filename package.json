@@ -16,6 +16,7 @@
     "workers-feasibility:check": "node scripts/workers-feasibility-check.mjs",
     "webmcp:check": "node scripts/webmcp-check.mjs",
     "templates:check": "node scripts/templates-check.mjs",
+    "site-parts:check": "node scripts/site-parts-check.mjs",
     "templates:sync": "node scripts/sync-templates-repo.mjs",
     "upgrades:check": "node scripts/upgrade-manifest.mjs",
     "test:upgrades": "node --test scripts/upgrade-manifest.test.mjs scripts/sync-reviewed-baselines.test.mjs scripts/freshness-guard.test.mjs",

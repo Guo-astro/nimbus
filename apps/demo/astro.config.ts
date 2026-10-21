@@ -10,7 +10,7 @@ import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
 import routes from "./src/api/routes.json" with { type: "json" };
 
 const nimbusConfig = defineNimbusConfig({
-  site: "https://weather.nimbus-docs.com",
+  site: "https://demo.nimbus-docs.com",
   title: "Sample Co",
   description: "Forecasts, observations, alerts, and imagery for anywhere on Earth.",
   locale: "en",

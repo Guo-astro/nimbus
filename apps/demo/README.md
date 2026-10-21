@@ -2,7 +2,7 @@
 
 A full Nimbus docs site for **Sample Co**, a fictional weather API company: its docs, a changelog,
 and a 105-endpoint API reference in three versions (v2 by default, v1 deprecated, v3-preview hidden),
-rendered on request on Cloudflare Workers. It runs at `weather.nimbus-docs.com` and redeploys with
+rendered on request on Cloudflare Workers. It runs at `demo.nimbus-docs.com` and redeploys with
 each Nimbus release. The API and its data are made up.
 
 It builds against the workspace's `@cloudflare/nimbus-docs`, and its components are the starter's

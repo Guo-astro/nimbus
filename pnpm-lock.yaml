@@ -42,7 +42,7 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
 
-  apps/demo-weather:
+  apps/demo:
     dependencies:
       '@astrojs/cloudflare':
         specifier: ~14.3.0

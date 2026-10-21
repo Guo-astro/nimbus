@@ -11,11 +11,13 @@ Flags:
 - `--deploy <cloudflare|other>` — static-output deploy target (default: `cloudflare`).
 - `--adapter <cloudflare|vercel|netlify|node>` — select server output and its Astro adapter.
 - `--content <starter|empty>` — docs content shape (default: `starter`, with example pages).
+- `--api [spec]` — add an API reference at `/api`, from your OpenAPI 3.x file (`.yaml`, `.yml`, `.json`) or a sample.
+- `--template <docs|api>` — what's at the root (default: `docs`); `api` makes a site that is only an API reference, at `/`.
 - `--yes`, `-y` — accept defaults, skip prompts.
 - `--package-manager <npm|pnpm|yarn|bun>` — override auto-detection.
 - `--skip-install` — don't run the package manager after scaffolding.
 - `--no-git` — don't initialize a git repo.
-- `--template-dir <path>` — scaffold from a local template directory instead of
+- `--template-dir <path>` — scaffold from a local folder instead of
   downloading (no network).
 
 ## Templates & network

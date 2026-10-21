@@ -230,16 +230,21 @@ export async function createCardRenderer(options: CardRendererOptions): Promise<
 
       // Too long at the smallest size: drop segments from the end until it
       // fits, trimming trailing spaces and punctuation from each try.
+      // Every try keeps at least the first word, with what comes before it.
+      const firstWord = segments.findIndex((s) => s.isWordLike);
+      const keepAtLeast = firstWord === -1 ? 1 : firstWord + 1;
       let previous = "";
-      for (let end = segments.length - 1; end >= 1; end--) {
+      for (let end = segments.length - 1; end >= keepAtLeast; end--) {
         const kept = segments.slice(0, end).map((s) => s.segment).join("").replace(TRAILING, "");
         if (!kept || kept === previous) continue;
         previous = kept;
         if (await fits(`${kept}…`, smallest, fit)) return done(`${kept}…`, smallest);
       }
-      // One segment too long for the lines: the node's clamp ends it.
-      const first = segments[0]!.segment;
-      return done(segments.length > 1 ? `${first}…` : first, smallest);
+      // The first word alone is too long for the lines: keep it, with what
+      // comes before it, and let the node's clamp end it.
+      const end = firstWord === -1 ? segments.length : keepAtLeast;
+      const head = segments.slice(0, end).map((s) => s.segment).join("");
+      return done(end < segments.length ? `${head.replace(TRAILING, "")}…` : head, smallest);
     },
 
     async png(element) {

@@ -83,6 +83,14 @@ test("one segment too long for the lines is returned whole for the clamp to end"
   assert.equal(result.node.props.style && (result.node.props.style as { lineClamp: number }).lineClamp, 1);
 });
 
+test("a long identifier in quotes or brackets keeps its opening mark and its word", async () => {
+  const word = "a".repeat(200);
+  for (const [open, close] of [["(", ")"], ["\u201c", "\u201d"], ["`", "`"]] as const) {
+    const result = await renderer.fit(`${open}${word}${close} more`, fit({ width: 100, sizes: [40], lines: 1 }));
+    assert.equal(result.text, `${open}${word}…`);
+  }
+});
+
 test("emoji: strip removes them before fitting, keep leaves them and warns once", async () => {
   assert.equal((await renderer.fit("Ship it 🚀 today", fit())).text, "Ship it today");
   const stripped = await renderer.fit("🚀", fit());

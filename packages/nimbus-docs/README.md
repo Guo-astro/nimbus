@@ -1,8 +1,8 @@
 # @cloudflare/nimbus-docs
 
-The Astro integration and CLI behind [Nimbus](https://nimbus-docs.com), the authoring tool for docs.
+The Astro integration and CLI for [Nimbus](https://nimbus-docs.com), an authoring tool for docs.
 
-Most sites start from the scaffolder, which sets up this package for you:
+Create a site with the scaffolder, which installs and configures this package:
 
 ```sh
 npx @cloudflare/create-nimbus-docs@latest my-docs
@@ -10,7 +10,7 @@ npx @cloudflare/create-nimbus-docs@latest my-docs
 
 ## The integration
 
-New sites call `nimbus(config)` in `astro.config.ts`. The integration processes your MDX, validates config and content as the site builds, indexes search, and provides the helpers your routes read. Your repo owns everything you see: content collections, routes, layouts and components.
+New sites call `nimbus(config)` in `astro.config.ts`. The integration processes MDX, validates config and content during the build, indexes search, and provides the helpers your routes call. The scaffolder copies content collections, routes, layouts and UI components into your repo. Shared components such as `NimbusHead` and `Icon` come from this package.
 
 ## The CLI
 
@@ -38,7 +38,7 @@ npx nimbus-docs lint --fix
 
 ### Keep up with Nimbus
 
-You own the starter's files, so upgrades are yours to review. `outdated` lists starter files, components and package changes that are behind. `diff <file>` shows a starter file's upstream change, and `--apply` takes it when you haven't edited the file. `migrate` applies the edits a new version needs and lists the ones to review.
+Review upstream changes before updating the starter files copied into your repo. `outdated` lists starter files, components and package changes that are behind. `diff <file>` shows a starter file's upstream change, and `--apply` takes it when you haven't edited the file. `migrate` applies the edits a new version needs and lists the ones to review.
 
 ```sh
 npx nimbus-docs outdated

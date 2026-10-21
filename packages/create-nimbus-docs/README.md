@@ -10,7 +10,7 @@ cd my-docs
 npm run dev
 ```
 
-It writes a complete Astro site into `my-docs`: layouts, components, styles, routes and starter pages, as files you own and edit from the first commit. It asks where you'll deploy and whether to start with example pages.
+It writes an Astro docs site into `my-docs`: layouts, components, styles, routes and example pages, as plain files you can edit. It asks where you'll deploy and whether to include the example pages.
 
 ## Options
 

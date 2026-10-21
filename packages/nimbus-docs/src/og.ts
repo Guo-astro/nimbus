@@ -150,7 +150,7 @@ export async function createCardRenderer(options: CardRendererOptions): Promise<
     if (!warned.has(code)) {
       warned.add(code);
       console.warn(
-        `[og] Share cards contain ${code} text the card fonts don't draw: "${segment}". ` +
+        `[og] Share cards contain text the card fonts don't draw (${code.split("|").join(", ")}): "${segment}". ` +
           "Add a font that covers it to createCardRenderer({ fonts }).",
       );
     }

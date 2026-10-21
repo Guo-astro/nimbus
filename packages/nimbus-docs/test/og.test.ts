@@ -96,7 +96,7 @@ test("emoji: strip removes them before fitting, keep leaves them and warns once"
   });
   assert.equal(kept, "Ship it 🚀");
   assert.equal(seen.length, 1, "one warning per kind of text per renderer");
-  assert.match(seen[0]!, /\[og\] Share cards contain emoji text the card fonts don't draw/u);
+  assert.match(seen[0]!, /\[og\] Share cards contain text the card fonts don't draw \(emoji\)/u);
 });
 
 test("text no font covers warns once per kind, naming the fix", async () => {

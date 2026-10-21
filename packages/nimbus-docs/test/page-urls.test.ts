@@ -1,6 +1,6 @@
 // Page URLs: the page helpers and `IndexedEntry` share one path function, and
-// every `ogImageUrl` is exactly the file the starter's OG route writes for its
-// `getOgImagePages()` key.
+// the starter's OG route writes every card at its page's `ogImageUrl`, with
+// the section `getPageSection()` gives it.
 
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
@@ -15,18 +15,11 @@ const STARTER_OG_ROUTE = path.resolve(
   "../../nimbus-starter-source/src/pages/og/[...slug].ts",
 );
 
-/** The files the starter's `og/[...slug].ts` writes for these `pages` keys:
- *  it passes each key through as the `slug` parameter, so the card lands at
- *  `/og/<key>`. */
-async function writtenOgImages(keys: readonly string[]): Promise<string[]> {
-  const route = await readFile(STARTER_OG_ROUTE, "utf8");
-  assert.match(
-    route,
-    /Object\.entries\(await getOgImagePages\(\)\)\.map\(\(\[slug, page\]\) => \(\{ params: \{ slug \}/,
-    "the starter's OG route passes each getOgImagePages() key through as its slug",
-  );
-  return keys.map((key) => `/og/${key}`);
-}
+/** Stands in for the starter's `_card.ts`: each "PNG" is the section and
+ *  title the real route passed, so the build shows what each card says. */
+const CARD_STUB = `export const renderPageCard = async (input: { section?: string; title: string }) =>
+  new TextEncoder().encode(JSON.stringify(input));
+`;
 
 test("pageUrls derives every URL from the served route", () => {
   assert.deepEqual(pageUrls("", { id: "index", body: "x" }), {
@@ -77,7 +70,7 @@ test("the OG route writes each key's card at the page's ogImageUrl, with no coll
     "/og/v1.2.png",
     "/og/api/charges/create.png",
   ]);
-  assert.deepEqual(await writtenOgImages(urls.map(ogImagePageKey)), urls);
+  assert.deepEqual(urls.map((url) => `/og/${ogImagePageKey(url)}`), urls, "each key is the card's path under /og/");
   assert.equal(new Set(urls).size, urls.length);
 });
 
@@ -236,6 +229,9 @@ export const collections = {
       "src/pages/changelog/[...slug].astro": proseRoute("changelog", "/changelog"),
       "src/pages/api/[...slug].astro": API_ROUTE,
       "src/pages/urls.json.ts": INDEX_ROUTE,
+      // The starter's own card route, with the card's drawing stubbed out.
+      "src/pages/og/[...slug].ts": await readFile(STARTER_OG_ROUTE, "utf8"),
+      "src/pages/og/_card.ts": CARD_STUB,
       "src/pages/[...slug]/index.md.ts": `import { markdownRoute } from ${srcModule("agent-endpoints.ts")};
 export const prerender = true;
 export const { GET, getStaticPaths } = markdownRoute();
@@ -244,6 +240,9 @@ export const { GET, getStaticPaths } = markdownRoute();
     {
       versions: { current: "v2", others: ["v1", "v1.2"] },
       api: [{ collection: "api", spec: SMALLCO_SPEC, schemaPages: true }],
+      // A hand-labelled group, so sections follow the sidebar's labels.
+      sidebar: { items: ["index", { label: "Handbook", items: ["guide"] }] },
+      packageImports: true,
     },
   );
 
@@ -298,8 +297,48 @@ export const { GET, getStaticPaths } = markdownRoute();
 
   const urls = indexed.map((item) => item.ogImageUrl).sort();
   assert.deepEqual(ogPages.map(([, url]) => url).sort(), urls, "one card per indexed page");
-  const written = await writtenOgImages(ogPages.map(([key]) => key));
-  assert.deepEqual(written.sort(), urls, "every card lands at its ogImageUrl");
+  // What the build wrote, at each key's path, and what each card says.
+  const cards = new Map<string, { section?: string; title: string }>();
+  for (const [key] of ogPages) {
+    const file = path.join(site.root, "dist/og", key);
+    cards.set(`/og/${key}`, JSON.parse(await readFile(file, "utf8")));
+  }
+  const written = [...cards.keys()];
+  assert.deepEqual([...written].sort(), urls, "every card lands at its ogImageUrl");
+  // Each card's section is the page's nearest parent: a sidebar group's
+  // label, a collection, an API tag or the API's root; none at the top level.
+  const section = (url: string) => cards.get(url)?.section ?? null;
+  assert.deepEqual(
+    Object.fromEntries(
+      [
+        "/og/index.png",
+        "/og/guide.png",
+        "/og/v1.png",
+        "/og/v1/guide.png",
+        "/og/v1.2/guide.png",
+        "/og/blog/post.png",
+        "/og/changelog/2026-01-01-first.png",
+        "/og/api.png",
+        "/og/api/charges/create.png",
+        "/og/api/tags/charges.png",
+        "/og/api/webhooks/payment.succeeded.png",
+      ].map((url) => [url, section(url)]),
+    ),
+    {
+      "/og/index.png": null,
+      "/og/guide.png": "Handbook",
+      "/og/v1.png": null,
+      "/og/v1/guide.png": "Handbook",
+      "/og/v1.2/guide.png": "Handbook",
+      "/og/blog/post.png": "Blog",
+      "/og/changelog/2026-01-01-first.png": "Changelog",
+      "/og/api.png": null,
+      "/og/api/charges/create.png": "charges",
+      "/og/api/tags/charges.png": "SmallCo API",
+      "/og/api/webhooks/payment.succeeded.png": "SmallCo API",
+    },
+  );
+  assert.equal(cards.get("/og/guide.png")?.title, "Guide");
 
   const todays = legacyOgImages(todaysOgKeys(indexed));
   const before = new Set(todays);

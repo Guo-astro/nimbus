@@ -89,6 +89,18 @@ if (page instanceof Response) return page;
 `,
   );
   for (const collection of ["qv", "big", "pets"]) await write(`src/pages/${collection}/[...slug].astro`, page(collection));
+  // Each API page's section, as the starter's share cards ask for it.
+  await write(
+    "src/pages/sections.json.ts",
+    `import { getIndexedEntries, getPageSection } from "@cloudflare/nimbus-docs/runtime";
+export const prerender = true;
+export async function GET() {
+  const sections = {};
+  for (const page of await getIndexedEntries()) sections[page.url] = (await getPageSection(page)) ?? null;
+  return new Response(JSON.stringify(sections));
+}
+`,
+  );
   await write("server-entry.mjs", 'import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n');
 
   // The request-rendering gate string-matches the adapter name; the test
@@ -260,4 +272,19 @@ test("the homepage Link header advertises only defaults and the complete catalog
   assert.doesNotMatch(headers, /v0\/>|v0\/openapi\.json>|\?v=v0/);
   // Hidden specs keep their media-type rule.
   assert.match(headers, /\/qv\/v0\/openapi\.json\n {2}Content-Type: application\/vnd\.oai\.openapi\+json/);
+});
+
+test("getPageSection reads bundle: false, prepared and query-mode API pages", async () => {
+  const sections = JSON.parse(await output("sections.json")) as Record<string, string | null>;
+  // An untagged operation's parent is its API's root, titled by the spec.
+  assert.deepEqual(
+    {
+      big: sections["/big/list-pets/"],
+      pets: sections["/pets/list-pets/"],
+      qv: sections["/qv/list-pets/"],
+      root: sections["/big/"],
+      docs: sections["/guide/"],
+    },
+    { big: "big v2", pets: "pets v2", qv: "qv v2", root: null, docs: null },
+  );
 });

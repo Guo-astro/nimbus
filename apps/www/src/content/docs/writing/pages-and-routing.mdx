@@ -215,4 +215,4 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 ---
 ```
 
-`getOgImagePages()` returns the `pages` map for astro-og-canvas's `OGImageRoute`: one entry per indexed page, keyed so the card is written at that page's `ogImageUrl`, with the page's `IndexedEntry` as the value. The starter's `src/pages/og/[...slug].ts` passes it through; see [Customize OG cards](/ai/override-markdown#customize-og-cards).
+`getOgImagePages()` returns one entry per indexed page, keyed by the card's path under `/og/` so the card is written at that page's `ogImageUrl`, with the page's `IndexedEntry` as the value. `getPageSection(page)` returns the label of that page's nearest parent, which the card prints above the title. The starter's `src/pages/og/[...slug].ts` passes it through; see [Customize OG cards](/ai/override-markdown#customize-og-cards).

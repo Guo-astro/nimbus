@@ -61,9 +61,10 @@ Inspect the repo to learn its conventions:
   instead of adding a second `OGImageRoute` under `src/pages/og/`, which
   would generate the same paths. The feed root is a page, not an entry, so
   it gets one static card in 5l.
-- `src/pages/og/_og-card-config.ts` — the card styling shared by the
-  starter's OG routes. If it's missing, copy the options from the project's
-  OG route into 5l instead of importing them.
+- `src/pages/og/_card.ts` — the starter's card renderer, shared by its OG
+  routes. Older starters have `src/pages/og/_og-card-config.ts` and render
+  with astro-og-canvas instead; 5l shows both. If neither exists, copy the
+  rendering from the project's OG route into 5l instead of importing it.
 - `src/styles/globals.css` — confirm Nimbus tokens exist (`--nb-border`,
   `--nb-card`, `--nb-foreground`, `--nb-muted-foreground`, `--nb-h1-size`, …).
   The components use them.
@@ -1093,10 +1094,29 @@ export async function GET({ params, props, request }: SlugContext) {
 
 The feed root and its paginated pages link to `/og/changelog.png`. Entries
 already get their cards from the shared `og/[...slug].ts` route; this card
-covers the feed, which isn't an entry. Use the same title and description
-as `index.astro`.
+covers the feed, which isn't an entry. Use the same title as `index.astro`.
+
+With `src/pages/og/_card.ts`:
 
 ```ts
+import { renderPageCard } from "./_card";
+
+export const prerender = true;
+
+export async function GET() {
+  return new Response(await renderPageCard({ title: "Changelog" }), {
+    headers: { "Content-Type": "image/png" },
+  });
+}
+```
+
+With `src/pages/og/_og-card-config.ts` (older starters), keep the project's
+astro-og-canvas setup:
+
+```ts
+import { fileURLToPath } from "node:url";
+
+import { publicDir, root } from "astro:config/server";
 import { generateOpenGraphImage } from "astro-og-canvas";
 import { ogCardConfig } from "./_og-card-config";
 
@@ -1107,6 +1127,8 @@ export async function GET() {
     title: "Changelog",
     description: "New features, improvements, and fixes.",
     ...ogCardConfig,
+    fonts: [fileURLToPath(new URL("fonts/Inter-Bold.ttf", publicDir))],
+    cacheDir: fileURLToPath(new URL("node_modules/.astro-og-canvas", root)),
   });
   return new Response(body, { headers: { "Content-Type": "image/png" } });
 }

@@ -815,11 +815,30 @@
       "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts and src/pages/og.png.ts.",
       "instructions": [
         "No action is needed when you build from the site's folder.",
-        "Run nimbus-docs outdated. When src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts are all unmodified, apply all three with nimbus-docs diff <file> --apply; applying the config alone drops the font.",
-        "If you've edited any of them, add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to both routes' image options, importing publicDir and root from astro:config/server, then drop fonts from the config."
+        "To keep the astro-og-canvas cards and build from another folder, edit both routes by hand: add fonts: [fileURLToPath(new URL(\"fonts/Inter-Bold.ttf\", publicDir))] and cacheDir: fileURLToPath(new URL(\"node_modules/.astro-og-canvas\", root)) to their image options, importing publicDir and root from astro:config/server, then drop fonts from _og-card-config.ts. Don't use nimbus-docs diff --apply on these files: the current starter replaces them with the branded-share-cards renderer.",
+        "To take the new cards instead, follow branded-share-cards; they resolve their fonts from the project too."
       ],
       "verify": [
         "From the parent folder, run astro build --root <site>; the build writes the OG cards."
+      ]
+    },
+    {
+      "id": "branded-share-cards",
+      "introducedIn": "0.19.0",
+      "mode": "optional",
+      "changeset": "branded-share-cards",
+      "summary": "Optionally take the new share cards: the site's logo, the page's section and its title, on white.",
+      "affected": "Sites created from the starter that still have src/pages/og/[...slug].ts, src/pages/og.png.ts and src/pages/og/_og-card-config.ts.",
+      "instructions": [
+        "No action is needed: the existing cards keep building, at the same URLs.",
+        "Commit first. Copy src/pages/og/_card.ts, src/pages/og/_fonts/ and src/components/logo.ts from a newly scaffolded site, then update src/pages/og/[...slug].ts, src/pages/og.png.ts and src/components/Logo.astro with nimbus-docs diff <file> --apply, or merge them by hand if you edited them. _card.ts imports @cloudflare/nimbus-docs/og, which needs this release.",
+        "If your Logo.astro draws your own logo, move its SVG paths and viewBox size into logo.ts instead of taking the starter's cloud, so the header and the cards share one drawing. A logo that isn't a single-colour SVG needs its own drawing in _card.ts.",
+        "Search src/ for astro-og-canvas and _og-card-config before removing them. The changelog recipe's src/pages/og/changelog.png.ts imports both: replace its body with renderPageCard({ title: \"Changelog\" }) from ./_card, as the current changelog recipe does. Move any other card route of your own to renderPageCard or renderSiteCard the same way.",
+        "Then delete src/pages/og/_og-card-config.ts and public/fonts/Inter-Bold.ttf. In package.json, replace astro-og-canvas and canvaskit-wasm with satori and @resvg/resvg-js (the optional peers @cloudflare/nimbus-docs/og loads), then install."
+      ],
+      "verify": [
+        "Build the site; dist/og.png and dist/og/<page>.png show the logo, a hairline, the page's section and its title.",
+        "A page whose frontmatter sets socialImage still uses that image."
       ]
     },
     {

@@ -81,7 +81,8 @@ test("changelog relies on the shared OG route", async () => {
 
 test("changelog gives its feed root its own OG card", async () => {
   const source = await feature("changelog");
-  assert.match(source, /### 5l\. `src\/pages\/og\/changelog\.png\.ts`[\s\S]*?generateOpenGraphImage\(/);
+  // The starter's card renderer first, then the older astro-og-canvas setup.
+  assert.match(source, /### 5l\. `src\/pages\/og\/changelog\.png\.ts`[\s\S]*?renderPageCard\([\s\S]*?generateOpenGraphImage\(/);
   assert.equal(source.match(/socialImage="\/og\/changelog\.png"/g)?.length, 3);
 });
 

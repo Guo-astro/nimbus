@@ -11,7 +11,7 @@ astro.config.ts              # imports nimbus + defineNimbusConfig
 nimbus.json                  # records the last reviewed Nimbus package version
 src/
 ├── components.ts            # MDX globals — components every .mdx can use without an import
-├── components/              # AgentDirective, Header, Render + ui/<slug>/
+├── components/              # AgentDirective, Header, Logo (drawn from logo.ts), Render + ui/<slug>/
 ├── content/
 │   ├── docs/*.mdx
 │   └── partials/*.mdx       # referenced via <Render file="..." />
@@ -30,7 +30,8 @@ src/
 │   ├── nimbus-api/coordinates.json.ts  # API citation manifest
 │   ├── og.png.ts                # site-level OG card
 │   ├── og/
-│   │   ├── _og-card-config.ts   # shared OG theme tokens (underscore = not a route)
+│   │   ├── _card.ts             # the card's look, shared by both routes (underscore = not a route)
+│   │   ├── _fonts/              # the card's fonts
 │   │   └── [...slug].ts         # per-page OG cards
 │   └── robots.txt.ts
 └── styles/                  # globals.css, prose.css
@@ -70,7 +71,7 @@ Rules:
 | Feature recipe | `npx @cloudflare/nimbus-docs add <feature-slug> --print`. Prints the recipe for you to follow; it changes no files itself. |
 | Check it builds | `npx @cloudflare/nimbus-docs check` — build-free preflight (env + structure + authoring + types). `--json` for an agent loop, `--fix` to repair what's safe. |
 | Custom page route | Add a file under `src/pages/`. |
-| Custom OG style | Edit `src/pages/og/_og-card-config.ts`. |
+| Custom OG style | Edit `src/pages/og/_card.ts`. The card draws the logo from `src/components/logo.ts`, the same drawing as the header. |
 | Check for updates | `npx @cloudflare/nimbus-docs outdated` — starter files behind their tag + registry components behind. |
 | Upgrade Nimbus | Update the package, then run `npx @cloudflare/nimbus-docs migrate --dry-run --diff`. Review every change and required manual step before applying. |
 | Upgrade a starter file | `npx @cloudflare/nimbus-docs diff <file>` to review, `diff --apply <file>` to pull a clean upstream change. |

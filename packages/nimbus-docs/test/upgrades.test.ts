@@ -47,6 +47,7 @@ test("only universally skippable entries are optional", () => {
       "api-sidebar-alignment",
       "api-sidebar-filter",
       "api-version-picker",
+      "branded-share-cards",
       "browser-documentation-search",
       "card-links",
       "collection-urls-from-routes",

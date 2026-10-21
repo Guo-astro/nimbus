@@ -1,35 +1,31 @@
 // Page URLs: the page helpers and `IndexedEntry` share one path function, and
-// every `ogImageUrl` is exactly the file the starter's astro-og-canvas route
-// writes for its `getOgImagePages()` key.
+// every `ogImageUrl` is exactly the file the starter's OG route writes for its
+// `getOgImagePages()` key.
 
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { after, test } from "node:test";
-import { pathToFileURL } from "node:url";
 
 import { ogImagePageKey, pageUrls } from "../src/_internal/page-urls.ts";
-import { ogCardConfig } from "../../nimbus-starter-source/src/pages/og/_og-card-config.ts";
 import { agentManifest, agentSites, SMALLCO_SPEC, srcModule } from "./fixtures/agent-site.ts";
 
-const starterRequire = createRequire(
-  path.resolve(import.meta.dirname, "../../nimbus-starter-source/package.json"),
+const STARTER_OG_ROUTE = path.resolve(
+  import.meta.dirname,
+  "../../nimbus-starter-source/src/pages/og/[...slug].ts",
 );
-const { OGImageRoute } = (await import(
-  pathToFileURL(starterRequire.resolve("astro-og-canvas")).href
-)) as typeof import("astro-og-canvas");
 
-/** The files the starter's `og/[...slug].ts` writes for these `pages` keys. */
+/** The files the starter's `og/[...slug].ts` writes for these `pages` keys:
+ *  it passes each key through as the `slug` parameter, so the card lands at
+ *  `/og/<key>`. */
 async function writtenOgImages(keys: readonly string[]): Promise<string[]> {
-  const { getStaticPaths } = await OGImageRoute({
-    pages: Object.fromEntries(keys.map((key) => [key, {}])),
-    getImageOptions: () => ({ title: "", ...ogCardConfig }),
-  });
-  const paths = (await getStaticPaths({
-    routePattern: "/og/[...slug]",
-  } as Parameters<typeof getStaticPaths>[0])) as Array<{ params: { slug: string } }>;
-  return paths.map(({ params }) => `/og/${params.slug}`);
+  const route = await readFile(STARTER_OG_ROUTE, "utf8");
+  assert.match(
+    route,
+    /Object\.entries\(await getOgImagePages\(\)\)\.map\(\(\[slug, page\]\) => \(\{ params: \{ slug \}/,
+    "the starter's OG route passes each getOgImagePages() key through as its slug",
+  );
+  return keys.map((key) => `/og/${key}`);
 }
 
 test("pageUrls derives every URL from the served route", () => {
@@ -55,7 +51,7 @@ test("pageUrls derives every URL from the served route", () => {
   assert.equal(ogImagePageKey("/og/v1.2/guide.png"), "v1.2/guide.png");
 });
 
-test("astro-og-canvas writes each key's card at the page's ogImageUrl, with no collisions", async () => {
+test("the OG route writes each key's card at the page's ogImageUrl, with no collisions", async () => {
   const pages: Array<[string, string]> = [
     ["", "index"],
     ["", "guides"],
@@ -163,6 +159,15 @@ export async function GET() {
   return new Response(JSON.stringify({ indexed, pages }));
 }
 `;
+
+/** Where the starter's earlier astro-og-canvas route wrote a key's card: its
+ *  default slug replaced the key's last extension with `.png` and folded a
+ *  trailing `/index`. Frozen here to show what the move to keyed paths fixed. */
+function legacyOgImages(keys: readonly string[]): string[] {
+  return keys.map(
+    (key) => `/og/${key.replace(/\.[^.]*$/, "").concat(".png").replace(/\/index\.png$/, ".png")}`,
+  );
+}
 
 /** The starter's `og/[...slug].ts` keys before this change. */
 function todaysOgKeys(indexed: readonly IndexedRecord[]): string[] {
@@ -296,7 +301,7 @@ export const { GET, getStaticPaths } = markdownRoute();
   const written = await writtenOgImages(ogPages.map(([key]) => key));
   assert.deepEqual(written.sort(), urls, "every card lands at its ogImageUrl");
 
-  const todays = await writtenOgImages(todaysOgKeys(indexed));
+  const todays = legacyOgImages(todaysOgKeys(indexed));
   const before = new Set(todays);
   const after = new Set(written);
   assert.equal(todays.length - before.size, 2, "today v1, v1.2, and v1.2/guide collide at /og/v1.png");

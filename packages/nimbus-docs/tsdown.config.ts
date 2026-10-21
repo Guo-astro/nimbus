@@ -21,6 +21,7 @@ export default defineConfig({
     adapters: "src/adapters.ts",
     client: "src/client/index.ts",
     markdown: "src/markdown/index.ts",
+    og: "src/og.ts",
     react: "src/react/index.ts",
     api: "src/api/index.ts",
     "lib/pkgm": "src/lib/pkgm.ts",
@@ -75,6 +76,10 @@ export default defineConfig({
     // never resolves or bundles them.
     "@scalar/openapi-parser",
     "@readme/httpsnippet",
+    // Share cards' renderer and rasterizer are optional peers, loaded by
+    // `./og` on first use.
+    "satori",
+    "@resvg/resvg-js",
     // The MCP server SDK is an optional peer: only the injected /mcp route
     // imports it, and only a site with agents.mcp injects that route.
     /^@modelcontextprotocol\//,

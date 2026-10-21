@@ -24,9 +24,13 @@ const { operations } = Astro.props;
           "w-fit text-[0.9375rem] font-medium leading-6 text-foreground underline-offset-4 [overflow-wrap:anywhere] group-hover:underline",
           op.deprecated && "text-muted-foreground line-through",
         ]}>{op.label}</span>
+        {/* The spaces keep the name, method and path apart in search text;
+            the flex layout doesn't render them. */}
+        {" "}
         {op.path && (
           <span dir="ltr" class="flex min-w-0 max-w-full items-center gap-2 self-start">
             <ApiMethodChip method={op.method} display="label" />
+            {" "}
             <code class="min-w-0 truncate font-mono text-xs text-muted-foreground" title={op.path}>{op.path}</code>
           </span>
         )}

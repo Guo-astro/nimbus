@@ -432,15 +432,13 @@ export async function getIndexedEntries(
 }
 
 /**
- * The `pages` map for astro-og-canvas's `OGImageRoute`: every indexed page,
- * keyed so its card is written at the page's `ogImageUrl`. Pass it straight
- * through from `src/pages/og/[...slug].ts`:
+ * Every indexed page, keyed by its card's path under `/og/` (`.png`
+ * included), so a route that uses each key as its `slug` writes the card at
+ * the page's `ogImageUrl`. The starter's `src/pages/og/[...slug].ts`:
  *
  * ```ts
- * export const { getStaticPaths, GET } = await OGImageRoute({
- *   pages: await getOgImagePages(),
- *   getImageOptions: (_path, page) => ({ title: page.title, ...ogCardConfig }),
- * });
+ * export const getStaticPaths = async () =>
+ *   Object.entries(await getOgImagePages()).map(([slug, page]) => ({ params: { slug }, props: { page } }));
  * ```
  */
 export async function getOgImagePages(): Promise<Record<string, IndexedEntry>> {
@@ -450,6 +448,33 @@ export async function getOgImagePages(): Promise<Record<string, IndexedEntry>> {
       item,
     ]),
   );
+}
+
+/**
+ * The label of a page's nearest parent, as its breadcrumbs name it: the
+ * sidebar group or folder above a docs page, the section above an API page
+ * (its tag, or the API's own root). `undefined` for a top-level page. The
+ * starter's share cards print it above the title.
+ */
+export async function getPageSection(page: IndexedEntry): Promise<string | undefined> {
+  if ((await loadApiCollections()).includes(page.collection)) {
+    // API pages take their trail from the spec's sections, not the sidebar
+    // or the URL, so read it from the page itself.
+    const data = page.entry.data as { coordinate?: string; version?: string; prepared?: unknown };
+    if (typeof data.coordinate !== "string") return undefined;
+    const { isPreparedApiPage } = await import("./_internal/api/prepared.js");
+    if (isPreparedApiPage(data.prepared)) return data.prepared.page.breadcrumbs.at(-1)?.label;
+    const { hasApiPageAssets, getApiAssetPage } = await import("./_internal/api/page-assets-runtime.js");
+    const props = (await hasApiPageAssets(page.collection))
+      ? (await getApiAssetPage(page.collection, data.version ?? null, data.coordinate)).page
+      : THIN_API_ENTRIES
+        ? await projectConfiguredApiPageProps(page.collection, data.version ?? null, data.coordinate)
+        : undefined;
+    return props?.breadcrumbs.at(-1)?.label;
+  }
+  // A docs page's trail ends with the page itself, after the root crumb.
+  const crumbs = await getBreadcrumbs(page.url.replace(/\/$/, "") || "/", { collection: page.collection });
+  return crumbs.length > 2 ? crumbs.at(-2)?.label : undefined;
 }
 
 /**

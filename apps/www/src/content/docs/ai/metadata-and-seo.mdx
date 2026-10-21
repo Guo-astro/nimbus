@@ -39,7 +39,7 @@ socialImage: /og/pricing.png
 ---
 ```
 
-Nimbus also ships an OG image route, so pages without an explicit image get a generated card.
+Nimbus also ships an OG image route, so pages without an explicit image get a generated card: the site's logo, the page's section and its title. See [Customize OG cards](/ai/override-markdown#customize-og-cards).
 
 The image a page uses is, in order: the page's `socialImage`, then `config.socialImage`, then `public/opengraph.png` or `public/logo.png` if one exists, then the generated `/og.png` card. A documentation page passes its own generated card, `/og/<page>.png`, as the page's image unless its frontmatter sets `socialImage`, so `config.socialImage` and the `public/` fallbacks apply to pages that set none, such as the 404 page and hand-written routes.
 

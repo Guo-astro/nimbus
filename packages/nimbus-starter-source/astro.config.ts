@@ -13,7 +13,7 @@ const nimbusConfig = defineNimbusConfig({
   // CHANGE_ME: your project's name — used for <title>, the home H1, and OG.
   title: "Nimbus",
   // CHANGE_ME: a one-line description of your docs — used for meta + OG.
-  description: "Minimal starter consuming nimbus-docs.",
+  description: "Nimbus, authoring tool for docs",
   locale: "en",
   // CHANGE_ME: your repository — shown as the GitHub link in the header.
   github: "https://github.com/cloudflare/nimbus",

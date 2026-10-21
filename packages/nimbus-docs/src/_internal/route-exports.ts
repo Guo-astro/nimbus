@@ -17,6 +17,8 @@ export interface PrerenderExport {
 
 export interface RouteExports {
   prerenders: PrerenderExport[];
+  /** `prerender` is exported from an `export { … }` list, which Astro doesn't read as a mode. */
+  listedPrerender: boolean;
   staticPaths: boolean;
 }
 
@@ -29,6 +31,41 @@ export function routeCode(file: string, source: string): RouteCode | undefined {
 
 export function parseRouteCode(code: string): ts.SourceFile {
   return ts.createSourceFile("route.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+/** A program over route code alone, with no lib or modules, so names resolve through the code's own scopes. */
+export function routeProgram(sourceFile: ts.SourceFile): ts.Program {
+  const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [], noEmit: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext };
+  const host: ts.CompilerHost = {
+    ...ts.createCompilerHost(options),
+    getSourceFile: (requested) => (requested === sourceFile.fileName ? sourceFile : undefined),
+    fileExists: (requested) => requested === sourceFile.fileName,
+    readFile: () => undefined,
+  };
+  return ts.createProgram({ rootNames: [sourceFile.fileName], options, host });
+}
+
+/**
+ * The export a callee or value names, through a value import or namespace
+ * import from a module `fromModule` accepts: `getApiRoute` for `apiRoute`
+ * imported `as` it, or `api.getApiRoute`. `undefined` for anything else,
+ * such as a parameter that shadows the import.
+ */
+export function importedName(checker: ts.TypeChecker, node: ts.Expression, fromModule: (specifier: string) => boolean): string | undefined {
+  const from = (statement: ts.ImportDeclaration | ts.JSDocImportTag) =>
+    !statement.importClause?.isTypeOnly && ts.isStringLiteral(statement.moduleSpecifier) && fromModule(statement.moduleSpecifier.text);
+  const declarationOf = (name: ts.Node) => checker.getSymbolAtLocation(name)?.declarations?.[0];
+  if (ts.isIdentifier(node)) {
+    const declaration = declarationOf(node);
+    return declaration && ts.isImportSpecifier(declaration) && !declaration.isTypeOnly && from(declaration.parent.parent.parent)
+      ? (declaration.propertyName ?? declaration.name).text
+      : undefined;
+  }
+  if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
+    const declaration = declarationOf(node.expression);
+    return declaration && ts.isNamespaceImport(declaration) && from(declaration.parent.parent) ? node.name.text : undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -50,13 +87,14 @@ export function readRouteExports(sourceFile: ts.SourceFile, namedExports = false
       prerenders.push({ statement, ...(value === undefined ? {} : { value }) });
     }
   }
-  return { prerenders, staticPaths };
+  const listedPrerender = !prerenders.length && exportedNames(sourceFile).has("prerender");
+  return { prerenders, listedPrerender, staticPaths };
 }
 
 /** A route file's exports: none for an `.astro` file without frontmatter. */
 export function readRouteFileExports(file: string, source: string): RouteExports {
   const script = routeCode(file, source);
-  return script ? readRouteExports(parseRouteCode(script.code), !isAstroFile(file)) : { prerenders: [], staticPaths: false };
+  return script ? readRouteExports(parseRouteCode(script.code), !isAstroFile(file)) : { prerenders: [], listedPrerender: false, staticPaths: false };
 }
 
 export function isAstroFile(file: string): boolean {

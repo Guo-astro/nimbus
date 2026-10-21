@@ -13,11 +13,10 @@ import path from "node:path";
 import ts from "typescript";
 
 import { collectionMountPrefix, NO_ROUTES, PRIMARY_COLLECTION, type MountContext, type VersionInfo } from "./collection-mount.js";
-import { routeCode } from "./route-exports.js";
-import { isStaticPathsHelper, PAGE_HELPERS, takesCollection } from "./route-helpers.js";
+import { importedName, parseRouteCode, routeCode, routeProgram } from "./route-exports.js";
+import { isRuntimeModule, isStaticPathsHelper, PAGE_HELPERS, takesCollection } from "./route-helpers.js";
 import type { SidebarConfigItem } from "../types.js";
 
-const RUNTIME_MODULES = new Set(["@cloudflare/nimbus-docs", "@cloudflare/nimbus-docs/runtime"]);
 
 /** A route file found serving a collection. */
 export interface FoundRoute {
@@ -144,41 +143,17 @@ export interface RouteRead {
 export function readRoute(source: string): RouteRead {
   const code = routeCode("route.astro", source)?.code;
   if (code === undefined) return { usesHelper: false };
-  // A program skips files with extensions it doesn't know, such as `.astro`.
-  const name = "route.ts";
-  const sourceFile = ts.createSourceFile(name, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [] };
-  const host: ts.CompilerHost = {
-    ...ts.createCompilerHost(options),
-    getSourceFile: (requested) => (requested === name ? sourceFile : undefined),
-    fileExists: (requested) => requested === name,
-    readFile: () => undefined,
-  };
-  const checker = ts.createProgram({ rootNames: [name], options, host }).getTypeChecker();
+  const sourceFile = parseRouteCode(code);
+  const checker = routeProgram(sourceFile).getTypeChecker();
 
-  const fromRuntime = (statement: ts.ImportDeclaration | ts.JSDocImportTag) =>
+  const fromRuntime = (statement: ts.ImportDeclaration) =>
     !statement.importClause?.isTypeOnly &&
     ts.isStringLiteral(statement.moduleSpecifier) &&
-    RUNTIME_MODULES.has(statement.moduleSpecifier.text);
+    isRuntimeModule(statement.moduleSpecifier.text);
   const declarationOf = (node: ts.Node): ts.Declaration | undefined =>
     checker.getSymbolAtLocation(node)?.declarations?.[0];
   // The runtime export a callee or value refers to, if it's one of ours.
-  const runtimeName = (node: ts.Expression): string | undefined => {
-    if (ts.isIdentifier(node)) {
-      const declaration = declarationOf(node);
-      return declaration && ts.isImportSpecifier(declaration) && !declaration.isTypeOnly &&
-        fromRuntime(declaration.parent.parent.parent)
-        ? (declaration.propertyName ?? declaration.name).text
-        : undefined;
-    }
-    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
-      const declaration = declarationOf(node.expression);
-      return declaration && ts.isNamespaceImport(declaration) && fromRuntime(declaration.parent.parent)
-        ? node.name.text
-        : undefined;
-    }
-    return undefined;
-  };
+  const runtimeName = (node: ts.Expression) => importedName(checker, node, isRuntimeModule);
   const isConst = (declaration: ts.VariableDeclaration) =>
     ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
   // Astro runs `getStaticPaths` apart from the rest of the frontmatter: a

@@ -1510,7 +1510,13 @@ test("route files that don't match rendering get one warning listing them", asyn
     default: "request",
     collections: { docs: "request", blog: "build" },
   });
-  const built = "---\nexport const prerender = true;\nexport const getStaticPaths = paths;\n---\n";
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "request", collections: { docs: "request", blog: "build" } } })] };\n',
+    "utf8",
+  );
+  const built =
+    '---\nimport { getDocsStaticPaths } from "@cloudflare/nimbus-docs";\nexport const prerender = true;\nexport const getStaticPaths = getDocsStaticPaths;\n---\n';
   const request = "---\nexport const prerender = false;\n---\n";
   await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), built, "utf8");
   await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), built, "utf8");
@@ -1571,6 +1577,11 @@ test("a request-rendered route with getStaticPaths is reported, whatever its pre
 
 test("a built dynamic route with no getStaticPaths fails the build, naming the fix", async (t) => {
   const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
   await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
   await writeFile(
     path.join(integration.root, "src/pages/llms.txt.ts"),
@@ -1582,6 +1593,21 @@ test("a built dynamic route with no getStaticPaths fails the build, naming the f
   assert.throws(
     () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
     /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths to it\..*configuration\/#mix-build-and-request-rendering/s,
+  );
+});
+
+test("when check --fix can't plan the edits, the advice says to edit by hand and why", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(path.join(integration.root, "astro.config.ts"), "export default makeConfig();\n", "utf8");
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /check --fix` can't edit route files here \(the Nimbus config can't be read statically\), so edit it by hand\./u);
+      assert.doesNotMatch(error.message, /Run `/u);
+      return true;
+    },
   );
 });
 

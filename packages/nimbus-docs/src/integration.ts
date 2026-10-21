@@ -3547,16 +3547,22 @@ export function nimbus(
         for (const file of routeFileMismatches.keys()) if (!entrypoints.has(file)) routeFileMismatches.delete(file);
         const mismatched = [...routeFileMismatches].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
         const unbuildable = mismatched.filter(([, mismatch]) => mismatch.kind === "missing-paths");
-        // What `check --fix` can't do for a file, so the advice doesn't loop.
+        // What `check --fix` can and can't do for each file, so the advice doesn't loop.
         const manual = new Map<string, string>();
+        const fixable = new Set<string>();
+        let unplanned = "";
         if (mismatched.length > 0) {
           // Advice only: if planning fails, the build still reports the files.
-          let plan: ReturnType<typeof planRouteFiles> | undefined;
+          let plan: ReturnType<typeof planRouteFiles>;
           try {
             plan = planRouteFiles(projectRootForBuild);
-          } catch {}
-          for (const entry of plan?.ok ? plan.files : [])
+          } catch (error) {
+            plan = { ok: false, reason: `planning failed: ${error instanceof Error ? error.message : String(error)}` };
+          }
+          if (!plan.ok) unplanned = plan.reason;
+          for (const entry of plan.ok ? plan.files : [])
             if (entry.edit.status === "manual") manual.set(entry.file, entry.edit.todo);
+            else fixable.add(entry.file);
         }
         const fixCommand = `\`${invocation("check --fix", projectRootForBuild)}\``;
         const lines = (files: Array<[string, RouteFileMismatch & { subject: string }]>, problem: boolean) =>
@@ -3569,9 +3575,10 @@ export function nimbus(
             .join("\n");
         // `what` takes "it", "them", or "the other(s)" beside files --fix can't change.
         const runFix = (files: Array<[string, unknown]>, what: (target: string) => string) => {
-          const fixable = files.filter(([file]) => !manual.has(file)).length;
-          if (fixable === 0) return "";
-          const target = fixable < files.length ? (fixable === 1 ? "the other" : "the others") : files.length === 1 ? "it" : "them";
+          if (unplanned) return `${fixCommand} can't edit route files here (${unplanned}), so edit ${files.length === 1 ? "it" : "them"} by hand.`;
+          const count = files.filter(([file]) => fixable.has(file)).length;
+          if (count === 0) return "";
+          const target = count < files.length ? (count === 1 ? "the other" : "the others") : files.length === 1 ? "it" : "them";
           return `Run ${fixCommand} to ${what(target)}.`;
         };
         const policy = config.rendering ? "`rendering`" : "Nimbus";

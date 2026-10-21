@@ -9,6 +9,7 @@ import ts from "typescript";
 
 import type { RenderingMode } from "../types.js";
 import {
+  isRuntimeModule,
   isStaticPathsHelper,
   PAGE_HELPERS,
   staticPathsFor,
@@ -16,15 +17,15 @@ import {
   type PageRouteKind,
   type StaticPathsHelper,
 } from "./route-helpers.js";
-import { exportedNames, isAstroFile, parseRouteCode, readRouteExports, routeCode } from "./route-exports.js";
+import { exportedNames, importedName, isAstroFile, parseRouteCode, readRouteExports, routeCode, routeProgram } from "./route-exports.js";
 import { isDynamicRoute, routeFileMismatch, type AstroOutput } from "./route-modes.js";
 
 const RUNTIME = "@cloudflare/nimbus-docs/runtime";
 // Agent factories whose routes are dynamic, so a built one exports its paths.
 const AGENT_PATHS = new Set(["markdownRoute", "markdownSourceRoute", "llmsSectionRoute"]);
 
-const AGENT_LINE =
-  /^([ \t]*export\s+const\s*\{\s*GET)\s*(?:,\s*getStaticPaths\s*)?,?\s*(\}\s*=\s*(markdownRoute|markdownSourceRoute|llmsSectionRoute|llmsRoute|llmsFullRoute)\(\s*\)\s*;?)/gmu;
+const AGENT_FACTORIES = new Set([...AGENT_PATHS, "llmsRoute", "llmsFullRoute"]);
+const AGENT_MODULE = "@cloudflare/nimbus-docs/agent-endpoints";
 
 export interface RouteFileTarget {
   mode: RenderingMode;
@@ -48,13 +49,19 @@ export function setRouteFileMode(file: string, source: string, target: RouteFile
   if (!script) return { status: "manual", source, todo: "It has no frontmatter opening the file (`---` on the first line) for Nimbus to edit." };
   const { code, todo } = editCode(script.code, target, !isAstroFile(file));
   const next = source.slice(0, script.start) + code + source.slice(script.start + script.code.length);
-  // The editor never removes another name the file declares or exports, never leaves code that stops
-  // parsing, and never stops short of a match.
-  const kept = topLevelNames(parseRouteCode(code));
-  const unsafe =
-    [...topLevelNames(parseRouteCode(script.code))].some((name) => !STATE_EXPORTS.has(name) && !kept.has(name)) ||
-    (!syntaxErrors(script.code) && syntaxErrors(code));
+  // The editor never removes another name the file declares or exports, nor one its template reads,
+  // never adds a TypeScript error, and never stops short of a match.
+  const before = parseRouteCode(script.code);
+  const after = parseRouteCode(code);
+  const kept = topLevelNames(after);
   const shapeTodo = `Nimbus can't edit this file's shape: ${neededState(file, script.code, target)}.`;
+  const template = isAstroFile(file) ? source.slice(script.start + script.code.length) : "";
+  const keptInScope = new Set([...kept, ...importedNames(after)]);
+  const read = [...topLevelNames(before), ...importedNames(before)].find((name) => !keptInScope.has(name) && readsName(template, name));
+  if (read)
+    return { status: "manual", source, todo: `Its template reads \`${read}\`, which Nimbus would remove: ${neededState(file, script.code, target)}, then update the template.` };
+  const unsafe =
+    [...topLevelNames(before)].some((name) => !STATE_EXPORTS.has(name) && !kept.has(name)) || introducesErrors(script.code, code);
   if (unsafe) return { status: "manual", source, todo: todo ?? shapeTodo };
   if (todo) return { status: "manual", source: next, todo };
   if (routeFileMismatch({ file, source: next, output: target.output, expected: target.mode }))
@@ -64,9 +71,25 @@ export function setRouteFileMode(file: string, source: string, target: RouteFile
 
 const STATE_EXPORTS = new Set(["prerender", "getStaticPaths"]);
 
-function syntaxErrors(code: string): boolean {
-  return (ts.transpileModule(code, { reportDiagnostics: true }).diagnostics ?? []).length > 0;
+/** Whether `after` has a TypeScript error `before` doesn't, such as a name it no longer declares or imports twice. */
+function introducesErrors(before: string, after: string): boolean {
+  const known = checkerErrors(before);
+  return [...checkerErrors(after)].some((error) => !known.has(error));
 }
+
+function checkerErrors(code: string): Set<string> {
+  // A module, as Astro compiles frontmatter, so top-level `await` stays valid without imports or exports.
+  const sourceFile = parseRouteCode(`${code}\nexport {};\n`);
+  const program = routeProgram(sourceFile);
+  return new Set(
+    [...program.getSyntacticDiagnostics(sourceFile), ...program.getSemanticDiagnostics(sourceFile)]
+      .filter((d) => !UNRESOLVED_MODULE.has(d.code))
+      .map((d) => `${d.code}:${ts.flattenDiagnosticMessageText(d.messageText, "\n")}`),
+  );
+}
+
+/** "Cannot find module" errors, which every import raises when the checker resolves none. */
+const UNRESOLVED_MODULE = new Set([2307, 2792]);
 
 /** The names the code declares or exports at the top level, imports aside. */
 function topLevelNames(sourceFile: ts.SourceFile): Set<string> {
@@ -77,6 +100,21 @@ function topLevelNames(sourceFile: ts.SourceFile): Set<string> {
     else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) names.add(statement.name.text);
   }
   return names;
+}
+
+function importedNames(sourceFile: ts.SourceFile): string[] {
+  return sourceFile.statements.flatMap((statement) => {
+    const clause = ts.isImportDeclaration(statement) ? statement.importClause : undefined;
+    if (!clause) return [];
+    const bindings = clause.namedBindings;
+    const named = !bindings ? [] : ts.isNamespaceImport(bindings) ? [bindings.name.text] : bindings.elements.map((e) => e.name.text);
+    return clause.name ? [clause.name.text, ...named] : named;
+  });
+}
+
+/** Whether an `.astro` template mentions `name` as a word: perhaps only in text, but Nimbus can't tell without compiling it. */
+function readsName(template: string, name: string): boolean {
+  return new RegExp(`(?<![\\w$])${name.replaceAll("$", "\\$")}(?![\\w$])`, "u").test(template);
 }
 
 function bindingNames(name: ts.BindingName): string[] {
@@ -104,17 +142,17 @@ function neededState(file: string, code: string, target: RouteFileTarget): strin
 
 function editCode(input: string, target: RouteFileTarget, namedExports: boolean): { code: string; todo?: string } {
   const build = target.mode === "build";
-  const { prerenders, staticPaths } = readRouteExports(parseRouteCode(input), namedExports);
-  const agents = [...input.matchAll(AGENT_LINE)];
+  const { prerenders, listedPrerender, staticPaths } = readRouteExports(parseRouteCode(input), namedExports);
+  const agents = agentExports(input);
   const paths = helperPathsExports(input);
   if (prerenders.length > 1) return { code: input, todo: "It sets `prerender` more than once; keep one line." };
-  if (!prerenders[0] && exportedNames(parseRouteCode(input)).has("prerender"))
+  if (listedPrerender)
     return { code: input, todo: "It exports `prerender` from a list; declare it as `export const prerender = …;`, which Nimbus can edit." };
   if (prerenders[0] && prerenders[0].statement.declarationList.declarations.length > 1)
     return { code: input, todo: "Its `prerender` shares a statement with other exports; give it a statement of its own (`export const prerender = …;`)." };
   if (prerenders[0] && prerenders[0].value === undefined) {
     const line = build === (target.output === "server") ? `set it to \`export const prerender = ${build};\`` : "remove it";
-    const factory = agents[0]?.[3];
+    const factory = agents[0]?.factory;
     const needsPaths = build && !staticPaths && (target.page || (factory && AGENT_PATHS.has(factory)));
     const paths = !needsPaths
       ? ""
@@ -138,8 +176,9 @@ function editCode(input: string, target: RouteFileTarget, namedExports: boolean)
   let reads = new Set<string>();
   let todo: string | undefined;
   if (agents.length) {
-    const [line, start, end, factory] = agents[0]!;
-    code = code.replace(line, `${start}${build && AGENT_PATHS.has(factory!) ? ", getStaticPaths" : ""} ${end}`);
+    const { pattern, factory } = agentExports(code)[0]!;
+    const names = `{ GET${build && AGENT_PATHS.has(factory) ? ", getStaticPaths" : ""} }`;
+    code = code.slice(0, pattern.getStart()) + names + code.slice(pattern.getEnd());
   } else if (paths.length) {
     if (!build) {
       code = removeNode(code, helperPathsExports(code)[0]!.statement);
@@ -170,22 +209,52 @@ function editCode(input: string, target: RouteFileTarget, namedExports: boolean)
   return { code, ...(todo ? { todo } : {}) };
 }
 
+/** `export const { GET, getStaticPaths } = <factory>()` statements, as the starter writes them. */
+function agentExports(code: string): { pattern: ts.ObjectBindingPattern; factory: string }[] {
+  const sourceFile = parseRouteCode(code);
+  const { agent } = nimbusNames(sourceFile);
+  return sourceFile.statements.flatMap((statement) => {
+    if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
+    const [declaration, ...rest] = statement.declarationList.declarations;
+    if (rest.length || !declaration || !ts.isObjectBindingPattern(declaration.name)) return [];
+    const names = declaration.name.elements.map((e) => (!e.propertyName && !e.initializer && !e.dotDotDotToken && ts.isIdentifier(e.name) ? e.name.text : ""));
+    if (!names.includes("GET") || names.some((name) => name !== "GET" && name !== "getStaticPaths")) return [];
+    const call = declaration.initializer;
+    if (!call || !ts.isCallExpression(call) || call.arguments.length) return [];
+    const factory = agent(call.expression);
+    return factory && AGENT_FACTORIES.has(factory) ? [{ pattern: declaration.name, factory }] : [];
+  });
+}
+
+/** The Nimbus helper or agent factory a name in `sourceFile` refers to, through its imports and scopes. */
+function nimbusNames(sourceFile: ts.SourceFile) {
+  const checker = routeProgram(sourceFile).getTypeChecker();
+  return {
+    runtime: (node: ts.Expression) => importedName(checker, node, isRuntimeModule),
+    agent: (node: ts.Expression) => importedName(checker, node, (specifier) => specifier === AGENT_MODULE),
+  };
+}
+
 /** `export const getStaticPaths = <helper>(…)` statements, as the starter writes them. */
 function helperPathsExports(code: string): { statement: ts.Statement; helper: StaticPathsHelper }[] {
-  return parseRouteCode(code).statements.flatMap((statement) => {
+  const sourceFile = parseRouteCode(code);
+  const { runtime } = nimbusNames(sourceFile);
+  return sourceFile.statements.flatMap((statement) => {
     if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
     const [declaration, ...rest] = statement.declarationList.declarations;
     if (rest.length || !declaration || !ts.isIdentifier(declaration.name) || declaration.name.text !== "getStaticPaths") return [];
     const value = declaration.initializer;
-    const helper = value && helperIn(value);
+    const helper = value && helperIn(value, runtime);
     return helper ? [{ statement, helper }] : [];
   });
 }
 
-function helperIn(value: ts.Expression): StaticPathsHelper | undefined {
-  if (ts.isIdentifier(value)) return isStaticPathsHelper(value.text) && !takesCollection(value.text) ? value.text : undefined;
-  if (!ts.isCallExpression(value) || !ts.isIdentifier(value.expression)) return undefined;
-  const name = value.expression.text;
+function helperIn(value: ts.Expression, runtime: (node: ts.Expression) => string | undefined): StaticPathsHelper | undefined {
+  if (!ts.isCallExpression(value)) {
+    const name = runtime(value);
+    return isStaticPathsHelper(name) && !takesCollection(name) ? name : undefined;
+  }
+  const name = runtime(value.expression);
   const [collection] = value.arguments;
   return isStaticPathsHelper(name) && takesCollection(name) && collection && ts.isStringLiteralLike(collection) ? name : undefined;
 }
@@ -208,9 +277,16 @@ function builtStaticPaths(
   const options = calls.find((call) => call.options)?.options;
   if (!options) return { value: paths, reads: new Set() };
   const value = `${paths.slice(0, -1)}, ${options.getText()})`;
-  const { reads, hidden } = namesRead(options);
+  const { reads, hidden, inner } = namesRead(options);
+  const list = (names: Set<string>) => [...names].map((name) => `\`${name}\``).join(", ");
+  if (inner.size > 0)
+    return {
+      todo:
+        `Its page helper's options read ${list(inner)} from inside the page, which getStaticPaths can't see: Astro runs it apart from the rest of the file. ` +
+        `Add \`export const getStaticPaths = ${paths.slice(0, -1)}, …);\` with the options the page helper gets.`,
+    };
   if (hidden.size === 0) return { value, reads };
-  const names = [...hidden].map((name) => `\`${name}\``).join(", ");
+  const names = list(hidden);
   return {
     todo:
       `Its page helper's options read ${names}, which getStaticPaths can't see: Astro runs it apart from the rest of the file. ` +
@@ -219,42 +295,69 @@ function builtStaticPaths(
 }
 
 /**
- * The names `node` reads: exported top-level constants, which `getStaticPaths`
- * can see, and `hidden` ones, other than those and imports, which it can't.
+ * The names `node` reads, resolved through the checker: `reads` are exported
+ * top-level constants, which `getStaticPaths` can see; `hidden` are other
+ * top-level names, which it can't until they're exported; `inner` are names
+ * declared inside the page, such as a parameter. Imports, globals and names
+ * declared inside the expression itself are none of these.
  */
-function namesRead(node: ts.Node): { reads: Set<string>; hidden: Set<string> } {
-  const imported = new Set<string>();
-  const exported = new Set<string>();
-  for (const statement of node.getSourceFile().statements) {
-    if (
-      ts.isVariableStatement(statement) &&
-      statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) &&
-      statement.declarationList.flags & ts.NodeFlags.Const
-    )
-      for (const d of statement.declarationList.declarations) if (ts.isIdentifier(d.name)) exported.add(d.name.text);
-    const clause = ts.isImportDeclaration(statement) && !statement.importClause?.isTypeOnly ? statement.importClause : undefined;
-    if (!clause) continue;
-    const bindings = clause.namedBindings;
-    if (clause.name) imported.add(clause.name.text);
-    if (bindings && ts.isNamespaceImport(bindings)) imported.add(bindings.name.text);
-    if (bindings && ts.isNamedImports(bindings)) for (const e of bindings.elements) if (!e.isTypeOnly) imported.add(e.name.text);
-  }
-  const topLevel = topLevelNames(node.getSourceFile());
+function namesRead(node: ts.Node): { reads: Set<string>; hidden: Set<string>; inner: Set<string> } {
+  const sourceFile = node.getSourceFile();
+  const checker = routeProgram(sourceFile).getTypeChecker();
   const reads = new Set<string>();
   const hidden = new Set<string>();
-  const visit = (child: ts.Node): void => {
-    const parent = child.parent;
-    const isName = (ts.isPropertyAssignment(parent) || ts.isPropertyAccessExpression(parent)) && parent.name === child;
-    // A global, such as `Math`, unless the file declares the name itself.
-    const global = (name: string) => Object.hasOwn(globalThis, name) && !topLevel.has(name);
-    if (ts.isIdentifier(child) && !isName && !global(child.text) && !imported.has(child.text)) {
-      if (exported.has(child.text)) reads.add(child.text);
-      else hidden.add(child.text);
-    }
-    ts.forEachChild(child, visit);
+  const inner = new Set<string>();
+  const within = (inner: ts.Node, outer: ts.Node) => inner.pos >= outer.pos && inner.end <= outer.end;
+  const walk = (root: ts.Node) => {
+    const visit = (child: ts.Node): void => {
+      // Types aren't values getStaticPaths reads, as in `satisfies ApiHomeOptions`.
+      if (ts.isTypeNode(child)) return;
+      const parent = child.parent;
+      const isName = (ts.isPropertyAssignment(parent) || ts.isPropertyAccessExpression(parent)) && parent.name === child;
+      if (ts.isIdentifier(child) && !isName) {
+        const symbol = ts.isShorthandPropertyAssignment(parent)
+          ? checker.getShorthandAssignmentValueSymbol(parent)
+          : checker.getSymbolAtLocation(child);
+        const declaration = symbol?.declarations?.[0];
+        if (declaration && !within(declaration, root) && !isValueImport(declaration)) {
+          if (!isTopLevel(declaration, sourceFile)) inner.add(child.text);
+          else if (!isExportedConst(declaration, sourceFile)) hidden.add(child.text);
+          else if (!reads.has(child.text)) {
+            // An exported constant is only as visible as the names it reads.
+            reads.add(child.text);
+            if (declaration.initializer) walk(declaration.initializer);
+          }
+        }
+      }
+      ts.forEachChild(child, visit);
+    };
+    visit(root);
   };
-  visit(node);
-  return { reads, hidden };
+  walk(node);
+  return { reads, hidden, inner };
+}
+
+function isTopLevel(declaration: ts.Declaration, sourceFile: ts.SourceFile): boolean {
+  const statement = ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration;
+  return statement.parent === sourceFile;
+}
+
+function isValueImport(declaration: ts.Declaration): boolean {
+  if (ts.isImportSpecifier(declaration)) return !declaration.isTypeOnly && !declaration.parent.parent.isTypeOnly;
+  if (ts.isNamespaceImport(declaration)) return !declaration.parent.isTypeOnly;
+  return ts.isImportClause(declaration) && !declaration.isTypeOnly;
+}
+
+function isExportedConst(declaration: ts.Declaration, sourceFile: ts.SourceFile): declaration is ts.VariableDeclaration {
+  if (!ts.isVariableDeclaration(declaration) || !ts.isIdentifier(declaration.name)) return false;
+  const list = declaration.parent;
+  const statement = list.parent;
+  return (
+    ts.isVariableStatement(statement) &&
+    statement.parent === sourceFile &&
+    (list.flags & ts.NodeFlags.Const) !== 0 &&
+    (statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false)
+  );
 }
 
 /**
@@ -286,11 +389,13 @@ function valueKind(node: ts.Expression, depth = 0): "string" | "object" | undefi
 
 function pageHelperCalls(code: string): ts.CallExpression[] {
   const calls: ts.CallExpression[] = [];
+  const sourceFile = parseRouteCode(code);
+  const { runtime } = nimbusNames(sourceFile);
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && PAGE_HELPERS.has(node.expression.text)) calls.push(node);
+    if (ts.isCallExpression(node) && PAGE_HELPERS.has(runtime(node.expression) ?? "")) calls.push(node);
     ts.forEachChild(node, visit);
   };
-  visit(parseRouteCode(code));
+  visit(sourceFile);
   return calls;
 }
 
@@ -369,12 +474,18 @@ function dropUnusedImport(code: string, name: string): string {
 
 /** Add `name` to the runtime import, or a new import after the last one. */
 function addRuntimeImport(code: string, name: string): string {
-  const imports = parseRouteCode(code).statements.filter(ts.isImportDeclaration);
+  const sourceFile = parseRouteCode(code);
+  const imports = sourceFile.statements.filter(ts.isImportDeclaration);
+  const imported = imports.some((statement) => {
+    const bindings = statement.importClause?.namedBindings;
+    return ts.isStringLiteral(statement.moduleSpecifier) && isRuntimeModule(statement.moduleSpecifier.text) && !statement.importClause?.isTypeOnly &&
+      bindings && ts.isNamedImports(bindings) && bindings.elements.some((e) => !e.isTypeOnly && !e.propertyName && e.name.text === name);
+  });
+  if (imported) return code;
   for (const statement of imports) {
     if (!ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== RUNTIME) continue;
     const bindings = statement.importClause?.namedBindings;
     if (!bindings || !ts.isNamedImports(bindings) || statement.importClause?.isTypeOnly) continue;
-    if (bindings.elements.some((item) => item.name.text === name && !item.propertyName)) return code;
     const open = bindings.getStart() + 1;
     const first = bindings.elements[0];
     if (first && bindings.getText().includes("\n")) {

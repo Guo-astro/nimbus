@@ -14,6 +14,11 @@ export type StaticPathsHelper = keyof typeof STATIC_PATHS_HELPERS;
 // Page helpers whose second argument names the collection a route serves.
 export const PAGE_HELPERS = new Set(["getCollectionPage", "getCollectionPageProps", "getApiRoute", "getApiPage"]);
 
+/** The modules a route imports page and static-paths helpers from. */
+export function isRuntimeModule(specifier: string): boolean {
+  return specifier === "@cloudflare/nimbus-docs" || specifier === "@cloudflare/nimbus-docs/runtime";
+}
+
 export function isStaticPathsHelper(name: string | undefined): name is StaticPathsHelper {
   return name !== undefined && Object.hasOwn(STATIC_PATHS_HELPERS, name);
 }

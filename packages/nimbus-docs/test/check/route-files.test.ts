@@ -247,6 +247,29 @@ test("a prerender set by an expression is reported, with the step to take", asyn
   }
 });
 
+test("a prerender exported from a list is reported, with the step to take", async () => {
+  const dir = project({
+    output: "server",
+    rendering: '{ default: "request" }',
+    files: {
+      "src/pages/llms.txt.ts":
+        'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\n\nconst prerender = false;\nexport { prerender };\nexport const { GET } = llmsRoute();\n',
+    },
+  });
+  try {
+    const finding = (await runChecks(dir, STRUCTURE)).findings.find((f) => f.file === "src/pages/llms.txt.ts");
+    assert.equal(finding?.severity, "warn");
+    assert.equal(
+      finding?.message,
+      "src/pages/llms.txt.ts: file exports `prerender` from a list, but Astro reads only `export const prerender = true;` or `false`, and `rendering` renders it on request.",
+    );
+    assert.equal(finding?.fixable, false);
+    assert.match(finding?.fix?.suggestion ?? "", /exports `prerender` from a list; declare it as `export const prerender = …;`/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("getStaticPaths exported from a list counts in a .ts endpoint", async () => {
   const dir = project({
     output: "static",

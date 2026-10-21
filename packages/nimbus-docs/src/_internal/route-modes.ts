@@ -18,9 +18,11 @@ export type AstroOutput = "static" | "server";
 
 /**
  * A route file's own mode, by Astro's rule: its `prerender` export, else the
- * `output` default. `undefined` when `prerender` is set by an expression.
+ * `output` default. `undefined` when `prerender` is set by an expression or
+ * exported from a list.
  */
 export function fileRouteMode(exports: RouteExports, output: AstroOutput): RenderingMode | undefined {
+  if (exports.listedPrerender) return undefined;
   if (exports.prerenders.length === 0) return output === "server" ? "request" : "build";
   const [only] = exports.prerenders;
   if (exports.prerenders.length > 1 || only!.value === undefined) return undefined;
@@ -40,9 +42,10 @@ export interface RouteFileMismatch {
    * which Astro can't do.
    * `expression`: it sets `prerender` with an expression, which the mode
    * Nimbus gives it overrides.
+   * `listed`: it exports `prerender` from a list, which Astro doesn't read.
    */
-  kind: "mode" | "ignored-paths" | "missing-paths" | "expression";
-  /** `undefined` when its `prerender` is an expression. */
+  kind: "mode" | "ignored-paths" | "missing-paths" | "expression" | "listed";
+  /** `undefined` when its `prerender` is an expression or listed. */
   fileMode?: RenderingMode;
   mode: RenderingMode;
 }
@@ -63,6 +66,7 @@ export function routeFileMismatch(input: {
   const base = { ...(fileMode ? { fileMode } : {}), mode: input.expected };
   if (input.expected === "build" && isDynamicRoute(input.file) && !exports.staticPaths) return { kind: "missing-paths", ...base };
   // Two `prerender` exports don't compile, so the build reports those itself.
+  if (exports.listedPrerender) return { kind: "listed", ...base };
   if (fileMode === undefined) return exports.prerenders.length === 1 ? { kind: "expression", ...base } : null;
   if (fileMode !== input.expected) return { kind: "mode", ...base };
   if (input.expected === "request" && exports.staticPaths) return { kind: "ignored-paths", ...base };
@@ -81,6 +85,8 @@ export function describeRouteFileMismatch(mismatch: RouteFileMismatch, subject: 
   if (mismatch.kind === "ignored-paths") return "file renders on request, so Astro ignores its getStaticPaths";
   if (mismatch.kind === "expression")
     return `file sets \`prerender\` with an expression, but ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)} whatever it says`;
+  if (mismatch.kind === "listed")
+    return `file exports \`prerender\` from a list, but Astro reads only \`export const prerender = true;\` or \`false\`, and ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`;
   const fileMode = mismatch.fileMode!;
   return `file ${verb(fileMode)} ${when(fileMode)}, ${policy} ${verb(mismatch.mode)} ${subject} ${when(mismatch.mode)}`;
 }

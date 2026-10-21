@@ -41,7 +41,7 @@ export function applyApiSidebarMode(nav: ApiNav, options: BoundApiNavOptions): A
   if (options.mode === "full") return nav;
   // Without the version's query, an old-version page would load the default
   // version's navigation for a page-less group.
-  const overviewHref = `${toDocumentHref(options.urlBasePath ?? options.mountPath)}${options.urlQuery ?? ""}`;
+  const overviewHref = `${toDocumentHref((options.urlBasePath ?? options.mountPath) || "/")}${options.urlQuery ?? ""}`;
   const bound = (items: ApiNavItem[]): ApiNavItem[] => items.map(boundItem);
   const boundItem = (item: ApiNavItem): ApiNavItem => {
     if (item.children.length === 0) return item;

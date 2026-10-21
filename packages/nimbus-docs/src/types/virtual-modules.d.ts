@@ -28,6 +28,8 @@ declare module "virtual:nimbus/config" {
   export const config: import("../types.js").RuntimeNimbusConfig;
   export const indexedCollections: readonly string[];
   export const emptyCollections: readonly string[];
+  /** Whether `content.config.ts` provably declares no `docs` collection. */
+  export const primaryCollectionAbsent: boolean;
   /**
    * The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice
    * without the root collection keeps its site-wide files under `prefix`

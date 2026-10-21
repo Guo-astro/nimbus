@@ -124,7 +124,7 @@ class ModelView {
   href(coordinate: Coordinate): string {
     if (pageReferenceModels.has(this.model))
       return `nimbus-ref:v1:${Buffer.from(coordinate, "utf8").toString("base64url")}`;
-    return `${toDocumentHref(this.routePath(coordinate))}${this.model.urlQuery ?? ""}`;
+    return `${toDocumentHref(this.routePath(coordinate) || "/")}${this.model.urlQuery ?? ""}`;
   }
 
   private routePath(coordinate: Coordinate): string {

@@ -1387,6 +1387,39 @@ test("collection parsing reports whether registrations are complete", async (t) 
 
   await writeFile(
     file,
+    "export const collections = {}; const registered = collections; registered.docs = {};\n",
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(file, "export const collections = {}; register(collections);\n");
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(
+    file,
+    "function registerDocs() { collections.docs = {}; }\nexport const collections = {};\nregisterDocs();\n",
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(
+    file,
+    'import { defineCollection } from "astro:content";\nimport { docsCollection } from "@cloudflare/nimbus-docs/content";\nexport const collections = { api: {} };\n',
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: ["api"],
+    complete: true,
+  });
+
+  await writeFile(
+    file,
     "export const collections = { docs: {} }; type Name = keyof typeof collections;\n",
   );
   assert.deepEqual(await parseContentCollections(file), {

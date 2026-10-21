@@ -1536,9 +1536,9 @@ function processHideChildren(items: SidebarItem[], entries: CollectionEntry[]): 
  *
  * The framework uses this to figure out which collections to load for
  * the sidebar — there's no separate `collections: string[]` config
- * field. The primary collection (`docs`) is always included by the
- * caller; this helper returns only the *extra* names referenced by
- * sidebar items.
+ * field. The caller adds the primary collection (`docs`) unless the site
+ * provably has none; this helper returns only the *extra* names referenced
+ * by sidebar items.
  */
 export function collectSidebarCollectionRefs(
   items: ConfigItem[] | undefined,
@@ -1557,6 +1557,16 @@ export function collectSidebarCollectionRefs(
   }
   walk(items);
   return [...found];
+}
+
+/** Whether the config reads the primary collection: a page slug or a `directory` autogenerate, at any depth. */
+export function sidebarReadsPrimary(items: ConfigItem[] | undefined): boolean {
+  return (items ?? []).some(
+    (item) =>
+      typeof item === "string" ||
+      ("autogenerate" in item && !("collection" in item.autogenerate)) ||
+      ("items" in item && sidebarReadsPrimary(item.items)),
+  );
 }
 
 /**

@@ -138,7 +138,7 @@ The rules:
 - One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error. Rendered on request, such a route finds its collection by the URL segment before the page, so it serves only collections at a one-segment URL (`/sdk`).
 - Several static routes for one collection: the one at its default URL serves it. The others still build their pages (or serve them, for a collection rendered on request), which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
 - A collection a route moved owns everything below its URL. Another collection's page under `/products/sdk` is an error, except under a collection nested deeper (`/products/sdk/cli` is its own). A collection at its default URL (`/sdk`) leaves pages under it as they were.
-- An API collection needs a folder: one at the site root is an error for now.
+- An API collection can be served at the site root, for a site that is only an API reference: put its route at `src/pages/[...slug].astro` and leave out `docs`.
 
 `nimbus-docs check` lists where each collection is served when a route moves one, and `check --json` always includes the list as `collections`.
 
@@ -164,7 +164,6 @@ The build and `nimbus-docs check` report each of these with the file and the fix
 | `nimbus/collection-dynamic-folder` | A collection other than `docs` served only from routes under dynamic folders. Give it a static route. |
 | `nimbus/collection-docs-route` | `docs` routed away from the site root. Move the route to `src/pages/[...slug].astro`, or set Astro's `base`. |
 | `nimbus/collection-version-route` | A docs version routed away from `/<version>`. Move the route there. |
-| `nimbus/collection-api-root` | An API collection routed at the site root. Move its route into a folder. |
 | `nimbus/collection-route-param` | A route helper in a route whose parameter isn't `slug` (`[...path].astro`). Rename it to `[...slug].astro`. |
 | `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
 

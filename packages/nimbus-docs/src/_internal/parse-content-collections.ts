@@ -104,20 +104,23 @@ export async function parseContentCollections(
     else complete = false;
   }
 
-  const remainder = stripped.slice(objectEnd + 1);
-  if (
-    /\bcollections\s*(?:\.\s*[A-Za-z_$][\w$]*|\[[^\]]+\])\s*=/.test(
-      remainder,
-    ) ||
-    /\bdelete\s+collections\s*(?:\.|\[)/.test(remainder) ||
-    /\b(?:Object\.(?:assign|definePropert(?:y|ies))|Reflect\.set)\s*\(\s*collections\b/.test(
-      remainder,
-    )
-  ) {
+  // Any other reference but a type can change the object: a mutation, an
+  // alias (`const registered = collections`), a call that receives it, or a
+  // helper declared above that registers into it.
+  const outside = stripStrings(
+    `${stripped.slice(0, prefixMatch.index)}\n${stripped.slice(objectEnd + 1)}`,
+  ).replace(/\btypeof\s+collections\b/g, "");
+  if (/\bcollections\b/.test(outside)) {
     complete = false;
   }
 
   return { names, complete };
+}
+
+/** Whether the file provably declares no collection `name`: a complete parse without it. */
+export async function declaresNoCollection(filePath: string, name: string): Promise<boolean> {
+  const declared = await parseContentCollections(filePath);
+  return declared?.complete === true && !declared.names.includes(name);
 }
 
 /**

@@ -79,7 +79,6 @@ test("a request route names its collection in the page helper; disagreeing names
   const { errors } = decideCollectionMounts(
     [{ collection: "sdk", folder: "/products/kit", file: "src/pages/products/kit/[...slug].astro", dynamic: false, conflict: ["sdk", "blog"] }],
     null,
-    [],
   );
   assert.deepEqual(errors.map((error) => error.code), ["nimbus/collection-route-mismatch"]);
   assert.match(errors[0]!.message, /names collections "sdk" and "blog"/);
@@ -148,7 +147,6 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
       found("docs-v1", "/v1"),
     ],
     versions,
-    ["api"],
   );
   assert.deepEqual(errors, []);
   assert.deepEqual(mounts.get("docs"), { mount: "", file: "src/pages/[...slug].astro", aliases: ["/es"] });
@@ -159,10 +157,10 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(warnings.map((warning) => warning.code), ["nimbus/collection-alias-route", "nimbus/collection-alias-route"]);
   assert.match(warnings[0]!.message, /^src\/pages\/es\/\[\.\.\.slug\]\.astro also serves collection "docs", which is served at \/ /);
   assert.match(warnings[1]!.message, /redirect \/es\/api to \/api\.$/);
-  const above = decideCollectionMounts([found("sdk", "/sdk"), found("sdk", "")], versions, []).warnings;
+  const above = decideCollectionMounts([found("sdk", "/sdk"), found("sdk", "")], versions).warnings;
   assert.match(above[0]!.message, /search too; delete the route\.$/);
 
-  const codes = (routes: FoundRoute[]) => decideCollectionMounts(routes, versions, ["api"]).errors.map((error) => error.code);
+  const codes = (routes: FoundRoute[]) => decideCollectionMounts(routes, versions).errors.map((error) => error.code);
   assert.deepEqual(codes([found("sdk", "/a"), found("sdk", "/b")]), ["nimbus/collection-two-routes"]);
   assert.deepEqual(codes([found("docs", "/guide")]), ["nimbus/collection-docs-route"]);
   assert.deepEqual(codes([found("docs-v1", "/old/v1")]), ["nimbus/collection-version-route"]);
@@ -170,7 +168,8 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
   assert.deepEqual(codes([found("docs", "/[locale]", true)]), []);
   assert.deepEqual(codes([found("sdk", "/tools"), found("cli", "/tools")]), ["nimbus/collection-same-url"]);
   assert.deepEqual(codes([found("guides", ""), found("docs", "")]), ["nimbus/collection-same-url"]);
-  assert.deepEqual(codes([found("api", "")]), ["nimbus/collection-api-root"]);
+  assert.deepEqual(codes([found("api", "")]), []);
+  assert.deepEqual(codes([found("api", ""), found("docs", "")]), ["nimbus/collection-same-url"]);
   assert.deepEqual(codes([found("guides", "")]), []);
 
   const misnamed = (collection: string, folder: string, file: string): FoundRoute => ({
@@ -178,13 +177,13 @@ test("decideCollectionMounts: route folders, defaults, aliases and the errors fo
     file,
     misnamed: file.match(/\[[^\]]+\](?=(?:\/index)?\.astro$)/)![0],
   });
-  const kit = decideCollectionMounts([misnamed("sdk", "/products/kit", "src/pages/products/kit/[...path].astro")], versions, ["api"]);
+  const kit = decideCollectionMounts([misnamed("sdk", "/products/kit", "src/pages/products/kit/[...path].astro")], versions);
   assert.deepEqual(kit.errors.map((error) => error.code), ["nimbus/collection-route-param"]);
   assert.match(kit.errors[0]!.message, /parameter is \[\.\.\.path\].*stays at \/sdk\. Rename it to src\/pages\/products\/kit\/\[\.\.\.slug\]\.astro\.$/);
   assert.equal(kit.mounts.size, 0);
   assert.deepEqual(codes([misnamed("api", "", "src/pages/[...path].astro")]), ["nimbus/collection-route-param"]);
   assert.match(
-    decideCollectionMounts([misnamed("blog", "/news", "src/pages/news/[id]/index.astro")], versions, []).errors[0]!.message,
+    decideCollectionMounts([misnamed("blog", "/news", "src/pages/news/[id]/index.astro")], versions).errors[0]!.message,
     /Rename it to src\/pages\/news\/\[slug\]\/index\.astro\.$/,
   );
   assert.deepEqual(codes([misnamed("sdk", "/sdk", "src/pages/sdk/[...path].astro")]), []);

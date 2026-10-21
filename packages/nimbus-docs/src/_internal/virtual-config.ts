@@ -63,6 +63,12 @@ export interface VirtualConfigExtras {
    */
   getEmptyCollections?: () => Promise<readonly string[]>;
   /**
+   * Whether `content.config.ts` provably declares no `docs`, so the sidebar
+   * doesn't query it. Builds only: dev keeps querying, since a config edit
+   * doesn't reach the running server's cached answer.
+   */
+  getPrimaryCollectionAbsent?: () => Promise<boolean>;
+  /**
    * The partial build this is, or null: its collections and the prefix its
    * site-wide files live under (`""` for a root slice), with the Pagefind
    * bundle the search client loads and the other slices' bundles it merges
@@ -158,6 +164,7 @@ export function virtualConfigPlugin(
         const indexedCollections = await extras.getIndexedCollections();
         const emptyCollections = (await extras.getEmptyCollections?.()) ?? [];
         const buildSlice = (await extras.getBuildSlice?.()) ?? null;
+        const primaryCollectionAbsent = (await extras.getPrimaryCollectionAbsent?.()) ?? false;
         return (
           `export const config = ${JSON.stringify(runtimeConfig)};\n` +
           `export const pageAssets = ${JSON.stringify(extras.getPageAssets?.() ?? {})};\n` +
@@ -165,6 +172,7 @@ export function virtualConfigPlugin(
           `export const apiLists = ${JSON.stringify(extras.getApiLists?.() ?? {})};\n` +
           `export const indexedCollections = ${JSON.stringify(indexedCollections)};\n` +
           `export const emptyCollections = ${JSON.stringify(emptyCollections)};\n` +
+          `export const primaryCollectionAbsent = ${JSON.stringify(primaryCollectionAbsent)};\n` +
           `export const buildSlice = ${JSON.stringify(buildSlice)};\n` +
           `export const searchIndex = ${JSON.stringify(buildSlice?.search ?? searchIndexLayout(null, [], { versions: null, routes: NO_ROUTES }, extras.base))};\n` +
           `export const requestRenderingCollections = ${JSON.stringify(extras.requestRenderingCollections)};\n` +

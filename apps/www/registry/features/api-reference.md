@@ -77,7 +77,9 @@ collide with an existing collection, and must not be `docs` or `partials`
 (reserved). The reference is served where its route file is: by default
 `src/pages/<collection>/`, so `api` serves at `/api`. If the user wants another
 URL (`/reference/api`), put the routes in that folder instead; it can be
-nested, and every URL Nimbus builds for the reference follows. Substitute the
+nested, and every URL Nimbus builds for the reference follows. For a site that
+is only the reference, put them at `src/pages/` to serve it at the root and
+follow 4f, which removes the docs part of the starter. Substitute the
 chosen folder for `api` in the route paths below, and the chosen name in the
 config and collection key.
 
@@ -104,6 +106,10 @@ Print a short, exact plan to the user **before** writing anything:
   stripped. The first build checks them (step 6).
 - Resulting URLs: `/api` (overview), `/api/<slug>` (each page), the matching
   `/api/<slug>/index.md` versions, and `/api/llms.txt`.
+- At the root (Q2): the route replaces the docs route at
+  `src/pages/[...slug].astro`, the `docs` collection and its sidebar entries
+  are removed (4f), and the URLs drop `/api`: `/`, `/<slug>`,
+  `/<slug>/index.md`, with the sections listed in `/llms.txt`.
 
 Wait for confirmation before executing.
 
@@ -273,9 +279,10 @@ const socialImage = new URL(page.href, Astro.url).search
 ```
 
 The route is written for a site built ahead of time on `output: "static"`. Run
-`nimbus-docs check --fix` next, so it matches the site's `rendering` and
-`output`: a request-rendered route drops `getStaticPaths`, and a built route on
-`output: "server"` gets `export const prerender = true`.
+`nimbus-docs check --fix` next (at the root, after 4f), so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
 If it reports a file it can't edit, apply the same rule by hand: a `prerender`
 line only when the route's mode differs from `output`'s default, and
 `getStaticPaths` only on a built route.
@@ -301,6 +308,37 @@ The route passes the size to both `getApiStaticPaths`, which builds one page
 per part, and `getApiRoute`, which reads it when the route renders on request.
 A built route fails the build if the two differ. Without it, the home lists every endpoint on
 one page.
+
+### 4f. A site that is only the reference
+
+Skip this unless Q2 chose the root. The API takes the URLs the docs had, so
+the starter's docs part goes:
+
+1. Write the route from 4d to `src/pages/[...slug].astro`, replacing the docs
+   route there. Keep `src/pages/[...slug]/index.md.ts`, the `llms.txt` routes
+   and `src/pages/[...section]/llms.txt.ts`: they serve the API's Markdown and
+   indexes.
+2. In `src/content.config.ts`, remove `docs` and the imports only it uses.
+   Keep `partials`: `src/components/Render.astro` reads it.
+
+   ```ts
+   import { defineCollection } from "astro:content";
+   import { apiCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
+
+   export const collections = {
+     partials: defineCollection(partialsCollection()),
+     api: defineCollection(apiCollection()),
+   };
+   ```
+
+3. Delete `src/content/docs/`.
+4. In the Nimbus config, remove `sidebar.items` entries that read the docs: page
+   slugs such as `"index"`, `{ autogenerate: { collection: "docs" } }` and
+   `directory` autogenerates. If nothing is left, remove `sidebar`. The API
+   pages draw their own navigation, so skip step 5.
+
+Run `nimbus-docs check`: its Collection URLs list shows `api  /`. An API and a
+`docs` collection both at the root fail with `nimbus/collection-same-url`.
 
 ## 5. Optional — add to the sidebar
 
@@ -333,6 +371,11 @@ After writing all files, run the user's build command and confirm:
    `dist/llms.txt` includes `api` as a top-level section.
 5. `dist/llms-full.txt` embeds the generated API Markdown.
 
+At the root (4f), the same files sit without `api/`: `dist/index.html`,
+`dist/<slug>/index.html` and their `index.md`. `dist/llms.txt` lists the API's
+index and sections directly, and the build prints no warning about a `docs`
+collection.
+
 If the build fails on a route, read its message and fix the config, then
 build again until it passes. The engine is the only route calculator; never
 predict a slug yourself.
@@ -360,7 +403,8 @@ List any route-fallback warnings the build printed, each with the
 `routes.operations` override that pins it.
 
 Then tell the user the URLs to visit: `/api`, `/api/<slug>`,
-`/api/<slug>/index.md`, `/api/llms.txt`.
+`/api/<slug>/index.md`, `/api/llms.txt` (at the root: `/`, `/<slug>`,
+`/<slug>/index.md`, `/llms.txt`).
 
 **Case-only coordinate collisions:** if the spec has two names that differ only
 by case (e.g. `createResponse` and `CreateResponse`), Nimbus emits a build

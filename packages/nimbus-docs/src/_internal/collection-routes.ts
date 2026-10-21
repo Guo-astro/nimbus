@@ -275,7 +275,6 @@ export interface MountError {
     | "nimbus/collection-version-route"
     | "nimbus/collection-two-routes"
     | "nimbus/collection-same-url"
-    | "nimbus/collection-api-root"
     | "nimbus/collection-route-param"
     | "nimbus/collection-route-mismatch";
   /** Names the file and the fix. */
@@ -306,7 +305,6 @@ export interface MountDecision {
 export function decideCollectionMounts(
   found: readonly FoundRoute[],
   versions: VersionInfo | null,
-  apiCollections: readonly string[],
 ): MountDecision {
   const errors: MountError[] = [];
   const warnings: MountWarning[] = [];
@@ -380,15 +378,6 @@ export function decideCollectionMounts(
                   `\nKeep one; the collection is served from that folder.`,
               },
       );
-      continue;
-    }
-    if (primary.folder === "" && fixed === undefined && apiCollections.includes(collection)) {
-      errors.push({
-        code: "nimbus/collection-api-root",
-        message:
-          `${primary.file} serves API collection "${collection}" at the site root, which isn't supported yet. ` +
-          `Move the route into a folder, such as src/pages/${collection}/[...slug].astro.`,
-      });
       continue;
     }
     const mount = fixed ?? primary.folder;

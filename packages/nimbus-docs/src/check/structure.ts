@@ -304,7 +304,7 @@ async function checkCollectionUrls(
         )
       : [];
   const { found, unread } = findCollectionRoutes(srcDir, cwd);
-  const { mounts, errors, warnings } = decideCollectionMounts(found, versions, apiCollections);
+  const { mounts, errors, warnings } = decideCollectionMounts(found, versions);
   for (const error of errors)
     findings.push({
       scope: "structure",

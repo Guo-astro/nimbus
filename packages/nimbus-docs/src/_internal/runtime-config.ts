@@ -26,6 +26,7 @@ import { setLinkPolicy } from "./url.js";
 let _cached: RuntimeNimbusConfig | null = null;
 let _cachedCollections: readonly string[] | null = null;
 let _cachedEmptyCollections: readonly string[] | null = null;
+let _cachedPrimaryCollectionAbsent: boolean | null = null;
 let _cachedRequestRenderingCollections: readonly string[] | null = null;
 let _cachedAlternates: VersionAlternatesTable | null = null;
 let _cachedApiCollections: readonly string[] | null = null;
@@ -100,6 +101,18 @@ export async function loadEmptyCollections(): Promise<readonly string[]> {
   const value = mod.emptyCollections ?? [];
   _cachedEmptyCollections = value;
   return value;
+}
+
+/**
+ * Whether `content.config.ts` provably declares no `docs` collection: a
+ * complete parse without it, in a build. False in dev, and when the virtual
+ * module predates the field.
+ */
+export async function loadPrimaryCollectionAbsent(): Promise<boolean> {
+  if (_cachedPrimaryCollectionAbsent !== null) return _cachedPrimaryCollectionAbsent;
+  const mod = await virtualConfig();
+  _cachedPrimaryCollectionAbsent = mod.primaryCollectionAbsent ?? false;
+  return _cachedPrimaryCollectionAbsent;
 }
 
 export async function loadRequestRenderingCollections(): Promise<readonly string[]> {

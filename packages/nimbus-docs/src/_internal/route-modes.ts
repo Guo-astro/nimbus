@@ -116,8 +116,15 @@ export function renderingCollections(input: {
     ...Object.keys(input.rendering?.collections ?? {}),
     ...(input.rendering === undefined ? input.mountContext.routes.keys() : []),
   ]);
+  // A route file that serves one collection isn't another's default route: an
+  // API served from `src/pages/[...slug].astro` leaves no `docs` route there.
+  const claimed = new Map<string, string>();
+  for (const [collection, { file }] of input.mountContext.routes) {
+    if (file) claimed.set(path.join(input.projectRoot, file), collection);
+  }
   return [...candidates].filter((collection) => {
     const component = canonicalCollectionRouteComponent(input.srcDir, collection, input.mountContext, input.projectRoot);
+    if ((claimed.get(component) ?? collection) !== collection) return false;
     return (
       (input.rendering !== undefined && isRequiredCanonicalRouteComponent(input.projectRoot, input.srcDir, component)) ||
       fs.existsSync(component)
@@ -134,12 +141,14 @@ export interface AgentRendering {
 
 export function agentRendering(policy: CompiledRenderingPolicy, mountContext: MountContext): AgentRendering {
   const mountModes = new Map<string, RenderingMode>();
+  let rootMode = policy.collections[PRIMARY_COLLECTION];
   for (const [collection, mode] of Object.entries(policy.collections)) {
     const mount = collectionMountPrefix(collection, mountContext);
     if (mount && mount !== "/") mountModes.set(mount, mode);
+    else rootMode ??= mode;
   }
   return {
-    rootMode: policy.collections[PRIMARY_COLLECTION] ?? policy.default,
+    rootMode: rootMode ?? policy.default,
     defaultMode: policy.default,
     mountModes,
   };

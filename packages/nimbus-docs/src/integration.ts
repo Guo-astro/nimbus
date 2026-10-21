@@ -107,6 +107,7 @@ import { readRouteTruth } from "./lint/route-truth.js";
 import { routeKey } from "./_internal/route-key.js";
 import { rewriteSourceLinks } from "./_internal/source-links.js";
 import {
+  declaresNoCollection,
   parsePageCollectionSources,
   placeStaticCollections,
 } from "./_internal/parse-content-collections.js";
@@ -643,12 +644,7 @@ export function nimbus(
   // file change moves a collection.
   let mountStampForSetup = "";
   let collectionRoutesTimer: ReturnType<typeof setTimeout> | undefined;
-  const decideMounts = (found: readonly FoundRoute[]) =>
-    decideCollectionMounts(
-      found,
-      versionMounts(),
-      (config.api ?? []).map((entry) => entry.collection),
-    );
+  const decideMounts = (found: readonly FoundRoute[]) => decideCollectionMounts(found, versionMounts());
   // Written by the dev server when a route file change moves a collection;
   // setup watches it, so Astro restarts and setup declares the new routes.
   const collectionRoutesSentinel = (projectRoot: string) =>
@@ -2948,6 +2944,9 @@ export function nimbus(
                   ogCard: OG_CARD,
                   imageSizes: socialImageSizes,
                 },
+                ...(building
+                  ? { getPrimaryCollectionAbsent: () => declaresNoCollection(contentConfigPath, PRIMARY_COLLECTION) }
+                  : {}),
                 contentConfigPath,
               }),
               ...(options.icons !== false
@@ -3193,6 +3192,8 @@ export function nimbus(
             "  export const indexedCollections: readonly string[];",
             "  /** Page collections a partial build left empty on purpose. Empty in a full build and in dev. */",
             "  export const emptyCollections: readonly string[];",
+            "  /** Whether `content.config.ts` provably declares no `docs` collection. */",
+            "  export const primaryCollectionAbsent: boolean;",
             "  /** The Pagefind bundle to load and the other slices' bundles to merge into it (none in a whole-site build): served URLs, base included. */",
             "  export const searchIndex: { bundle: string; merge: readonly string[] };",
             "  /** Collections whose canonical routes render on request. Build-only. */",

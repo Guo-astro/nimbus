@@ -17,6 +17,7 @@ import {
   loadMountContext,
   loadNestedLlmsSections,
   loadNimbusConfig,
+  loadPrimaryCollectionAbsent,
   loadUnreadCollectionRoutes,
   loadVersionAlternates,
 } from "./_internal/runtime-config.js";
@@ -39,6 +40,7 @@ import {
   applyOverviewLeaf,
   buildSidebarTree,
   collectSidebarCollectionRefs,
+  sidebarReadsPrimary,
   cloneSidebarTree,
   deriveSidebarSections,
   deriveTransformCtx,
@@ -860,8 +862,14 @@ async function buildStructuralTree(
   ) as Parameters<typeof collectSidebarCollectionRefs>[0];
 
   const referenced = collectSidebarCollectionRefs(rewrittenItems);
+  // A site without `docs` doesn't query it, unless its sidebar reads it.
+  const skipPrimary =
+    effectivePrimary === PRIMARY_COLLECTION &&
+    !referenced.includes(PRIMARY_COLLECTION) &&
+    !sidebarReadsPrimary(rewrittenItems) &&
+    (await loadPrimaryCollectionAbsent());
   const collections = [
-    effectivePrimary,
+    ...(skipPrimary ? [] : [effectivePrimary]),
     ...referenced.filter((c) => c !== effectivePrimary),
   ];
   const nestedCandidates =

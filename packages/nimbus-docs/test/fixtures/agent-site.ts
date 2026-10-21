@@ -20,6 +20,8 @@ export interface AgentSite {
 export interface AgentSiteOptions {
   conflict?: "error" | "warn" | "ignore";
   server?: boolean;
+  /** The test adapter's name; generated API pages render on request only under `@astrojs/cloudflare`. */
+  adapterName?: string;
   logLevel?: "silent" | "warn";
   versions?: { current: string; others: string[] };
   api?: unknown[];
@@ -50,13 +52,13 @@ export const REQUEST_DOCS_PAGE = {
 export const SMALLCO_SPEC = path.resolve(import.meta.dirname, "api/smallco.yaml");
 
 /** A minimal on-demand adapter: Astro's generated App behind the entrypoint. */
-export function testAdapter(entrypoint: string): AstroIntegration {
+export function testAdapter(entrypoint: string, name = "test:adapter"): AstroIntegration {
   return {
-    name: "test:adapter",
+    name,
     hooks: {
       "astro:config:done": ({ setAdapter }) => {
         setAdapter({
-          name: "test:adapter",
+          name,
           entrypointResolution: "auto",
           serverEntrypoint: entrypoint,
           supportedAstroFeatures: { serverOutput: "stable" },
@@ -100,7 +102,7 @@ export function agentSites() {
         "server-entry.mjs",
         `import { createApp } from "astro/app/entrypoint";\nexport const app = createApp();\n`,
       );
-      adapter = testAdapter(path.join(root, "server-entry.mjs"));
+      adapter = testAdapter(path.join(root, "server-entry.mjs"), options.adapterName);
     }
 
     const chunks: string[] = [];

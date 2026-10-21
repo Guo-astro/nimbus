@@ -71,7 +71,7 @@ export function projectRouteFiles(cwd: string, srcDirOverride?: string): Project
     ? config.api.flatMap((entry: { collection?: unknown }) => (typeof entry?.collection === "string" ? [entry.collection] : []))
     : [];
   const versionInfo = config.versions ? { others: versions } : null;
-  const { mounts } = decideCollectionMounts(findCollectionRoutes(srcDir, cwd).found, versionInfo, apiCollections);
+  const { mounts } = decideCollectionMounts(findCollectionRoutes(srcDir, cwd).found, versionInfo);
   const mountContext: MountContext = { versions: versionInfo, routes: mounts };
   let policy: ReturnType<typeof compileRenderingPolicy>;
   try {

@@ -240,6 +240,9 @@ for (const variant of VARIANTS) {
         const catalog = await readFile(path.join(site.root, "dist/.well-known/api-catalog"), "utf8");
         assert.match(catalog, new RegExp(`"href": "${origin}/openapi\\.json"`));
         assert.doesNotMatch(catalog, /\/api\//);
+        const ard = await readFile(path.join(site.root, "dist/.well-known/ard.json"), "utf8");
+        assert.match(ard, new RegExp(`${origin}/`));
+        assert.doesNotMatch(ard, /\/api\//);
       });
     }
   });

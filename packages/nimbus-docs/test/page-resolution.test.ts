@@ -113,6 +113,10 @@ test("collection page helpers take the collection name, and still reject the rem
     /Drop the argument: getDocsPageProps\(Astro\)\./,
   );
   await assert.rejects(
+    () => (getDocsPageProps as (...args: unknown[]) => Promise<unknown>)({ props: {} }, undefined, "blog"),
+    /getDocsPageProps takes \(Astro\), but was passed 2 more arguments\./,
+  );
+  await assert.rejects(
     () => getCollectionPageProps({ props: {} } as never, "sdk", "sdk" as never),
     /getCollectionPageProps takes \(Astro, collection\), but was passed 1 more argument\./,
   );
@@ -255,6 +259,9 @@ describe("prose page resolution", () => {
       assert.equal(blogLeaf.page.identity.collection, "blog");
       assert.equal(blogLeaf.page.entry.id, "v1");
     }
+    // A version route that names its collection, as check --fix writes it.
+    const named = await resolveProsePage(context("/v1/v1/", "v1"), { collection: "docs-v1" }, dependencies);
+    assert.equal(named.status === "found" && named.page.entry.id, "v1");
   });
   test("an index path is not a second URL for a landing", async () => {
     for (const [pathname, slug, collection] of [

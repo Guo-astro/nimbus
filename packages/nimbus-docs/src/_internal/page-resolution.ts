@@ -189,12 +189,12 @@ async function requestProseIdentity(
   const id = slug || "index";
   const versions = await dependencies.getVersions();
   const [first, ...rest] = slug ? slug.split("/") : [];
+  // Only the root route's slug carries a version's prefix; a version's own route starts below it.
   if (
     first &&
     versions?.others.includes(first) &&
-    ((!collection && isRootRoute(context)) ||
-      collection === PRIMARY_COLLECTION ||
-      collection === `${PRIMARY_COLLECTION}-${first}`)
+    isRootRoute(context) &&
+    (!collection || collection === PRIMARY_COLLECTION || collection === `${PRIMARY_COLLECTION}-${first}`)
   ) {
     return {
       collection: `${PRIMARY_COLLECTION}-${first}`,

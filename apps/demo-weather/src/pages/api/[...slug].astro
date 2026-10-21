@@ -1,16 +1,15 @@
 ---
-import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { getApiRoute } from "@cloudflare/nimbus-docs/runtime";
 import Header from "@/components/Header.astro";
-import { ApiLayout } from "@/components/ui/api-layout";
+import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
 import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
-export const prerender = true;
-export const getStaticPaths = getApiStaticPaths("api");
-
-const result = await getApiRoute(Astro);
+const result = await getApiRoute(Astro, "api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
+const { page, nav, collection, version, coordinate, home } = result;
+// A later part of the API home's list: a page of its own, kept out of search.
+const part = home && home.part.number > 1 ? home.part : undefined;
 // The generated per-page card exists for the default version's version-free
 // URL; a non-default query-mode page (its href carries the version query) uses
 // the site's shared social image instead. The card path derives from the
@@ -23,10 +22,11 @@ const socialImage = new URL(page.href, Astro.url).search
 ---
 
 <BaseLayout
-  title={page.kind === "api" ? "API reference" : `${page.title} · API reference`}
+  title={part ? `${page.title}: endpoints ${part.start}–${part.end} · API reference` : page.kind === "api" ? "API reference" : `${page.title} · API reference`}
   description={page.description}
   markdownUrl={page.markdownHref}
   socialImage={socialImage}
+  noindex={part !== undefined}
   collection={collection}
   apiVersion={version ?? undefined}
   coordinate={coordinate}
@@ -34,5 +34,5 @@ const socialImage = new URL(page.href, Astro.url).search
   <Header showSidebar collection={collection}>
     <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
   </Header>
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>

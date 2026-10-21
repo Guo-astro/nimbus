@@ -5,11 +5,15 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { mkdtemp } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { buildCitationIndex, ingestRemoteManifest, type CoordinatesManifest } from "../src/_internal/api/citation-index.ts";
 import { resolveCitations } from "../src/_internal/api/citations.ts";
+import { setMountContext } from "../src/_internal/collection-mount.ts";
 import type { ApiSpec } from "../src/types.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 function fixturePath(rel: string): string {
   return fileURLToPath(new URL(`./fixtures/api/${rel}`, import.meta.url));
@@ -262,5 +266,33 @@ describe("prepared API citations: historical authored lookup without published h
       /operation-v[12]/,
       "virtual module contains published default only even after authored reads",
     );
+  });
+});
+
+describe("buildCitationIndex: an API served at the site root", () => {
+  const spec = fixturePath("smallco.yaml");
+  const rootFor = async (collection: string) => {
+    const dir = await mkdtemp(path.join(TEST_TMP, "nimbus-citation-root-"));
+    const route = { mount: "", file: "src/pages/[...slug].astro", aliases: [] };
+    setMountContext(pathToFileURL(`${dir}/`), { versions: null, routes: new Map([[collection, route]]) });
+    return dir;
+  };
+
+  test("cites the home at / and the pages below it", async () => {
+    const dir = await rootFor("smallco");
+    const { index } = await buildCitationIndex([{ collection: "smallco", spec: fixturePath("smallco.yaml") }], dir);
+    assert.equal(index.get("smallco:smallco"), "/");
+    for (const [, url] of index) assert.match(url, /^\/(?!\/)/);
+    assert.equal(resolveCitations("[home](api.ref:smallco:smallco)", { mode: "author", citationIndex: index }).diagnostics.length, 0);
+  });
+
+  test("cites a query-mode old version's home at /?version=", async () => {
+    const dir = await rootFor("svc");
+    const { index } = await buildCitationIndex(
+      [{ collection: "svc", versionUrl: { in: "query" }, versions: [{ version: "v2", default: true, spec }, { version: "v1", spec }] }],
+      dir,
+    );
+    assert.equal(index.get("svc:svc"), "/");
+    assert.equal(index.get("svc@v1:svc"), "/?version=v1");
   });
 });

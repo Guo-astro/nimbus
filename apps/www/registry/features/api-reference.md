@@ -318,19 +318,20 @@ the starter's docs part goes:
    route there. Keep `src/pages/[...slug]/index.md.ts`, the `llms.txt` routes
    and `src/pages/[...section]/llms.txt.ts`: they serve the API's Markdown and
    indexes.
-2. In `src/content.config.ts`, remove `docs` and `partials` and the imports
-   only they use, so `collections` holds the API's line alone:
+2. In `src/content.config.ts`, remove `docs` and the imports only it uses.
+   Keep `partials`: `src/components/Render.astro` reads it.
 
    ```ts
    import { defineCollection } from "astro:content";
-   import { apiCollection } from "@cloudflare/nimbus-docs/content";
+   import { apiCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
 
    export const collections = {
+     partials: defineCollection(partialsCollection()),
      api: defineCollection(apiCollection()),
    };
    ```
 
-3. Delete `src/content/docs/` and `src/content/partials/`.
+3. Delete `src/content/docs/`.
 4. In the Nimbus config, remove `sidebar.items` entries that read the docs: page
    slugs such as `"index"`, `{ autogenerate: { collection: "docs" } }` and
    `directory` autogenerates. If nothing is left, remove `sidebar`. The API

@@ -900,7 +900,7 @@
       "affected": "Sites with a collection route away from /<collection> and none at it, or a collection served only from dynamic [locale] folders.",
       "instructions": [
         "No action is needed when each collection's route file is at src/pages/<collection>/ (or the site root for docs): output is unchanged.",
-        "If the build or nimbus-docs check names a collection route, follow its message (every error is listed at https://nimbus-docs.com/writing/pages-and-routing/#collection-url-errors): keep one route per collection, move a docs or version route to its URL, give a collection served only from a dynamic folder its own static route, or move a page out from under another collection's URL.",
+        "If the build or nimbus-docs check names a collection route, follow its message (every error is listed at https://nimbus-docs.com/reference/lint-rules/#collection-routing): keep one route per collection, move a docs or version route to its URL, give a collection served only from a dynamic folder its own static route, or move a page out from under another collection's URL.",
         "When a route moves a collection to a new folder, add a redirect from its old URLs, such as \"/sdk/[...slug]\": \"/products/sdk/[...slug]\", and remove a sidebar autogenerate prefix that repeats the route's URL."
       ],
       "verify": [
@@ -970,7 +970,7 @@
         "Commit first, then update these together. Reinstall the layout with nimbus-docs add api-layout --overwrite, and review the change with git diff.",
         "The reinstalled components, including the docs sidebar, use the 0.19 starter's styles. On a site scaffolded before 0.19.0, adopt the redesigned-starter entry first.",
         "ApiLayout no longer renders the version picker. In the API route (src/pages/api/[...slug].astro, or wherever yours is), pass it to the header: <Header showSidebar collection={collection}><VersionSwitcher slot=\"actions\" apiCollection={collection} apiVersion={version} coordinate={coordinate} /></Header>, importing VersionSwitcher from @/components/ui/version-switcher.",
-        "In the same route, pass the API home's part size and its parts, as the api-reference recipe's route does (https://nimbus-docs.com/api-reference/#the-api-home): import API_HOME_CHUNK_SIZE from @/components/ui/api-layout, write getApiStaticPaths(\"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }) and getApiRoute(Astro, \"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }), and pass home from getApiRoute's result to ApiLayout as home={home}. On a later part (home.part.number > 1), give BaseLayout noindex and the part's title."
+        "In the same route, pass the API home's part size and its parts, as the api-reference recipe's route does (https://nimbus-docs.com/api-reference/large-apis/#the-api-home): import API_HOME_CHUNK_SIZE from @/components/ui/api-layout, write getApiStaticPaths(\"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }) and getApiRoute(Astro, \"api\", { homeChunkSize: API_HOME_CHUNK_SIZE }), and pass home from getApiRoute's result to ApiLayout as home={home}. On a later part (home.part.number > 1), give BaseLayout noindex and the part's title."
       ],
       "verify": [
         "The API home lists every endpoint, and the filter finds one by name, method or path.",

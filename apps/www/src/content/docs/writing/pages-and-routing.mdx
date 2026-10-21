@@ -51,7 +51,7 @@ Use `export const prerender = true` to emit a custom route as static output duri
 
 This boundary is not limited to `prerender`. Dynamic segments, endpoint methods, redirects and responses, and other native Astro route behavior remain controlled by the route itself. Nimbus only intervenes when a route claims the exact pattern of a configured canonical content route, package-injected infrastructure, an active feature, or a published content entry.
 
-Nimbus's `rendering` configuration controls canonical content-collection routes, not other files under `src/pages/`. Files scaffolded for `llms.txt`, Markdown alternates, Open Graph images, and `robots.txt` belong to your project and may use Astro's native rendering behavior like any other route.
+Nimbus's `rendering` configuration controls the routes it manages: each collection's catch-all route, and the scaffolded `llms.txt` and Markdown routes that call a Nimbus factory. Those files are yours to edit, but `rendering` decides how they render; `nimbus-docs check --fix` keeps them in step. Other files under `src/pages/`, such as Open Graph images and `robots.txt`, use Astro's native rendering behavior like any other route.
 
 ## Page modes
 
@@ -116,10 +116,9 @@ A collection is served where its route file is. Put the route at `src/pages/prod
 import DocsLayout from "../../../layouts/DocsLayout.astro";
 import { getCollectionPage, getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("sdk");
 
-const page = await getCollectionPage(Astro);
+const page = await getCollectionPage(Astro, "sdk");
 if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 // The rest matches your root src/pages/[...slug].astro: sidebar, previous and next, layout.
@@ -128,7 +127,7 @@ const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
 `nimbus-docs add new-collection` writes the whole route for you. Relative imports such as the layout's grow one `../` per folder level.
 
-Nimbus reads the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
+Nimbus reads the collection from the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. Every collection route also names the collection in its page helper: `getCollectionPage(Astro, "sdk")`, and likewise `getCollectionPageProps`, `getApiRoute` and `getApiPage`. That's what a route rendered on request, which has no `getStaticPaths`, needs, and naming it on built routes too keeps the file the same in either mode. The names must match. Docs routes use `getDocsPage(Astro)`, whose name says the collection. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
 
 A route Nimbus can't read, such as a wrapper imported from another module, keeps the collection at its default URL. The build and `check` warn about one in a nested folder (`nimbus/collection-unread-route`), and its pages fail the build when they render, naming the route.
 

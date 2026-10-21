@@ -32,23 +32,21 @@ Then wire the layout/page props:
 - `src/layouts/DocsLayout.astro` accepts `markdownUrl` and forwards it to `BaseLayout`.
 - `src/pages/[...slug].astro` passes the page's `markdownUrl` from `getDocsPage(Astro)` to `DocsLayout`.
 
-Do not add an `ai` config block or an MCP server. Nimbus prepares the endpoint payloads at build time. The two Markdown routes must stay prerendered; the `llms.txt` routes may be prerendered or rendered on request.
+Do not add an `ai` config block or an MCP server. Nimbus prepares the endpoint payloads at build time. The agent routes render the way `rendering` renders the pages they describe.
 
 ## Reference implementation
 
-Keep all five endpoints prerendered and use the route helpers from `@cloudflare/nimbus-docs/agent-endpoints`.
+Use the route helpers from `@cloudflare/nimbus-docs/agent-endpoints`. The files below are for a site built ahead of time on `output: "static"`; after writing them, run `nimbus-docs check --fix` so they match the site's `rendering` and `output`.
 
 ```ts title="src/pages/[...slug]/index.md.ts"
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = markdownRoute();
 ```
 
 ```ts title="src/pages/[...slug]/index.mdx.ts"
 import { markdownSourceRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = markdownSourceRoute();
 ```
 
@@ -57,21 +55,18 @@ These two files serve every collection, including collections added later. Do no
 ```ts title="src/pages/llms.txt.ts"
 import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET } = llmsRoute();
 ```
 
 ```ts title="src/pages/llms-full.txt.ts"
 import { llmsFullRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET } = llmsFullRoute();
 ```
 
 ```ts title="src/pages/[...section]/llms.txt.ts"
 import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
 
@@ -89,7 +84,7 @@ Run the user's package manager build command (`pnpm build`, `npm run build`, etc
 - `dist/<slug>/index.md` exists for every indexed page, in every collection.
 - `dist/<slug>/index.mdx` exists for every authored page. API pages have no `.mdx`.
 - Section indexes such as `dist/<section>/llms.txt` list their alternate Markdown versions.
-- The build log has no warning about Markdown or `llms.txt` pages that were not prerendered, unless the user renders the `llms.txt` routes on request on purpose.
+- `nimbus-docs check` reports no route file that doesn't match `rendering`, and the build log has no `getStaticPaths() ignored` warning.
 - HTML pages include `<link rel="alternate" type="text/markdown" ...>` for docs entries.
 - HTML pages include the hidden `[data-ai-agent-directive]` block for docs entries.
 

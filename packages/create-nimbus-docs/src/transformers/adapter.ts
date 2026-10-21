@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import {
   ADAPTER_RECIPES,
   ASTRO_CONFIG_FILENAMES,
+  alignRouteFiles,
   applyAdapterToConfig,
   buildServerWranglerConfig,
   sanitizeWorkerName,
@@ -20,7 +21,8 @@ const IGNORE_ENTRIES_BY_ADAPTER: Partial<Record<AdapterId, string[]>> = {
 };
 
 /**
- * Flip the scaffolded `astro.config` to server output and wire the adapter.
+ * Flip the scaffolded `astro.config` to server output, wire the adapter, and
+ * set the route files to the modes `rendering` gives them.
  * Fail-closed: a missing marker, missing/altered `output`, or a pre-wired
  * adapter aborts the scaffold with the framework's actionable message rather
  * than shipping a half-configured project.
@@ -48,12 +50,17 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
       "The template's Nimbus config is customized, so request rendering cannot be enabled safely.",
     );
   }
-  if (result.status === "applied") {
-    writeFileSync(configPath, result.source);
+  if (result.status === "applied") writeFileSync(configPath, result.source);
+  // A fresh template is never pre-wired, but treat idempotent success as success.
+  if (result.status !== "error") {
+    // The route files then say what `rendering` gives them.
+    const routes = alignRouteFiles(dir);
+    if (routes.skipped || routes.manual.length > 0) {
+      const reason = routes.skipped ?? routes.manual.map((entry) => entry.file).join(", ");
+      throw new ScaffoldError(`The template's route files couldn't be set to match \`rendering\`: ${reason}.`);
+    }
     return;
   }
-  // A fresh template is never pre-wired, but treat idempotent success as success.
-  if (result.status === "noop") return;
 
   throw new ScaffoldError(`Could not enable the "${adapter}" adapter: ${result.message}`);
 }

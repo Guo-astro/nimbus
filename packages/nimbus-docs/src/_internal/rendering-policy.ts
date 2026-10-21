@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import type { RenderingConfig, RenderingMode } from "../types.js";
@@ -42,9 +43,9 @@ export function compileRenderingPolicy(
 }
 
 /**
- * A collection's canonical route file. A collection a route moved away from
- * its default URL uses that route's file; otherwise the file at the default
- * URL, as before routes could move collections.
+ * A collection's canonical route file: the route that serves it, else the
+ * first of `[...slug].astro`, `[...slug]/index.astro`, `[slug].astro` and
+ * `[slug]/index.astro` at its default URL, else `[...slug].astro` there.
  */
 export function canonicalCollectionRouteComponent(
   srcDir: string,
@@ -52,10 +53,13 @@ export function canonicalCollectionRouteComponent(
   context: MountContext,
   projectRoot: string,
 ): string {
-  const moved = movedCollectionRoute(collection, context);
-  if (moved) return path.join(projectRoot, moved.file);
-  const mount = collectionMountPrefix(collection, { versions: context.versions, routes: NO_ROUTES }).slice(1);
-  return path.join(srcDir, "pages", mount, "[...slug].astro");
+  const file = context.routes.get(collection)?.file;
+  if (file) return path.join(projectRoot, file);
+  const folder = path.join(srcDir, "pages", collectionMountPrefix(collection, { versions: context.versions, routes: NO_ROUTES }).slice(1));
+  const candidates = ["[...slug].astro", "[...slug]/index.astro", "[slug].astro", "[slug]/index.astro"].map((name) =>
+    path.join(folder, name),
+  );
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
 }
 
 /** The route that serves a collection away from its default URL, if one does. */

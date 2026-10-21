@@ -22,8 +22,6 @@ Call the shared route's `GET`, then change its response. This example adds a lic
 import type { APIRoute } from "astro";
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
 const route = markdownRoute();
 export const getStaticPaths = route.getStaticPaths;
 
@@ -50,8 +48,6 @@ import {
   markdownRoute,
   type MarkdownEndpointReference,
 } from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
 
 export const { getStaticPaths } = markdownRoute();
 
@@ -82,8 +78,6 @@ Astro gives a more specific route priority. Add a route file under a collection'
 import type { APIRoute } from "astro";
 import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
 const route = markdownRoute();
 export const getStaticPaths = route.getStaticPaths;
 
@@ -100,8 +94,6 @@ export const GET: APIRoute = async (context) => {
 Or write the route with the public helpers. The changelog recipe (`nimbus-docs add changelog`) adds `src/pages/changelog/[...slug]/index.md.ts`, which builds its own frontmatter with each entry's date and tags:
 
 ```ts title="src/pages/changelog/[...slug]/index.md.ts (abridged)"
-export const prerender = true;
-
 export const getStaticPaths = async () =>
   getMarkdownStaticPaths({ collection: "changelog", surface: "markdown" });
 
@@ -127,8 +119,6 @@ The starter's `llms.txt` routes call `llmsRoute()`, `llmsFullRoute()`, and `llms
 ```ts title="src/pages/llms.txt.ts"
 import type { APIRoute } from "astro";
 import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
 
 const route = llmsRoute();
 
@@ -171,6 +161,6 @@ Keep the route at `src/pages/og/[...slug].ts`, the map's keys, the default `getS
 
 An override changes only what that route serves. `llms-full.txt` and hosted MCP keep the Markdown Nimbus generates.
 
-The shared routes and routes that use `markdownRoute()` or `markdownSourceRoute()` must keep `export const prerender = true`. The build fails if one is rendered on request.
+The shared routes and routes that call an agent factory render the same way as the pages they describe: ahead of time on a static site, and in their collection's mode with a [`rendering` policy](/configuration#mix-build-and-request-rendering). `nimbus-docs check --fix` writes that mode into the file; for a route it can't edit, such as a wrapped one, it says what to change.
 
 Call the factory in the route file itself, as the examples above do. Like Astro's own `prerender` detection, Nimbus finds it by reading the route file, so a factory re-exported from another module is not checked when the build starts. At the end of the build, Nimbus warns about every Markdown version and `llms.txt` index that no prerendered route generated, and names the route that serves it.

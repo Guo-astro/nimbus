@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 
-import { agentManifest, agentSites, siteApp, srcModule } from "./fixtures/agent-site.ts";
+import { agentManifest, agentSites, REQUEST_DOCS_PAGE, siteApp, srcModule } from "./fixtures/agent-site.ts";
 
 const sites = agentSites();
 afterEach(() => sites.cleanup());
@@ -89,8 +89,8 @@ test("the old [section] route keeps one flat index per top-level section", async
 
 test("[...section] rendered on request serves nested sections and 404s unknown ones", async () => {
   const site = await sites.buildSite(
-    { ...CONTENT, ...sectionRoute("[...section]", false) },
-    { server: true },
+    { ...CONTENT, ...REQUEST_DOCS_PAGE, ...sectionRoute("[...section]", false) },
+    { server: true, rendering: { default: "request" } },
   );
   const app = await siteApp(site);
   for (const url of ["reference/llms.txt", "reference/functions/llms.txt", "reference/functions/dates/llms.txt", "changelog/2024/llms.txt"]) {

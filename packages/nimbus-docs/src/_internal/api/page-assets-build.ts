@@ -610,18 +610,16 @@ export async function stageApiAssetFamily(
     }
     next[target.version ?? ""] = filename;
     files.add(filename);
-    if (target.sidebar === "on-demand") {
-      // Same inputs as the index, so the index's key names it too.
-      const listPointer = `${indexPointer}.nav`;
-      let list = await readFile(listPointer, "utf8").catch(() => "");
-      if (!list || !(await writer.stage({ filename: list }))) {
-        const written = apiNavList(resolvedNav().nav, prepared.operationPaths);
-        await writer.writeAsset(written.filename, written.body);
-        list = written.filename;
-        await writeAtomic(listPointer, list);
-      }
-      recordApiNavList(root, target.family, target.version, list);
+    // Same inputs as the index, so the index's key names it too.
+    const listPointer = `${indexPointer}.nav`;
+    let list = await readFile(listPointer, "utf8").catch(() => "");
+    if (!list || !(await writer.stage({ filename: list }))) {
+      const written = apiNavList(resolvedNav().nav, prepared.operationPaths);
+      await writer.writeAsset(written.filename, written.body);
+      list = written.filename;
+      await writeAtomic(listPointer, list);
     }
+    recordApiNavList(root, target.family, target.version, list, target.sidebar === "on-demand");
     for (const row of prepared.rows) files.add(row.location.filename);
   }
   const key = preparedMarkdownRootKey(root);

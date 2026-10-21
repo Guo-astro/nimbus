@@ -3,9 +3,9 @@
  * ApiHomeChunk — one part of the API home's list: each tag group a heading,
  * each section its linked title, description and endpoints, name first; then
  * untagged endpoints and webhooks. The home page renders the first part; each
- * later part is a page of its own (the api-reference recipe's chunk route),
- * which the home fetches and appends as the reader scrolls. Edits here show
- * in both.
+ * later part is a page of its own, served by the API route at
+ * `<home>/index/<n>/`, which the home fetches and appends as the reader
+ * scrolls. Edits here show in both.
  */
 import ApiOperationList from "./ApiOperationList.astro";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";

@@ -19,7 +19,7 @@ import { cn } from "@/lib/cn";
 import { getApiVersionHead, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiNav, ApiPageProps } from "@cloudflare/nimbus-docs/api";
 import type { TOCItem } from "@cloudflare/nimbus-docs/types";
-import type { ApiIndexChunk } from "@cloudflare/nimbus-docs/runtime";
+import type { ApiHome } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   page: ApiPageProps;
@@ -29,11 +29,13 @@ interface Props {
   collection?: string;
   version?: string | null;
   coordinate?: string;
-  /** On an API home chunk route: the part to show, and every part. */
-  home?: { chunk: ApiIndexChunk; chunks: ApiIndexChunk[] };
+  /** On the API home and its later parts, from `getApiRoute`: the part to
+   *  show, and every part. */
+  home?: ApiHome;
 }
 
 const { page, nav, collection, version, coordinate, home } = Astro.props;
+const homePart = home && home.part.number > 1;
 // Sidebar state is shared per API version, across both sidebar copies. The
 // base keeps two sites on one origin apart.
 const navKey = `${import.meta.env.BASE_URL}|${nav.collection}${version ? `@${version}` : ""}`;
@@ -55,7 +57,7 @@ const currentSiblingHref = withBase(currentSiblingUrl ?? "/", import.meta.env.BA
 // "On this page" for the API home: its tag groups and their sections. A link
 // to a part that hasn't loaded yet loads the list up to it.
 const tocHeadings: TOCItem[] =
-  page.kind === "api" && !home
+  page.kind === "api" && !homePart
     ? [
         ...page.index.groups.flatMap((group) => [
           ...(group.label ? [{ depth: 2, text: group.label, slug: group.anchor }] : []),
@@ -72,7 +74,8 @@ const hasRail =
 
 const pagefindAttrs: Record<string, string> = {};
 const pagefindDeprecated = !versionStatus?.isHidden && Boolean(versionStatus?.isDeprecated);
-if (versionStatus?.isHidden) {
+// A later part of the API home repeats the home's list.
+if (versionStatus?.isHidden || homePart) {
   pagefindAttrs["data-pagefind-ignore"] = "";
 } else {
   pagefindAttrs["data-pagefind-body"] = "";
@@ -174,7 +177,7 @@ if (versionStatus?.isHidden) {
             />
           </div>
         )}
-        <ApiBody page={page} version={version} home={home} />
+        <ApiBody page={page} home={home} />
         {nav.prevNext && !hasRail && <Pagination prevNext={nav.prevNext} data-pagefind-ignore />}
       </div>
     </main>

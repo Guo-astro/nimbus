@@ -50,8 +50,10 @@ declare module "virtual:nimbus/config" {
   /** Whether the section `llms.txt` route serves nested sections (`[...section]`). */
   export const nestedLlmsSections: boolean;
   export const pageAssets: import("../_internal/api/page-assets-runtime.js").ApiPageAssetManifest;
-  /** collection → version ("" when unversioned) → sidebar filter list filename. */
+  /** collection → version ("" when unversioned) → page list filename, for versions with an on-demand sidebar. */
   export const navLists: Record<string, Record<string, string>>;
+  /** collection → version ("" when unversioned) → page list filename, for every version. */
+  export const apiLists: Record<string, Record<string, string>>;
   export const headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;

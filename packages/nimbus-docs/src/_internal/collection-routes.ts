@@ -13,11 +13,10 @@ import path from "node:path";
 import ts from "typescript";
 
 import { collectionMountPrefix, NO_ROUTES, PRIMARY_COLLECTION, type MountContext, type VersionInfo } from "./collection-mount.js";
+import { importedName, parseRouteCode, routeCode, routeProgram } from "./route-exports.js";
+import { isRuntimeModule, isStaticPathsHelper, PAGE_HELPERS, takesCollection } from "./route-helpers.js";
 import type { SidebarConfigItem } from "../types.js";
 
-const RUNTIME_MODULES = new Set(["@cloudflare/nimbus-docs", "@cloudflare/nimbus-docs/runtime"]);
-const FACTORIES = new Set(["getCollectionStaticPaths", "getApiStaticPaths"]);
-const DOCS_PATHS = "getDocsStaticPaths";
 
 /** A route file found serving a collection. */
 export interface FoundRoute {
@@ -30,6 +29,8 @@ export interface FoundRoute {
   dynamic: boolean;
   /** The route's last segment when it isn't `[slug]` or `[...slug]`: the helpers' params can't fill it. */
   misnamed?: string;
+  /** Every collection the route names, when its `getStaticPaths` and page helpers disagree. */
+  conflict?: string[];
 }
 
 /** Where a collection is served. */
@@ -85,12 +86,13 @@ export function findCollectionRoutes(srcDir: string, projectRoot: string): Colle
       } catch {
         continue;
       }
-      const { collection, usesHelper } = readRoute(source);
+      const { collection, usesHelper, conflict } = readRoute(source);
       const folder = folderSegments.length ? `/${folderSegments.join("/")}` : "";
       const file = path.relative(projectRoot, full).split(path.sep).join("/");
       const dynamic = folderSegments.some((segment) => segment.includes("["));
       const misnamed = last === "[slug]" || last === "[...slug]" ? undefined : last;
-      if (collection !== undefined) found.push({ collection, folder, file, dynamic, ...(misnamed ? { misnamed } : {}) });
+      if (collection !== undefined)
+        found.push({ collection, folder, file, dynamic, ...(misnamed ? { misnamed } : {}), ...(conflict ? { conflict } : {}) });
       else if (usesHelper && !dynamic && !misnamed) unread.push({ folder, file });
     }
   };
@@ -119,68 +121,58 @@ const PATH_LIST_METHODS = new Set(["filter", "map", "flatMap", "concat", "slice"
 
 /** What a route file's frontmatter says about the collection it serves. */
 export interface RouteRead {
-  /** The collection its exported `getStaticPaths` serves, when the reader could follow it. */
+  /**
+   * The collection its exported `getStaticPaths` serves, else the one its page
+   * helper names (`getCollectionPage(Astro, "sdk")`), when the reader could follow it.
+   */
   collection?: string;
   /** It imports a route helper from Nimbus, so it likely serves a collection. */
   usesHelper: boolean;
+  /** Every collection it names, when they differ. */
+  conflict?: string[];
 }
 
 /**
- * The collection a route file's exported `getStaticPaths` serves. Names
- * resolve through TypeScript's checker, so scopes are real: a parameter,
- * class or inner declaration that shadows an import or wrapper is followed
- * as itself. Values are followed through `const` declarations only, and
- * top-level ones only when exported, as Astro requires.
+ * The collection a route file serves, from its exported `getStaticPaths`
+ * or its page helper's collection argument. Names resolve through
+ * TypeScript's checker, so scopes are real: a parameter, class or inner
+ * declaration that shadows an import or wrapper is followed as itself.
+ * Values are followed through `const` declarations only; for
+ * `getStaticPaths`, top-level ones only when exported, as Astro requires.
  */
 export function readRoute(source: string): RouteRead {
-  const code = /^\s*---\r?\n([\s\S]*?)\r?\n---/u.exec(source)?.[1];
+  const code = routeCode("route.astro", source)?.code;
   if (code === undefined) return { usesHelper: false };
-  // A program skips files with extensions it doesn't know, such as `.astro`.
-  const name = "route.ts";
-  const sourceFile = ts.createSourceFile(name, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const options: ts.CompilerOptions = { noLib: true, noResolve: true, types: [] };
-  const host: ts.CompilerHost = {
-    ...ts.createCompilerHost(options),
-    getSourceFile: (requested) => (requested === name ? sourceFile : undefined),
-    fileExists: (requested) => requested === name,
-    readFile: () => undefined,
-  };
-  const checker = ts.createProgram({ rootNames: [name], options, host }).getTypeChecker();
+  const sourceFile = parseRouteCode(code);
+  const checker = routeProgram(sourceFile).getTypeChecker();
 
-  const fromRuntime = (statement: ts.ImportDeclaration | ts.JSDocImportTag) =>
+  const fromRuntime = (statement: ts.ImportDeclaration) =>
     !statement.importClause?.isTypeOnly &&
     ts.isStringLiteral(statement.moduleSpecifier) &&
-    RUNTIME_MODULES.has(statement.moduleSpecifier.text);
+    isRuntimeModule(statement.moduleSpecifier.text);
   const declarationOf = (node: ts.Node): ts.Declaration | undefined =>
     checker.getSymbolAtLocation(node)?.declarations?.[0];
   // The runtime export a callee or value refers to, if it's one of ours.
-  const runtimeName = (node: ts.Expression): string | undefined => {
-    if (ts.isIdentifier(node)) {
-      const declaration = declarationOf(node);
-      return declaration && ts.isImportSpecifier(declaration) && !declaration.isTypeOnly &&
-        fromRuntime(declaration.parent.parent.parent)
-        ? (declaration.propertyName ?? declaration.name).text
-        : undefined;
-    }
-    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression)) {
-      const declaration = declarationOf(node.expression);
-      return declaration && ts.isNamespaceImport(declaration) && fromRuntime(declaration.parent.parent)
-        ? node.name.text
-        : undefined;
-    }
-    return undefined;
-  };
+  const runtimeName = (node: ts.Expression) => importedName(checker, node, isRuntimeModule);
   const isConst = (declaration: ts.VariableDeclaration) =>
     ts.isVariableDeclarationList(declaration.parent) && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
   // Astro runs `getStaticPaths` apart from the rest of the frontmatter: a
   // top-level name it uses must be exported (imports are handled above).
-  const reachable = (declaration: ts.FunctionDeclaration | ts.VariableDeclaration) => {
+  // The page renders with the whole frontmatter, so its names need no export.
+  const reachable = (declaration: ts.FunctionDeclaration | ts.VariableDeclaration, inPage: boolean) => {
     const statement = ts.isVariableDeclaration(declaration) ? declaration.parent.parent : declaration;
-    return statement.parent !== sourceFile || (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export) !== 0;
+    return inPage || statement.parent !== sourceFile || (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export) !== 0;
   };
   // What a declaration holds: a function, or a `const`'s value.
-  const valueOf = (declaration: ts.Declaration | undefined): ts.Expression | ts.FunctionDeclaration | undefined => {
-    if (!declaration || !(ts.isFunctionDeclaration(declaration) || ts.isVariableDeclaration(declaration)) || !reachable(declaration))
+  const valueOf = (
+    declaration: ts.Declaration | undefined,
+    inPage = false,
+  ): ts.Expression | ts.FunctionDeclaration | undefined => {
+    if (
+      !declaration ||
+      !(ts.isFunctionDeclaration(declaration) || ts.isVariableDeclaration(declaration)) ||
+      !reachable(declaration, inPage)
+    )
       return undefined;
     if (ts.isFunctionDeclaration(declaration)) return declaration;
     if (ts.isVariableDeclaration(declaration) && ts.isIdentifier(declaration.name) && isConst(declaration))
@@ -195,25 +187,25 @@ export function readRoute(source: string): RouteRead {
       node = node.expression;
     return node;
   };
-  const stringValue = (node: ts.Expression | undefined, depth = 0): string | undefined => {
+  const stringValue = (node: ts.Expression | undefined, depth = 0, inPage = false): string | undefined => {
     if (!node || depth > 8) return undefined;
     node = unwrap(node);
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
     if (!ts.isIdentifier(node)) return undefined;
-    const value = valueOf(declarationOf(node));
-    return value && !ts.isFunctionDeclaration(value) ? stringValue(value, depth + 1) : undefined;
+    const value = valueOf(declarationOf(node), inPage);
+    return value && !ts.isFunctionDeclaration(value) ? stringValue(value, depth + 1, inPage) : undefined;
   };
 
   const seen = new Set<ts.Node>();
   const fromExpression = (node: ts.Expression): string | undefined => {
     node = unwrap(node);
-    if (runtimeName(node) === DOCS_PATHS) return PRIMARY_COLLECTION;
+    const bare = runtimeName(node);
+    if (isStaticPathsHelper(bare) && !takesCollection(bare)) return PRIMARY_COLLECTION;
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return fromFunction(node);
     if (ts.isIdentifier(node)) return fromDeclaration(declarationOf(node));
     if (!ts.isCallExpression(node)) return undefined;
     const callee = runtimeName(node.expression);
-    if (callee === DOCS_PATHS) return PRIMARY_COLLECTION;
-    if (callee && FACTORIES.has(callee)) return stringValue(node.arguments[0]);
+    if (isStaticPathsHelper(callee)) return takesCollection(callee) ? stringValue(node.arguments[0]) : PRIMARY_COLLECTION;
     // `factory("sdk")(options)`: the helper's returned function, called.
     if (ts.isCallExpression(node.expression)) return fromExpression(node.expression);
     // `(await factory("sdk")(options)).filter(…)`: the paths, narrowed.
@@ -253,14 +245,26 @@ export function readRoute(source: string): RouteRead {
     return ts.isNamespaceImport(bindings) ||
       bindings.elements.some((element) => {
         const name = (element.propertyName ?? element.name).text;
-        return !element.isTypeOnly && (FACTORIES.has(name) || name === DOCS_PATHS);
+        return !element.isTypeOnly && (isStaticPathsHelper(name) || PAGE_HELPERS.has(name));
       });
   });
   const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
   const exported = moduleSymbol && checker.getExportsOfModule(moduleSymbol).find((symbol) => symbol.name === "getStaticPaths");
   // `export { getStaticPaths }` isn't followed: Astro's compiler rejects it.
-  const collection = fromDeclaration(exported?.declarations?.[0]);
-  return collection === undefined ? { usesHelper } : { collection, usesHelper };
+  const fromPaths = fromDeclaration(exported?.declarations?.[0]);
+  const named: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && PAGE_HELPERS.has(runtimeName(node.expression) ?? "")) {
+      const name = stringValue(node.arguments[1], 0, true);
+      if (name !== undefined && !named.includes(name)) named.push(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  const names = [...new Set([...(fromPaths === undefined ? [] : [fromPaths]), ...named])];
+  const collection = names[0];
+  if (collection === undefined) return { usesHelper };
+  return names.length > 1 ? { collection, usesHelper, conflict: names } : { collection, usesHelper };
 }
 
 export interface MountError {
@@ -272,7 +276,8 @@ export interface MountError {
     | "nimbus/collection-two-routes"
     | "nimbus/collection-same-url"
     | "nimbus/collection-api-root"
-    | "nimbus/collection-route-param";
+    | "nimbus/collection-route-param"
+    | "nimbus/collection-route-mismatch";
   /** Names the file and the fix. */
   message: string;
 }
@@ -307,6 +312,15 @@ export function decideCollectionMounts(
   const warnings: MountWarning[] = [];
   const byCollection = new Map<string, FoundRoute[]>();
   for (const route of found) {
+    if (route.conflict) {
+      errors.push({
+        code: "nimbus/collection-route-mismatch",
+        message:
+          `${route.file} names collections ${route.conflict.map((name) => `"${name}"`).join(" and ")} in its getStaticPaths and ` +
+          "page helpers. Name the collection it serves in each.",
+      });
+      continue;
+    }
     if (route.misnamed) {
       const fallback = fixedMount(route.collection, versions) ?? `/${route.collection}`;
       const helper = route.misnamed.startsWith("[...") ? "[...slug]" : "[slug]";
@@ -459,8 +473,9 @@ export function unreadRouteWarnings(unread: readonly UnreadRoute[]): MountWarnin
       code: "nimbus/collection-unread-route",
       message:
         `Nimbus couldn't read the getStaticPaths in ${route.file}, so the collection it serves isn't served at ${route.folder}. ` +
-        `Export it as \`export const getStaticPaths = getCollectionStaticPaths("<name>")\`, or return the helper's paths ` +
-        `from getStaticPaths itself, passing the name as a string literal or an exported const holding one. ` +
+        `Export it as \`export const getStaticPaths = getCollectionStaticPaths("<name>")\`, return the helper's paths ` +
+        `from getStaticPaths itself, or pass the name to the page helper, \`getCollectionPage(Astro, "<name>")\`. ` +
+        `Use a string literal or an exported const holding one. ` +
         `If the build then fails with "<name> is not defined", export that name: Astro runs getStaticPaths apart from the rest of the frontmatter.`,
     }));
 }

@@ -67,6 +67,7 @@ test("only universally skippable entries are optional", () => {
       "pnpm-sharp",
       "publish-agent-skills",
       "redesigned-starter",
+      "route-files-follow-rendering",
       "search-provider-slices",
       "shared-markdown-routes",
       "starter-component-fixes",

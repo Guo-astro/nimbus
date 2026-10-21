@@ -167,8 +167,9 @@ rendering: {
 ```
 
 Use `"request"` to render it like the rest of a request-rendered site, or
-`"build"` to prerender it. The policy wins over the routes'
-`export const prerender = true`. Without a `rendering` option, skip this step.
+`"build"` to prerender it. Without a `rendering` option, skip this step. The
+permalink route (5h) follows this mode; the other routes below stay
+prerendered.
 
 ## 5. Implementation
 
@@ -761,13 +762,12 @@ import { Badge } from "@/components/ui/badge";
 import { getCollectionStaticPaths, getCollectionPage, withBase } from "@cloudflare/nimbus-docs";
 import { components } from "@/components";
 
-export const prerender = true;
 export const getStaticPaths: GetStaticPaths = async (options) =>
   (await getCollectionStaticPaths("changelog")(options)).filter(
     (path) => path.params.slug,
   );
 
-const page = await getCollectionPage<"changelog">(Astro);
+const page = await getCollectionPage(Astro, "changelog");
 if (page instanceof Response) return page;
 const { entry, Content, markdownUrl, ogImageUrl } = page;
 const { title, description, date, tags } = entry.data;
@@ -827,6 +827,13 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
   </article>
 </ChangelogLayout>
 ```
+
+The route is written for a site built ahead of time on `output: "static"`.
+Its `getStaticPaths` filters the helper's paths, so `nimbus-docs check --fix`
+can't edit it: when the changelog renders on request, delete
+`getStaticPaths` (and the `GetStaticPaths` and `getCollectionStaticPaths`
+imports); when it's built on `output: "server"`, add
+`export const prerender = true;` above it. `nimbus-docs check` names the edit.
 
 ### 5i. `src/pages/changelog/page/[page].astro` (paginated fallback)
 

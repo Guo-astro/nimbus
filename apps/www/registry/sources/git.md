@@ -109,10 +109,9 @@ import {
 } from "@cloudflare/nimbus-docs/runtime";
 import { components } from "@/components";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("<collection>");
 
-const page = await getCollectionPage<"<collection>">(Astro);
+const page = await getCollectionPage(Astro, "<collection>");
 if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
@@ -162,7 +161,8 @@ const socialImage = entry.data.socialImage ?? ogImageUrl;
 **Rendering.** If the Nimbus config sets `rendering` (a Cloudflare site with server output sets
 `rendering: { default: "request" }`), add the collection to `rendering.collections`, or the
 build fails: `collections: { <collection>: "request" }` (or `"build"` to prerender it). Without
-a `rendering` option, skip this.
+a `rendering` option, skip this. The route above is written for a site built ahead of time on
+`output: "static"`; run `nimbus-docs check --fix` so it matches the site's `rendering` and `output`.
 
 **Sidebar.** Ask the user whether the collection goes in the sidebar, and where. If the Nimbus
 config has `sidebar.items`, add `{ label: "<Display Name>", autogenerate: { collection: "<collection>" } }`.

@@ -6,7 +6,7 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 
-import { agentManifest, agentSites, siteApp, srcModule } from "./fixtures/agent-site.ts";
+import { agentManifest, agentSites, REQUEST_DOCS_PAGE, siteApp, srcModule } from "./fixtures/agent-site.ts";
 
 const sites = agentSites();
 afterEach(() => sites.cleanup());
@@ -75,8 +75,8 @@ test("prerendered factories write every baked llms.txt payload and warn about no
 
 test("factories rendered on request serve by URL, 404 unknown sections, and 500 without details", async () => {
   const site = await sites.buildSite(
-    { ...CONTENT, ...routes(false) },
-    { server: true, logLevel: "warn" },
+    { ...CONTENT, ...REQUEST_DOCS_PAGE, ...routes(false) },
+    { server: true, logLevel: "warn", rendering: { default: "request" } },
   );
   // Request-rendered llms routes are normal operation now — agent files
   // follow the rendering policy — so the build warns about nothing.

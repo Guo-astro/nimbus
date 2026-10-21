@@ -346,8 +346,8 @@ siblings:
 
 - `getCollectionStaticPaths("docs-<slug>")` — takes the collection
   name as an argument
-- `getCollectionPage<"docs-<slug>">(Astro)` — takes the
-  collection name as a TypeScript generic
+- `getCollectionPage(Astro, "docs-<slug>")` — takes the
+  collection name as its second argument
 
 The snippet below uses the correct helpers. Copy it verbatim and
 substitute `<slug>` — do not be tempted to "match" the primary
@@ -373,10 +373,9 @@ import {
 } from "@cloudflare/nimbus-docs";
 import { components } from "../../components";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("docs-<slug>");
 
-const page = await getCollectionPage<"docs-<slug>">(Astro);
+const page = await getCollectionPage(Astro, "docs-<slug>");
 if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
@@ -424,6 +423,15 @@ Substitute the user's version slug for **every `<slug>` token** in
 the snippet above (the directory name in the file path, plus the
 several references inside the file body). Don't ship literal angle
 brackets to the user's repo.
+
+The route is written for a site built ahead of time on
+`output: "static"`. Then run `nimbus-docs check --fix`, so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
 
 The `collection={entry.collection}` and `entryId={entry.id}` props on
 `<DocsLayout>` are required — they're what drives the picker, the

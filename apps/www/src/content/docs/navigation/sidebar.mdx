@@ -117,7 +117,7 @@ sidebar: {
 
 - `scope: "full"` is the default and renders the complete tree on every page.
 - `scope: "section"` renders only the active top-level group. Pair it with section tabs or another cross-section navigation surface.
-- `isolate.boundaries` descends again when a route matches a segment glob. `*` matches one path segment; non-matching routes are unchanged.
+- `isolate.boundaries` descends again when a route matches a segment glob. `*` matches one path segment; non-matching routes are unchanged. The rail starts with the group's landing page, labeled like an overview leaf under `indexDisplay: "overview-leaf"`.
 - `defaultCollapsed` closes groups by default. The active group still opens, and a group's explicit `collapsed` value wins.
 
 Build section tabs from the same structural tree:

@@ -310,9 +310,14 @@ The route in 4c is written for a site built ahead of time on
 site's `rendering` and `output`: a request-rendered route drops
 `getStaticPaths`, and a built route on `output: "server"` gets
 `export const prerender = true`.
+
 If it reports a file it can't edit, apply the same rule by hand: a `prerender`
 line only when the route's mode differs from `output`'s default, and
 `getStaticPaths` only on a built route.
+
+`check` reads links against the last build's pages, so until you build it
+reports links to the new collection's pages as broken. Build, then run `check`
+again before treating them as broken.
 
 ## 5. Adding a docs version? Stop and use `nimbus-docs add new-version`
 

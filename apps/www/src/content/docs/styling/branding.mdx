@@ -14,7 +14,9 @@ Set `title` and `description` in the Nimbus config in `astro.config.ts`. The tit
 
 ## Logo
 
-The header and the phone menu draw `src/components/Logo.astro`, the Nimbus cloud by default. Replace its SVG with your mark, or change it to render an image:
+The logo is drawn once, in `src/components/logo.ts`: its box and SVG paths. The header and phone menu (`Logo.astro`) and every share card read it. Replace the paths with your mark to rebrand them all. Keep it a single-colour mark, since each place fills it with its own text colour.
+
+For a multicolour logo or an image, change `Logo.astro` to render it:
 
 ```astro title="src/components/Logo.astro"
 ---
@@ -23,6 +25,8 @@ const { class: cls = "h-5 w-auto" } = Astro.props;
 ---
 <img src="/logo.svg" alt="" class={cls} />
 ```
+
+The share cards still draw `logo.ts`, so replace that too, or change the cards as [Customize OG cards](/ai/override-markdown#customize-og-cards) shows.
 
 The header keeps the site title as the link's accessible name, so the logo itself needs no text. To show your name beside the mark, add it inside `Logo.astro`.
 
@@ -48,4 +52,4 @@ The accent is two tokens in `src/styles/globals.css`, one for light mode and one
 
 ## Share cards
 
-Nimbus draws a share card for every page at build time. Its colours, spacing and fonts are in `src/pages/og/_og-card-config.ts`. A page's `socialImage` frontmatter replaces its card with your own image. See [Metadata and SEO](/publish/metadata-and-seo).
+Nimbus draws a share card for every page at build time: the logo, the page's section and its title. Its colours, fonts and layout are in `src/pages/og/_card.ts`; see [Customize OG cards](/ai/override-markdown#customize-og-cards). A page's `socialImage` frontmatter replaces its card with your own image. See [Metadata and SEO](/publish/metadata-and-seo).

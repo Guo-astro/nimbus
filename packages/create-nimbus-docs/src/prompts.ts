@@ -1,13 +1,19 @@
+import { resolve } from "node:path";
 import * as p from "@clack/prompts";
 import { ADAPTER_RECIPES, type AdapterId } from "@cloudflare/nimbus-docs/adapters";
+import { specProblem, type SiteChoice } from "./transformers/site.js";
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 export type DeployTarget = "cloudflare" | "other";
 export type ContentMode = "starter" | "empty";
 export type OutputMode = "static" | "server";
+export type SiteTemplate = SiteChoice["template"];
 export type { AdapterId };
 
 /** The known adapter ids, derived from the framework's recipe table. */
+/** The spec question's answer for the sample. A spec file always has an extension, so it can't be one. */
+const SAMPLE_SPEC = "sample";
+
 export const ADAPTER_IDS = Object.keys(ADAPTER_RECIPES) as AdapterId[];
 
 // Interactive scaffolding currently supports the Cloudflare adapter.
@@ -22,6 +28,10 @@ export interface PromptOptions {
   /** Server-lane adapter. Its presence selects `output: "server"`. */
   adapter?: AdapterId;
   content?: ContentMode;
+  /** What's at the root (`--template`). */
+  template?: SiteTemplate;
+  /** `--api`, with its spec or null for the sample. */
+  api?: { spec: string | null };
   yes?: boolean;
   skipInstall?: boolean;
   packageManager?: PackageManager;
@@ -30,6 +40,7 @@ export interface PromptOptions {
 
 interface ResponsesBase {
   dir: string;
+  site: SiteChoice;
   content: ContentMode;
   packageManager: PackageManager;
   git: boolean;
@@ -56,9 +67,16 @@ function detectPackageManager(): PackageManager {
 export async function getPromptResponses(opts: PromptOptions): Promise<PromptResponses> {
   const defaultPM = opts.packageManager ?? detectPackageManager();
 
+  // `--template api` makes an API site; `--api` adds one. Neither: docs only.
+  const flaggedSite = (): SiteChoice => {
+    const template = opts.template ?? "docs";
+    return { template, api: opts.api ?? (template === "api" ? { spec: null } : false) };
+  };
+
   if (opts.yes) {
     const base: ResponsesBase = {
       dir: opts.dir ?? "my-docs",
+      site: flaggedSite(),
       content: opts.content ?? "starter",
       packageManager: defaultPM,
       git: opts.git ?? true,
@@ -75,7 +93,8 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
   if (!process.stdin.isTTY) {
     const unanswered = [
       opts.dir === undefined && `Where should we create your project? Pass a directory argument.`,
-      opts.content === undefined && `Starter content? Pass --content starter|empty.`,
+      // A site that is only an API reference has no docs pages to fill.
+      opts.content === undefined && opts.template !== "api" && `Starter content? Pass --content starter|empty.`,
       opts.packageManager === undefined && `Which package manager? Pass --package-manager npm|pnpm|yarn|bun.`,
       opts.git === undefined && `Initialize a git repository? Pass --git or --no-git.`,
       opts.adapter === undefined &&
@@ -115,7 +134,48 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
       }),
     ));
 
+  // Without flags for it, ask which parts the site has. Without a terminal
+  // the site is docs only, as before the question existed.
+  let site = flaggedSite();
+  const interactive = process.stdin.isTTY === true;
+  if (interactive && opts.template === undefined && opts.api === undefined) {
+    // One choice while there are two parts: three outcomes read better as a
+    // list than as checkboxes.
+    const parts = (await ask(() =>
+      p.select({
+        message: "What should the site include?",
+        options: [
+          { value: "docs", label: "Docs", hint: "Hand-written pages" },
+          { value: "docs+api", label: "Docs and an API reference", hint: "The reference at /api" },
+          { value: "api", label: "API reference", hint: "The reference is the site" },
+        ],
+        initialValue: "docs",
+      }),
+    )) as "docs" | "docs+api" | "api";
+    site =
+      parts === "docs"
+        ? { template: "docs", api: false }
+        : { template: parts === "api" ? "api" : "docs", api: { spec: null } };
+  }
+  if (interactive && site.api && opts.api === undefined) {
+    const spec = (await ask(() =>
+      p.text({
+        message: "OpenAPI spec?",
+        placeholder: "Path to a .yaml or .json file, or Enter for the sample",
+        // What the answer reads as once Enter takes the sample.
+        defaultValue: SAMPLE_SPEC,
+        validate: (value) => {
+          const problem = value && value !== SAMPLE_SPEC ? specProblem(value) : undefined;
+          return problem && `${value} ${problem}. Pass an OpenAPI 3.x file, or leave it empty for a sample.`;
+        },
+      }),
+    )) as string;
+    site = { ...site, api: { spec: spec && spec !== SAMPLE_SPEC ? resolve(spec) : null } };
+  }
+
+  // An API-only site has no docs pages to fill.
   const content =
+    site.template === "api" ? (opts.content ?? "starter") :
     opts.content ??
     ((await ask(() =>
       p.select({
@@ -157,6 +217,7 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 
   const base: ResponsesBase = {
     dir,
+    site,
     content,
     packageManager,
     git,

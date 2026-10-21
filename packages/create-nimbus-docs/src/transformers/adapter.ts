@@ -31,7 +31,7 @@ const IGNORE_ENTRIES_BY_ADAPTER: Partial<Record<AdapterId, string[]>> = {
  * (`ASTRO_CONFIG_FILENAMES`); `.cjs` is intentionally absent, so the ESM
  * `import` the edit inserts can never be written into a CommonJS config.
  */
-export async function applyAdapter(dir: string, adapter: AdapterId): Promise<void> {
+export async function applyAdapter(dir: string, adapter: AdapterId, site: { docs: boolean } = { docs: true }): Promise<void> {
   const configPath = ASTRO_CONFIG_FILENAMES.map((f) => join(dir, f)).find(existsSync);
   if (!configPath) {
     throw new ScaffoldError(
@@ -41,9 +41,10 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
 
   // A new server site renders its docs on request, so content negotiation and
   // agent headers work from the first deploy. Off Cloudflare that's the docs
-  // collection only: generated API pages render on request only there.
+  // collection only: generated API pages render on request only there, so an
+  // API-only site keeps building them.
   const result = applyAdapterToConfig(readFileSync(configPath, "utf-8"), adapter, {
-    requestRendering: adapter === "cloudflare" ? true : { collections: ["docs"] },
+    requestRendering: adapter === "cloudflare" ? true : site.docs && { collections: ["docs"] },
   });
   if (result.status !== "error" && result.requestRendering === "unresolved") {
     throw new ScaffoldError(

@@ -47,7 +47,8 @@
     "@clack/prompts": "^0.9.1",
     "giget": "^3.3.0",
     "mri": "^1.2.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "yaml": "^2.7.1"
   },
   "devDependencies": {
     "@cloudflare/nimbus-docs": "workspace:*",

@@ -22,6 +22,8 @@ import {
   writeServerWrangler,
 } from "./transformers/adapter.js";
 import { updatePackageJson } from "./transformers/package.js";
+import { applySite, type SiteChoice, type SiteResult } from "./transformers/site.js";
+import type { SiteRecord } from "@cloudflare/nimbus-docs/site-parts";
 
 // Injected by tsdown at build time (see tsdown.config.ts). The scaffolder
 // fetches templates pinned to the tag that matches its OWN version, so
@@ -63,6 +65,7 @@ function writeNimbusJson(
   target: string,
   options: ScaffoldOptions,
   preview: PreviewProvenance | null,
+  parts: SiteResult,
 ): void {
   // tsdown inlines __APP_VERSION__ at build; guard so the source also runs
   // under tsx (tests), where the injected constant is undefined.
@@ -75,6 +78,7 @@ function writeNimbusJson(
     templatesTag: preview ? null : `templates-v${version}`,
     variant: options.content,
     registry: preview?.registry ?? DEFAULT_REGISTRY_URL,
+    ...(parts.site ? { site: parts.site } : {}),
     ...(options.output === "server"
       ? { serverOutput: { adapter: options.adapter } }
       : {}),
@@ -85,7 +89,7 @@ function writeNimbusJson(
       root: "src",
       aliases: { "@/*": "src/*" },
     },
-    components: [],
+    components: parts.components,
   };
   writeFileSync(
     join(target, "nimbus.json"),
@@ -145,6 +149,8 @@ interface ScaffoldOptionsBase {
    * variant is selected from `content`.
    */
   templateDir?: string;
+  /** What's at the root and whether the site has an API reference. Docs only when absent. */
+  site?: SiteChoice;
   /** The target folder already existed (empty, or holding only `.git`). */
   intoExisting?: boolean;
 }
@@ -196,6 +202,8 @@ interface PreviewProvenance {
 /** Whether dependencies are installed, so the caller knows what's left to run. */
 export interface ScaffoldResult {
   install: "done" | "skipped" | "failed";
+  /** The site's parts, when it has an API reference. */
+  site: SiteRecord | null;
 }
 
 export async function scaffold(
@@ -272,15 +280,18 @@ export async function scaffold(
   // and rethrow a friendly error. Without the rollback, a half-written dir
   // blocks re-running (the existence check above hard-fails on it).
   startProgress("Fetching template…");
+  let site: SiteRecord | null = null;
   try {
     await fetchTemplate(target, { ...options, intoExisting: existing !== null });
     assertNoTemplateSymlinks(target);
     stopProgress("Template ready.");
 
     startProgress("Configuring project…");
+    const parts = applySite(target, options.site ?? { template: "docs", api: false }, preview?.registry ?? DEFAULT_REGISTRY_URL);
+    site = parts.site;
     normalizePackageManagerFiles(target, packageManager);
     if (options.output === "server") {
-      await applyAdapter(target, options.adapter);
+      await applyAdapter(target, options.adapter, { docs: options.site?.template !== "api" });
       await writeServerWrangler(target, options.adapter);
       appendAdapterIgnoreEntries(target, options.adapter);
       if (options.adapter === "cloudflare") {
@@ -303,7 +314,7 @@ export async function scaffold(
       });
     }
     if (packageManager === "yarn") pinYarnBerry(target);
-    writeNimbusJson(target, options, preview);
+    writeNimbusJson(target, options, preview, parts);
     if (preview?.registry) {
       const envPath = join(target, ".env");
       const kept = existsSync(envPath)
@@ -349,7 +360,7 @@ export async function scaffold(
   if (skipInstall) {
     p.log.step("Skipped dependency installation.");
     if (ownRepo) await firstCommit(target);
-    return { install: "skipped" };
+    return { install: "skipped", site };
   }
 
   startProgress(`Installing dependencies via ${packageManager}…`);
@@ -357,12 +368,12 @@ export async function scaffold(
     await installDependencies(packageManager, target);
     stopProgress("Dependencies installed.");
     if (ownRepo) await firstCommit(target);
-    return { install: "done" };
+    return { install: "done", site };
   } catch (err) {
     stopProgress("Failed to install dependencies.");
     const output = (err as Error).message;
     if (output) p.log.message(output);
-    return { install: "failed" };
+    return { install: "failed", site };
   }
 }
 

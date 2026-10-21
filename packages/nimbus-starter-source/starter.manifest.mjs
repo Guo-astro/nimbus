@@ -48,6 +48,8 @@
  *   scripts the generator declines in the shipped template's
  *   pnpm-workspace.yaml (pnpm's build-scripts gate). Named exactly, never a
  *   blanket approval; both ship working prebuilds.
+ * @property {{ components: string[], dependencies: Record<string, string> }} apiPart
+ *   The API reference site part: registry components and peer pins.
  * @property {Record<string, TemplateVariant>} templates Per-template
  *   content overrides. Key = output dir name under create-nimbus-docs/
  *   (e.g. "template" → packages/create-nimbus-docs/template/).
@@ -98,6 +100,21 @@ export const STARTER_MANIFEST = {
   // Install scripts declined in shipped templates to clear pnpm's build-scripts
   // gate. Both ship prebuilds, so declining is strictly narrower than allowing.
   declinedBuildScripts: ["esbuild", "sharp"],
+
+  // The API reference, a site part `create-nimbus-docs` adds (`--api`) or makes
+  // the whole site (`--template api`). Its files live in `parts/`; the
+  // generator ships them in each variant's `.nimbus-parts/`. `components` and
+  // `dependencies` are the `api-layout` registry item's closure among the
+  // registry-only components and its pinned peers (a www registry test keeps
+  // them equal), installed and recorded as `add api-layout` would.
+  apiPart: {
+    components: ["api-code-rail", "api-field-row", "api-layout", "api-sidebar", "popover", "version-switcher"],
+    dependencies: {
+      "@scalar/openapi-parser": "0.28.12",
+      "openapi-sampler": "1.7.4",
+      "@readme/httpsnippet": "11.4.0",
+    },
+  },
 
   templates: {
     template: {

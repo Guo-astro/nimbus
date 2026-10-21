@@ -55,6 +55,15 @@ const nimbusJsonSchema = z
     // later diffs use as that file's base instead of `templatesTag`.
     templatesTagByFile: z.record(z.string(), z.string()).optional(),
     variant: z.string().nullable().optional(),
+    // What `create-nimbus-docs` built beyond the docs starter (an API reference),
+    // so upgrades rebuild the same starter tree. Absent means docs only.
+    site: z
+      .object({
+        template: z.enum(["docs", "api"]),
+        api: z.union([z.object({ spec: z.string() }).passthrough(), z.literal(false)]),
+      })
+      .passthrough()
+      .optional(),
     registry: z.string().optional(),
     // `init` sets this when it rebuilt a record it couldn't fully recover.
     reconstructed: z.boolean().optional(),

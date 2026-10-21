@@ -19,6 +19,7 @@ export default defineConfig({
     types: "src/types.ts",
     server: "src/server.ts",
     adapters: "src/adapters.ts",
+    "site-parts": "src/site-parts.ts",
     client: "src/client/index.ts",
     markdown: "src/markdown/index.ts",
     og: "src/og.ts",

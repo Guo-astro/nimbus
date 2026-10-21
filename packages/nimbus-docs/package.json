@@ -77,6 +77,10 @@
 			"types": "./dist/adapters.d.ts",
 			"import": "./dist/adapters.js"
 		},
+		"./site-parts": {
+			"types": "./dist/site-parts.d.ts",
+			"import": "./dist/site-parts.js"
+		},
 		"./client": {
 			"types": "./dist/client.d.ts",
 			"import": "./dist/client.js"

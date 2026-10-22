@@ -24,9 +24,11 @@ export const collections = {
         date: z.coerce.date(),
         // The release this entry shipped in; the page's contents list them.
         version: z.string().optional(),
-        // Products the entry touches; the feed's filter is built from them.
+        // Products the entry touches, shown in its meta line and feed categories.
         tags: z.array(z.string()).default([]),
       },
+      // Written into each release's .md and .mdx; `version` already is.
+      markdownFields: ["date", "tags"],
     }),
   ),
 };

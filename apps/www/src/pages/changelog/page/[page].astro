@@ -1,0 +1,23 @@
+---
+/** /changelog/page/<n>/ — older releases, `PAGE_SIZE` to a page. Page 1 is /changelog/. */
+import type { GetStaticPaths } from "astro";
+import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
+import { changelogPage, getReleaseIndex, type ChangelogPageData } from "@/components/changelog/release";
+
+export const prerender = true;
+export const getStaticPaths = (async () => {
+  const index = await getReleaseIndex();
+  return index.pages.slice(1).map((_, i) => ({
+    params: { page: String(i + 2) },
+    props: { data: changelogPage(index, i + 2) },
+  }));
+}) satisfies GetStaticPaths;
+
+interface Props {
+  data: ChangelogPageData;
+}
+
+const { data } = Astro.props;
+---
+
+<ChangelogPage data={data} />

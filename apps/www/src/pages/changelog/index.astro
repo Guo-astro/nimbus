@@ -1,0 +1,11 @@
+---
+/** /changelog/ — the newest releases. Older ones are on /changelog/page/<n>/. */
+import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
+import { changelogPage, getReleaseIndex } from "@/components/changelog/release";
+
+export const prerender = true;
+
+const data = changelogPage(await getReleaseIndex(), 1);
+---
+
+<ChangelogPage data={data} />

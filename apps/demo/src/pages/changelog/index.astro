@@ -1,13 +1,11 @@
 ---
-/**
- * /changelog — the newest releases. Older ones are on /changelog/page/<n>/.
- */
-import { getCollection } from "astro:content";
+/** /changelog/ — the newest releases. Older ones are on /changelog/page/<n>/. */
 import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
+import { changelogPage, getReleaseIndex } from "@/components/changelog/release";
 
 export const prerender = true;
 
-const entries = await getCollection("changelog", (e) => !e.data.draft);
+const data = changelogPage(await getReleaseIndex(), 1);
 ---
 
-<ChangelogPage entries={entries} page={1} />
+<ChangelogPage data={data} />

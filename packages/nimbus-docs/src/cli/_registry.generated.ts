@@ -288,7 +288,7 @@ export const BUNDLED_INDEX: BundledIndex = {
       "name": "changelog",
       "type": "registry:feature",
       "title": "Changelog",
-      "description": "Add a reverse-chronological changelog at /changelog — a dated timeline feed that renders full entries inline, with tag filtering, year-grouped load-more pagination, per-entry permalinks, OG cards, markdown alternates, and an optional RSS feed. Generic: tags are opaque strings you define. For a feed-style changelog; for a docs-shaped tree use `nimbus-docs add new-collection`."
+      "description": "Add a changelog at /changelog: release notes newest first, 10 a page with Newer / Older and a \"More releases\" list, a page per release with its sections in \"On this page\", Markdown versions with each release's date and tags, OG cards, and an optional RSS feed. For a docs-shaped tree use `nimbus-docs add new-collection`."
     },
     "component-showcase": {
       "name": "component-showcase",

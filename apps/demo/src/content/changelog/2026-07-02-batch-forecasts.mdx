@@ -8,8 +8,7 @@ tags: [Forecasts, API]
 
 Forecasts for up to 100 places in one request.
 
-<ReleaseSection title="New">
-
+## New
 
 - [Get forecasts for many points](/api/forecasts/batch-forecasts/) takes up to 100 coordinates and returns a forecast for each, with the `ref` you gave it. See [Forecast many places at once](/guides/batch-forecasts).
 
@@ -17,11 +16,6 @@ Forecasts for up to 100 places in one request.
 A point that fails, such as a coordinate in the sea for a land-only product, returns an error in its own result. The rest of the batch still succeeds.
 </Aside>
 
-</ReleaseSection>
-
-<ReleaseSection title="Billing">
-
+## Billing
 
 Each point counts as one call, so a batch costs the same as the requests it replaces, with one round trip instead of a hundred.
-
-</ReleaseSection>

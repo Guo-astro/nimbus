@@ -1,0 +1,31 @@
+---
+/**
+ * ChangelogEntry — one release on a list page: its date, the package and
+ * version as an h3 linking to the release's own page, then the notes, passed
+ * in as the default slot. The notes' headings sit below the h3 and carry no
+ * ids; the release page is where its sections are linkable.
+ */
+import { withBase } from "@cloudflare/nimbus-docs/runtime";
+import { dateLabel, listPageBody, releaseHref, type Release } from "./release";
+
+interface Props {
+  entry: Release;
+  /** The release's id on the list pages, from the index. */
+  anchor: string;
+}
+
+const { entry, anchor } = Astro.props;
+const { title, date } = entry.data;
+const href = withBase(releaseHref(entry), import.meta.env.BASE_URL);
+const body = listPageBody(await Astro.slots.render("default"), href);
+---
+
+<section class="cl-release" aria-labelledby={anchor}>
+  {date && (
+    <p class="cl-meta">
+      <time datetime={date.toISOString()}>{dateLabel(date)}</time>
+    </p>
+  )}
+  <h3 id={anchor}><a href={href}>{title}</a></h3>
+  <Fragment set:html={body} />
+</section>

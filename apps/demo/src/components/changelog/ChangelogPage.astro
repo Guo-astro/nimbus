@@ -1,57 +1,60 @@
 ---
 /**
  * ChangelogPage — one page of the changelog: up to `PAGE_SIZE` releases,
- * newest first. The TOC lists this page's versions and the range every other
- * page holds; the pagination bar moves to newer and older releases.
+ * newest first. "On this page" lists its years and releases, "More releases"
+ * the range every other page holds, and the pagination bar moves to newer
+ * and older releases.
  */
-import type { CollectionEntry } from "astro:content";
+import { config } from "virtual:nimbus/config";
 import DocsLayout from "@/layouts/DocsLayout.astro";
 import ChangelogFeed from "./ChangelogFeed.astro";
 import { Pagination } from "@/components/ui/pagination";
 import { TOC } from "@/components/ui/toc";
-import { anchor, byYear, pageHref, paginate, rangeLabel } from "./release";
+import { CHANGELOG_DESCRIPTION, CHANGELOG_TITLE, releaseLabel, type ChangelogPageData } from "./release";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { TOCItem } from "@cloudflare/nimbus-docs/types";
 
 interface Props {
-  entries: CollectionEntry<"changelog">[];
-  page: number;
+  data: ChangelogPageData;
 }
 
-const { entries, page } = Astro.props;
-const pages = paginate(entries);
-const list = pages[page - 1];
-const headings: TOCItem[] = byYear(list).flatMap(([, releases]) =>
-  releases.map((e) => ({ depth: 2, text: e.data.version ?? e.data.title, slug: anchor(e) })),
-);
-const link = (n: number) => ({ label: rangeLabel(pages[n - 1]), href: pageHref(n) });
+const { data } = Astro.props;
+const { page } = data;
+const headings: TOCItem[] = data.years.flatMap((group) => [
+  { depth: 2, text: String(group.year), slug: group.anchor },
+  ...group.releases.map(({ entry, anchor }) => ({ depth: 3, text: releaseLabel(entry), slug: anchor })),
+]);
 const prevNext = {
-  prev: page > 1 ? link(page - 1) : undefined,
-  next: page < pages.length ? link(page + 1) : undefined,
+  prev: data.newer && { label: data.newer.range, href: data.newer.href },
+  next: data.older && { label: data.older.range, href: data.older.href },
 };
-const others = pages.map((_, i) => i + 1).filter((n) => n !== page);
 const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
 ---
 
 <DocsLayout
-  title={page === 1 ? "Changelog" : `Changelog, page ${page}`}
-  description={page === 1 ? "New features, improvements and fixes in the Weather API, by release." : `Releases ${rangeLabel(list)}.`}
+  title={page === 1 ? CHANGELOG_TITLE : `${CHANGELOG_TITLE}, page ${page}`}
+  description={page === 1 ? CHANGELOG_DESCRIPTION : `Releases ${data.range}.`}
   sidebar={false}
   headings={headings}
   prevNext={prevNext}
-  breadcrumbs={page === 1 ? [] : [{ label: "Changelog", href: "/changelog/" }, { label: `Page ${page}` }]}
-  head={[{ tag: "link", attrs: { rel: "alternate", type: "application/rss+xml", title: "Weather changelog", href: rss } }]}
+  breadcrumbs={page === 1 ? [] : [{ label: CHANGELOG_TITLE, href: "/changelog/" }, { label: `Page ${page}` }]}
+  socialImage="/og/changelog.png"
+  head={[{ tag: "link", attrs: { rel: "alternate", type: "application/rss+xml", title: `${config.title} ${CHANGELOG_TITLE}`, href: rss } }]}
 >
-  <ChangelogFeed entries={list} />
+  <ChangelogFeed years={data.years} />
   <Fragment slot="toc">
     <TOC headings={headings} />
-    {others.length > 0 && (
+    {data.others.length > 0 && (
       <nav aria-label="Other changelog pages" class="cl-pages">
         <h2>More releases</h2>
         <ul>
-          {others.map((n) => (
-            <li><a href={withBase(pageHref(n), import.meta.env.BASE_URL)}>{rangeLabel(pages[n - 1])}</a></li>
-          ))}
+          {data.others.map((other) =>
+            other ? (
+              <li><a href={withBase(other.href, import.meta.env.BASE_URL)}>{other.range}</a></li>
+            ) : (
+              <li aria-hidden="true" class="cl-gap">…</li>
+            ),
+          )}
         </ul>
       </nav>
     )}
@@ -63,7 +66,8 @@ const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
   .cl-pages { margin-top: 2rem; }
   .cl-pages h2 { margin: 0 0 0.5rem; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--nb-foreground); }
   .cl-pages ul { margin: 0; padding: 0; list-style: none; }
-  .cl-pages a {
+  .cl-pages a,
+  .cl-gap {
     display: block;
     padding: 0.375rem 0;
     font-size: 0.8125rem;

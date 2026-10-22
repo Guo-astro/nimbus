@@ -1,0 +1,36 @@
+---
+/** One release on its own page, in the docs layout. */
+import type { GetStaticPaths } from "astro";
+import { getCollection, render } from "astro:content";
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import { CHANGELOG_TITLE, dateLabel, getReleaseIndex, releaseHref, releaseLabel, releaseNeighbours, type Release } from "@/components/changelog/release";
+import { Pagination } from "@/components/ui/pagination";
+
+export const getStaticPaths = (async () =>
+  (await getCollection("releases")).map((entry) => ({ params: { slug: entry.id }, props: { entry } }))) satisfies GetStaticPaths;
+
+interface Props {
+  entry: Release;
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await render(entry);
+const { title, date } = entry.data;
+// Newer and older releases, so a release page walks the changelog like a docs page walks its section.
+const { newer, older } = releaseNeighbours(await getReleaseIndex(), entry.id);
+const link = (release: Release | undefined) => release && { label: releaseLabel(release), href: releaseHref(release) };
+const prevNext = { prev: link(newer), next: link(older) };
+---
+
+<DocsLayout
+  title={title}
+  description={date ? `Released ${dateLabel(date, "long")}.` : undefined}
+  sidebar={false}
+  headings={headings.filter((heading) => heading.depth === 2)}
+  prevNext={prevNext}
+  breadcrumbs={[{ label: CHANGELOG_TITLE, href: "/changelog/" }, { label: releaseLabel(entry) }]}
+  socialImage="/og/changelog.png"
+>
+  <Content />
+  <Pagination slot="pagination" prevNext={prevNext} prevLabel="Newer" nextLabel="Older" />
+</DocsLayout>

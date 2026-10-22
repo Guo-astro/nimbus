@@ -8,8 +8,7 @@ tags: [Stations, API]
 
 Private stations are generally available: register your own sensors and report alongside the public network.
 
-<ReleaseSection title="New">
-
+## New
 
 - [Register a private station](/api/stations/create-station/) and submit its readings alongside the public network. Private stations are visible only to your organization until you set `public` to `true`. See [Report from your own station](/guides/private-stations).
 - [Submit up to 1,000 readings](/api/stations/submit-readings/) per request, as JSON or a logger file uploaded as multipart form data.
@@ -22,5 +21,3 @@ curl -X POST https://api.weather.example/v2/stations \
   -H "Content-Type: application/json" \
   -d '{"name": "Rooftop, Oslo office", "latitude": 59.91, "longitude": 10.75}'
 ```
-
-</ReleaseSection>

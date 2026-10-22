@@ -21,6 +21,27 @@ Every Nimbus site publishes a plain-text copy of itself for agents and other too
 
 On a versioned site, every Markdown version's frontmatter has a `version:` key, so agents can pin a version. Every page's head also carries JSON-LD structured data. Pages with `draft: true` or `noindex: true` are left out of the indexes; see [Docs for agents](/ai/docs-for-agents#how-pages-are-indexed) for the full rules.
 
+## Add your own frontmatter
+
+Each page's Markdown version carries `title`, `description`, `image` and, where the page has one, `version`. To add other fields, declare them in `schemaFields` and name them in `markdownFields`:
+
+```ts title="src/content.config.ts"
+changelog: defineCollection(
+  docsCollection({
+    base: "changelog",
+    schemaFields: {
+      date: z.coerce.date(),
+      tags: z.array(z.string()).default([]),
+    },
+    markdownFields: ["date", "tags"],
+  }),
+),
+```
+
+The fields follow Nimbus's own keys, in the order you list them, in both `index.md` and `index.mdx`. Values can be strings, numbers, booleans, dates, or arrays of those; a field a page leaves empty is left out.
+
+A date at midnight UTC is written as `2026-07-02`, and any other time in full with `Z`. Write dates without a time, or with an offset (`2026-07-02T09:30:00+02:00`): a time without an offset is read in the build machine's timezone.
+
 ## Add the routes to an older site
 
 A site created before these routes shipped adds five endpoints. The Nimbus integration must already be present in `astro.config.ts`.

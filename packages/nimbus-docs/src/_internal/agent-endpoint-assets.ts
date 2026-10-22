@@ -583,9 +583,53 @@ function preparedMarkdownUrls(
   };
 }
 
+/** A date at midnight UTC as `YYYY-MM-DD`; any other instant as full ISO. */
+function frontmatterDate(date: Date): string {
+  const iso = date.toISOString();
+  return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+}
+
+function frontmatterScalar(value: unknown): string | undefined {
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
+  if (value instanceof Date && !Number.isNaN(value.getTime()))
+    return JSON.stringify(frontmatterDate(value));
+  return undefined;
+}
+
+/**
+ * `docsCollection({ markdownFields })`: each named field of the entry's
+ * data as a frontmatter line, in list order. Missing values are left out;
+ * arrays are JSON flow sequences.
+ */
+function markdownFieldLines(
+  entry: Pick<PreparedMarkdownEntry, "collection" | "id" | "data">,
+  fields: readonly string[],
+): string[] {
+  const lines: string[] = [];
+  for (const field of fields) {
+    const value = entry.data[field];
+    if (value === undefined || value === null) continue;
+    const written = Array.isArray(value)
+      ? value.every((item) => frontmatterScalar(item) !== undefined)
+        ? `[${value.map((item) => frontmatterScalar(item)).join(", ")}]`
+        : undefined
+      : frontmatterScalar(value);
+    if (written === undefined) {
+      throw new Error(
+        `nimbus-docs: "${entry.collection}:${entry.id}" can't write markdownFields "${field}" to its .md: ` +
+          "values must be strings, numbers, booleans, dates, or arrays of those.",
+      );
+    }
+    lines.push(`${field}: ${written}`);
+  }
+  return lines;
+}
+
 function frontmatter(
   entry: Pick<PreparedMarkdownEntry, "collection" | "id" | "data">,
   options: BakeAgentEndpointAssetsOptions,
+  fields: readonly string[] = [],
 ): string[] {
   const title =
     typeof entry.data.title === "string" && entry.data.title.length > 0
@@ -612,6 +656,7 @@ function frontmatter(
         ]
       : []),
     ...(version ? [`version: ${JSON.stringify(version)}`] : []),
+    ...markdownFieldLines(entry, fields),
     "---",
   ];
 }
@@ -634,6 +679,7 @@ function markdownAsset(
   entry: PreparedMarkdownEntry,
   markdown: string,
   options: BakeAgentEndpointAssetsOptions,
+  fields: readonly string[],
 ): MarkdownEndpointPayloadBody {
   const title =
     typeof entry.data.title === "string" && entry.data.title.length > 0
@@ -641,7 +687,7 @@ function markdownAsset(
       : entry.id;
   const urls = preparedMarkdownUrls(entry, options);
   const prefix = [
-    ...frontmatter(entry, options),
+    ...frontmatter(entry, options, fields),
     "",
     "> Documentation Index",
     `> Fetch the complete documentation index at: ${absoluteUrl(options.site, options.base, "/llms.txt")}`,
@@ -689,9 +735,10 @@ function sourceAsset(
   entry: PreparedMarkdownEntry,
   expanded: string,
   options: BakeAgentEndpointAssetsOptions,
+  fields: readonly string[],
 ): MarkdownEndpointPayloadBody {
   return envelopedAsset(
-    `${[...frontmatter(entry, options), ""].join("\n")}\n`,
+    `${[...frontmatter(entry, options, fields), ""].join("\n")}\n`,
     expanded,
   );
 }
@@ -1905,11 +1952,12 @@ export async function bakeAgentEndpointAssets(
       });
     }
     const urls = preparedMarkdownUrls(entry, options);
+    const fields = snapshot.collections.get(entry.collection)?.markdownFields ?? [];
     for (const surface of ["markdown", "source"] as const) {
       const asset =
         surface === "markdown"
-          ? markdownAsset(entry, markdown, options)
-          : sourceAsset(entry, expanded, options);
+          ? markdownAsset(entry, markdown, options, fields)
+          : sourceAsset(entry, expanded, options, fields);
       const { body, contentStart, contentEnd } = asset;
       const fingerprint = digest(
         JSON.stringify({

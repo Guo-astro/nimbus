@@ -26,3 +26,6 @@ apps/www/public/registry/
 # verify, and the templates-repo sync. Regenerate via `pnpm build:templates`.
 .generated/
 .tmp/
+
+# The changelog recipe build test's fixture, removed when it finishes.
+packages/nimbus-starter-source/.changelog-recipe-*/

@@ -43,6 +43,8 @@ export interface PreparedMarkdownCollection {
    * collection without `files`, still standing when the load committed.
    */
   collisions?: ReadonlyArray<PreparedMarkdownCollision>;
+  /** Entry `data` fields written into each page's `.md` and `.mdx` frontmatter. */
+  markdownFields?: readonly string[];
 }
 
 export interface PreparedMarkdownFiles {
@@ -59,6 +61,7 @@ export interface PreparedMarkdownCollision {
 
 export interface PreparedMarkdownCommitDetails {
   files?: PreparedMarkdownFiles;
+  markdownFields?: readonly string[];
   collisions?: ReadonlyArray<PreparedMarkdownCollision>;
 }
 
@@ -77,6 +80,7 @@ interface MutableCollection {
   entries: Map<string, PreparedMarkdownEntry>;
   files?: PreparedMarkdownFiles;
   collisions?: ReadonlyArray<PreparedMarkdownCollision>;
+  markdownFields?: readonly string[];
 }
 
 interface MutableRoot {
@@ -324,6 +328,10 @@ export function commitPreparedMarkdownCollection(
     ...(details.collisions?.length
       ? { collisions: structuredClone(details.collisions) }
       : {}),
+    // Part of the equality below: changing the list re-bakes the assets.
+    ...(details.markdownFields?.length
+      ? { markdownFields: [...details.markdownFields] }
+      : {}),
     capability: preparedMarkdownCollectionCapability(
       collection,
       sourceEntries,
@@ -439,6 +447,9 @@ export function getPreparedMarkdownSnapshot(
           ...(value.files ? { files: structuredClone(value.files) } : {}),
           ...(value.collisions
             ? { collisions: structuredClone(value.collisions) }
+            : {}),
+          ...(value.markdownFields
+            ? { markdownFields: [...value.markdownFields] }
             : {}),
           entries: new Map(
             [...value.entries].map(([id, entry]) => [

@@ -15,6 +15,7 @@
  * `config.include` mirrors the include config for type-checking.
  */
 
+import { invalidateDevModules, type DevServerGraphs } from "./dev-invalidation.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getIcons } from "@iconify/utils";
@@ -49,9 +50,8 @@ export interface VitePluginLike {
   enforce?: "pre" | "post" | "normal";
   resolveId(id: string): string | undefined;
   load(id: string): Promise<string | undefined> | string | undefined;
-  configureServer?(server: {
+  configureServer?(server: DevServerGraphs & {
     watcher: { add: (p: string) => void; on: (e: string, cb: (e: string, p: string) => void) => void };
-    moduleGraph: { invalidateAll: () => void };
   }): void;
 }
 
@@ -122,13 +122,14 @@ export function iconVirtualPlugin(
       }
       return undefined;
     },
-    configureServer({ watcher, moduleGraph }) {
+    configureServer(server) {
+      const { watcher } = server;
       watcher.add(`${iconDir}/**/*.svg`);
       watcher.on("all", async (_event, filepath) => {
         if (!filepath.endsWith(".svg")) return;
         if (!filepath.startsWith(resolvedIconDir)) return;
         collections = null;
-        moduleGraph.invalidateAll();
+        invalidateDevModules(server);
       });
     },
   };

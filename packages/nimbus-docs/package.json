@@ -107,6 +107,7 @@
 		},
 		"./components/NimbusHead.astro": "./src/components/NimbusHead.astro",
 		"./components/Icon.astro": "./src/components/Icon.astro",
+		"./components/NestedContent.astro": "./src/components/NestedContent.astro",
 		"./styles/math.css": "./src/styles/math.css"
 	},
 	"files": [

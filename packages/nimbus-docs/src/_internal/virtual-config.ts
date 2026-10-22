@@ -19,6 +19,7 @@
  * object when the site is unversioned. See `version-alternates.ts`.
  */
 
+import { invalidateDevModules, type DevServerGraphs } from "./dev-invalidation.js";
 import type { NimbusConfig, RuntimeContentSource, RuntimeNimbusConfig } from "../types.js";
 import { searchIndexLayout } from "./build-slice.js";
 import { NO_ROUTES } from "./collection-mount.js";
@@ -33,16 +34,7 @@ export interface VitePluginLike {
   enforce?: "pre" | "post";
   resolveId(id: string, importer?: string): string | undefined;
   load(id: string): string | undefined | Promise<string | undefined>;
-  handleHotUpdate?(context: {
-    file: string;
-    server: {
-      moduleGraph: {
-        getModuleById(id: string): unknown;
-        invalidateModule(module: never): void;
-        invalidateAll?(): void;
-      };
-    };
-  }): void;
+  handleHotUpdate?(context: { file: string; server: DevServerGraphs }): void;
 }
 
 export interface VirtualConfigExtras {
@@ -194,12 +186,7 @@ export function virtualConfigPlugin(
       // The whole graph, not just this module: `runtime-config.ts` caches the
       // list in module state, and an edit re-runs every loader anyway (the
       // same rule the integration applies to content-file edits).
-      if (server.moduleGraph.invalidateAll) {
-        server.moduleGraph.invalidateAll();
-        return;
-      }
-      const module = server.moduleGraph.getModuleById(RESOLVED_ID);
-      if (module) server.moduleGraph.invalidateModule(module as never);
+      invalidateDevModules(server);
     },
   };
 }

@@ -123,6 +123,16 @@ export interface DocsCollectionOptions<
    */
   schemaFields?: TFields;
   /**
+   * `schemaFields` keys to write into each page's `.md` and `.mdx`
+   * frontmatter, in this order, after Nimbus's own keys (`title`,
+   * `description`, `image`, `version`), which can't be named here. Values
+   * are strings, numbers, booleans, dates, or arrays of those; a date at
+   * midnight UTC is written `YYYY-MM-DD`.
+   */
+  markdownFields?: ReadonlyArray<
+    string extends keyof TFields ? never : Extract<keyof TFields, string>
+  >;
+  /**
    * When `false`, unknown frontmatter keys pass through instead of erroring
    * (default `true`). For ingesting byte-identical content with keys the
    * schema doesn't model. Declared fields in `schemaFields` stay typed.
@@ -190,6 +200,38 @@ export function withNimbusMarkdown<T extends Loader>(loader: T): T {
   return wrapNimbusMarkdown(loader, "page");
 }
 
+/** Frontmatter keys every page's `.md` and `.mdx` already carries. */
+const NIMBUS_MARKDOWN_KEYS = new Set(["title", "description", "image", "version"]);
+
+function checkMarkdownFields(
+  fields: readonly string[],
+  schemaFields: Record<string, unknown> | undefined,
+): void {
+  const seen = new Set<string>();
+  for (const field of fields) {
+    // Written as a bare YAML key, so it must read as one.
+    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(field)) {
+      throw new Error(
+        `nimbus-docs: docsCollection({ markdownFields }) names "${field}", which can't be a frontmatter key. Use letters, digits, "_" and "-", starting with a letter or "_".`,
+      );
+    }
+    if (seen.has(field)) {
+      throw new Error(`nimbus-docs: docsCollection({ markdownFields }) names "${field}" twice.`);
+    }
+    seen.add(field);
+    if (NIMBUS_MARKDOWN_KEYS.has(field)) {
+      throw new Error(
+        `nimbus-docs: docsCollection({ markdownFields }) names "${field}", which Nimbus already writes to every page's .md and .mdx. Remove it from markdownFields.`,
+      );
+    }
+    if (!schemaFields || !Object.hasOwn(schemaFields, field)) {
+      throw new Error(
+        `nimbus-docs: docsCollection({ markdownFields }) names "${field}", which isn't in schemaFields. Declare it in schemaFields, or remove it from markdownFields.`,
+      );
+    }
+  }
+}
+
 /**
  * Shared implementation behind `withNimbusMarkdown()` (role `page`) and
  * `partialsCollection()` (role `partials`). The role is recorded on the
@@ -201,6 +243,7 @@ export function withNimbusMarkdown<T extends Loader>(loader: T): T {
 function wrapNimbusMarkdown<T extends Loader>(
   loader: T,
   role: "page" | "partials",
+  markdownFields?: readonly string[],
 ): T {
   const existing = wrappedMarkdownLoaders.get(loader);
   if (existing) return existing as T;
@@ -215,6 +258,7 @@ function wrapNimbusMarkdown<T extends Loader>(
       generation: NIMBUS_MARKDOWN_GENERATION,
       base,
       role,
+      ...(markdownFields?.length ? { markdownFields: [...markdownFields] } : {}),
       // Partials always load: a page in the slice may render one.
       empty:
         role === "page" &&
@@ -270,16 +314,17 @@ export function docsCollection<
     fields: options.schemaFields,
     strictFrontmatter: options.strictFrontmatter,
   });
-
-  if (options.source !== undefined) {
-    return {
-      loader: withNimbusMarkdown(sourceGlob(options.source, options.base, pattern)),
-      schema,
-    };
-  }
+  const markdownFields = options.markdownFields ?? [];
+  checkMarkdownFields(markdownFields, options.schemaFields);
 
   return {
-    loader: withNimbusMarkdown(nimbusGlob(base, pattern)),
+    loader: wrapNimbusMarkdown(
+      options.source !== undefined
+        ? sourceGlob(options.source, options.base, pattern)
+        : nimbusGlob(base, pattern),
+      "page",
+      markdownFields,
+    ),
     schema,
   };
 }

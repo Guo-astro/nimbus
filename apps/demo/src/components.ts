@@ -6,7 +6,6 @@
 
 import { Aside } from "./components/ui/aside";
 import Render from "./components/Render.astro";
-import ReleaseSection from "./components/changelog/ReleaseSection.astro";
 import { Card } from "./components/ui/card";
 import { CardGrid } from "./components/ui/card-grid";
 import { PackageManagers } from "./components/ui/package-managers";
@@ -18,7 +17,6 @@ export const components = {
   Card,
   CardGrid,
   PackageManagers,
-  ReleaseSection,
   Render,
   Step,
   Steps,

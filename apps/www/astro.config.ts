@@ -22,6 +22,7 @@ const nimbusConfig = defineNimbusConfig({
       { label: "Components", icon: "ph:puzzle-piece", autogenerate: { collection: "components" } },
       // The glossary is an appendix, after the component catalog.
       { label: "Glossary", link: "/glossary" },
+      { label: "Changelog", link: "/changelog/" },
     ],
   },
 });

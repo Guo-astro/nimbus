@@ -92,7 +92,7 @@ export const GET: APIRoute = async (context) => {
 };
 ```
 
-Or write the route with the public helpers. The changelog recipe (`nimbus-docs add changelog`) adds `src/pages/changelog/[...slug]/index.md.ts`, which builds its own frontmatter with each entry's date and tags:
+Or write the route with the public helpers. This route builds a `changelog` collection's frontmatter itself. To add fields from a page's frontmatter, [`markdownFields`](/ai/publish-markdown#add-your-own-frontmatter) needs no route; write one for anything it can't produce:
 
 ```ts title="src/pages/changelog/[...slug]/index.md.ts (abridged)"
 export const getStaticPaths = async () =>

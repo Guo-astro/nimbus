@@ -34,6 +34,7 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event.number }}
       cancel-in-progress: true
     permissions:
+      checks: read # find the www Preview from its Workers Builds check run
       contents: read
       pull-requests: write # remove the trigger label (same-repo only; fork tokens are read-only)
     env:
@@ -64,9 +65,11 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.number }}
 
-      # Same-repo heads take the URL from the Workers Builds comment. Fork heads
-      # wait up to 15 minutes for the Fork preview workflow's comment; either
-      # way the URL counts only once it serves this commit.
+      # Same-repo heads take the URL from the Workers Builds comment, or, when the
+      # bot skips it or it names a stale URL, from the Workers Builds check run
+      # for this commit, waiting up to 5 minutes for the build. Fork heads wait
+      # up to 15 minutes for the Fork preview workflow's comment. Either way the
+      # URL counts only once it serves this commit.
       - name: Require a live www Preview of this commit
         id: registry
         run: |
@@ -80,8 +83,15 @@ jobs:
           else
             author='cloudflare-workers-and-pages[bot]'
             match='/services/view/nimbus-docs/'
-            deadline=$SECONDS
+            deadline=$((SECONDS + 300))
           fi
+          probe() {
+            url=$1
+            served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/_nimbus-preview-sha.txt") || true
+            registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
+              "$url/registry/registry.json" | jq -er '.registryVersion') || true
+          }
           while :; do
             comment=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
               --jq ".[] | select(.user.login == \"$author\" and (.body | contains(\"$match\"))) | .id" | sort -n | tail -1)
@@ -89,14 +99,19 @@ jobs:
             served_sha=''
             registry_version=''
             if [ -n "$comment" ]; then
-              url=$(gh api "repos/$REPO/issues/comments/$comment" --jq '.body' | \
+              candidate=$(gh api "repos/$REPO/issues/comments/$comment" --jq '.body' | \
                 grep -oE 'Preview URL: https://[A-Za-z0-9.-]+' | head -1 | sed 's/^Preview URL: //') || true
+              if [ -n "$candidate" ]; then probe "$candidate"; fi
             fi
-            if [ -n "$url" ]; then
-              served_sha=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-                "$url/_nimbus-preview-sha.txt") || true
-              registry_version=$(curl --fail --show-error --silent --retry 3 --retry-delay 2 \
-                "$url/registry/registry.json" | jq -er '.registryVersion') || true
+            if [ "$served_sha" != "$sha" ] && [ "$FORK" != true ]; then
+              # The check run links the build under its Preview alias, the
+              # subdomain the bot's comment names when it posts one. Only
+              # Cloudflare's app counts, and never a `fork-<PR#>` alias: those
+              # serve fork PRs' builds (fork-preview.yml).
+              alias=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=Workers%20Builds:%20nimbus-docs" \
+                --jq '[.check_runs[] | select(.app.slug == "cloudflare-workers-and-pages" and .conclusion == "success")
+                  | .details_url | capture("/previews/(?<alias>[a-z0-9-]+)/builds/").alias] | first // empty') || true
+              if [[ "$alias" =~ ^[a-z0-9-]+$ && "$alias" != fork-* ]]; then probe "https://$alias.nimbus-docs.com"; fi
             fi
             if [ "$served_sha" = "$sha" ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             sleep 15

@@ -286,6 +286,7 @@ import {
   preparedMarkdownRootKey,
 } from "./_internal/prepared-markdown-registry.js";
 import { currentPageLoadScope } from "./_internal/page-load-scope.js";
+import { invalidateDevModules } from "./_internal/dev-invalidation.js";
 import type {
   GeneratedMarkdownComponentTransform,
   GeneratedMarkdownPartialResolver,
@@ -3230,12 +3231,11 @@ export function nimbus(
       },
       "astro:server:setup": async ({ server, refreshContent, logger }) => {
         reloadDevModules = () => {
-          server.moduleGraph.invalidateAll();
           // workerd executes in a separate Vite module runner. Invalidating
           // only Node's compatibility graph leaves its virtual modules and
           // memoized inventories on the previous snapshot.
+          invalidateDevModules(server);
           for (const environment of Object.values(server.environments)) {
-            environment.moduleGraph.invalidateAll();
             environment.hot.send({ type: "full-reload" });
           }
         };
@@ -3392,7 +3392,7 @@ export function nimbus(
           (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(
             projectRootForBuild,
           );
-          server.moduleGraph.invalidateAll();
+          invalidateDevModules(server);
         };
         server.watcher.on("add", invalidate);
         server.watcher.on("change", invalidate);

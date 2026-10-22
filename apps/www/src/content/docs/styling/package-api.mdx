@@ -141,7 +141,7 @@ From `@cloudflare/nimbus-docs/content`, in `src/content.config.ts`.
 
 | Helper | What it does |
 | --- | --- |
-| `docsCollection(options)` | A docs collection; `schemaFields` adds frontmatter fields. |
+| `docsCollection(options)` | A docs collection; `schemaFields` adds frontmatter fields, and `markdownFields` writes them into each page's [Markdown version](/ai/publish-markdown#add-your-own-frontmatter). |
 | `partialsCollection(options)` | The reusable snippets that `<Render>` includes. |
 | `componentsCollection(options)` | Component pages, like the [component catalog](/components). |
 | `apiCollection(options)` | The pages generated from an OpenAPI spec. |
@@ -173,3 +173,4 @@ From `@cloudflare/nimbus-docs/markdown`, in `markdown.hastPlugins` in the integr
 | --- | --- |
 | `@cloudflare/nimbus-docs/components/Icon.astro` | Renders an icon by name, such as `ph:check`. |
 | `@cloudflare/nimbus-docs/components/NimbusHead.astro` | The page's head: title, description, canonical, share card and agent discovery tags. |
+| `@cloudflare/nimbus-docs/components/NestedContent.astro` | Shows another page's content inside this one, such as a release on a changelog list: its `h1` and `h2` become `headingLevel` and drop their ids, and links to its sections go to `sourceUrl`. |

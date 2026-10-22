@@ -220,6 +220,18 @@ test("sites upgrading from 0.12.x are told to wrap custom loaders", () => {
   );
 });
 
+test("changelog sites review an optional move to release notes", () => {
+  const entry = selectUpgradeEntries("0.18.1", "0.19.0").find((candidate) => candidate.id === "changelog-release-notes");
+  assert.equal(entry?.mode, "review-required");
+  const instructions = entry?.instructions.join("\n") ?? "";
+  assert.match(instructions, /Keeping the current changelog is fine/);
+  assert.match(instructions, /markdownFields: \["date", "tags"\]/);
+  assert.match(instructions, /delete src\/pages\/changelog\/\[\.\.\.slug\]\/index\.md\.ts/);
+  assert.match(instructions, /before deleting them/);
+  assert.match(instructions, /\?tag=/);
+  assert.match(entry?.affected ?? "", /Sites without one: skip/);
+});
+
 test("a preview pre-release selects the entries of the release it previews", () => {
   assert.deepEqual(
     selectUpgradeEntries("0.13.0", "0.14.0-pr.170.sha0123abc").map(entry => entry.id),

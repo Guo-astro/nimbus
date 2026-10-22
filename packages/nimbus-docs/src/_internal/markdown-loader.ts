@@ -43,6 +43,11 @@ export interface PrepareMarkdownLoaderOptions extends NimbusMarkdownCapability {
    */
   role?: "page" | "partials";
   /**
+   * Entry `data` fields the bake writes into each page's `.md` and `.mdx`
+   * frontmatter (`docsCollection({ markdownFields })`).
+   */
+  markdownFields?: readonly string[];
+  /**
    * Commit the collection empty without running the loader: a partial build
    * (`NIMBUS_BUILD_ONLY`) leaves collections outside its slice this way. The
    * store is cleared unconditionally, because Astro persists it between
@@ -442,7 +447,7 @@ export function prepareMarkdownLoader<T extends Loader>(
           [],
           new Map(),
           options.role ?? "page",
-          { files: options.files },
+          { files: options.files, markdownFields: options.markdownFields },
         );
         if (!committed) {
           throw new Error(
@@ -526,6 +531,7 @@ export function prepareMarkdownLoader<T extends Loader>(
             options.role ?? "page",
             {
               files: options.files,
+              markdownFields: options.markdownFields,
               collisions: standingCollisions(
                 mutationState.candidates,
                 sourceEntries,

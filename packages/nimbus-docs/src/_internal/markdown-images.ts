@@ -10,10 +10,24 @@
  * (prerendered `.md` routes and the prepared agent pipeline), so the record is
  * shared through `globalThis`. No Node imports: this module is bundled into
  * server builds with the renderer.
+ *
+ * A slice without the root collection (`NIMBUS_BUILD_ONLY`) is served only
+ * under its prefix, so its images go there too: `products/sdk/_nimbus/md/…`.
  */
 export const MARKDOWN_IMAGE_PREFIX = "_nimbus/md";
 
 const REGISTRY = Symbol.for("nimbus-docs.markdown-images");
+const SLICE_PREFIX = Symbol.for("nimbus-docs.markdown-images.slice-prefix");
+
+/** The build's slice prefix (`/products/sdk`), or `""` for a whole-site or root-slice build. */
+export function setMarkdownImageSlicePrefix(prefix: string): void {
+  (globalThis as unknown as Record<symbol, string>)[SLICE_PREFIX] = prefix;
+}
+
+function outputPrefix(): string {
+  const prefix = (globalThis as unknown as Record<symbol, string | undefined>)[SLICE_PREFIX] ?? "";
+  return prefix ? `${prefix.replace(/^\/+/, "")}/${MARKDOWN_IMAGE_PREFIX}` : MARKDOWN_IMAGE_PREFIX;
+}
 
 type Registry = Map<string, string>; // output path (under the prefix) → project-relative source
 
@@ -34,7 +48,7 @@ interface Positioned {
 const ABSOLUTE = /^(?:[a-z][a-z\d+.-]*:|\/|#|\?)/i;
 
 /** FNV-1a, so the same source always gets the same folder. */
-function hash(value: string): string {
+export function markdownImageHash(value: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < value.length; i++) {
     h ^= value.charCodeAt(i);
@@ -94,7 +108,7 @@ export function rewriteRelativeImages(markdown: string, tree: Positioned, filePa
     const after = text.indexOf(isImage ? "](" : "]:");
     const at = after < 0 ? -1 : text.indexOf(node.url, after);
     if (at < 0) return;
-    const output = `${MARKDOWN_IMAGE_PREFIX}/${hash(source)}/${source.slice(source.lastIndexOf("/") + 1)}`;
+    const output = `${outputPrefix()}/${markdownImageHash(source)}/${source.slice(source.lastIndexOf("/") + 1)}`;
     markdownImageRegistry().set(output, source);
     edits.push({ at: start + at, length: node.url.length, url: `${base.replace(/\/?$/, "/")}${output}` });
   });

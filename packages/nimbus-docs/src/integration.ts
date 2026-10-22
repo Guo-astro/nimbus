@@ -68,6 +68,8 @@ import {
 } from "./_internal/collection-routes.js";
 import { cloudflareTrailingSlashWarning } from "./_internal/cloudflare-trailing-slash.js";
 import { copyMarkdownImages } from "./_internal/markdown-images-copy.js";
+import { setMarkdownImageSlicePrefix } from "./_internal/markdown-images.js";
+import { markdownImageSource, markdownImageType } from "./_internal/markdown-images-dev.js";
 import { mcpSdkMessage, serverAdapterFeature, serverAdapterMessage } from "./_internal/server-adapter.js";
 import { deriveFootprint, footprintRoutes } from "./_internal/footprint.js";
 import { readDependencyNames } from "./check/probe.js";
@@ -1195,6 +1197,7 @@ export function nimbus(
         sliceLayoutForBuild = buildSliceForBuild
           ? buildSliceLayout(buildSliceForBuild, mountContextForBuild)
           : null;
+        setMarkdownImageSlicePrefix(sliceLayoutForBuild && !sliceLayoutForBuild.root ? sliceLayoutForBuild.prefix : "");
         if (sliceLayoutForBuild && !sliceLayoutForBuild.root) {
           // The slice's pages load their bundled CSS and JS from the assets
           // directory, which at the root the zone routes to another Worker.
@@ -3346,6 +3349,29 @@ export function nimbus(
           res.setHeader("cache-control", "no-store");
           res.setHeader("x-nb-shiki-path", pathname);
           res.end(getCodeStyleCSS() || "/* nimbus shiki styles */\n");
+        });
+
+        // Relative images in Markdown versions point at copies the build makes
+        // (markdown-images.ts); in dev, serve them from their source files.
+        server.middlewares.use((req, res, next) => {
+          let pathname: string;
+          try {
+            pathname = decodeURIComponent(new URL(req.url ?? "/", "http://nimbus.local").pathname);
+          } catch {
+            next();
+            return;
+          }
+          const file = pathname.includes("/_nimbus/md/")
+            ? markdownImageSource(projectRootForBuild, pathname)
+            : undefined;
+          if (!file) {
+            next();
+            return;
+          }
+          res.statusCode = 200;
+          res.setHeader("content-type", markdownImageType(file));
+          res.setHeader("cache-control", "no-store");
+          res.end(fs.readFileSync(file));
         });
 
         // Nav caches (`getSidebar`/`getBreadcrumbs`/`getSidebarSections`) are

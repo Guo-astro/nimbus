@@ -9,12 +9,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const demo = join(here, "../../demo");
-const RELEASE_TS = join(demo, "src/components/changelog/release.ts");
+const RELEASE_TS = join(demo, "src/components/changelog/changelog.ts");
 
 test("the recipe's code is apps/demo's changelog, file for file", async () => {
   const recipe = await readFile(join(here, "features/changelog.md"), "utf8");
   const files = [
-    "src/components/changelog/release.ts",
+    "src/components/changelog/changelog.ts",
     "src/components/changelog/ChangelogEntry.astro",
     "src/components/changelog/ChangelogFeed.astro",
     "src/components/changelog/ChangelogPage.astro",
@@ -60,12 +60,11 @@ type ReleaseModule = {
   changelogPage(
     index: Index,
     page: number,
-  ): { range: string; newer?: Link; older?: Link; others: Array<Link | null>; years: Array<{ anchor: string; releases: unknown[] }> };
-  morePages(page: number, pageCount: number): Array<number | null>;
+  ): { range: string; newer?: Link; older?: Link; otherPages: Array<Link | null>; years: Array<{ anchor: string; releases: unknown[] }> };
+  paginationItems(page: number, pageCount: number): Array<number | null>;
   releaseLabel(entry: Entry): string;
   rangeLabel(list: Entry[]): string;
   dateLabel(date: Date, month?: "short" | "long"): string;
-  listPageBody(html: string, href: string): string;
   releaseHref(entry: Entry): string;
 };
 const store = globalThis as typeof globalThis & { __changelog: Entry[]; __changelogReads: number };
@@ -137,15 +136,15 @@ test("pages: 0, 1, 10 and 23 releases", () => {
   assert.equal(page2.range, "1.13.0 – 1.4.0");
   assert.deepEqual(page2.newer, { href: "/changelog/", range: "1.23.0 – 1.14.0" });
   assert.deepEqual(page2.older, { href: "/changelog/page/3/", range: "1.3.0 – 1.1.0" });
-  assert.deepEqual(page2.others.map((o) => o?.href), ["/changelog/", "/changelog/page/3/"]);
+  assert.deepEqual(page2.otherPages.map((o) => o?.href), ["/changelog/", "/changelog/page/3/"]);
 });
 
 test("More releases: every page up to 20, then first 3, current ±2 and last 3", () => {
-  assert.deepEqual(release.morePages(1, 20), Array.from({ length: 19 }, (_, i) => i + 2));
-  assert.deepEqual(release.morePages(1, 25), [2, 3, null, 23, 24, 25]);
-  assert.deepEqual(release.morePages(12, 25), [1, 2, 3, null, 10, 11, 13, 14, null, 23, 24, 25]);
-  assert.deepEqual(release.morePages(25, 25), [1, 2, 3, null, 23, 24]);
-  assert.deepEqual(release.morePages(5, 25), [1, 2, 3, 4, 6, 7, null, 23, 24, 25]);
+  assert.deepEqual(release.paginationItems(1, 20), Array.from({ length: 19 }, (_, i) => i + 2));
+  assert.deepEqual(release.paginationItems(1, 25), [2, 3, null, 23, 24, 25]);
+  assert.deepEqual(release.paginationItems(12, 25), [1, 2, 3, null, 10, 11, 13, 14, null, 23, 24, 25]);
+  assert.deepEqual(release.paginationItems(25, 25), [1, 2, 3, null, 23, 24]);
+  assert.deepEqual(release.paginationItems(5, 25), [1, 2, 3, 4, 6, 7, null, 23, 24, 25]);
 });
 
 test("labels and anchors: versions, versionless releases and collisions", () => {
@@ -176,67 +175,7 @@ test("dates show in UTC, so a date-only release is that day everywhere", () => {
   assert.equal(release.dateLabel(new Date("2026-07-02"), "long"), "July 2, 2026");
 });
 
-test("list-page bodies: headings two levels down without ids, links to them go to the release page", () => {
-  const html = [
-    '<h1 id="intro">Intro</h1>',
-    '<h2 id="new">New</h2><p>See <a href="#fixed">fixes</a> and <a href="#elsewhere">x</a>.</p>',
-    '<h2 id="新機能">新機能</h2><a href="#%E6%96%B0%E6%A9%9F%E8%83%BD">link</a>',
-    '<h3 id="detail" class="x">Detail</h3><h4 id="deep">Deep</h4><h5>Deeper</h5>',
-    '<h2 id="fixed">Fixed</h2>',
-    '<script>const s = "<h2 id=\\"keep\\">"; location.href = "#new";</script>',
-  ].join("");
-  assert.equal(
-    release.listPageBody(html, "/docs/changelog/one/"),
-    [
-      "<h4>Intro</h4>",
-      '<h4>New</h4><p>See <a href="/docs/changelog/one/#fixed">fixes</a> and <a href="#elsewhere">x</a>.</p>',
-      '<h4>新機能</h4><a href="/docs/changelog/one/#%E6%96%B0%E6%A9%9F%E8%83%BD">link</a>',
-      '<h5 class="x">Detail</h5><h6>Deep</h6><h6>Deeper</h6>',
-      "<h4>Fixed</h4>",
-      '<script>const s = "<h2 id=\\"keep\\">"; location.href = "#new";</script>',
-    ].join(""),
-  );
-});
-
 test("release links follow the collection route: a/index is served at /changelog/a/", () => {
   assert.equal(release.releaseHref(entry("a/index", "2026-01-01")), "/changelog/a/");
   assert.equal(release.releaseHref(entry("2026-01-01-one", "2026-01-01")), "/changelog/2026-01-01-one/");
-});
-
-test("list-page bodies change only heading tags and exact href attributes", () => {
-  const html = [
-    '<h2 title="a > b" id="fixed">Fixed</h2>',
-    '<a data-href="#fixed" href="#fixed">x</a>',
-    "<textarea><h2 id=\"raw\">raw</h2> #fixed</textarea>",
-    "<!-- <h2 id=\"c\"> -->",
-    "<style>h2[id] { color: red }</style>",
-    "<p>Plain text with href=\"#fixed\" in it.</p>",
-  ].join("");
-  assert.equal(
-    release.listPageBody(html, "/changelog/one/"),
-    [
-      '<h4 title="a > b">Fixed</h4>',
-      '<a data-href="#fixed" href="/changelog/one/#fixed">x</a>',
-      "<textarea><h2 id=\"raw\">raw</h2> #fixed</textarea>",
-      "<!-- <h2 id=\"c\"> -->",
-      "<style>h2[id] { color: red }</style>",
-      "<p>Plain text with href=\"#fixed\" in it.</p>",
-    ].join(""),
-  );
-});
-
-test("list-page bodies: raw-text bodies end at their real closing tag, and rewritten links stay well formed", () => {
-  const script = '<script data-example="</script>">const s = "<h2 id=\'keep\'>";</script>';
-  assert.equal(release.listPageBody(`<h2 id="new">New</h2>${script}`, "/changelog/one/"), `<h4>New</h4>${script}`);
-  assert.equal(
-    release.listPageBody(`<h2 id='a"b'>Title</h2><a href='#a"b'>x</a><h3 id="fixed">Fixed</h3><a href="&#35;fixed">y</a>`, "/changelog/one/"),
-    '<h4>Title</h4><a href="/changelog/one/#a&quot;b">x</a><h5>Fixed</h5><a href="/changelog/one/#fixed">y</a>',
-  );
-});
-
-test("list-page bodies: an invalid character reference elsewhere doesn't fail the page", () => {
-  assert.equal(
-    release.listPageBody('<h2 id="fixed">Fixed</h2><p title="&#x110000;">Text</p><a href="#fixed">x</a>', "/changelog/one/"),
-    '<h4>Fixed</h4><p title="&#x110000;">Text</p><a href="/changelog/one/#fixed">x</a>',
-  );
 });

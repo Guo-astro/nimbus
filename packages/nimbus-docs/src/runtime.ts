@@ -160,6 +160,13 @@ export type { Heading } from "./_internal/partial-headings.js";
 export { getHeadingsFromHtml } from "./_internal/rendered-headings.js";
 
 /**
+ * Rendered content set inside another page's outline: `h1` and `h2` become
+ * `headingLevel`, deeper headings follow, ids are dropped, and links to those
+ * sections go to `sourceUrl`. `NestedContent.astro` applies it to its slot.
+ */
+export { nestContent, type NestedContentOptions } from "./_internal/nested-content.js";
+
+/**
  * Define a typed Nimbus config.
  */
 export { defineConfig } from "./config.js";

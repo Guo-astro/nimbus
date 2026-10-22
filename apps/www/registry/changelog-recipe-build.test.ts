@@ -57,7 +57,7 @@ before(async () => {
 
   const recipe = await readFile(join(here, "features/changelog.md"), "utf8");
   for (const file of [
-    "src/components/changelog/release.ts",
+    "src/components/changelog/changelog.ts",
     "src/components/changelog/ChangelogEntry.astro",
     "src/components/changelog/ChangelogFeed.astro",
     "src/components/changelog/ChangelogPage.astro",
@@ -121,7 +121,7 @@ test("three list pages of 10, 10 and 3; page 1 is /changelog/, nothing past the 
     assert.ok(!existsSync(join(dist, file)), file);
   const counts = await Promise.all(
     ["changelog/index.html", "changelog/page/2/index.html", "changelog/page/3/index.html"].map(
-      async (file) => (await read(file)).match(/class="cl-release"/g)?.length,
+      async (file) => (await read(file)).match(/<section class="release"/g)?.length,
     ),
   );
   assert.deepEqual(counts, [10, 10, 3]);
@@ -132,7 +132,7 @@ test("list pages: unique ids, sections below h3 without ids, links to sections g
   const all = ids(html);
   assert.equal(new Set(all).size, all.length, `duplicate ids: ${all}`);
   for (const id of ["y2026", "v2-4-0", "v2-4-0-2", "v2-4-0-3", "y2026-2"]) assert.ok(all.includes(id), id);
-  for (const section of article(html).split('class="cl-release"').slice(1).map((part) => part.slice(0, part.indexOf("</section>")))) {
+  for (const section of article(html).split('<section class="release"').slice(1).map((part) => part.slice(0, part.indexOf("</section>")))) {
     assert.doesNotMatch(section, /<h[12][\s>]/);
     assert.doesNotMatch(section, /<h[4-6][^>]*\sid=/);
   }

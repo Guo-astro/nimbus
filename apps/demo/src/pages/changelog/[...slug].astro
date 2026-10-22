@@ -1,10 +1,9 @@
 ---
-/** One release on its own page, in the docs layout. */
 import type { GetStaticPaths } from "astro";
 import DocsLayout from "@/layouts/DocsLayout.astro";
 import { getCollectionStaticPaths, getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
 import { components } from "@/components";
-import { CHANGELOG_TITLE, dateLabel, getReleaseIndex, releaseHref, releaseLabel, releaseNeighbours, type Release } from "@/components/changelog/release";
+import { CHANGELOG_TITLE, dateLabel, getReleaseIndex, releaseHref, releaseLabel, releaseNeighbours, type Release } from "@/components/changelog/changelog";
 import { Pagination } from "@/components/ui/pagination";
 
 export const prerender = true;
@@ -18,9 +17,12 @@ if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 const { title, description, date, version, tags } = entry.data;
 const socialImage = entry.data.socialImage ?? ogImageUrl;
-// Newer and older releases, so a release page walks the changelog like a docs page walks its section.
 const { newer, older } = releaseNeighbours(await getReleaseIndex(), entry.id);
-const link = (release: Release | undefined) => release && { label: `${releaseLabel(release)}: ${release.data.title}`, href: releaseHref(release) };
+const link = (release: Release | undefined) =>
+  release && {
+    label: release.data.version ? `${release.data.version}: ${release.data.title}` : release.data.title,
+    href: releaseHref(release),
+  };
 const prevNext = { prev: link(newer), next: link(older) };
 ---
 
@@ -38,8 +40,8 @@ const prevNext = { prev: link(newer), next: link(older) };
   collection={entry.collection}
   entryId={entry.id}
 >
-  <p class="cl-meta">
-    {version && <span class="cl-version">{version}</span>}
+  <p class="meta">
+    {version && <span class="version">{version}</span>}
     <time datetime={date.toISOString().slice(0, 10)}>{dateLabel(date, "long")}</time>
     {tags.length > 0 && <span>{tags.join(", ")}</span>}
   </p>
@@ -48,7 +50,24 @@ const prevNext = { prev: link(newer), next: link(older) };
 </DocsLayout>
 
 <style>
-  .cl-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 0.625rem; margin: 0; font-size: 0.8125rem; color: var(--nb-muted-foreground); }
-  .cl-meta > * + *::before { content: "·"; margin-inline-end: 0.625rem; color: var(--nb-border-strong); }
-  .cl-version { font-family: var(--nb-font-mono); font-weight: 500; color: var(--nb-foreground); }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.625rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--nb-muted-foreground);
+  }
+
+  .meta > * + *::before {
+    content: "·";
+    margin-inline-end: 0.625rem;
+    color: var(--nb-border-strong);
+  }
+
+  .version {
+    font-family: var(--nb-font-mono);
+    font-weight: 500;
+    color: var(--nb-foreground);
+  }
 </style>

@@ -1,12 +1,14 @@
 ---
 /**
- * ChangelogEntry — one release on a list page: a meta line (version, date,
- * tags), the title as an h3 linking to the release's own page, then the body,
- * passed in as the default slot. The body's headings sit below the h3 and
- * carry no ids; the release page is where its sections are linkable.
+ * One release on a list page. Its body's headings sit below the release's h3
+ * and carry no ids, since every release has its own "New"; links to them go
+ * to the release's own page.
  */
+import { render } from "astro:content";
+import NestedContent from "@cloudflare/nimbus-docs/components/NestedContent.astro";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
-import { dateLabel, listPageBody, releaseHref, type Release } from "./release";
+import { components } from "@/components";
+import { dateLabel, releaseHref, type Release } from "./changelog";
 
 interface Props {
   entry: Release;
@@ -17,15 +19,79 @@ interface Props {
 const { entry, anchor } = Astro.props;
 const { title, date, version, tags } = entry.data;
 const href = withBase(releaseHref(entry), import.meta.env.BASE_URL);
-const body = listPageBody(await Astro.slots.render("default"), href);
+const { Content } = await render(entry);
 ---
 
-<section class="cl-release" aria-labelledby={anchor}>
-  <p class="cl-meta">
-    {version && <span class="cl-version">{version}</span>}
+<section class="release" aria-labelledby={anchor}>
+  <p class="meta">
+    {version && <span class="version">{version}</span>}
     <time datetime={date.toISOString().slice(0, 10)}>{dateLabel(date)}</time>
     {tags.length > 0 && <span>{tags.join(", ")}</span>}
   </p>
   <h3 id={anchor}><a href={href}>{title}</a></h3>
-  <Fragment set:html={body} />
+  <NestedContent headingLevel={4} sourceUrl={href}>
+    <Content components={components} />
+  </NestedContent>
 </section>
+
+<style>
+  .release {
+    margin-top: 2rem;
+    padding-bottom: 2.5rem;
+    border-bottom: 1px solid var(--nb-border);
+  }
+
+  .release:last-child {
+    border-bottom: 0;
+  }
+
+  /* The release is one prose block: the docs rhythm, inside it. */
+  .release > :global(* + *) {
+    margin-top: 1.25rem;
+  }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.625rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--nb-muted-foreground);
+  }
+
+  .meta > * + *::before {
+    content: "·";
+    margin-inline-end: 0.625rem;
+    color: var(--nb-border-strong);
+  }
+
+  .version {
+    font-family: var(--nb-font-mono);
+    font-weight: 500;
+    color: var(--nb-foreground);
+  }
+
+  .release > h3 {
+    margin-top: 0.375rem;
+    /* Land with the meta line above it in view. */
+    scroll-margin-top: 6.5rem;
+  }
+
+  .release > h3 + :global(*) {
+    margin-top: 0.75rem;
+  }
+
+  h3 a {
+    color: inherit;
+    font-weight: inherit;
+    text-decoration: none;
+  }
+
+  h3 a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
+</style>

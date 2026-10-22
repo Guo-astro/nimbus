@@ -40,21 +40,17 @@ export interface ChangelogPageData {
   newer?: { href: string; range: string };
   older?: { href: string; range: string };
   /** "More releases": other pages by range, with `null` where pages are skipped. */
-  others: Array<{ href: string; range: string } | null>;
+  otherPages: Array<{ href: string; range: string } | null>;
 }
 
+// In the site's language, and in UTC so a date-only `2026-07-02` is July 2 everywhere.
 const lang = config.locale ?? "en";
-const dateFormats = new Map<string, Intl.DateTimeFormat>();
+const shortDate = new Intl.DateTimeFormat(lang, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const longDate = new Intl.DateTimeFormat(lang, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** A release date in the site's language, in UTC so a date-only value is that day everywhere. */
-export function dateLabel(date: Date, month: "short" | "long" = "short"): string {
-  let format = dateFormats.get(month);
-  if (!format) {
-    format = new Intl.DateTimeFormat(lang, { month, day: "numeric", year: "numeric", timeZone: "UTC" });
-    dateFormats.set(month, format);
-  }
-  return format.format(date);
-}
+/** "Jul 2, 2026", or "July 2, 2026" with `long`. */
+export const dateLabel = (date: Date, month: "short" | "long" = "short") =>
+  (month === "long" ? longDate : shortDate).format(date);
 
 /** A release's name everywhere: "nimbus-docs 0.18.1". */
 export const releaseLabel = (entry: Release) => entry.data.title;
@@ -117,7 +113,7 @@ export function getReleaseIndex(): Promise<ReleaseIndex> {
 }
 
 /** Page numbers "More releases" links from `page`, with `null` for each gap. */
-export function morePages(page: number, pageCount: number): Array<number | null> {
+export function paginationItems(page: number, pageCount: number): Array<number | null> {
   const all = Array.from({ length: pageCount }, (_, i) => i + 1);
   const shown =
     pageCount <= ALL_PAGES_UP_TO
@@ -153,7 +149,7 @@ export function changelogPage(index: ReleaseIndex, page: number): ChangelogPageD
     range: rangeLabel(list),
     newer: page > 1 ? link(page - 1) : undefined,
     older: page < index.pages.length ? link(page + 1) : undefined,
-    others: morePages(page, index.pages.length).map((n) => (n === null ? null : link(n))),
+    otherPages: paginationItems(page, index.pages.length).map((n) => (n === null ? null : link(n))),
   };
 }
 
@@ -164,76 +160,4 @@ export function releaseNeighbours(index: ReleaseIndex, id: string) {
     newer: at > 0 ? index.releases[at - 1] : undefined,
     older: at >= 0 ? index.releases[at + 1] : undefined,
   };
-}
-
-const listDepth = (depth: number) => Math.min(6, Math.max(4, depth + 2));
-// The references Markdown renderers write in ids and links; anything else,
-// or a number past Unicode, stays as written.
-const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-const unescape = (value: string) =>
-  value.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (match, dec?: string, hex?: string, name?: string) => {
-    if (!dec && !hex) return NAMED[name!.toLowerCase()] ?? match;
-    const code = parseInt(dec ?? hex!, dec ? 10 : 16);
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-  });
-const escapeAttr = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-const ATTR = String.raw`\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\`]+))?`;
-// Comments and the bodies of script, style and textarea pass through as they
-// are; every other match is one tag, with its attributes.
-const TOKEN = new RegExp(
-  String.raw`<!--[\s\S]*?-->|<(script|style|textarea)(?:${ATTR})*\s*>[\s\S]*?<\/\1\s*>|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:${ATTR})*)\s*(\/?)>`,
-  "gi",
-);
-const ATTRS = new RegExp(String.raw`\s+([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>\`]+))?`, "g");
-const attrValue = (raw: string | undefined) =>
-  raw === undefined ? "" : unescape(/^["']/.test(raw) ? raw.slice(1, -1) : raw);
-
-function eachTag(
-  html: string,
-  edit: (tag: { closing: boolean; name: string; attrs: string; selfClosing: string }) => string | undefined,
-): string {
-  return html.replace(TOKEN, (match, raw: string | undefined, closing: string, name: string, attrs: string, selfClosing: string) =>
-    raw || match.startsWith("<!--") ? match : (edit({ closing: closing === "/", name, attrs, selfClosing }) ?? match),
-  );
-}
-
-/**
- * A release body for a list page, where each release is an h3 under its
- * year: headings move down two levels (`h2` → `h4`, never above `h4` or
- * past `h6`) and lose their ids, since every release has its own "New".
- * Links to those ids go to the release's own page instead. Only heading tags
- * and `href` attributes change; scripts, styles and text are left alone.
- */
-export function listPageBody(html: string, href: string): string {
-  const removed = new Set<string>();
-  const demoted = eachTag(html, ({ closing, name, attrs, selfClosing }) => {
-    const depth = /^h([1-6])$/i.exec(name)?.[1];
-    if (!depth) return undefined;
-    const level = listDepth(Number(depth));
-    if (closing) return `</h${level}>`;
-    const kept = attrs.replace(ATTRS, (attr, attrName: string, raw: string | undefined) => {
-      if (attrName.toLowerCase() !== "id") return attr;
-      removed.add(attrValue(raw));
-      return "";
-    });
-    return `<h${level}${kept}${selfClosing ? " /" : ""}>`;
-  });
-  if (removed.size === 0) return demoted;
-  return eachTag(demoted, ({ closing, name, attrs, selfClosing }) => {
-    if (closing) return undefined;
-    let changed = false;
-    const rewritten = attrs.replace(ATTRS, (attr, attrName: string, raw: string | undefined) => {
-      if (attrName.toLowerCase() !== "href") return attr;
-      const value = attrValue(raw);
-      if (!value.startsWith("#")) return attr;
-      let id = value.slice(1);
-      try {
-        id = decodeURIComponent(id);
-      } catch {}
-      if (!removed.has(id)) return attr;
-      changed = true;
-      return ` href="${escapeAttr(`${href}${value}`)}"`;
-    });
-    return changed ? `<${name}${rewritten}${selfClosing ? " /" : ""}>` : undefined;
-  });
 }

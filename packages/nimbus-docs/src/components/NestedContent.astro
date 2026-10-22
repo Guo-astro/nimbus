@@ -1,0 +1,18 @@
+---
+/**
+ * Renders its slot inside another page's outline: `h1` and `h2` become
+ * `headingLevel`, deeper headings follow, ids are dropped, and links to those
+ * sections go to `sourceUrl`, the page the content comes from.
+ *
+ *   <NestedContent headingLevel={4} sourceUrl={releaseUrl}>
+ *     <Content />
+ *   </NestedContent>
+ */
+import { nestContent, type NestedContentOptions } from "@cloudflare/nimbus-docs/runtime";
+
+type Props = NestedContentOptions;
+
+const html = nestContent(await Astro.slots.render("default"), Astro.props);
+---
+
+<Fragment set:html={html} />

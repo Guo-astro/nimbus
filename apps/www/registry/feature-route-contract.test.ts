@@ -82,7 +82,7 @@ test("changelog reserves its index entry for the feed route", async () => {
   const source = await feature("changelog");
   assert.match(
     source,
-    /### 5g\.[\s\S]*?```astro\n---\n.*\nimport type \{ GetStaticPaths \} from "astro";/,
+    /### 5g\.[\s\S]*?```astro\n---\nimport type \{ GetStaticPaths \} from "astro";/,
   );
   assert.doesNotMatch(source, /getChangelogStaticPaths/);
   assert.match(

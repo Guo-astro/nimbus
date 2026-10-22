@@ -26,7 +26,9 @@ below is the user's own source to restyle.
 ## 1. Discovery (read-only)
 
 - `package.json`: confirm `@cloudflare/nimbus-docs` is a dependency and note
-  the package manager. If it isn't a Nimbus project, stop.
+  the package manager. If it isn't a Nimbus project, stop. The pages need
+  0.19.0 or later (`markdownFields` and `NestedContent`); on an older version,
+  ask the user to upgrade first with `nimbus-docs upgrade`.
 - `src/content.config.ts`: read it in full. Note the existing collections
   (don't collide) and the import style.
 - `astro.config.ts`: read the Nimbus config. Note `title`, `description`,
@@ -83,7 +85,7 @@ release), `/changelog/<slug>/`, its `index.md` and `index.mdx`,
 
 You will **create**:
 
-- `src/components/changelog/release.ts`
+- `src/components/changelog/changelog.ts`
 - `src/components/changelog/ChangelogEntry.astro`
 - `src/components/changelog/ChangelogFeed.astro`
 - `src/components/changelog/ChangelogPage.astro`
@@ -160,24 +162,25 @@ when content does.
 
 Copy these files as they are, with these substitutions only:
 
-- the title and description from step 2, in `release.ts`;
+- the title and description from step 2, in `changelog.ts`;
 - for a site that declined RSS, the edits marked "RSS only".
 
 Dates are formatted in the site's `locale`, in UTC, so a release dated
 `2026-07-02` shows July 2 everywhere. Spacing uses logical properties, so
 the pages work right to left.
 
-### 5a. `src/components/changelog/release.ts`
+### 5a. `src/components/changelog/changelog.ts`
 
-The one index: releases sorted once, newest first, split into pages, with an
-anchor for every year and release on the list pages. Pages receive their
-slice; nothing else sorts the collection.
+The changelog's settings (title, description, `PAGE_SIZE`) and its one index:
+releases sorted once, newest first, split into pages, with an anchor for
+every year and release on the list pages.
 
 ```ts
 /**
- * The changelog's one index: every release sorted once (newest first), split
- * into pages, with an anchor for each release and year on the list pages.
- * Pages read their slice from it; nothing else sorts the collection.
+ * The changelog's settings and its one index: every release sorted once
+ * (newest first), split into pages, with an anchor for each release and year
+ * on the list pages. Pages read their slice from it; nothing else sorts the
+ * collection.
  */
 import { getCollection, type CollectionEntry } from "astro:content";
 import { config } from "virtual:nimbus/config";
@@ -213,21 +216,17 @@ export interface ChangelogPageData {
   newer?: { href: string; range: string };
   older?: { href: string; range: string };
   /** "More releases": other pages by range, with `null` where pages are skipped. */
-  others: Array<{ href: string; range: string } | null>;
+  otherPages: Array<{ href: string; range: string } | null>;
 }
 
+// In the site's language, and in UTC so a date-only `2026-07-02` is July 2 everywhere.
 const lang = config.locale ?? "en";
-const dateFormats = new Map<string, Intl.DateTimeFormat>();
+const shortDate = new Intl.DateTimeFormat(lang, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+const longDate = new Intl.DateTimeFormat(lang, { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** A release date in the site's language, in UTC so a date-only value is that day everywhere. */
-export function dateLabel(date: Date, month: "short" | "long" = "short"): string {
-  let format = dateFormats.get(month);
-  if (!format) {
-    format = new Intl.DateTimeFormat(lang, { month, day: "numeric", year: "numeric", timeZone: "UTC" });
-    dateFormats.set(month, format);
-  }
-  return format.format(date);
-}
+/** "Jul 2, 2026", or "July 2, 2026" with `long`. */
+export const dateLabel = (date: Date, month: "short" | "long" = "short") =>
+  (month === "long" ? longDate : shortDate).format(date);
 
 /** A release's name in the meta line, contents, breadcrumb and neighbour links. */
 export const releaseLabel = (entry: Release) => entry.data.version ?? entry.data.title;
@@ -298,7 +297,7 @@ export function getReleaseIndex(): Promise<ReleaseIndex> {
 }
 
 /** Page numbers "More releases" links from `page`, with `null` for each gap. */
-export function morePages(page: number, pageCount: number): Array<number | null> {
+export function paginationItems(page: number, pageCount: number): Array<number | null> {
   const all = Array.from({ length: pageCount }, (_, i) => i + 1);
   const shown =
     pageCount <= ALL_PAGES_UP_TO
@@ -334,7 +333,7 @@ export function changelogPage(index: ReleaseIndex, page: number): ChangelogPageD
     range: rangeLabel(list),
     newer: page > 1 ? link(page - 1) : undefined,
     older: page < index.pages.length ? link(page + 1) : undefined,
-    others: morePages(page, index.pages.length).map((n) => (n === null ? null : link(n))),
+    otherPages: paginationItems(page, index.pages.length).map((n) => (n === null ? null : link(n))),
   };
 }
 
@@ -346,96 +345,27 @@ export function releaseNeighbours(index: ReleaseIndex, id: string) {
     older: at >= 0 ? index.releases[at + 1] : undefined,
   };
 }
-
-const listDepth = (depth: number) => Math.min(6, Math.max(4, depth + 2));
-// The references Markdown renderers write in ids and links; anything else,
-// or a number past Unicode, stays as written.
-const NAMED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-const unescape = (value: string) =>
-  value.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (match, dec?: string, hex?: string, name?: string) => {
-    if (!dec && !hex) return NAMED[name!.toLowerCase()] ?? match;
-    const code = parseInt(dec ?? hex!, dec ? 10 : 16);
-    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
-  });
-const escapeAttr = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-const ATTR = String.raw`\s+[^\s"'>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>\`]+))?`;
-// Comments and the bodies of script, style and textarea pass through as they
-// are; every other match is one tag, with its attributes.
-const TOKEN = new RegExp(
-  String.raw`<!--[\s\S]*?-->|<(script|style|textarea)(?:${ATTR})*\s*>[\s\S]*?<\/\1\s*>|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:${ATTR})*)\s*(\/?)>`,
-  "gi",
-);
-const ATTRS = new RegExp(String.raw`\s+([^\s"'>/=]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s"'=<>\`]+))?`, "g");
-const attrValue = (raw: string | undefined) =>
-  raw === undefined ? "" : unescape(/^["']/.test(raw) ? raw.slice(1, -1) : raw);
-
-function eachTag(
-  html: string,
-  edit: (tag: { closing: boolean; name: string; attrs: string; selfClosing: string }) => string | undefined,
-): string {
-  return html.replace(TOKEN, (match, raw: string | undefined, closing: string, name: string, attrs: string, selfClosing: string) =>
-    raw || match.startsWith("<!--") ? match : (edit({ closing: closing === "/", name, attrs, selfClosing }) ?? match),
-  );
-}
-
-/**
- * A release body for a list page, where each release is an h3 under its
- * year: headings move down two levels (`h2` → `h4`, never above `h4` or
- * past `h6`) and lose their ids, since every release has its own "New".
- * Links to those ids go to the release's own page instead. Only heading tags
- * and `href` attributes change; scripts, styles and text are left alone.
- */
-export function listPageBody(html: string, href: string): string {
-  const removed = new Set<string>();
-  const demoted = eachTag(html, ({ closing, name, attrs, selfClosing }) => {
-    const depth = /^h([1-6])$/i.exec(name)?.[1];
-    if (!depth) return undefined;
-    const level = listDepth(Number(depth));
-    if (closing) return `</h${level}>`;
-    const kept = attrs.replace(ATTRS, (attr, attrName: string, raw: string | undefined) => {
-      if (attrName.toLowerCase() !== "id") return attr;
-      removed.add(attrValue(raw));
-      return "";
-    });
-    return `<h${level}${kept}${selfClosing ? " /" : ""}>`;
-  });
-  if (removed.size === 0) return demoted;
-  return eachTag(demoted, ({ closing, name, attrs, selfClosing }) => {
-    if (closing) return undefined;
-    let changed = false;
-    const rewritten = attrs.replace(ATTRS, (attr, attrName: string, raw: string | undefined) => {
-      if (attrName.toLowerCase() !== "href") return attr;
-      const value = attrValue(raw);
-      if (!value.startsWith("#")) return attr;
-      let id = value.slice(1);
-      try {
-        id = decodeURIComponent(id);
-      } catch {}
-      if (!removed.has(id)) return attr;
-      changed = true;
-      return ` href="${escapeAttr(`${href}${value}`)}"`;
-    });
-    return changed ? `<${name}${rewritten}${selfClosing ? " /" : ""}>` : undefined;
-  });
-}
 ```
 
 ### 5b. `src/components/changelog/ChangelogEntry.astro`
 
-One release on a list page. Its sections (`## New`, `## Fixed`) move below
-the release's h3 and lose their ids there, since every release has its own
-"New"; the release page is where sections are linkable.
+One release on a list page, with its own styles. `NestedContent` from
+`@cloudflare/nimbus-docs` moves its sections (`## New`, `## Fixed`) below the
+release's h3 and drops their ids, since every release has its own "New";
+links to a section go to the release page, where sections are linkable.
 
 ```astro
 ---
 /**
- * ChangelogEntry — one release on a list page: a meta line (version, date,
- * tags), the title as an h3 linking to the release's own page, then the body,
- * passed in as the default slot. The body's headings sit below the h3 and
- * carry no ids; the release page is where its sections are linkable.
+ * One release on a list page. Its body's headings sit below the release's h3
+ * and carry no ids, since every release has its own "New"; links to them go
+ * to the release's own page.
  */
+import { render } from "astro:content";
+import NestedContent from "@cloudflare/nimbus-docs/components/NestedContent.astro";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
-import { dateLabel, listPageBody, releaseHref, type Release } from "./release";
+import { components } from "@/components";
+import { dateLabel, releaseHref, type Release } from "./changelog";
 
 interface Props {
   entry: Release;
@@ -446,69 +376,38 @@ interface Props {
 const { entry, anchor } = Astro.props;
 const { title, date, version, tags } = entry.data;
 const href = withBase(releaseHref(entry), import.meta.env.BASE_URL);
-const body = listPageBody(await Astro.slots.render("default"), href);
+const { Content } = await render(entry);
 ---
 
-<section class="cl-release" aria-labelledby={anchor}>
-  <p class="cl-meta">
-    {version && <span class="cl-version">{version}</span>}
+<section class="release" aria-labelledby={anchor}>
+  <p class="meta">
+    {version && <span class="version">{version}</span>}
     <time datetime={date.toISOString().slice(0, 10)}>{dateLabel(date)}</time>
     {tags.length > 0 && <span>{tags.join(", ")}</span>}
   </p>
   <h3 id={anchor}><a href={href}>{title}</a></h3>
-  <Fragment set:html={body} />
+  <NestedContent headingLevel={4} sourceUrl={href}>
+    <Content components={components} />
+  </NestedContent>
 </section>
-```
-
-### 5c. `src/components/changelog/ChangelogFeed.astro`
-
-```astro
----
-/**
- * ChangelogFeed — one page's releases, newest first, under a heading per
- * year. Renders inside the docs prose column; the page's table of contents
- * lists the same years and releases.
- */
-import { render } from "astro:content";
-import { components } from "@/components";
-import ChangelogEntry from "./ChangelogEntry.astro";
-import type { ChangelogPageData } from "./release";
-
-interface Props {
-  years: ChangelogPageData["years"];
-}
-
-const years = await Promise.all(
-  Astro.props.years.map(async (group) => ({
-    ...group,
-    releases: await Promise.all(
-      group.releases.map(async (release) => ({ ...release, Content: (await render(release.entry)).Content })),
-    ),
-  })),
-);
----
-
-{years.map((group) => (
-  <>
-    <h2 id={group.anchor}>{group.year}</h2>
-    {group.releases.map(({ entry, anchor, Content }) => (
-      <ChangelogEntry entry={entry} anchor={anchor}>
-        <Content components={components} />
-      </ChangelogEntry>
-    ))}
-  </>
-))}
 
 <style>
-  :global(.cl-release) {
+  .release {
     margin-top: 2rem;
     padding-bottom: 2.5rem;
     border-bottom: 1px solid var(--nb-border);
   }
-  :global(.cl-release:last-child) {
+
+  .release:last-child {
     border-bottom: 0;
   }
-  :global(.docs-content .cl-meta) {
+
+  /* The release is one prose block: the docs rhythm, inside it. */
+  .release > :global(* + *) {
+    margin-top: 1.25rem;
+  }
+
+  .meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -518,39 +417,61 @@ const years = await Promise.all(
     line-height: 1.25rem;
     color: var(--nb-muted-foreground);
   }
-  :global(.cl-meta > * + *::before) {
+
+  .meta > * + *::before {
     content: "·";
     margin-inline-end: 0.625rem;
     color: var(--nb-border-strong);
   }
-  :global(.cl-version) {
+
+  .version {
     font-family: var(--nb-font-mono);
     font-weight: 500;
     color: var(--nb-foreground);
   }
-  /* The release is one prose block: the docs rhythm, scoped inside it. */
-  :global(.cl-release > * + *) {
-    margin-top: 1.25rem;
-  }
-  :global(.cl-release > h3) {
+
+  .release > h3 {
     margin-top: 0.375rem;
     /* Land with the meta line above it in view. */
     scroll-margin-top: 6.5rem;
   }
-  :global(.cl-release > h3 + *) {
+
+  .release > h3 + :global(*) {
     margin-top: 0.75rem;
   }
-  :global(.cl-release > h3 a) {
+
+  h3 a {
     color: inherit;
     font-weight: inherit;
     text-decoration: none;
   }
-  :global(.cl-release > h3 a:hover) {
+
+  h3 a:hover {
     text-decoration: underline;
     text-underline-offset: 4px;
     text-decoration-thickness: 1px;
   }
 </style>
+```
+
+### 5c. `src/components/changelog/ChangelogFeed.astro`
+
+```astro
+---
+import ChangelogEntry from "./ChangelogEntry.astro";
+import type { ChangelogPageData } from "./changelog";
+
+interface Props {
+  years: ChangelogPageData["years"];
+}
+---
+
+{Astro.props.years.map((group) => (
+  <>
+    <h2 id={group.anchor}>{group.year}</h2>
+    {group.releases.map(({ entry, anchor }) => <ChangelogEntry entry={entry} anchor={anchor} />)}
+  </>
+))}
 ```
 
 ### 5d. `src/components/changelog/ChangelogPage.astro`
@@ -560,18 +481,12 @@ and the `config` import.
 
 ```astro
 ---
-/**
- * ChangelogPage — one page of the changelog: up to `PAGE_SIZE` releases,
- * newest first. "On this page" lists its years and releases, "More releases"
- * the range every other page holds, and the pagination bar moves to newer
- * and older releases.
- */
 import { config } from "virtual:nimbus/config";
 import DocsLayout from "@/layouts/DocsLayout.astro";
 import ChangelogFeed from "./ChangelogFeed.astro";
 import { Pagination } from "@/components/ui/pagination";
 import { TOC } from "@/components/ui/toc";
-import { CHANGELOG_DESCRIPTION, CHANGELOG_TITLE, releaseLabel, type ChangelogPageData } from "./release";
+import { CHANGELOG_DESCRIPTION, CHANGELOG_TITLE, releaseLabel, type ChangelogPageData } from "./changelog";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { TOCItem } from "@cloudflare/nimbus-docs/types";
 
@@ -605,15 +520,15 @@ const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
   <ChangelogFeed years={data.years} />
   <Fragment slot="toc">
     <TOC headings={headings} />
-    {data.others.length > 0 && (
-      <nav aria-label="Other changelog pages" class="cl-pages">
+    {data.otherPages.length > 0 && (
+      <nav aria-label="Other changelog pages" class="more-pages">
         <h2>More releases</h2>
         <ul>
-          {data.others.map((other) =>
+          {data.otherPages.map((other) =>
             other ? (
               <li><a href={withBase(other.href, import.meta.env.BASE_URL)}>{other.range}</a></li>
             ) : (
-              <li aria-hidden="true" class="cl-gap">…</li>
+              <li aria-hidden="true" class="gap">…</li>
             ),
           )}
         </ul>
@@ -624,11 +539,26 @@ const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
 </DocsLayout>
 
 <style>
-  .cl-pages { margin-top: 2rem; }
-  .cl-pages h2 { margin: 0 0 0.5rem; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--nb-foreground); }
-  .cl-pages ul { margin: 0; padding: 0; list-style: none; }
-  .cl-pages a,
-  .cl-gap {
+  .more-pages {
+    margin-top: 2rem;
+  }
+
+  .more-pages h2 {
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    color: var(--nb-foreground);
+  }
+
+  .more-pages ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .more-pages a,
+  .gap {
     display: block;
     padding: 0.375rem 0;
     font-size: 0.8125rem;
@@ -637,7 +567,10 @@ const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
     text-decoration: none;
     font-variant-numeric: tabular-nums;
   }
-  .cl-pages a:hover { color: var(--nb-foreground); }
+
+  .more-pages a:hover {
+    color: var(--nb-foreground);
+  }
 </style>
 ```
 
@@ -645,9 +578,8 @@ const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
 
 ```astro
 ---
-/** /changelog/ — the newest releases. Older ones are on /changelog/page/<n>/. */
 import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
-import { changelogPage, getReleaseIndex } from "@/components/changelog/release";
+import { changelogPage, getReleaseIndex } from "@/components/changelog/changelog";
 
 export const prerender = true;
 
@@ -663,10 +595,10 @@ Pages 2 and up. Any other number, `/changelog/page/1/` included, is a 404.
 
 ```astro
 ---
-/** /changelog/page/<n>/ — older releases, `PAGE_SIZE` to a page. Page 1 is /changelog/. */
+// Pages 2 and up; page 1 is /changelog/.
 import type { GetStaticPaths } from "astro";
 import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
-import { changelogPage, getReleaseIndex, type ChangelogPageData } from "@/components/changelog/release";
+import { changelogPage, getReleaseIndex, type ChangelogPageData } from "@/components/changelog/changelog";
 
 export const prerender = true;
 export const getStaticPaths = (async () => {
@@ -694,12 +626,11 @@ index entry, so `/changelog/` stays the list page.
 
 ```astro
 ---
-/** One release on its own page, in the docs layout. */
 import type { GetStaticPaths } from "astro";
 import DocsLayout from "@/layouts/DocsLayout.astro";
 import { getCollectionStaticPaths, getCollectionPage } from "@cloudflare/nimbus-docs/runtime";
 import { components } from "@/components";
-import { CHANGELOG_TITLE, dateLabel, getReleaseIndex, releaseHref, releaseLabel, releaseNeighbours, type Release } from "@/components/changelog/release";
+import { CHANGELOG_TITLE, dateLabel, getReleaseIndex, releaseHref, releaseLabel, releaseNeighbours, type Release } from "@/components/changelog/changelog";
 import { Pagination } from "@/components/ui/pagination";
 
 export const getStaticPaths: GetStaticPaths = async (options) =>
@@ -712,9 +643,12 @@ if (page instanceof Response) return page;
 const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 const { title, description, date, version, tags } = entry.data;
 const socialImage = entry.data.socialImage ?? ogImageUrl;
-// Newer and older releases, so a release page walks the changelog like a docs page walks its section.
 const { newer, older } = releaseNeighbours(await getReleaseIndex(), entry.id);
-const link = (release: Release | undefined) => release && { label: `${releaseLabel(release)}: ${release.data.title}`, href: releaseHref(release) };
+const link = (release: Release | undefined) =>
+  release && {
+    label: release.data.version ? `${release.data.version}: ${release.data.title}` : release.data.title,
+    href: releaseHref(release),
+  };
 const prevNext = { prev: link(newer), next: link(older) };
 ---
 
@@ -732,8 +666,8 @@ const prevNext = { prev: link(newer), next: link(older) };
   collection={entry.collection}
   entryId={entry.id}
 >
-  <p class="cl-meta">
-    {version && <span class="cl-version">{version}</span>}
+  <p class="meta">
+    {version && <span class="version">{version}</span>}
     <time datetime={date.toISOString().slice(0, 10)}>{dateLabel(date, "long")}</time>
     {tags.length > 0 && <span>{tags.join(", ")}</span>}
   </p>
@@ -742,9 +676,26 @@ const prevNext = { prev: link(newer), next: link(older) };
 </DocsLayout>
 
 <style>
-  .cl-meta { display: flex; flex-wrap: wrap; gap: 0.25rem 0.625rem; margin: 0; font-size: 0.8125rem; color: var(--nb-muted-foreground); }
-  .cl-meta > * + *::before { content: "·"; margin-inline-end: 0.625rem; color: var(--nb-border-strong); }
-  .cl-version { font-family: var(--nb-font-mono); font-weight: 500; color: var(--nb-foreground); }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.625rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: var(--nb-muted-foreground);
+  }
+
+  .meta > * + *::before {
+    content: "·";
+    margin-inline-end: 0.625rem;
+    color: var(--nb-border-strong);
+  }
+
+  .version {
+    font-family: var(--nb-font-mono);
+    font-weight: 500;
+    color: var(--nb-foreground);
+  }
 </style>
 ```
 
@@ -761,11 +712,10 @@ Skip this step if the user declined RSS. Each item's link is its release
 page and its permalink GUID.
 
 ```ts
-/** /changelog/rss.xml — the changelog's RSS feed, newest release first. */
 import rss from "@astrojs/rss";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import { config } from "virtual:nimbus/config";
-import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/release";
+import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/changelog";
 
 export const prerender = true;
 
@@ -799,12 +749,13 @@ route. Use the title from step 2.
 With `src/pages/og/_card.ts`:
 
 ```ts
+import { CHANGELOG_TITLE } from "@/components/changelog/changelog";
 import { renderPageCard } from "./_card";
 
 export const prerender = true;
 
 export async function GET() {
-  return new Response(await renderPageCard({ title: "Changelog" }), {
+  return new Response(await renderPageCard({ title: CHANGELOG_TITLE }), {
     headers: { "Content-Type": "image/png" },
   });
 }
@@ -818,14 +769,15 @@ import { fileURLToPath } from "node:url";
 
 import { publicDir, root } from "astro:config/server";
 import { generateOpenGraphImage } from "astro-og-canvas";
+import { CHANGELOG_DESCRIPTION, CHANGELOG_TITLE } from "@/components/changelog/changelog";
 import { ogCardConfig } from "./_og-card-config";
 
 export const prerender = true;
 
 export async function GET() {
   const body = await generateOpenGraphImage({
-    title: "Changelog",
-    description: "New features, improvements and fixes, by release.",
+    title: CHANGELOG_TITLE,
+    description: CHANGELOG_DESCRIPTION,
     ...ogCardConfig,
     fonts: [fileURLToPath(new URL("fonts/Inter-Bold.ttf", publicDir))],
     cacheDir: fileURLToPath(new URL("node_modules/.astro-og-canvas", root)),
@@ -861,6 +813,18 @@ labels the release in lists, links and its Markdown version. Sections are
 ordinary `##` headings; `## New`, `## Improved`, `## Deprecated` and
 `## Fixed` are the usual ones, and none is required. Components in a body
 must be registered in `src/components.ts`, as in docs.
+
+### Where to change what
+
+Tell the user, once the files are in:
+
+| To change | Edit |
+|---|---|
+| Title, description, releases per page | `changelog.ts` |
+| How a release looks (meta line, title, spacing) | `ChangelogEntry.astro` |
+| The page around them: "On this page", "More releases", Newer / Older | `ChangelogPage.astro` |
+| A release's own page | `src/pages/changelog/[...slug].astro` |
+| The feed | `src/pages/changelog/rss.xml.ts`, and its `<link>` in `ChangelogPage.astro` |
 
 ## 6. Link to it (optional, ask first)
 

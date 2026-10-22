@@ -1,8 +1,7 @@
-/** /changelog/rss.xml — the changelog's RSS feed, newest release first. */
 import rss from "@astrojs/rss";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import { config } from "virtual:nimbus/config";
-import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/release";
+import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/changelog";
 
 export const prerender = true;
 

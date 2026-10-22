@@ -1,12 +1,13 @@
 ---
 /**
- * ChangelogEntry — one release on a list page: its date, the package and
- * version as an h3 linking to the release's own page, then the notes, passed
- * in as the default slot. The notes' headings sit below the h3 and carry no
- * ids; the release page is where its sections are linkable.
+ * One release on a list page. Its notes' headings sit below the release's h3
+ * and carry no ids, since every release has its own "Patch Changes"; links to
+ * them go to the release's own page.
  */
+import { render } from "astro:content";
+import NestedContent from "@cloudflare/nimbus-docs/components/NestedContent.astro";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
-import { dateLabel, listPageBody, releaseHref, type Release } from "./release";
+import { dateLabel, releaseHref, type Release } from "./changelog";
 
 interface Props {
   entry: Release;
@@ -17,15 +18,63 @@ interface Props {
 const { entry, anchor } = Astro.props;
 const { title, date } = entry.data;
 const href = withBase(releaseHref(entry), import.meta.env.BASE_URL);
-const body = listPageBody(await Astro.slots.render("default"), href);
+const { Content } = await render(entry);
 ---
 
-<section class="cl-release" aria-labelledby={anchor}>
+<section class="release" aria-labelledby={anchor}>
   {date && (
-    <p class="cl-meta">
+    <p class="meta">
       <time datetime={date.toISOString()}>{dateLabel(date)}</time>
     </p>
   )}
   <h3 id={anchor}><a href={href}>{title}</a></h3>
-  <Fragment set:html={body} />
+  <NestedContent headingLevel={4} sourceUrl={href}>
+    <Content />
+  </NestedContent>
 </section>
+
+<style>
+  .release {
+    margin-top: 2rem;
+    padding-bottom: 2.5rem;
+    border-bottom: 1px solid var(--nb-border);
+  }
+
+  .release:last-child {
+    border-bottom: 0;
+  }
+
+  /* The release is one prose block: the docs rhythm, inside it. */
+  .release > :global(* + *) {
+    margin-top: 1.25rem;
+  }
+
+  .meta {
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--nb-muted-foreground);
+  }
+
+  .release > h3 {
+    margin-top: 0.375rem;
+    /* Land with the date above it in view. */
+    scroll-margin-top: 6.5rem;
+  }
+
+  .release > h3 + :global(*) {
+    margin-top: 0.75rem;
+  }
+
+  h3 a {
+    color: inherit;
+    font-weight: inherit;
+    text-decoration: none;
+  }
+
+  h3 a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-thickness: 1px;
+  }
+</style>

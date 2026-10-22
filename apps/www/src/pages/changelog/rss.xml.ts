@@ -1,8 +1,8 @@
-/** /changelog/rss.xml — the changelog's RSS feed, newest release first. Undated releases carry no pubDate. */
+// Undated releases (a build without tags) carry no pubDate.
 import rss from "@astrojs/rss";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
 import { config } from "virtual:nimbus/config";
-import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/release";
+import { CHANGELOG_TITLE, getReleaseIndex, releaseHref } from "@/components/changelog/changelog";
 
 export const prerender = true;
 

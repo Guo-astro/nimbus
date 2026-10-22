@@ -385,3 +385,50 @@ test("old Pagefind gives an actionable typed error and warns once across calls a
   assert.equal(warning.mock.callCount(), 1);
   next();
 });
+
+test("on a slice, WebMCP searches its bundle and merges the other slices that exist", async () => {
+  const g = globalThis as { location?: unknown; fetch?: unknown };
+  const previous = { location: g.location, fetch: g.fetch };
+  g.location = { origin: "https://example.test" };
+  g.fetch = async (url: URL) => ({ ok: !url.pathname.startsWith("/docs/remote/") });
+  try {
+    const model = context();
+    const configs: unknown[] = [];
+    const merged: Array<[string, unknown]> = [];
+    const engine = pagefind();
+    // Search answers from the slice's own bundle and from each merged one.
+    const page = (bundle: string) => ({
+      data: async () => ({ url: `${bundle}guide/`, meta: { title: bundle }, excerpt: "Text", sub_results: [] }),
+    });
+    const index = {
+      ...engine.index,
+      async mergeIndex(url: string, options: unknown) {
+        merged.push([url, options]);
+      },
+      async search() {
+        return { results: ["/docs/api/", ...merged.map(([url]) => new URL(url).pathname.replace(/pagefind\/$/, ""))].map(page) };
+      },
+    };
+    registerDocumentationWebMcp(
+      model,
+      { ...options, bundle: "/docs/api/pagefind/", merge: ["/docs/pagefind/", "/docs/remote/pagefind/"] },
+      async () => ({
+        createInstance(config: unknown) {
+          configs.push(config);
+          return index;
+        },
+      }),
+    );
+    await model.ready;
+    const result = (await model.tool!.execute({ query: "alpha" }, execution())) as { results: Array<{ url: string }> };
+    assert.deepEqual(
+      result.results.map((r) => r.url),
+      ["https://example.test/docs/api/guide/", "https://example.test/docs/guide/"],
+      "the root slice's page is found; the missing slice adds nothing",
+    );
+    assert.deepEqual(configs, [{ basePath: "/docs/api/pagefind/", baseUrl: "/docs/" }]);
+    assert.deepEqual(merged, [["https://example.test/docs/pagefind/", { baseUrl: "/docs/" }]]);
+  } finally {
+    Object.assign(g, previous);
+  }
+});

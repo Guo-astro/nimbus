@@ -43,3 +43,21 @@ test("synthetic Pagefind document retains route metadata and heading HTML", () =
   assert.match(html, /data-pagefind-filter="status:deprecated"/);
   assert.match(html, /<h2 id="configure-it">Configure it<\/h2>/);
 });
+
+test("synthetic Pagefind prose reads as text, not Markdown syntax", () => {
+  const html = pagefindMarkdown(
+    "Operations.\n\n- [List items](/reference/items/list/) reads `items[0]` and _more_\n- **Deprecated.**\n\n<b onclick=\"x()\">Raw</b> text, <script>bad()</script> and <script unclosed\n\nAfter.",
+  );
+  assert.match(html, /<a>List items<\/a> reads <code>items\[0\]<\/code> and <em>more<\/em>/);
+  assert.match(html, /<li><strong>Deprecated\.<\/strong><\/li>/);
+  assert.doesNotMatch(html, /\]\(|`|_more_|^- /m);
+  assert.doesNotMatch(html, /<script|onclick|bad\(\)|<b>/);
+  assert.match(html, /Raw text/);
+  assert.match(html, /<p>After\.<\/p>/, "an unclosed tag swallows nothing after it");
+});
+
+test("synthetic Pagefind prose resolves reference links defined after a heading", () => {
+  const html = pagefindMarkdown("See [Options][options].\n\n## Later\n\n[options]: /options/\n");
+  assert.match(html, /See <a>Options<\/a>\./);
+  assert.doesNotMatch(html, /\[options\]/i);
+});

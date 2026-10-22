@@ -1,3 +1,4 @@
+import { invalidateDevModules, type DevServerGraphs } from "./dev-invalidation.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   lstat,
@@ -1381,14 +1382,7 @@ export interface PreparedHeadingsPlugin {
     this: { environment?: { name?: string } },
     id: string,
   ): Promise<string | undefined> | string | undefined;
-  handleHotUpdate(context: {
-    server: {
-      moduleGraph: {
-        getModuleById(id: string): unknown;
-        invalidateModule(module: unknown): void;
-      };
-    };
-  }): void;
+  handleHotUpdate(context: { server: DevServerGraphs }): void;
 }
 
 const HEADINGS_VIRTUAL_ID = "virtual:nimbus/headings";
@@ -1460,10 +1454,8 @@ export function preparedHeadingsPlugin(
       );
     },
     handleHotUpdate(context) {
-      for (const id of [HEADINGS_RESOLVED_ID, ...entryModules]) {
-        const module = context.server.moduleGraph.getModuleById(id);
-        if (module) context.server.moduleGraph.invalidateModule(module);
-      }
+      // Every environment that loaded an entry, then forget them once.
+      invalidateDevModules(context.server, [HEADINGS_RESOLVED_ID, ...entryModules]);
       entryModules.clear();
     },
   };
@@ -1492,9 +1484,7 @@ export function agentEndpointAssetsRuntimePlugin(
       );
     },
     handleHotUpdate(context) {
-      const module =
-        context.server.moduleGraph.getModuleById(ARTIFACTS_RESOLVED_ID);
-      if (module) context.server.moduleGraph.invalidateModule(module);
+      invalidateDevModules(context.server, [ARTIFACTS_RESOLVED_ID]);
     },
   };
 }

@@ -39,6 +39,7 @@ if (hasFields && fields.length === 0) return;
 const showControls = collapsible ?? (hasFields && fields.some(isExpandable));
 const omitted = truncated ? truncated.total - (fields?.length ?? 0) : 0;
 const TitleTag = title ? HeadTag : "span";
+const flag = required === true ? "required" : required === false ? "optional" : undefined;
 ---
 
 <section
@@ -49,16 +50,18 @@ const TitleTag = title ? HeadTag : "span";
   {(title || badge || showControls || required !== undefined) && (
     <div class="fl-head">
       <TitleTag class="fl-title">
+        {/* Each label starts with a space so search reads "Request body JSON required";
+            the title is flex, so the space takes no room. */}
         {title}
-        {badge && <span class="fl-badge">{badge}</span>}
-        {required === true && <span class="fl-required">required</span>}
-        {required === false && <span class="fl-optional">optional</span>}
+        {badge && <span class="fl-badge"> {badge}</span>}
+        {flag && <span class={`fl-${flag}`}> {flag}</span>}
       </TitleTag>
       {showControls && (
         <button
           type="button"
           class="fl-toggle group/toggle"
           data-api-toggle-all
+          data-pagefind-ignore
           data-nb-expanded="true"
         >
           <span class="group-data-[nb-expanded=true]/toggle:hidden">Expand all</span>

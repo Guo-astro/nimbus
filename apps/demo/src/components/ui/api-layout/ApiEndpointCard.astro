@@ -43,9 +43,11 @@ const variant = methodVariant(method);
     </span>
   </LayerCardHeader>
   <LayerCardContent class="flex-row items-stretch gap-0 p-0">
-    <code class="min-w-0 grow self-center truncate px-3 font-mono text-[0.8125rem] text-foreground">
-      {server && <span class="text-muted-foreground">{base}</span>}{path}{serverQuery && <span class="text-muted-foreground">{serverQuery}</span>}
-    </code>
+    <div class="min-w-0 grow self-center px-3">
+      <code class="block truncate font-mono text-[0.8125rem] text-foreground">
+        {server && <span class="text-muted-foreground">{base}</span>}{path}{serverQuery && <span class="text-muted-foreground">{serverQuery}</span>}
+      </code>
+    </div>
     {isWebhook && <Badge text="Webhook" variant="outline" class="me-3 self-center" />}
     <button
       type="button"

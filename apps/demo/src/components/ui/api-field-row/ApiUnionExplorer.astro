@@ -34,10 +34,10 @@ const entries =
               {variant.href ? (
                 <a href={withBase(variant.href, import.meta.env.BASE_URL)} class="fl-type-link fl-variant-link">{variant.label}</a>
               ) : (
-                <span class="fl-name">{variant.label}</span>
+                <div class="fl-name">{variant.label}</div>
               )}
-              {value && <span class="fl-type">{value}</span>}
-              <button type="button" class="fl-count" data-fl-toggle aria-expanded={open ? "true" : "false"}>
+              {value && <div class="fl-type">{value}</div>}
+              <button type="button" class="fl-count" data-fl-toggle data-pagefind-ignore aria-expanded={open ? "true" : "false"}>
                 <span class="fl-count-brace" aria-hidden="true">{"{"}</span><span class="fl-count-text">{countLabel(variant.fields!.length, "property")}</span><span class="fl-count-brace" aria-hidden="true">{"}"}</span>
               </button>
             </div>
@@ -53,7 +53,7 @@ const entries =
                   <ApiFieldRow field={f} depth={depth + 1} anchored={false} />
                 ))}
               </ul>
-              <span class="fl-fold-close" aria-hidden="true">{"}"}</span>
+              <span class="fl-fold-close" aria-hidden="true" data-pagefind-ignore>{"}"}</span>
             </details>
           </div>
         </li>
@@ -63,9 +63,9 @@ const entries =
             {variant.href ? (
               <a href={withBase(variant.href, import.meta.env.BASE_URL)} class="fl-type-link fl-variant-link">{variant.label}</a>
             ) : (
-              <span class="fl-name">{variant.label}</span>
+              <div class="fl-name">{variant.label}</div>
             )}
-            {value && <span class="fl-type">{value}</span>}
+            {value && <div class="fl-type">{value}</div>}
           </div>
         </li>
       );

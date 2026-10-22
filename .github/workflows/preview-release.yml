@@ -105,11 +105,13 @@ jobs:
             fi
             if [ "$served_sha" != "$sha" ] && [ "$FORK" != true ]; then
               # The check run links the build under its Preview alias, the
-              # subdomain the bot's comment names when it posts one.
+              # subdomain the bot's comment names when it posts one. Only
+              # Cloudflare's app counts, and never a `fork-<PR#>` alias: those
+              # serve fork PRs' builds (fork-preview.yml).
               alias=$(gh api "repos/$REPO/commits/$sha/check-runs?check_name=Workers%20Builds:%20nimbus-docs" \
-                --jq '[.check_runs[] | select(.conclusion == "success") | .details_url
-                  | capture("/previews/(?<alias>[a-z0-9-]+)/builds/").alias] | first // empty') || true
-              if [[ "$alias" =~ ^[a-z0-9-]+$ ]]; then probe "https://$alias.nimbus-docs.com"; fi
+                --jq '[.check_runs[] | select(.app.slug == "cloudflare-workers-and-pages" and .conclusion == "success")
+                  | .details_url | capture("/previews/(?<alias>[a-z0-9-]+)/builds/").alias] | first // empty') || true
+              if [[ "$alias" =~ ^[a-z0-9-]+$ && "$alias" != fork-* ]]; then probe "https://$alias.nimbus-docs.com"; fi
             fi
             if [ "$served_sha" = "$sha" ] || [ "$SECONDS" -ge "$deadline" ]; then break; fi
             sleep 15

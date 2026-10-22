@@ -9,6 +9,7 @@ const PROVIDER = path.resolve(
   import.meta.dirname,
   "../../nimbus-starter-source/src/components/ui/search/providers/pagefind.ts",
 );
+const CLIENT = pathToFileURL(path.resolve(import.meta.dirname, "../../nimbus-docs/src/client/index.ts")).href;
 
 type Globals = {
   __config?: unknown;
@@ -16,6 +17,8 @@ type Globals = {
   __BASE_URL?: string;
   __import?: (href: string) => Promise<unknown>;
   window?: unknown;
+  location?: unknown;
+  fetch?: unknown;
 };
 
 const WHOLE_SITE = { bundle: "/pagefind/", merge: [] };
@@ -27,6 +30,7 @@ const WHOLE_SITE = { bundle: "/pagefind/", merge: [] };
 async function pagefindUrlFor(
   base: string,
   searchIndex: { bundle: string; merge: string[] } = WHOLE_SITE,
+  missing: string[] = [],
 ): Promise<{
   loaded: string;
   merged: string[];
@@ -40,13 +44,15 @@ async function pagefindUrlFor(
       "const config = (globalThis as any).__config; const searchIndex = (globalThis as any).__searchIndex;",
     )
     .replaceAll("import.meta.env.BASE_URL", "(globalThis as any).__BASE_URL")
-    .replace(/await import\(\/\* @vite-ignore \*\/ ([^)]+)\)/, "await (globalThis as any).__import($1)");
+    .replace(/await import\(\/\* @vite-ignore \*\/ ([^)]+)\)/, "await (globalThis as any).__import($1)")
+    .replace('from "@cloudflare/nimbus-docs/client";', `from ${JSON.stringify(CLIENT)};`);
   assert.match(source, /__import\(/, "the provider still loads Pagefind with a dynamic import");
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-search-"));
   const file = path.join(dir, "pagefind.ts");
   fs.writeFileSync(file, source);
   const globals = globalThis as Globals;
+  const previous = { location: globals.location, fetch: globals.fetch };
   let loaded = "";
   const merged: string[] = [];
   const baseUrls: string[] = [];
@@ -81,6 +87,9 @@ async function pagefindUrlFor(
       };
     },
     window: { location: { origin: "https://example.com" } },
+    location: { origin: "https://example.com" },
+    // Each bundle's entry file answers, except the ones named missing.
+    fetch: async (url: URL) => ({ ok: !missing.some((bundle) => url.href.startsWith(`https://example.com${bundle}`)) }),
   });
   try {
     const { provider } = (await import(pathToFileURL(file).href)) as {
@@ -98,6 +107,7 @@ async function pagefindUrlFor(
     delete globals.__BASE_URL;
     delete globals.__import;
     delete globals.window;
+    Object.assign(globals, previous);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -124,6 +134,15 @@ test("a slice build loads its own bundle and merges the other slices' bundles", 
   });
   assert.equal(loaded, "https://example.com/docs-es/pagefind/pagefind.js");
   assert.deepEqual(merged, ["https://example.com/pagefind/", "https://example.com/api/pagefind/"]);
+});
+
+test("a slice of several collections merges only the bundles that exist", async () => {
+  const { merged } = await pagefindUrlFor(
+    "/",
+    { bundle: "/api/pagefind/", merge: ["/pagefind/", "/remote/pagefind/"] },
+    ["/remote/pagefind/"],
+  );
+  assert.deepEqual(merged, ["https://example.com/pagefind/"]);
 });
 
 test("a slice's results resolve from the site root, not from under the slice's bundle", async () => {

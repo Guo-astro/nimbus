@@ -1,3 +1,4 @@
+import { mergeSearchIndexes } from "@cloudflare/nimbus-docs/client";
 import type { SearchProvider, SearchResult } from "@cloudflare/nimbus-docs/types";
 import { config, searchIndex } from "virtual:nimbus/config";
 
@@ -67,13 +68,7 @@ export const provider: SearchProvider = {
     await loaded.init();
     // A slice that holds several collections writes one bundle; the other
     // collections' URLs answer 404 and are skipped.
-    await Promise.all(
-      searchIndex.merge.map((bundle) =>
-        loaded
-          .mergeIndex(new URL(bundle, window.location.origin).href, { baseUrl })
-          .catch(() => undefined),
-      ),
-    );
+    await mergeSearchIndexes(loaded, searchIndex.merge, { baseUrl });
     pagefind = loaded;
   },
 

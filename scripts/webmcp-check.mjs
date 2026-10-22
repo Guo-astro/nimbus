@@ -38,9 +38,11 @@ const esbuildRequire = createRequire(
 const { build: bundle } = await import(
   pathToFileURL(esbuildRequire.resolve("esbuild"))
 );
+// Inside the package, so the native Markdown parser it imports resolves from
+// the package's own dependencies instead of being bundled.
 const documentModule = join(
   root,
-  ".generated/mcp-webmcp/pagefind-document.mjs",
+  "packages/nimbus-docs/.generated/mcp-webmcp/pagefind-document.mjs",
 );
 await bundle({
   entryPoints: [
@@ -50,6 +52,7 @@ await bundle({
   bundle: true,
   platform: "node",
   format: "esm",
+  external: ["satteri"],
 });
 const { pagefindDocument } = await import(pathToFileURL(documentModule));
 const versionedDist = join(root, ".generated/mcp-webmcp/versioned");

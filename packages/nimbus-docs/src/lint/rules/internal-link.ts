@@ -45,10 +45,15 @@
  *     which the build can't see.
  *
  * Relative links (`./foo`, `../bar`, bare `foo`) error by default. `allowRelative: true`
- * silences them for projects that want to use them.
+ * silences them for projects that want to use them. In a content source's
+ * snapshot, a relative link to another page of the collection
+ * (`2-options.md#signal`) is fine: the build turns it into that page's URL
+ * (`source-links.ts`). One to a file the collection doesn't publish is
+ * reported as such, since the build leaves it as written.
  */
 
 import { matchesAnyIgnore } from "../../_internal/ignore-glob.js";
+import { isSourcePage, sourcePageLink } from "../../_internal/source-links.js";
 import { suggest } from "../../_internal/levenshtein.js";
 import { linkRouteKey } from "../../_internal/route-key.js";
 import { inferProjectRoot, loadLinkEnv } from "../link-env.js";
@@ -94,6 +99,16 @@ export const internalLink: Rule = {
 
       if (isRelativeUrl(url)) {
         if (allowRelative) continue;
+        const sourceLink = ctx.sourceFolder ? sourcePageLink(url, ctx.file.absPath) : undefined;
+        if (sourceLink && isSourcePage(ctx.sourceFolder!, sourceLink.target)) continue;
+        if (sourceLink) {
+          ctx.report({
+            message: `relative link "${url}" isn't a page of this collection; the build leaves it as written.`,
+            line: occ.line,
+            column: occ.column,
+          });
+          continue;
+        }
         ctx.report({
           message: `relative link "${url}" — internal docs links should be root-relative (e.g. /foo).`,
           line: occ.line,

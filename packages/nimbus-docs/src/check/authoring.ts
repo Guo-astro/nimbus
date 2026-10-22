@@ -93,6 +93,7 @@ export function checkAuthoring(
     collectionOf: lintScope.collectionOf,
     displayPath: lintScope.displayPath,
     readOnlySource: lintScope.readOnlySource,
+    sourceFolder: lintScope.sourceFolder,
   };
   if (!hasLintJson) {
     notes.push({

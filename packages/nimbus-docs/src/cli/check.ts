@@ -158,6 +158,7 @@ async function applyFixes(
         collectionOf: lintScope.collectionOf,
         displayPath: lintScope.displayPath,
         readOnlySource: lintScope.readOnlySource,
+        sourceFolder: lintScope.sourceFolder,
         signal: ctx.signal,
       });
       if (run.fixed > 0) {

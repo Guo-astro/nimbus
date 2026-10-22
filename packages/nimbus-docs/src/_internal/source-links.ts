@@ -50,8 +50,33 @@ function collectionOf(file: string): SourceCollectionFolder | undefined {
 const PAGE_EXTENSION = /\.mdx?$/i;
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
+/**
+ * The page file a relative `.md`/`.mdx` link in `file` points at, split from
+ * its `?`/`#` suffix, or `undefined` for any other link. `nimbus-docs lint`
+ * uses it too, so the build and the link rule agree on which links become
+ * page URLs.
+ */
+export function sourcePageLink(raw: string, file: string): { target: string; suffix: string } | undefined {
+  if (!raw || SCHEME.test(raw) || raw.startsWith("/") || raw.startsWith("#") || raw.startsWith("<")) return undefined;
+  const match = /^([^?#]*)([?#].*)?$/.exec(raw);
+  const pathname = match?.[1] ?? raw;
+  if (!PAGE_EXTENSION.test(pathname)) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURI(pathname);
+  } catch {
+    decoded = pathname;
+  }
+  return { target: path.resolve(path.dirname(file), decoded), suffix: match?.[2] ?? "" };
+}
+
+/** Whether `target` is a page of the collection that reads `folder`. */
+export function isSourcePage(folder: string, target: string): boolean {
+  return inside(folder, target) && PAGE_EXTENSION.test(target) && fs.existsSync(target);
+}
+
 function pageUrl(owner: SourceCollectionFolder, target: string): string | undefined {
-  if (!inside(owner.folder, target) || !PAGE_EXTENSION.test(target) || !fs.existsSync(target)) return undefined;
+  if (!isSourcePage(owner.folder, target)) return undefined;
   const prefix = collectionMountPrefix(owner.collection, getMountContext(owner.root));
   let slug: string | undefined;
   try {
@@ -76,18 +101,10 @@ export function rewriteSourceLinks(source: string, filePath: string | undefined)
   if (!owner) return source;
   const unresolved = new Set<string>();
   const rewrite = (raw: string): string => {
-    if (!raw || SCHEME.test(raw) || raw.startsWith("/") || raw.startsWith("#") || raw.startsWith("<")) return raw;
-    const match = /^([^?#]*)([?#].*)?$/.exec(raw);
-    const pathname = match?.[1] ?? raw;
-    const suffix = match?.[2] ?? "";
-    if (!PAGE_EXTENSION.test(pathname)) return raw;
-    let decoded: string;
-    try {
-      decoded = decodeURI(pathname);
-    } catch {
-      decoded = pathname;
-    }
-    const url = pageUrl(owner, path.resolve(path.dirname(file), decoded));
+    const link = sourcePageLink(raw, file);
+    if (!link) return raw;
+    const { suffix } = link;
+    const url = pageUrl(owner, link.target);
     if (!url) {
       unresolved.add(raw);
       return raw;

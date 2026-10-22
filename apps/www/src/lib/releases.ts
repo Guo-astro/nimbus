@@ -6,6 +6,9 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import type { Loader } from "astro/loaders";
+import { fromHtml } from "hast-util-from-html";
+import { defaultSchema, sanitize } from "hast-util-sanitize";
+import { toHtml } from "hast-util-to-html";
 import { markdownToMdast } from "satteri";
 
 /** The packages, in the order their same-moment releases are listed. */
@@ -26,6 +29,9 @@ export interface Release extends ParsedRelease {
   date?: Date;
 }
 
+/** A release heading: `## 0.18.1`, or a pre-release such as `## 1.0.0-next.2`. */
+const VERSION = /^\d{1,9}\.\d{1,9}\.\d{1,9}(?:-[0-9A-Za-z.]{1,40})?$/;
+
 /**
  * The releases in a package's CHANGELOG.md, in file order: each top-level
  * `## <version>` heading, as the site's Markdown parser reads the file, up to
@@ -36,9 +42,16 @@ export function parseChangelog(pkg: PackageName, markdown: string): ParsedReleas
   const nodes = ((markdownToMdast(markdown) as { children?: unknown[] }).children ?? []) as Array<{
     type: string;
     depth?: number;
+    children?: Array<{ type: string; value?: string }>;
     position?: { start: { offset: number }; end: { offset: number } };
   }>;
-  const starts = nodes.flatMap((node, index) => (node.type === "heading" && node.depth === 2 ? [index] : []));
+  const versionOf = (node: (typeof nodes)[number]) => {
+    const text = node.children?.length === 1 && node.children[0]!.type === "text" ? node.children[0]!.value! : "";
+    return VERSION.test(text) ? text : undefined;
+  };
+  const starts = nodes.flatMap((node, index) =>
+    node.type === "heading" && node.depth === 2 && versionOf(node) ? [index] : [],
+  );
   return starts.map((at, i) => {
     const heading = nodes[at]!;
     const next = starts[i + 1] === undefined ? undefined : nodes[starts[i + 1]!]!;
@@ -55,8 +68,7 @@ export function parseChangelog(pkg: PackageName, markdown: string): ParsedReleas
       from = hash + 1;
     }
     body += markdown.slice(from, end);
-    const version = markdown.slice(heading.position!.start.offset, start).replace(/^#+\s*/, "").replace(/\s*#*\s*$/, "");
-    return { package: pkg, version, body: body.trim() };
+    return { package: pkg, version: versionOf(heading)!, body: body.trim() };
   });
 }
 
@@ -132,6 +144,25 @@ export function readReleases(root: URL): Release[] {
  * The `releases` collection: one entry per release, its notes rendered with
  * the site's Markdown processor. `order` is its place, newest first.
  */
+/**
+ * Release notes come from changeset files any contributor writes, so their
+ * HTML goes through GitHub's allowlist: no scripts, event handlers or
+ * `javascript:` links. Ids keep the allowlist's `user-content-` prefix except
+ * on headings, which keep the ids "On this page" links to.
+ */
+export function safeHtml(html: string): string {
+  const tree = sanitize(fromHtml(html, { fragment: true }), defaultSchema);
+  const visit = (node: { type: string; tagName?: string; properties?: Record<string, unknown>; children?: unknown[] }) => {
+    const id = node.properties?.id;
+    if (node.type === "element" && /^h[1-6]$/.test(node.tagName!) && typeof id === "string") {
+      node.properties!.id = id.replace(/^user-content-/, "");
+    }
+    for (const child of node.children ?? []) visit(child as typeof node);
+  };
+  visit(tree as never);
+  return toHtml(tree);
+}
+
 export function releasesLoader(root: URL): Loader {
   return {
     name: "nimbus-releases",
@@ -148,7 +179,8 @@ export function releasesLoader(root: URL): Loader {
             ...(release.date ? { date: release.date } : {}),
           },
         });
-        store.set({ id: release.id, data, body: release.body, rendered: await renderMarkdown(release.body) });
+        const rendered = await renderMarkdown(release.body);
+        store.set({ id: release.id, data, body: release.body, rendered: { ...rendered, html: safeHtml(rendered.html) } });
       }
     },
   };

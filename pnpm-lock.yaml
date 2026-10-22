@@ -168,6 +168,15 @@ importers:
       framer-motion:
         specifier: ^12.23.24
         version: 12.40.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      hast-util-from-html:
+        specifier: ^2.0.3
+        version: 2.0.3
+      hast-util-sanitize:
+        specifier: ^5.0.2
+        version: 5.0.2
+      hast-util-to-html:
+        specifier: ^9.0.5
+        version: 9.0.5
       react:
         specifier: ^19.2.0
         version: 19.2.7

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-import { orderReleases, parseChangelog, parseTagDates } from "../src/lib/releases.ts";
+import { orderReleases, parseChangelog, parseTagDates, safeHtml } from "../src/lib/releases.ts";
 
 test("each ## <version> is a release; code blocks hold no headings, whatever their fences", () => {
   const markdown = [
@@ -101,4 +101,25 @@ test("without tags, every version is listed undated, in file order, nimbus-docs 
       ["create-nimbus-docs 0.9.0", undefined],
     ],
   );
+});
+
+test("release notes can't carry script: the allowlist strips it, heading ids stay for their links", () => {
+  assert.equal(
+    safeHtml(
+      '<h2 id="patch-changes">Patch Changes</h2><script>alert(1)</script><img src="x" onerror="alert(2)">' +
+        '<a href="javascript:alert(3)">x</a><a href="https://github.com/cloudflare/nimbus/pull/247">#247</a>' +
+        '<iframe src="https://example.test"></iframe><p id="config" style="color:red">p</p>',
+    ),
+    '<h2 id="patch-changes">Patch Changes</h2><img src="x"><a>x</a>' +
+      '<a href="https://github.com/cloudflare/nimbus/pull/247">#247</a><p id="user-content-config">p</p>',
+  );
+});
+
+test("only version headings start releases, and a crafted heading parses in linear time", () => {
+  const releases = parseChangelog("nimbus-docs", "## 1.0.0\n\nOne.\n\n## Notes\n\nStill 1.0.0.\n\n## 1.0.0-next.2\n\nPre.\n");
+  assert.deepEqual(releases.map((r) => r.version), ["1.0.0", "1.0.0-next.2"]);
+  assert.match(releases[0]!.body, /## Notes/);
+  const started = performance.now();
+  assert.deepEqual(parseChangelog("nimbus-docs", `## v${" ".repeat(20_000)}x\n\n## 1.0.0\n`).map((r) => r.version), ["1.0.0"]);
+  assert.ok(performance.now() - started < 500, "a long heading takes linear time");
 });

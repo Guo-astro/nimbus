@@ -574,7 +574,10 @@ async function addCommand(
   if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
   if (report.replaced.length > 0) {
     const notes: string[] = [];
-    if (report.replacedEdited > 0) notes.push(`${report.replacedEdited} had local edits`);
+    if (report.replacedEdited.length > 0) notes.push(`${report.replacedEdited.join(", ")} had local edits`);
+    if (report.replacedEditedUnplaced.length > 0) {
+      notes.push(`${report.replacedEditedUnplaced.join(", ")} had local edits its install record can't place`);
+    }
     if (report.replacedUncompared > 0) notes.push(`${report.replacedUncompared} could not be compared`);
     const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
     lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));

@@ -23,6 +23,7 @@ const DEFAULT_ROOT = "src";
 //   version       registry release the item was pulled from (provenance); null when
 //                 the registry doesn't publish versions yet.
 //   hash          `sha256:…` of the source (registry) bytes — the drift signal; `null` = unknown.
+//   fileHashes    `sha256:…` of each file as installed, by its `files` path: which file was edited.
 //   modified      `init` only: on-disk bytes already differ from the recorded source.
 //   handAuthored  `init` only: found on disk, matched to no registry item.
 const installedComponentSchema = z
@@ -35,6 +36,7 @@ const installedComponentSchema = z
     source: z.string().nullable(),
     hash: z.string().nullable(),
     files: z.array(z.string()),
+    fileHashes: z.record(z.string(), z.string()).optional(),
     modified: z.boolean().optional(),
     handAuthored: z.boolean().optional(),
   })
@@ -148,6 +150,10 @@ export function bytesHash(files: RegistryFile[]): string {
   return `sha256:${hash.digest("hex")}`;
 }
 
+export function fileHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
 export function toInstalledComponent(
   item: ComponentItem,
   opts: { source: string; files: string[] },
@@ -159,6 +165,8 @@ export function toInstalledComponent(
     source: opts.source,
     hash: bytesHash(item.files),
     files: opts.files,
+    // `opts.files` names `item.files` in order, as `recordInstalled` builds it.
+    fileHashes: Object.fromEntries(opts.files.map((file, i) => [file, fileHash(item.files[i]!.content)])),
   };
 }
 

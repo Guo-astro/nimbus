@@ -28,7 +28,7 @@ below is the user's own source to restyle.
 - `package.json`: confirm `@cloudflare/nimbus-docs` is a dependency and note
   the package manager. If it isn't a Nimbus project, stop. The pages need
   0.19.0 or later (`markdownFields` and `NestedContent`); on an older version,
-  ask the user to upgrade first with `nimbus-docs upgrade`.
+  ask the user to update it first and run `nimbus-docs migrate`.
 - `src/content.config.ts`: read it in full. Note the existing collections
   (don't collide) and the import style.
 - `astro.config.ts`: read the Nimbus config. Note `title`, `description`,
@@ -94,7 +94,7 @@ You will **create**:
 - `src/pages/changelog/[...slug].astro`
 - `src/pages/changelog/rss.xml.ts` (RSS only)
 - `src/pages/og/changelog.png.ts`
-- `src/content/changelog/<YYYY-MM-DD>-<slug>.md`: the seed releases.
+- `src/content/changelog/<YYYY-MM-DD>-<slug>.mdx`: the seed releases.
 
 You will **edit** `src/content.config.ts` and, if `rendering` is set, the
 Nimbus config's `rendering.collections` (4a). If RSS was chosen, install
@@ -786,9 +786,9 @@ export async function GET() {
 }
 ```
 
-### 5j. Seed release: `src/content/changelog/<YYYY-MM-DD>-<slug>.md`
+### 5j. Seed release: `src/content/changelog/<YYYY-MM-DD>-<slug>.mdx`
 
-```md
+```mdx
 ---
 title: Welcome to the changelog
 description: The first entry, created by `nimbus-docs add changelog`. Replace it with your first release.
@@ -859,7 +859,7 @@ navigation.
 If `src/pages/changelog/index.astro` exists, the changelog is installed:
 report that and don't overwrite anything. A site with the earlier design
 (`src/layouts/ChangelogLayout.astro`, a date rail and tag filter) moves to
-this one through the upgrade notes (`nimbus-docs upgrade`); keeping the
+this one through the upgrade notes (`nimbus-docs migrate` lists them); keeping the
 earlier design is fine.
 
 ## Notes for the agent

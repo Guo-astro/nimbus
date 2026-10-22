@@ -25,6 +25,7 @@ export {
   workersCompatibilityDate,
 } from "./_internal/adapters.js";
 export { alignRouteFiles } from "./_internal/route-files.js";
+export { declineBuildScript } from "./_internal/pnpm-build-scripts.js";
 export type {
   AdapterId,
   AdapterRecipe,

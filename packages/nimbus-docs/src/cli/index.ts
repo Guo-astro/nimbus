@@ -23,7 +23,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import mri from "mri";
 import * as p from "@clack/prompts";
@@ -757,6 +757,11 @@ async function runAdapterInstall(
       : [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
   if (outcome.depsInstalled.length > 0) {
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
+  }
+  if (outcome.declinedBuildScripts) {
+    const { file, names } = outcome.declinedBuildScripts;
+    const scripts = names.map((name) => `${name}'s`).join(", ");
+    lines.push(`✓ Declined ${scripts} build script${names.length === 1 ? "" : "s"} in ${relative(cwd, file)}`);
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
   const handOff = agentSession && outcome.requestRendering === "unresolved";

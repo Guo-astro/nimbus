@@ -32,7 +32,8 @@ import {
   workersCompatibilityDate,
 } from "../_internal/adapters.js";
 import { isRangeSubset, satisfies } from "../_internal/semver-lite.js";
-import { invocation, quoteForDisplay } from "./pm.js";
+import { declineBuildScript, pnpmWorkspaceFile } from "../_internal/pnpm-build-scripts.js";
+import { detectPackageManager, invocation, quoteForDisplay } from "./pm.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 import {
   NIMBUS_JSON,
@@ -86,6 +87,8 @@ export type AdapterInstallOutcome =
       adapter: AdapterId;
       configPath: string;
       depsInstalled: string[];
+      /** Build scripts declined in a `pnpm-workspace.yaml`, when it changed. */
+      declinedBuildScripts?: DeclinedBuildScripts;
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
@@ -96,12 +99,18 @@ export type AdapterInstallOutcome =
       adapter: AdapterId;
       configPath: string;
       depsInstalled: string[];
+      declinedBuildScripts?: DeclinedBuildScripts;
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
       routeFiles: ReturnType<typeof alignRouteFiles>;
     }
   | { status: "error"; code: AdapterInstallErrorCode; message: string };
+
+export interface DeclinedBuildScripts {
+  file: string;
+  names: string[];
+}
 
 export type AdapterInstallErrorCode =
   | "non-astro-project"
@@ -342,6 +351,7 @@ export async function installAdapter(
       adapter,
       configPath: fresh.path,
       depsInstalled: depResult.installed,
+      declinedBuildScripts: depResult.declinedBuildScripts,
       warnings: [...warnings, ...wr.warnings],
       wrangler: wr.result,
       requestRendering: edit.requestRendering,
@@ -371,6 +381,7 @@ export async function installAdapter(
     adapter,
     configPath: fresh.path,
     depsInstalled: depResult.installed,
+    declinedBuildScripts: depResult.declinedBuildScripts,
     warnings: [...warnings, ...wr.warnings],
     wrangler: wr.result,
     requestRendering: edit.requestRendering,
@@ -728,7 +739,7 @@ async function installMissingDeps(
   cwd: string,
   pkg: Record<string, unknown> | null,
   installDeps: DepInstaller,
-): Promise<{ ok: boolean; installed: string[]; message?: string }> {
+): Promise<{ ok: boolean; installed: string[]; declinedBuildScripts?: DeclinedBuildScripts; message?: string }> {
   const wanted = [recipe.installSpec, ...recipe.extraDeps];
   const dependencies = (pkg?.dependencies as Record<string, unknown>) ?? {};
   const devDependencies = (pkg?.devDependencies as Record<string, unknown>) ?? {};
@@ -778,6 +789,14 @@ async function installMissingDeps(
   const missing = wanted.filter((spec) => !already.has(depName(spec)));
   if (missing.length === 0) return { ok: true, installed: [] };
 
+  // Decide pnpm's build scripts first: an undecided one fails the install.
+  let declinedBuildScripts: DeclinedBuildScripts | undefined;
+  if (recipe.declinedBuildScripts?.length && detectPackageManager(cwd) === "pnpm") {
+    const file = pnpmWorkspaceFile(cwd) ?? join(cwd, "pnpm-workspace.yaml");
+    const names = recipe.declinedBuildScripts.filter((name) => declineBuildScript(file, name));
+    if (names.length > 0) declinedBuildScripts = { file, names };
+  }
+
   const res = await installDeps(missing, cwd);
   if (!res.ok) {
     return {
@@ -788,7 +807,7 @@ async function installMissingDeps(
         `Failed to install ${missing.join(", ")}. Install them manually and re-run.`,
     };
   }
-  return { ok: true, installed: missing };
+  return { ok: true, installed: missing, declinedBuildScripts };
 }
 
 // `@scope/pkg@range` → `@scope/pkg` (a leading `@` scope isn't a version separator).

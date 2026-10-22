@@ -66,7 +66,8 @@ if (rows.length > 0 && !home) {
       </a>
     )}
 
-    <div data-nb-ix-results hidden>
+    {/* Filter results are built in the browser; search indexes the page's own list. */}
+    <div data-nb-ix-results hidden data-pagefind-ignore>
       <div data-nb-ix-results-list></div>
       <p class="nb-ix-note" hidden data-nb-ix-note></p>
       <button type="button" class="nb-ix-retry" hidden data-nb-ix-retry>Retry</button>
@@ -256,7 +257,7 @@ if (rows.length > 0 && !home) {
         const li = template!.content.querySelector("li")!.cloneNode(true) as HTMLLIElement;
         const a = li.querySelector("a")!;
         a.href = based(url);
-        a.querySelector("span")!.textContent = title;
+        a.querySelector("[data-slot=api-operation-name]")!.textContent = title;
         li.querySelector("code")!.textContent = path ?? "";
         ul.append(li);
       }

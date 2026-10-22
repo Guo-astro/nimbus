@@ -721,7 +721,7 @@ async function resolveOne(
   throw new SourceUnavailableError(d, failure);
 }
 
-const PRIVATE_REPOSITORIES_DOCS = "https://nimbus-docs.com/writing/content-sources/#private-repositories";
+const PRIVATE_REPOSITORIES_DOCS = "https://nimbus-docs.com/content-sources/git/#private-repositories";
 
 function noSnapshotError(error: SourceUnavailableError, readBy: string | undefined): Error {
   const failure = (error.failure ?? "the snapshot was removed while it was being selected").replace(/\.\s*$/, "");

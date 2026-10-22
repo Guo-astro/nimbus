@@ -12,7 +12,7 @@ const sites = agentSites();
 after(() => sites.cleanup());
 
 const runtime = JSON.stringify("@cloudflare/nimbus-docs/runtime");
-const DOCS_LINK = /See https:\/\/nimbus-docs\.com\/writing\/pages-and-routing\/#collection-urls\./;
+const DOCS_LINK = /See https:\/\/nimbus-docs\.com\/writing\/collections\/#collection-urls\./;
 
 const base: Record<string, string> = {
   "src/content.config.ts": `import { defineCollection } from "astro:content";

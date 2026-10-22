@@ -23,7 +23,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import mri from "mri";
 import * as p from "@clack/prompts";
@@ -574,7 +574,10 @@ async function addCommand(
   if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
   if (report.replaced.length > 0) {
     const notes: string[] = [];
-    if (report.replacedEdited > 0) notes.push(`${report.replacedEdited} had local edits`);
+    if (report.replacedEdited.length > 0) notes.push(`${report.replacedEdited.join(", ")} had local edits`);
+    if (report.replacedEditedUnplaced.length > 0) {
+      notes.push(`${report.replacedEditedUnplaced.join(", ")} had local edits its install record can't place`);
+    }
     if (report.replacedUncompared > 0) notes.push(`${report.replacedUncompared} could not be compared`);
     const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
     lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));
@@ -757,6 +760,11 @@ async function runAdapterInstall(
       : [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
   if (outcome.depsInstalled.length > 0) {
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
+  }
+  if (outcome.declinedBuildScripts) {
+    const { file, names } = outcome.declinedBuildScripts;
+    const scripts = names.map((name) => `${name}'s`).join(", ");
+    lines.push(`✓ Declined ${scripts} build script${names.length === 1 ? "" : "s"} in ${relative(cwd, file)}`);
   }
   appendWranglerWriteLine(lines, outcome.wrangler);
   const handOff = agentSession && outcome.requestRendering === "unresolved";

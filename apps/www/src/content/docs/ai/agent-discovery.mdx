@@ -1,0 +1,80 @@
+---
+title: Agent discovery
+description: Every file and header Nimbus publishes so agents can find your docs, with its path, contents and when it ships.
+aiGenerated: true
+sidebar:
+  order: 2
+  label: Discovery
+---
+
+An agent that lands on your domain looks in a few well-known places before it reads any page. Nimbus publishes all of them by default. For everything an agent can read once it has found the site, see [Docs for agents](/ai/docs-for-agents).
+
+| Path | What it is | Ships when |
+| --- | --- | --- |
+| `/.well-known/ard.json` | Discovery manifest | Always, unless discovery is off |
+| `/.well-known/ai-catalog.json` | The same manifest, under a second name | Always, unless discovery is off |
+| `/.well-known/api-catalog` | API catalog (RFC 9727) | The site has an OpenAPI reference, unless discovery is off |
+| `/.well-known/agent-skills/index.json` | Agent Skills index | The project has a `skills/` folder |
+| Homepage `Link` header | Pointers to the files above | Always, unless discovery is off |
+| `/robots.txt` | Crawler rules and Content Signals | `site` is set |
+| `/llms.txt` | Index of the docs' Markdown versions | Always |
+
+## Discovery manifest
+
+**Paths:** `/.well-known/ard.json` and `/.well-known/ai-catalog.json` · **Type:** `application/json` · **CORS:** `Access-Control-Allow-Origin: *`
+
+Lists `/llms.txt`, the homepage Markdown at `/index.md`, each visible published API spec, the Agent Skills index, and the [remote MCP server](/ai/remote-mcp)'s card when the site runs one. The two files have the same content. If your project already has a file or route at either path, the build fails until you move it, unless discovery is off.
+
+## API catalog
+
+**Path:** `/.well-known/api-catalog` · **Type:** `application/linkset+json` · **Standard:** [RFC 9727](https://www.rfc-editor.org/rfc/rfc9727)
+
+One entry per visible API reference and version. Each entry links the reference page, its Markdown and its published spec, for example `/api/openapi.json`. The file has no extension, so a host that ignores `_headers` needs its own rule for the media type. See [Published spec](/api-reference/openapi/options#published-spec) to keep a spec unpublished.
+
+## Agent Skills index
+
+**Path:** `/.well-known/agent-skills/index.json` · **Type:** `application/json`
+
+Lists each skill in the project's `skills/` folder, with a SHA-256 digest per file. See [Publish Agent Skills](/ai/agent-skills).
+
+## Homepage `Link` header
+
+**Applies to:** request-rendered homepages, and static builds on hosts that read `_headers`, including Cloudflare
+
+Advertises the discovery manifest (`rel="ard"`), the API catalog (`rel="api-catalog"`), and each API family's default reference and spec. Your own `_headers` rules win: a header they already set for a path is left out of the generated rule. On hosts without `_headers`, set the same headers in the host's own configuration.
+
+## Content Signals
+
+**File:** `src/pages/robots.txt.ts` · **Default:** `Content-Signal: ai-train=yes, search=yes, ai-input=yes`
+
+Tells crawlers how they may use your content: training, search indexing, and answering questions. Edit the values in the starter's route to match your policy, and if you set one to `no`, add the policy text from [contentsignals.org](https://contentsignals.org/) above it. Signals are requests, not access control; private docs need authentication.
+
+## `agents.discovery`
+
+**Type:** `boolean` · **Default:** `true`
+
+Set to `false` when another site owns the domain, such as docs at `example.com/docs` beside a main site at `example.com`:
+
+```ts title="astro.config.ts"
+const nimbusConfig = defineNimbusConfig({
+  // …
+  agents: { discovery: false },
+});
+```
+
+- Removes the discovery manifest, the API catalog, their `Link` header entries, and their `_headers` rules.
+- Keeps `llms.txt`, Markdown versions, Markdown negotiation, the remote MCP server, and Agent Skills.
+- Keeps your own files in `public/.well-known/`.
+
+After switching, purge the cached homepage, since its `Link` header still lists the old files.
+
+## Under a base path
+
+Discovery files belong at the origin root. With a `base` such as `/docs`, the Cloudflare adapter puts them there for you. On other hosts, deploy the emitted `.well-known` folder at the root beside the site:
+
+```text
+host-root/
+├── .well-known/   # discovery and Skills files
+├── docs/          # the site
+└── _headers       # when the host supports it
+```

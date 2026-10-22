@@ -65,11 +65,20 @@ Content here.
 
 **`AgentDirective` renders in `BaseLayout.astro`.** It writes an agent-readable hint at the top of every doc and markdown alternate pointing at `/llms.txt`. Don't remove it.
 
+## How this site is organized
+
+- **The sidebar follows the content tree.** Each top-level folder under `src/content/docs/` is a group; its `index.mdx` sets the group's label, icon and place with `sidebar.group` and `sidebar.order`. `astro.config.ts` lists the docs collection, the components collection and a link to the glossary appendix, and holds no group labels or page order. Keep groups at most two levels deep.
+- **Moved pages redirect in one hop.** Add the old path to `moved` in `astro.config.ts` (Astro writes the bare path), and add the `/old/`, `/old/index.md` and `/old/index.mdx` lines to `public/_redirects`. Never chain redirects, never add a splat, and never redirect anything under `/registry/` except the page itself: published packages fetch registry files from there.
+- **Docs pages use the starter's files as they are.** Layouts, components and styles match what the scaffolder generates; take changes from the starter rather than editing them here. www adds only the homepage (`src/home/`), the component catalog, and the `aiGenerated` label in page actions.
+- **Component pages** live in the `components` collection and render through `src/pages/components/[slug].astro` and the starter's `DocsLayout`. Their install state is computed from `registry/manifests.ts` and the starter manifest.
+- **`src/content/docs/ai/docs-for-agents.mdx` doesn't move.** The `nimbus-docs` package build copies that exact file, as raw text, into the npm package. Keep it free of components and partials.
+- **The homepage is its own route.** `/` renders `src/home/HomePage.astro`, injected in `astro.config.ts`, so its styles stay off the docs pages. The homepage's files live in `src/home/`.
+
 ## Adding things
 
 | Goal | Action |
 |---|---|
-| New doc page | Create `src/content/docs/<slug>.mdx` with valid frontmatter. The sidebar picks it up automatically. |
+| New doc page | Create `src/content/docs/<group>/<slug>.mdx` with valid frontmatter and a `sidebar.order`, and link it from the group's `index.mdx`. The sidebar picks it up automatically. |
 | New partial | Create `src/content/partials/<slug>.mdx`. Use via `<Render file="<slug>" />`. |
 | New UI component from the registry | `pnpm exec nimbus-docs add <slug>`. Resolves dependencies and writes files into `src/components/ui/<slug>/`. Remember to import + register the component in `src/components.ts` if it's used in MDX. |
 | New feature (e.g. custom 404, AI surface) | `pnpm exec nimbus-docs add <feature-slug>`. Prints an agent brief; pipe it to your coding agent. |

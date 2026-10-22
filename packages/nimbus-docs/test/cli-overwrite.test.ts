@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { installComponents, keptLines, localEdits, registerHint, starterBaseline, type InstallOptions, type KeptComponent, type Prompts } from "../src/cli/component.js";
-import { bytesHash } from "../src/cli/nimbus-json.js";
+import { bytesHash, fileHash } from "../src/cli/nimbus-json.js";
 import type { ComponentItem, RegistryFile } from "../src/cli/resolver.js";
 
 function item(
@@ -40,7 +40,20 @@ const opts = (cwd: string, over: Partial<InstallOptions> = {}): InstallOptions =
 const dialog = (content: string) =>
   item("dialog", "registry:ui", [{ path: "components/ui/dialog/Dialog.astro", content }]);
 const cn = (content: string) => item("cn", "registry:lib", [{ path: "lib/cn.ts", content }]);
+// A record as `add` writes it, and one written before per-file hashes.
 const recordFor = (slug: string, files: RegistryFile[]) =>
+  new Map([
+    [
+      slug,
+      {
+        slug,
+        hash: bytesHash(files),
+        files: files.map((f) => `src/${f.path}`),
+        fileHashes: Object.fromEntries(files.map((f) => [`src/${f.path}`, fileHash(f.content)])),
+      },
+    ],
+  ]);
+const oldRecordFor = (slug: string, files: RegistryFile[]) =>
   new Map([[slug, { slug, hash: bytesHash(files), files: files.map((f) => `src/${f.path}`) }]]);
 
 test("a conflict without --overwrite keeps the existing file (non-interactive)", async () => {
@@ -264,25 +277,57 @@ test("--overwrite without a terminal keeps edited components and their edited de
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/badge/Badge.astro"), "utf8"), "B1 redesigned");
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/breadcrumbs/Breadcrumbs.astro"), "utf8"), "C1 redesigned");
     assert.deepEqual(report.replaced, [path.join("src", "components/ui/dialog/Dialog.astro")]);
+    const badgeFile = path.join("src", "components/ui/badge/Badge.astro");
+    const crumbsFile = path.join("src", "components/ui/breadcrumbs/Breadcrumbs.astro");
     assert.deepEqual(report.keptUnasked, [
-      { slug: "badge", files: [path.join("src", "components/ui/badge/Badge.astro")], reason: "edited" },
-      { slug: "breadcrumbs", files: [path.join("src", "components/ui/breadcrumbs/Breadcrumbs.astro")], reason: "edited" },
+      { slug: "badge", files: [badgeFile], size: 1, reason: "edited", edited: [badgeFile] },
+      { slug: "breadcrumbs", files: [crumbsFile], size: 1, reason: "edited", edited: [crumbsFile] },
     ]);
     assert.deepEqual(report.skipped, ["badge", "breadcrumbs"], "kept components stay out of the install record");
     assert.deepEqual(report.keptDeclined, []);
-    assert.equal(report.replacedEdited, 0);
+    assert.deepEqual(report.replacedEdited, []);
   });
 });
 
-test("--overwrite --yes replaces edited files too and says how many carried edits", async () => {
+test("--overwrite --yes replaces edited files too and names the ones that carried edits", async () => {
   await withProject(async (cwd) => {
     await installComponents([dialog("V1")], opts(cwd));
     writeFiles(cwd, { "src/components/ui/dialog/Dialog.astro": "V1 redesigned" });
     const recorded = recordFor("dialog", dialog("V1").files);
     const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, recorded }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
-    assert.equal(report.replacedEdited, 1);
+    assert.deepEqual(report.replacedEdited, [path.join("src", "components/ui/dialog/Dialog.astro")]);
     assert.deepEqual(report.keptUnasked, []);
+  });
+});
+
+test("--overwrite names only the edited file of a component, and keeps the component whole", async () => {
+  await withProject(async (cwd) => {
+    const names = ["Accordion", "AccordionContent", "AccordionGroup", "AccordionTrigger"];
+    const accordion = (v: string) =>
+      item("accordion", "registry:ui", names.map((n) => ({ path: `components/ui/accordion/${n}.astro`, content: `${n} ${v}` })));
+    await installComponents([accordion("V1")], opts(cwd));
+    writeFiles(cwd, { "src/components/ui/accordion/Accordion.astro": "Accordion V1 edited" });
+    const files = names.map((n) => path.join("src", `components/ui/accordion/${n}.astro`));
+
+    const report = await installComponents([accordion("V2")], opts(cwd, { overwrite: true, recorded: recordFor("accordion", accordion("V1").files) }));
+    assert.deepEqual(report.keptUnasked, [{ slug: "accordion", files, size: 4, reason: "edited", edited: [files[0]!] }]);
+    assert.equal(readFileSync(path.join(cwd, files[1]!), "utf8"), "AccordionContent V1", "the component is kept whole");
+    assert.match(keptLines(report, "accordion", null).join("\n"), /accordion \(4 files\): src.components.ui.accordion.Accordion\.astro has local edits/);
+
+    // A record from before per-file hashes can't say which file.
+    const old = await installComponents([accordion("V2")], opts(cwd, { overwrite: true, recorded: oldRecordFor("accordion", accordion("V1").files) }));
+    assert.deepEqual(old.keptUnasked, [{ slug: "accordion", files, size: 4, reason: "edited" }]);
+    assert.match(keptLines(old, "accordion", null).join("\n"), /accordion \(4 files\): it has local edits; its install record predates per-file tracking/);
+    // Reinstalling the release it came from: one file differs, the component is still four.
+    const same = await installComponents([accordion("V1")], opts(cwd, { overwrite: true, recorded: recordFor("accordion", accordion("V1").files) }));
+    assert.deepEqual(same.keptUnasked, [{ slug: "accordion", files: [files[0]!], size: 4, reason: "edited", edited: [files[0]!] }]);
+    assert.match(keptLines(same, "accordion", null).join("\n"), /accordion \(4 files\)/);
+    // An untouched component under an old record is still unedited.
+    writeFiles(cwd, { "src/components/ui/accordion/Accordion.astro": "Accordion V1" });
+    const clean = await installComponents([accordion("V2")], opts(cwd, { overwrite: true, recorded: oldRecordFor("accordion", accordion("V1").files) }));
+    assert.deepEqual(clean.keptUnasked, []);
+    assert.equal(clean.replaced.length, 4);
   });
 });
 
@@ -298,7 +343,7 @@ test("--overwrite --yes without an install record consults the starter release; 
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
     assert.equal(fetches, 1, "the starter release is consulted so the report can say what was discarded");
     assert.equal(report.replacedUncompared, 1);
-    assert.equal(report.replacedEdited, 0);
+    assert.deepEqual(report.replacedEdited, []);
   });
 });
 
@@ -311,7 +356,7 @@ test("--overwrite --yes on an edited starter component counts it as a local edit
     const starter = starterBaseline({ templatesTag: "templates-v1.0.0" }, "src", tree);
     const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, yes: true, starter }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V2");
-    assert.equal(report.replacedEdited, 1);
+    assert.deepEqual(report.replacedEdited, [path.join("src", "components/ui/dialog/Dialog.astro")]);
   });
 });
 
@@ -334,9 +379,8 @@ test("--overwrite in a terminal asks per edited component; no keeps it in the sa
     assert.deepEqual(asked, ["dialog", "cn"]);
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V1 redesigned");
     assert.equal(readFileSync(path.join(cwd, "src/lib/cn.ts"), "utf8"), "C2");
-    assert.deepEqual(report.keptDeclined, [
-      { slug: "dialog", files: [path.join("src", "components/ui/dialog/Dialog.astro")], reason: "edited" },
-    ]);
+    const dialogFile = path.join("src", "components/ui/dialog/Dialog.astro");
+    assert.deepEqual(report.keptDeclined, [{ slug: "dialog", files: [dialogFile], size: 1, reason: "edited", edited: [dialogFile] }]);
     assert.deepEqual(report.keptUnasked, []);
     assert.deepEqual(report.skipped, ["dialog"]);
   });
@@ -349,7 +393,7 @@ test("--overwrite without a terminal and without a record consults the starter r
     const report = await installComponents([dialog("V2")], opts(cwd, { overwrite: true, starter: offline }));
     assert.equal(readFileSync(path.join(cwd, "src/components/ui/dialog/Dialog.astro"), "utf8"), "V1");
     assert.deepEqual(report.keptUnasked, [
-      { slug: "dialog", files: [path.join("src", "components/ui/dialog/Dialog.astro")], reason: "unknown" },
+      { slug: "dialog", files: [path.join("src", "components/ui/dialog/Dialog.astro")], size: 1, reason: "unknown" },
     ]);
   });
 });
@@ -385,13 +429,14 @@ test("a lib item under --overwrite follows the same rule as a component", async 
 const kept = (slug: string, reason: KeptComponent["reason"] = "edited"): KeptComponent => ({
   slug,
   files: [`src/components/ui/${slug}/${slug}.astro`],
+  size: 1,
   reason,
 });
 const none = { keptUnasked: [], keptDeclined: [] };
 
 test("the kept block names each component's replace command and the whole tree's", () => {
   const lines = keptLines({ ...none, keptUnasked: [kept("badge"), kept("breadcrumbs")] }, "api-layout", null).join("\n");
-  assert.match(lines, /Kept 2 files with local edits \(no terminal to ask\)/);
+  assert.match(lines, /Kept 2 components with local edits \(no terminal to ask\)/);
   assert.match(lines, /nimbus-docs add badge --overwrite --yes/);
   assert.match(lines, /nimbus-docs add breadcrumbs --overwrite --yes/);
   assert.match(lines, /Or everything above: .*nimbus-docs add api-layout --overwrite --yes/);

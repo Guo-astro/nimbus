@@ -13,14 +13,12 @@ import { cn } from "@/lib/cn";
 import type { HTMLAttributes } from "astro/types";
 
 interface Props extends HTMLAttributes<"a"> {
-  /** Iconify icon name, e.g. `ph:rocket-launch`, shown before the title. */
-  icon?: string;
   title?: string;
   description?: string;
   href: string;
 }
 
-const { title, description, href, icon, class: className, ...attrs } = Astro.props;
+const { title, description, href, class: className, ...attrs } = Astro.props;
 const hasDescription = Boolean(description) || Astro.slots.has("description");
 ---
 
@@ -33,13 +31,6 @@ const hasDescription = Boolean(description) || Astro.slots.has("description");
   )}
   {...attrs}
 >
-  {icon && (
-    <Icon
-      data-slot="link-card-leading"
-      name={icon}
-      class="shrink-0 w-6 h-6 text-muted-foreground transition-colors group-hover:text-primary"
-    />
-  )}
   <div data-slot="link-card-body" class="min-w-0 [overflow-wrap:anywhere]">
     <h3 data-slot="link-card-title" class="m-0 text-base font-semibold leading-snug text-foreground transition-colors group-hover:text-primary"><slot name="title">{title}</slot></h3>
     {hasDescription && <span data-slot="link-card-description" class="mt-1 block text-sm leading-normal text-muted-foreground"><slot name="description">{description}</slot></span>}

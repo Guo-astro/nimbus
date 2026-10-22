@@ -315,7 +315,7 @@ test("a source that can't be fetched and has no snapshot fails with git's error,
     const message = await failure(describeSourceReaders(["sdk"], [], false));
     assert.match(
       message,
-      /^nimbus-docs: could not fetch source "sdk" \([^)]*missing\.git @ main\): [^\n]*(?:does not appear to be a git repository|not found|No such file)[\s\S]*\. No snapshot of this repo, ref and path exists under \.nimbus\/sources\/sdk\/\.\n {2}Read by: collection "sdk"\.\n {2}Give git a credential: https:\/\/nimbus-docs\.com\/writing\/content-sources\/#private-repositories$/,
+      /^nimbus-docs: could not fetch source "sdk" \([^)]*missing\.git @ main\): [^\n]*(?:does not appear to be a git repository|not found|No such file)[\s\S]*\. No snapshot of this repo, ref and path exists under \.nimbus\/sources\/sdk\/\.\n {2}Read by: collection "sdk"\.\n {2}Give git a credential: https:\/\/nimbus-docs\.com\/content-sources\/git\/#private-repositories$/,
     );
     assert.doesNotMatch(message, /NIMBUS_BUILD_ONLY/);
     assert.match(

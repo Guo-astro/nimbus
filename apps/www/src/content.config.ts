@@ -12,6 +12,9 @@ export const collections = {
         // reviewed by a human. Surfaces an "awaiting review" label in the
         // page actions. Remove the flag once a human has reviewed the page.
         aiGenerated: z.boolean().optional(),
+        // The date a person last followed the page's steps and they worked,
+        // as our content recipes ask. Set it when you re-run a page.
+        lastVerified: z.coerce.date().optional(),
       },
     }),
   ),

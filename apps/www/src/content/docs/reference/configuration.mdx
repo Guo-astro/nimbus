@@ -1,0 +1,170 @@
+---
+title: Nimbus config
+description: Every option defineConfig and the Nimbus integration accept.
+aiGenerated: true
+sidebar:
+  order: 1
+  label: Nimbus config
+---
+
+Nimbus is configured in `astro.config.ts`. `defineConfig` from `@cloudflare/nimbus-docs`, imported as `defineNimbusConfig` so it doesn't clash with Astro's own `defineConfig`, types the site config; the `nimbus()` integration takes that config plus build-time options.
+
+```ts title="astro.config.ts"
+import { defineConfig } from "astro/config";
+import nimbus, {
+  defineConfig as defineNimbusConfig,
+} from "@cloudflare/nimbus-docs";
+
+const config = defineNimbusConfig({
+  site: "https://docs.example.com",
+  title: "Acme",
+  description: "Build with Acme.",
+  github: "https://github.com/acme/docs",
+  editPattern: "https://github.com/acme/docs/edit/main/{path}",
+  sidebar: { items: [/* … */] },
+});
+
+export default defineConfig({
+  integrations: [nimbus(config, {/* options */})],
+});
+```
+
+## Site config
+
+| Field                            | Type              | Notes                                                                         |
+| -------------------------------- | ----------------- | ----------------------------------------------------------------------------- |
+| `site`                           | string            | **Required.** Canonical site URL. Bridged to Astro's `site`.                  |
+| `title`                          | string            | **Required.** Site title and metadata fallback.                               |
+| `description`                    | string            | Default meta description.                                                     |
+| `locale`                         | string            | Document language (e.g. `"en"`).                                              |
+| `homeLabel`                      | string            | Label for the "Home" breadcrumb.                                              |
+| `github`                         | string \| null    | Repo URL for the header link; `null` hides it.                                |
+| `editPattern`                    | string \| null    | Edit-link pattern; `{path}` is the page path.                                 |
+| `socialImage` / `socialImageAlt` | string            | OG fallback image and alt. See [Metadata and SEO](/publish/metadata-and-seo).      |
+| `head`                           | array             | Site-wide `<head>` elements.                                                  |
+| `sidebar`                        | object            | Rail config — see [Sidebar](/navigation/sidebar).                             |
+| `features`                       | object            | `sidebar` / `tableOfContents` kill switches. See [Layouts](/styling/layouts). |
+| `search`                         | object \| `false` | Search backend. See [Search](/navigation/search).                             |
+| `versions`                       | object            | Versioning manifest — each version is its own content collection.             |
+| `rendering`                      | object            | Build or request rendering policy for canonical content collection routes.    |
+| `agents`                         | object            | Agent services and discovery. `agents.mcp` serves a remote MCP server; `agents.discovery: false` leaves origin-root discovery to another site. |
+| `sources`                        | object            | Git repositories collections and API specs read. See [Content from other sources](/content-sources/git). |
+| `api` | array | API references generated from specs, one entry each. See [OpenAPI options](/api-reference/openapi/options). |
+| `apiReferences` | array | API references on other Nimbus sites that this site cites. See [Cite API pages](/api-reference/citations#cite-an-api-hosted-elsewhere). |
+
+### Content sources
+
+`sources` declares git repositories by name; `docsCollection({ source, base })` and `api[].spec: { source, path }` read them.
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `repo` | string | **Required.** An `https` or `ssh` URL, or a local path. A URL with a token or password is refused; give credentials to git. |
+| `ref` | string | **Required.** A 40-character commit, or a branch or tag name. |
+| `path` | string | Folder to check out, relative to the repository root. Default `""`, the whole repository. |
+| `editPattern` | string | Edit links for the source's pages: `{path}` is repository-relative, `{ref}` the configured ref. |
+
+`nimbus-docs check` reports `nimbus/source-floating-ref` for a branch or tag `ref` and `nimbus/source-unreferenced` for a source nothing reads, both as warnings. `NIMBUS_SOURCES_RESOLVE_TIMEOUT` and `NIMBUS_SOURCES_FETCH_TIMEOUT` set the resolve and fetch timeouts in seconds (defaults 30 and 600).
+
+### Rendering policy
+
+`rendering` controls the routes Nimbus manages: the catch-all routes for docs, API references, and other registered collections, and the Markdown and `llms.txt` routes that serve them. Other files under `src/pages/` keep their own rendering.
+
+| Mode | Behavior | Deployment requirement |
+| --- | --- | --- |
+| `"build"` | Prerenders the route during `astro build`. This is the default. | Any static or server deployment. |
+| `"request"` | Renders the route when a visitor requests it. | Astro server output with an adapter. Generated API request rendering currently requires Cloudflare. |
+
+`"build"` is what Astro calls prerendered, and `"request"` what it calls on-demand rendered. Every other route, such as a 404 page, Open Graph images or `robots.txt`, keeps its own `prerender` export.
+
+Without `rendering`, Nimbus builds every route it manages ahead of time, every page collection's included. Once `rendering` is set, `default` covers docs, version and API collections, and each other page collection needs its own entry in `rendering.collections` (see below).
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `rendering.default` | `"build"` \| `"request"` | `"build"` | Mode for `docs`, version collections, API collections, and the site-wide `llms.txt` and `llms-full.txt`. Each collection's Markdown and section `llms.txt` routes follow that collection's mode. |
+| `rendering.collections` | `Record<string, "build" \| "request">` | — | Mode by Astro collection name, not by URL or version. Every name must be a registered collection with its own catch-all route, and once `rendering` is set, every other page collection with its own catch-all route, such as a `blog`, must be listed. |
+
+To set up a server and choose modes, see [Choose build or request rendering](/reference/rendering).
+
+### Agents
+
+`agents` turns on services the site runs for agents, and controls the discovery files it publishes for them:
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `mcp` | boolean | Serve a remote MCP server at `/mcp` with `list_pages` and `get_page`. Needs a server adapter and the `@modelcontextprotocol/server` package. Default `false`. |
+| `discovery` | boolean | `false` publishes no origin-root discovery files (`/.well-known/ard.json`, `ai-catalog.json`, `api-catalog`) or homepage links to them, for a site on a domain another site owns. See [Shared domains](/ai/docs-for-agents#shared-domains). Default `true`. |
+
+```ts
+agents: { mcp: true },
+```
+
+See [Remote MCP server](/ai/remote-mcp) for what it serves and how clients connect.
+
+## Links and trailing slashes
+
+Nimbus reads Astro's [`trailingSlash`](https://docs.astro.build/en/reference/configuration-reference/#trailingslash) and [`build.format`](https://docs.astro.build/en/reference/configuration-reference/#buildformat), and gives every URL it generates the shape Astro serves, from sidebar links to the sitemap.
+
+With the defaults, page URLs end in a slash, such as `/guides/`. With `trailingSlash: "never"`, or `build.format: "file"`, they don't.
+
+Links you write keep the path you wrote; Nimbus only adds Astro's `base`, so leave the base out. Write them in the shape your site serves, such as `[Guides](/guides/)` with the defaults.
+
+With `trailingSlash: "always"` or `"never"`, the other shape gets a 404 in `astro dev`, and often a redirect or 404 in production. `nimbus/internal-link` doesn't check trailing slashes.
+
+On Cloudflare, a static site with `trailingSlash: "always"` and `build.format: "file"` writes `guides.html` but links `/guides/`, and Cloudflare redirects `/guides/` to `/guides` by default. The build and `nimbus-docs check` warn about it; set `"assets": { "html_handling": "force-trailing-slash" }` in `wrangler.jsonc` to serve `/guides/` directly.
+
+## Integration options
+
+The second argument to `nimbus()` controls build behavior:
+
+| Option               | Default                 | Notes                                                                                                                                                                                                                                                  |
+| -------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `validateMdx`        | `true`                  | PascalCase tag validation. `false` to skip; object to override paths. See [Markdown and MDX](/writing/markdown-and-mdx).                                                                                                                               |
+| `admonitions`        | `true`                  | Native Sätteri MDX directives → `<Aside>`; object adds `typeAliases`, `contentDirs`, and `skip`. Set `false` when using an incompatible custom processor.                                                                                                                                        |
+| `markdown`           | Sätteri processor       | Configure authored Markdown processing and generated Markdown customization. `markdown.features` turns on Sätteri syntax, such as `{ headingAttributes: true }` for `{#id}` heading ids or `{ math: true }`. See [Markdown and MDX](/writing/markdown-and-mdx#heading-ids-and-math). |
+| `markdown.processor` | Sätteri | A custom Astro Markdown processor. The options below, except `componentMap` and `partialResolver`, are ignored with one. |
+| `markdown.features` | — | Sätteri syntax features, such as `{ headingAttributes: true }` or `{ math: true }`. Every Nimbus pass reads Markdown with them. |
+| `markdown.mdastPlugins` | `[]` | Sätteri mdast plugins, run in order. |
+| `markdown.hastPlugins` | `[]` | Sätteri hast plugins, run in order after Shiki. See [Package API](/styling/package-api#markdown-plugins) for ready-made ones. |
+| `markdown.componentMap` | — | How your own MDX components appear in generated Markdown. See [Customize generated Markdown](#customize-generated-markdown). |
+| `markdown.partialResolver` | — | Maps static `<Render>` attributes to partial IDs in generated Markdown. |
+| `sitemap`            | enabled when `site` set | `false` to disable.                                                                                                                                                                                                                                    |
+| `mdx`                | —                       | Options forwarded to Astro's MDX integration. Their behavior remains processor-owned.                                                                                                                                                                                                        |
+| `icons`              | `true`                  | Built-in icon system. `true` auto-detects `@iconify-json/*` packages (Phosphor, Material Icons, etc.) and local `src/icons/*.svg`. `false` to disable. Object for explicit config (`iconDir`, `include`, `svgoOptions`). See [Icon](/components/icon). |
+| `rules`              | `off` (opt-in)          | Authoring-lint severities — each rule is off until you enable it. See [Linting](/writing/linting).                                                                                                                                                     |
+| `redirectsFile`      | —                       | A redirects file in `_redirects` syntax that your deployment reads under another name. Link checking follows it. See [Linting](/writing/linting). |
+| `collections`        | —                       | Per-collection lint overrides.                                                                                                                                                                                                                         |
+
+```ts
+nimbus(config, {
+  validateMdx: true,
+  rules: { "nimbus/single-h1": "error", "nimbus/bare-url": "warn" },
+});
+```
+
+### Customize generated Markdown
+
+Use `markdown.componentMap` to define how project-specific MDX components appear in generated Markdown. Use `markdown.partialResolver` when `<Render>` attributes map to a custom partial ID:
+
+```ts title="astro.config.ts"
+nimbus(config, {
+  markdown: {
+    componentMap: {
+      ProductName: {
+        revision: "product-name-v1",
+        render: ({ children }) => children,
+      },
+    },
+    partialResolver: {
+      revision: "product-partials-v1",
+      resolve: ({ file, product }) =>
+        product ? `${product}/${file}` : file,
+    },
+  },
+});
+```
+
+`<ProductName>Acme</ProductName>` becomes `Acme` in clean Markdown. Nimbus normalizes static authored `href` values before a transform runs, so validate and render those values directly. The transform also receives the active `base` for destinations it constructs itself.
+
+Each transform requires a non-empty `revision`. Increment it whenever its output changes so Nimbus invalidates the generated Markdown cache.
+
+Request-rendered HTML consumes prepared entries and headings. Generating alternate Markdown/MDX versions, `llms.txt` indexes, `llms-full.txt`, reusable-snippet expansion, and syntax highlighting remains build-time work. Their endpoints can prerender or serve those payloads on request. Run a production build after changing these options; development mode does not validate the final Worker bundle.

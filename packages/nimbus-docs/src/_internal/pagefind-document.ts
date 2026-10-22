@@ -1,4 +1,5 @@
 import GithubSlugger from "github-slugger";
+import { markdownToHast } from "satteri";
 
 import type { RequestRouteInventoryEntry } from "./request-route-url.js";
 
@@ -35,56 +36,65 @@ function stripInlineHtml(value: string): string {
   return output;
 }
 
-function headingText(markdown: string): string {
-  return stripInlineHtml(
-    markdown
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1"),
-  )
-    .replace(/[<>]/g, "")
-    .replace(/[`*_~]/g, "")
-    .trim();
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  children?: HastNode[];
 }
 
+const UNINDEXED = /^(?:script|style)$/i;
+
+/**
+ * A request-rendered page's Markdown as HTML for Pagefind, so excerpts read as
+ * text rather than Markdown syntax, parsed once so reference links resolve
+ * across headings. Headings get the page's anchor ids for sub-results.
+ * Elements keep no attributes, and raw HTML keeps only its text, so nothing
+ * the author wrote can open a tag that swallows the rest.
+ */
 export function pagefindMarkdown(markdown: string): string {
   const slugger = new GithubSlugger();
-  const html: string[] = [];
-  let prose: string[] = [];
-  let fence: "`" | "~" | undefined;
-
-  const flush = () => {
-    if (prose.length === 0) return;
-    html.push(`<pre>${escapeHtml(prose.join("\n"))}</pre>`);
-    prose = [];
+  const text = (node: HastNode): string =>
+    node.type === "text"
+      ? (node.value ?? "")
+      : node.type === "raw"
+        ? stripInlineHtml(node.value ?? "")
+        : (node.children ?? []).map(text).join("");
+  const children = (nodes: HastNode[]): string => {
+    let out = "";
+    // Inline raw HTML arrives as separate tag nodes: skip from an opening
+    // script or style tag to its closing one.
+    let skipping = false;
+    for (const node of nodes) {
+      const raw = node.type === "raw" ? (node.value ?? "") : "";
+      if (skipping) {
+        if (/<\/(?:script|style)\s*>/i.test(raw)) skipping = false;
+        continue;
+      }
+      if (/^\s*<(?:script|style)\b/i.test(raw)) {
+        skipping = !/<\/(?:script|style)\s*>/i.test(raw);
+        continue;
+      }
+      out += render(node);
+    }
+    return out;
   };
-
-  for (const line of markdown.split("\n")) {
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fence) {
-      prose.push(line);
-      if (fenceMatch?.[1]?.startsWith(fence)) fence = undefined;
-      continue;
+  const render = (node: HastNode): string => {
+    if (node.type === "text") return escapeHtml(node.value ?? "");
+    if (node.type === "raw") return escapeHtml(stripInlineHtml(node.value ?? ""));
+    if (node.type !== "element" || !node.tagName) return children(node.children ?? []);
+    if (UNINDEXED.test(node.tagName)) return "";
+    if (/^h[1-6]$/.test(node.tagName)) {
+      const heading = text(node).replace(/[<>]/g, "").trim();
+      return `<${node.tagName} id="${escapeHtml(slugger.slug(heading))}">${escapeHtml(heading)}</${node.tagName}>`;
     }
-    if (fenceMatch?.[1]) {
-      fence = fenceMatch[1][0] as "`" | "~";
-      prose.push(line);
-      continue;
-    }
-
-    const heading = line.match(/^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
-    if (!heading?.[1] || !heading[2]) {
-      prose.push(line);
-      continue;
-    }
-    flush();
-    const depth = heading[1].length;
-    const text = headingText(heading[2]);
-    html.push(
-      `<h${depth} id="${escapeHtml(slugger.slug(text))}">${escapeHtml(text)}</h${depth}>`,
-    );
+    return `<${node.tagName}>${children(node.children ?? [])}</${node.tagName}>`;
+  };
+  try {
+    return render(markdownToHast(markdown) as HastNode).trim();
+  } catch {
+    return `<pre>${escapeHtml(markdown)}</pre>`;
   }
-  flush();
-  return html.join("");
 }
 
 export function pagefindDocument(entry: RequestRouteInventoryEntry): string {

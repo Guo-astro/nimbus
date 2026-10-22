@@ -1,0 +1,72 @@
+---
+title: Serve Markdown at page URLs
+description: Answer agents that ask for Markdown at a page's own URL, by rendering your docs on request.
+aiGenerated: true
+sidebar:
+  order: 4
+  label: Markdown negotiation
+---
+
+import PackageManagers from "@/components/ui/package-managers/PackageManagers.astro";
+
+Every page already has a Markdown version at `/<slug>/index.md`. With Markdown negotiation, a request to the page's own URL with `Accept: text/markdown` gets that Markdown too, so an agent doesn't need to know the `.md` convention.
+
+## Prerequisites
+
+- `site` set to your production origin in the Nimbus config
+- A host with a server adapter: Cloudflare, Netlify, Node or Vercel
+
+## Steps
+
+<Steps>
+  <Step title="Add a server adapter">
+    Skip this step if the site already has one. For Cloudflare:
+
+    <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+
+    Other hosts use `adapter-netlify`, `adapter-node` or `adapter-vercel`.
+  </Step>
+  <Step title="Render the docs on request">
+    In `astro.config.ts`, set the docs collection to render on request:
+
+    ```ts title="astro.config.ts" {4}
+    const nimbusConfig = defineNimbusConfig({
+      site: "https://docs.example.com",
+      // …
+      rendering: { collections: { docs: "request" } },
+    });
+    ```
+  </Step>
+  <Step title="Build and deploy">
+    Deploy the server and the generated Markdown files together. Off Cloudflare, the server reads the Markdown from `site`, so the files must be reachable there.
+  </Step>
+</Steps>
+
+## Verify
+
+Request a page with Markdown first in the `Accept` header:
+
+```sh
+curl -I -H 'Accept: text/markdown' https://docs.example.com/guide/
+```
+
+```text
+HTTP/2 200
+content-type: text/markdown; charset=utf-8
+vary: Accept
+```
+
+If `content-type` is `text/html`, the page is still prerendered: check that its collection is set to `"request"`. A browser's `Accept: */*` always gets HTML.
+
+## Static sites
+
+A prerendered page is served before any server code runs, so it can't negotiate. On Cloudflare, turn on [Markdown for Agents](https://developers.cloudflare.com/fundamentals/reference/markdown-for-agents/) for the zone instead: Cloudflare converts the HTML when an agent asks for Markdown.
+
+## API references
+
+Generated API references render on request only with the Cloudflare adapter. On other adapters, keep API collections set to `"build"` while the docs use `"request"`.
+
+## Next steps
+
+- [Markdown and llms.txt](/ai/publish-markdown): the `.md` versions this serves.
+- [Override generated Markdown](/ai/override-markdown): change what a page's Markdown contains.

@@ -1,59 +1,70 @@
 /**
- * Shared Satori → PNG renderer used by `og.png.ts` (home card) and
- * `og/[...slug].ts` (per-page cards). Loads fonts + the cloud image once
- * at module init, then renders an `OgCard` element through Satori and
- * converts the SVG to PNG via resvg.
+ * Satori → PNG renderer for nimbus-docs.com's share images: `og.png.ts`
+ * (the home card) and `og/[...slug].ts` (one card per docs page).
+ *
+ * Fonts and the chrome still load once at module init. The picture on the
+ * right never changes between cards, so each kind of panel is drawn once,
+ * on first use, and every card embeds that PNG instead of re-laying-out the
+ * chrome and the skeleton page.
  */
 import { readFile } from "node:fs/promises";
 import satori from "satori";
 import { Resvg } from "@resvg/resvg-js";
-import { OgCard } from "@/components/og-card";
+import {
+  DocsOgCard,
+  HomeOgCard,
+  OG_HEIGHT,
+  OG_WIDTH,
+  OgPanel,
+  PANEL_WIDTH,
+} from "@/components/og-card";
 
-const [interBuffer, bellezaBuffer, cloudBuffer] = await Promise.all([
-  readFile("./public/fonts/Inter-Bold.ttf"),
-  readFile("./public/fonts/Belleza-Regular.ttf"),
-  readFile("./public/bg-cloud.png"),
+// The fonts only feed the build, so they live outside public/ and never ship.
+const [bricolage, inter, interMedium, mono, chrome] = await Promise.all([
+  readFile("./og-assets/BricolageGrotesque-Medium.ttf"),
+  readFile("./og-assets/Inter-Regular.ttf"),
+  readFile("./og-assets/Inter-Medium.ttf"),
+  readFile("./og-assets/JetBrainsMono-Regular.ttf"),
+  readFile("./public/www/chrome/chrome-1-light.jpg"),
 ]);
 
-// The cloud PNG is dark linework over a flat ~41% gray matte, drawn for the light
-// card; a plain invert keeps the matte and leaves a rectangle behind the dark
-// card. Instead we key it for dark mode: force it opaque (use the art's true RGB,
-// not the matte), map luminance to coverage, invert so the paper keys out fully,
-// then paint the surviving strokes light. Retune the ramp if the paper level moves.
-const cloudInkSvg =
-  `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="690" height="425">` +
-  `<filter id="ink" color-interpolation-filters="sRGB">` +
-  `<feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0 1" result="opaque"/>` +
-  `<feColorMatrix in="opaque" type="luminanceToAlpha" result="luma"/>` +
-  `<feComponentTransfer in="luma" result="mask"><feFuncA type="linear" slope="-1.06" intercept="1.05"/></feComponentTransfer>` +
-  `<feFlood flood-color="#F5F5F5" result="ink"/>` +
-  `<feComposite in="ink" in2="mask" operator="in"/>` +
-  `</filter>` +
-  `<image xlink:href="data:image/png;base64,${cloudBuffer.toString("base64")}" width="690" height="425" filter="url(#ink)"/>` +
-  `</svg>`;
-const cloudDarkPng = new Resvg(cloudInkSvg).render().asPng();
-const cloudDataUri = `data:image/png;base64,${Buffer.from(cloudDarkPng).toString("base64")}`;
+const FONTS = [
+  { name: "Bricolage Grotesque", data: bricolage, weight: 500 as const, style: "normal" as const },
+  { name: "Inter", data: inter, weight: 400 as const, style: "normal" as const },
+  { name: "Inter", data: interMedium, weight: 500 as const, style: "normal" as const },
+  { name: "JetBrains Mono", data: mono, weight: 400 as const, style: "normal" as const },
+];
 
-export async function renderOgCard(input: {
-  title: string;
-  description: string;
-}): Promise<Uint8Array<ArrayBuffer>> {
-  const svg = await satori(
-    OgCard({
-      title: input.title,
-      description: input.description,
-      cloudSrc: cloudDataUri,
-    }),
-    {
-      width: 1200,
-      height: 630,
-      fonts: [
-        { name: "Inter", data: interBuffer, weight: 700, style: "normal" },
-        { name: "Belleza", data: bellezaBuffer, weight: 400, style: "normal" },
-      ],
-    },
-  );
+const chromeSrc = `data:image/jpeg;base64,${chrome.toString("base64")}`;
 
-  const png = new Resvg(svg).render().asPng();
-  return new Uint8Array(png);
+async function toPng(element: unknown, width: number, height: number): Promise<Buffer> {
+  // Satori's types expect a React node; these components return plain JSX objects.
+  const svg = await satori(element as Parameters<typeof satori>[0], { width, height, fonts: FONTS });
+  // Satori has already turned every glyph into a path, so resvg needs no
+  // fonts. Loading the system's costs about a second per card.
+  return new Resvg(svg, { font: { loadSystemFonts: false } }).render().asPng();
+}
+
+const panels = new Map<"docs" | "home", Promise<string>>();
+function panel(kind: "docs" | "home"): Promise<string> {
+  let p = panels.get(kind);
+  if (!p) {
+    p = toPng(OgPanel({ chromeSrc, kind }), PANEL_WIDTH, OG_HEIGHT).then(
+      (png) => `data:image/png;base64,${png.toString("base64")}`,
+    );
+    panels.set(kind, p);
+  }
+  return p;
+}
+
+/** A docs page's card. */
+export async function renderDocsOgCard(input: { section: string; title: string }): Promise<Uint8Array<ArrayBuffer>> {
+  const panelSrc = await panel("docs");
+  return Uint8Array.from(await toPng(DocsOgCard({ ...input, panelSrc }), OG_WIDTH, OG_HEIGHT));
+}
+
+/** The site's card. */
+export async function renderHomeOgCard(input: { name: string; tagline: string; address: string }): Promise<Uint8Array<ArrayBuffer>> {
+  const panelSrc = await panel("home");
+  return Uint8Array.from(await toPng(HomeOgCard({ ...input, panelSrc }), OG_WIDTH, OG_HEIGHT));
 }

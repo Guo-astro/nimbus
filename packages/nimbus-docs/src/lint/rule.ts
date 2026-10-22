@@ -39,6 +39,8 @@ export interface RuleContext {
   site?: string;
   /** The deployment base in the renderer's form (`"/docs"`, `""` at the root). */
   base?: string;
+  /** The folder the file's content-source collection reads; unset for any other file. */
+  sourceFolder?: string;
   /** Another rule's resolved options for this file, so related rules agree. */
   optionsOf?(code: AuthoringRuleCode): Record<string, unknown>;
   report(report: RuleReport): void;

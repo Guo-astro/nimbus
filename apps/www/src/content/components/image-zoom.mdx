@@ -3,7 +3,9 @@ title: Image zoom
 tagline: "Content images open at full size in one native <dialog>, with keyboard and screen-reader support."
 ---
 
-New sites render `<ImageZoom />` once in `src/layouts/DocsLayout.astro`. Every image in the page content that would show at least 1.2× bigger becomes a button that opens it at up to 95% of the viewport. Images that are already about as big as they can get, such as a screenshot on a phone, stay plain images, and resizing the window adds or removes the button.
+New sites render `<ImageZoom />` once in `src/layouts/DocsLayout.astro`. Every content image that would show at least 1.2× bigger becomes a button that opens it at up to 95% of the viewport.
+
+Images already about as big as they can get, such as a screenshot on a phone, stay plain. Resizing the window adds or removes the button.
 
 - **Keyboard:** Tab reaches the image, Enter or Space opens it, and Esc closes it. Focus returns to the image.
 - **Screen readers:** the button is named "Enlarge image: *alt text*", and the enlarged image keeps the alt text.

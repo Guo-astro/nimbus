@@ -1,0 +1,83 @@
+---
+title: Troubleshooting
+description: Fixes for the common failures in Nimbus, by the message you'll see.
+aiGenerated: true
+sidebar:
+  order: 5
+---
+
+Each entry starts with the message as Nimbus or your tools print it. Search this page for a phrase from your error.
+
+## GitHub rate-limited the template download (HTTP 403)
+
+```text
+GitHub rate-limited the template download (HTTP 403).
+```
+
+The scaffolder, `nimbus-docs outdated` and `diff` download starter files from GitHub, which allows 60 anonymous requests an hour from one address. Shared networks and CI hit that quickly. Set `GIGET_AUTH` to a GitHub token for the run:
+
+```sh
+GIGET_AUTH=<your-github-token> npm create @cloudflare/nimbus-docs@latest
+```
+
+The token needs no scopes. To work without the network, pass `--template-dir <path>` with a local copy of the templates.
+
+## Unknown frontmatter key "…"
+
+```text
+lastVerified: Unknown frontmatter key "lastVerified".
+```
+
+A page's frontmatter has a key the docs schema doesn't know. Either remove it, or declare it in `src/content.config.ts` with `schemaFields`:
+
+```ts title="src/content.config.ts"
+docs: defineCollection(
+  docsCollection({
+    schemaFields: { lastVerified: z.coerce.date().optional() },
+  }),
+),
+```
+
+Pages created from the `content-*` registry recipes can include `lastVerified`; declare it as above, or delete the line. [Frontmatter](/reference/frontmatter) lists every key the schema already knows.
+
+## Unknown MDX component tag
+
+```text
+[nimbus-docs] Unknown MDX component tag:
+  src/content/docs/guide.mdx:12:1  <Callout />  →  Register it in src/components.ts, or add an explicit `import` at the top of this file.
+```
+
+MDX only renders a component it knows about. Add it to `src/components.ts` to use it on every page, or import it at the top of the page. A component from the registry needs installing first, with `nimbus-docs add <slug>`; see [Add components and features](/styling/add-components).
+
+## Search could not load
+
+```text
+Search could not load. Check your connection and reload the page. If it persists, ask the site owner to rebuild and deploy the search index.
+```
+
+The search index is written at the end of the production build, into `dist/pagefind/`. If it's missing from the deployed site, check that the build finished and that the whole of `dist/` was uploaded. In `astro dev`, search says "Search is available after a production build."; run the build and `astro preview` to try it. See [Search](/navigation/search).
+
+## A page 404s with or without a trailing slash
+
+With `trailingSlash: "always"` or `"never"` in `astro.config.ts`, `astro dev` answers only the matching form of each URL, and links Nimbus generates use that form. A hand-written link in the other form 404s in dev, and on some hosts in production. Match the setting, or leave `trailingSlash` at its default. [Links and trailing slashes](/reference/configuration#links-and-trailing-slashes) covers each setting.
+
+## This is a shallow clone, so pages get no git dates
+
+```text
+this is a shallow clone, so pages get no git dates (sitemap lastmod, "Last updated"). Run git fetch --unshallow, or set fetch-depth: 0 in CI, to restore them.
+```
+
+The "Last updated" line and the sitemap's dates come from git history, and CI usually clones only the latest commit. Set `fetch-depth: 0` on the checkout step, or run `git fetch --unshallow` before the build.
+
+## Ignored build scripts: esbuild, sharp
+
+pnpm 10 asks before running a dependency's install scripts. The scaffolder's `pnpm-workspace.yaml` already declines them for esbuild and sharp, and for workerd on Cloudflare, because each ships a working prebuilt binary. The warning is safe to ignore, and approving them with `pnpm approve-builds` is also fine.
+
+## Still stuck?
+
+Ask in [GitHub Discussions](https://github.com/cloudflare/nimbus/discussions), or [open an issue](https://github.com/cloudflare/nimbus/issues) if it looks like a bug. Include:
+
+- the versions of `@cloudflare/nimbus-docs` and `astro` from your lockfile, and of Node (`node --version`),
+- the full error, copied as text,
+- the command you ran, and your package manager,
+- what you expected to happen.

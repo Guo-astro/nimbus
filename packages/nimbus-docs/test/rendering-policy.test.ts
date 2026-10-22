@@ -1625,7 +1625,7 @@ test("a built dynamic route with no getStaticPaths fails the build, naming the f
   await integration.routeSetup({ route: { component: "src/pages/llms.txt.ts", prerender: true } } as never);
   assert.throws(
     () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
-    /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths to it\..*configuration\/#mix-build-and-request-rendering/s,
+    /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths to it\..*reference\/rendering\//s,
   );
 });
 

@@ -119,6 +119,7 @@ if (versionStatus?.isHidden || homePart) {
       below restores them before paint, and `initNavSidebar` records them. It is
       excluded from the page transition so it never fades or replays. */}
   <aside
+    aria-label="Sidebar"
     transition:name="nb-api-sidebar"
     transition:animate="none"
     class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 flex-col border-e border-border bg-background md:flex lg:w-(--nb-sidebar-width)"
@@ -187,7 +188,7 @@ if (versionStatus?.isHidden || homePart) {
         at 90rem+ it becomes the sticky right column. The left padding keeps overflow-y-auto
         from clipping the LayerCard's outset ring at the scroll edge. */}
     {!hasRail && tocHeadings.length > 0 && (
-      <aside data-nb-toc-scroll-host class="hidden xl:block w-(--nb-toc-width) shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto">
+      <aside aria-label="On this page" data-nb-toc-scroll-host class="hidden xl:block w-(--nb-toc-width) shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto">
         <div class="pt-8 pb-8 ps-8 pe-6"><TOC headings={tocHeadings} /></div>
       </aside>
     )}

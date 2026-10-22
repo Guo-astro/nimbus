@@ -30,6 +30,8 @@ export interface PageCollectionLintScope {
   displayPath: (absPath: string) => string | undefined;
   /** The source a file's snapshot belongs to: such a file is never written. */
   readOnlySource: (absPath: string) => string | undefined;
+  /** The folder a snapshot file's collection reads; `undefined` for any other file. */
+  sourceFolder: (absPath: string) => string | undefined;
   /** One line per collection lint can't see. */
   notes: string[];
 }
@@ -88,6 +90,8 @@ export function pageCollectionLintScope(
       return source ? `${source.name}: ${source.path}` : undefined;
     },
     readOnlySource: (absPath) => sourceOf(absPath)?.name,
+    sourceFolder: (absPath) =>
+      sourceOf(absPath) ? owners.find((owner) => inside(owner.dir, absPath))?.dir : undefined,
     notes: [
       ...(unplaced.length ? [`not inspected: ${unplaced.join(", ")}.`] : []),
       ...(markdown.size

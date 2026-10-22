@@ -10,8 +10,10 @@ export const visibilityDocs = [
   {
     url: "/entities/",
     title: "Entities",
+    // Markdown for the literal text `&amp;` and `<b>tags</b>`, which search
+    // must return exactly as written.
     content:
-      "## Literal\nNebulacobalt entityneedle keeps &amp; and <b>tags</b> as written.",
+      "## Literal\nNebulacobalt entityneedle keeps &amp;amp; and &lt;b&gt;tags&lt;/b&gt; as written.",
     version: "v2",
   },
   {

@@ -7,13 +7,21 @@ import type {
   DocumentationPagefind,
   DocumentationSearchOptions,
 } from "../_internal/agent-search-contract.js";
+import { mergeSearchIndexes, type MergeablePagefind } from "./search-indexes.js";
 
 export interface DocumentationWebMcpOptions extends DocumentationSearchOptions {
   title: string;
   search: "pagefind" | "unavailable";
+  /**
+   * The Pagefind bundle to search and the other slices' bundles to merge into
+   * it, as `searchIndex` in `virtual:nimbus/config` names them. Without
+   * `bundle`, the site's `/pagefind/` under `base`.
+   */
+  bundle?: string;
+  merge?: readonly string[];
 }
 
-interface PagefindInstance extends DocumentationPagefind {
+interface PagefindInstance extends DocumentationPagefind, MergeablePagefind {
   init(): Promise<unknown>;
   filters(): Promise<unknown>;
   destroy(): Promise<unknown>;
@@ -86,11 +94,13 @@ export function registerDocumentationWebMcp(
           throw error;
         }
         candidate = module.createInstance({
-          basePath: `${baseUrl}pagefind/`,
+          basePath: options.bundle ?? `${baseUrl}pagefind/`,
           baseUrl,
         });
         instance = candidate;
         await candidate.init();
+        // The other slices' bundles, as the search dialog merges them.
+        if (options.merge?.length) await mergeSearchIndexes(candidate, options.merge, { baseUrl });
         // init() may only initialize the worker wrapper. filters() also waits for
         // the index/WASM, so an absent previous build is index_unavailable.
         await candidate.filters();
@@ -171,7 +181,7 @@ export function initDocumentationWebMcp(
   if (!context || typeof context.registerTool !== "function") return () => {};
   const base = `/${(options.base ?? "/").split("/").filter(Boolean).join("/")}`;
   const moduleUrl = new URL(
-    `${base === "/" ? "" : base}/pagefind/pagefind.js`,
+    options.bundle ? `${options.bundle}pagefind.js` : `${base === "/" ? "" : base}/pagefind/pagefind.js`,
     location.origin,
   ).href;
   return registerDocumentationWebMcp(

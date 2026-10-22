@@ -1,0 +1,72 @@
+---
+title: Scaffolder options
+description: Every prompt and flag of create-nimbus-docs, and what it writes.
+audience: human
+sidebar:
+  order: 5
+---
+import { FileTree } from "@/components/ui/file-tree";
+
+`create-nimbus-docs` sets up a project with layouts, components, content schemas, search, a sitemap, share cards, and a Markdown version of every page. For a guided first run, follow the [Quickstart](/quickstart); this page lists every option.
+
+## Requirements
+
+- **Node** 22.12 or later
+- **A package manager** — npm, pnpm, yarn, or bun
+- **Git** — for last-updated dates, which come from commit history
+
+## Scaffold
+
+<PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" />
+
+The scaffolder asks:
+
+<Steps>
+  <Step title="Directory">
+    Where to create the project; press Enter for `my-docs`. Pass it as the first argument, such as `my-docs`, or `.` for the current folder. The folder must be new, empty, or hold only `.git`, such as a freshly cloned repository.
+  </Step>
+  <Step title="What the site includes">
+    **Docs**, hand-written pages (the default); **Docs and an API reference**, with the docs at `/` and the reference, generated from an OpenAPI spec, at `/api`; or **API reference**, a site that is only the reference, at `/`. Flags: `--api` adds the reference, `--template api` makes it the whole site.
+  </Step>
+  <Step title="OpenAPI spec">
+    Asked when the site has an API reference: the path to your OpenAPI 3.x spec (`.yaml`, `.yml` or `.json`), or Enter for a sample to replace later. Flag: `--api <path>`.
+  </Step>
+  <Step title="Starter content">
+    **Getting started guide + example pages**, or **Empty**, just the shell for your own content. A site that is only an API reference skips it and refuses the flag. Flag: `--content starter|empty`.
+  </Step>
+  <Step title="Package manager">
+    npm, pnpm, yarn, or bun; the default is the one that runs the scaffolder. It installs dependencies with your choice unless you pass `--skip-install`. Flag: `--package-manager <pm>`.
+  </Step>
+  <Step title="Git">
+    Whether to initialize a repository and make a first commit. Inside an existing repository it does neither. Flag: `--git` or `--no-git`.
+  </Step>
+  <Step title="Output mode">
+    **Static** prerenders every content collection route and deploys anywhere. **Server** renders docs pages on request. You can override individual collections later. Flag: `--deploy` chooses static, `--adapter` chooses server.
+  </Step>
+  <Step title="Deploy target or adapter">
+    Static output asks for a deploy target: Cloudflare or another static host (flag: `--deploy cloudflare|other`). Server output offers Cloudflare; the `--adapter` flag also accepts `vercel`, `netlify`, and `node`.
+  </Step>
+</Steps>
+
+Pass `--yes` to accept every default, or `--help` to list every flag.
+
+Without a terminal, such as in CI or an agent, pass `--yes` or a flag for every question; otherwise the scaffolder exits and lists the flags it still needs. Unknown or conflicting flags stop it before it writes anything.
+
+If installing dependencies fails, the scaffolder keeps the project, prints the commands that finish the setup, and exits with status 1. To scaffold from a local folder instead of downloading the template, such as when working on templates offline, pass `--template-dir <path>`.
+
+With npm, put `--` before the arguments, or npm keeps the flags for itself:
+
+```sh
+npm create @cloudflare/nimbus-docs@latest -- my-docs --yes
+npm create @cloudflare/nimbus-docs@latest -- my-docs --api ./openapi.yaml   # docs + API reference
+npm create @cloudflare/nimbus-docs@latest -- my-docs --template api         # only an API reference
+```
+
+Put the directory before `--api`: a value after the flag is read as the spec.
+
+
+## What lands in your repo
+
+See [Project structure](/project-structure) for every file the scaffolder writes and what each one is for.
+
+To run, build and publish the site, see the [Quickstart](/quickstart) and [Deployment](/deploy/cloudflare).

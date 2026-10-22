@@ -1,0 +1,211 @@
+---
+import "../styles/www.css";
+// The www page body: shared by /www, /brand-lab (recoloured) and /variants/v.
+// The thesis sentence, the story (Write, Own), Features bento, Extend registry, questions. (Quotes are parked in Quotes.astro.)
+// Header treatments chosen Oct 9: write 1, read 2, own 5 (inset), features 1, extend 2.
+import SampleShot from "./SampleShot.astro";
+import StoryWrite from "./story/StoryWrite.astro";
+import ExpSentence from "./story/exp/ExpSentence.astro";
+import ExpVoice from "./story/exp/ExpVoice.astro";
+import ExpRibbon from "./story/exp/ExpRibbon.astro";
+import ExpStart from "./story/exp/ExpStart.astro";
+import Hero from "./Hero.astro";
+import Section from "../variants/Section.astro";
+import BentoAlive from "../variants/BentoAlive.astro";
+import { Icon } from "@/home/icon";
+import Logo from "./Logo.astro";
+import { LinkButton } from "./ui/link-button";
+import { Accordion, AccordionTrigger, AccordionContent, AccordionGroup } from "./ui/accordion";
+import { ThemeToggle } from "./ui/theme-toggle";
+import { SearchTrigger, SearchDialog } from "@/components/ui/search";
+import { sections as s } from "../variants/copy";
+
+// Copy pass, Oct 9 2026. Local to www so the variant pages keep their exploration copy.
+const workflows = [
+  { label: "For people", title: "Pages worth reading.", items: ["Interactive diagrams readers can explore", "Reusable snippets and personalised tabs", "Write wherever your content already lives", "A preview that matches production"] },
+  { label: "For agents", title: "Pages an agent can write.", items: ["Recipes an agent can follow", "Writing mistakes it finds and fixes, just like code", "Aware of your conventions before it writes", "Nothing ships without your sign-off"] },
+];
+const installCmd = "npx @cloudflare/create-nimbus-docs@latest";
+const faq: [string, string][] = [
+  ["Does it work with the Markdown I already have?", "Yes. Drop your pages in. Each page needs a title. The checks tell you what else is missing."],
+  ["Do I need an agent to use it?", "No. Every feature works by hand. Agents are first-class authors, not required ones."],
+  ["Which agents can author with it?", "Any that can read a file. Recipes are plain Markdown, checks are JSON, and the site index is a text file at a fixed address."],
+  ["Where can I deploy it?", "Anywhere that serves static files. On Cloudflare, deploying is one more line."],
+  ["Is it free?", "MIT licensed, no hosted tier required. The registry is free too."],
+];
+
+const sectionsNav = [
+  { label: "Docs", href: "/quickstart" },
+  { label: "Components", href: "/components" },
+  { label: "Registry", href: "/registry" },
+  { label: "Philosophy", href: "/why-nimbus" },
+];
+const big = "text-[22px] leading-7 text-foreground md:text-[26px] md:leading-8";
+---
+  <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded focus:bg-primary focus:px-3 focus:py-2 focus:text-sm focus:text-primary-foreground">Skip to content</a>
+
+  <!-- Theme: same storage key and resolution as the docs (stored pref, else OS). Runs before the page paints. -->
+  <script is:inline>
+    (() => {
+      const KEY = "ui-mode";
+      const media = matchMedia("(prefers-color-scheme: dark)");
+      const read = () => { try { const v = localStorage.getItem(KEY); return v === "dark" || v === "light" ? v : null; } catch { return null; } };
+      const apply = () => {
+        const mode = read() ?? (media.matches ? "dark" : "light");
+        const root = document.documentElement;
+        if (mode === "dark") root.setAttribute("data-mode", "dark"); else root.removeAttribute("data-mode");
+        root.style.colorScheme = mode;
+        document.querySelectorAll("[data-nb-theme-toggle]").forEach((b) => b.setAttribute("data-nb-state", mode));
+      };
+      apply();
+      media.addEventListener("change", () => { if (!read()) apply(); });
+      addEventListener("storage", (e) => { if (e.key === KEY) apply(); });
+      window.__nbApplyTheme = apply;
+    })();
+  </script>
+
+  <!-- Header: mirrors the Nimbus docs header (logo, divider, section pills · search, GitHub, theme). -->
+  <header class="sticky top-0 z-30 border-b border-transparent bg-background/80 backdrop-blur-lg transition-colors duration-200 data-[scrolled]:border-border" data-site-header>
+    <div class="mx-auto flex h-16 max-w-[1440px] items-center justify-between px-4 lg:px-6">
+      <div class="flex items-center">
+        <a href="/" class="flex items-center" aria-label="Nimbus home">
+          <Logo class="h-6 w-auto text-foreground" />
+        </a>
+        <nav aria-label="Sections" class="ml-10 hidden items-center gap-6 md:flex">
+          {sectionsNav.map((n) => (<a href={n.href} class="text-base leading-6 font-[450] tracking-[0.015em] text-muted-foreground transition-colors hover:text-foreground">{n.label}</a>))}
+        </nav>
+      </div>
+      <div class="flex items-center gap-2">
+        <SearchTrigger />
+        <LinkButton href="https://github.com/cloudflare/nimbus" variant="ghost" size="sm" shape="square" target="_blank" rel="noopener" aria-label="GitHub" class="text-muted-foreground hover:text-foreground"><Icon name="ph:github-logo" class="size-4" /></LinkButton>
+        <ThemeToggle />
+        <LinkButton href="#start" variant="primary" class="ml-2 hidden sm:inline-flex">Get started</LinkButton>
+        <details class="group relative md:hidden" data-menu>
+          <summary aria-label="Open navigation" class="flex size-8 cursor-pointer list-none items-center justify-center rounded-md hover:bg-accent [&::-webkit-details-marker]:hidden"><Icon name="ph:list" class="size-5 text-muted-foreground group-open:hidden" /><Icon name="ph:x" class="hidden size-5 text-muted-foreground group-open:block" /></summary>
+          <nav aria-label="Mobile" class="absolute top-11 right-0 w-56 rounded-xl border border-border bg-card p-2 text-sm shadow-(--www-shadow-float)">
+            {sectionsNav.map((n) => (<a href={n.href} class="block rounded-md px-3 py-2 hover:bg-accent">{n.label}</a>))}
+          </nav>
+        </details>
+      </div>
+    </div>
+  </header>
+
+  <SearchDialog />
+
+  <main id="main" class="mx-auto max-w-[1440px] px-6">
+    <Hero />
+
+    <!-- The thesis: one sentence; each section after it proves a phrase of it -->
+    <section id="one-file" class="border-t border-border pt-14"><ExpSentence label={false} /></section>
+
+    <Section id="write" class="mt-14" label="Author" h1="Write with your team. And your agents." h2="Every page up to your standard." body="Write in your editor, your repo, or the tools you already use. Or hand the page to an agent. Every page meets the same standard." bodyClass="md:hidden" layout={1}>
+      {/* Desktop only: on a phone the demos below make the same points. */}
+      <div class="mt-12 hidden gap-10 md:grid md:grid-cols-2 md:gap-8">
+        {workflows.map((w) => (
+          <div>
+            <p class="text-[13px] leading-none text-muted-foreground">{w.label}</p>
+            <h3 class="mt-4 text-[22px] leading-7 font-medium">{w.title}</h3>
+            <ul class="mt-4 space-y-2 text-base leading-7 text-foreground/70">{w.items.map((it) => (<li class="flex gap-2.5"><Icon name="ph:check" class="mt-1.5 size-4 shrink-0 text-muted-foreground/70" />{it}</li>))}</ul>
+          </div>
+        ))}
+      </div>
+      <StoryWrite class="mt-12" />
+      <!-- Rules: lint, applied to an agent's draft -->
+      <div class="mt-20 grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)] lg:gap-16">
+        <div>
+          <h3 class="text-[22px] leading-7 font-medium">Every author follows the same rules.</h3>
+          <p class="mt-3 max-w-md text-base leading-7 text-foreground/70"><code class="font-mono text-[14px]">nimbus-docs lint</code> holds an agent's draft to your writing rules, and <code class="font-mono text-[14px]">--fix</code> makes the fixes.</p>
+        </div>
+        <ExpVoice bare />
+      </div>
+    </Section>
+
+    <!-- Own: copy above, the screenshot alone on the chrome stage -->
+    <section id="own" class="mt-20 border-t border-border pt-20">
+      <figure>
+        <h2 class="max-w-3xl text-balance text-[22px] leading-7 md:text-[26px] md:leading-8"><span class="block text-foreground">Make it look like your product.</span><span class="block text-muted-foreground">Every file is yours to change.</span></h2>
+        <p class="mt-4 max-w-xl text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground md:text-[18px] md:leading-7"><span class="md:hidden">Scaffold once and every file is yours. The framework stays underneath, so updates never touch your work.</span><span class="hidden md:inline">{s.own.body}</span></p>
+        <div class="chrome-bg chrome-3 mt-12 overflow-hidden rounded-2xl border border-border px-6 pt-6 md:px-12 md:pt-12"><SampleShot /></div>
+        <figcaption class="mt-4 text-[13px] leading-5 text-muted-foreground">The Sample Co docs: the Nimbus starter with its own content.</figcaption>
+      </figure>
+    </section>
+
+    <Section id="everything" class="mt-20" label="Features" h1="Everything a docs site needs." h2="Built in, or one command away." layout={1}>
+      <BentoAlive class="mt-12" omit={["edit", "checks", "theme", "diagram", "try"]} />
+    </Section>
+
+    <Section id="extend" class="mt-20" label={s.extend.label} h1={s.extend.h1} h2="Components land as files. Features land as recipes." body="The registry installs in two modes. Components copy into your repo as source. Features arrive as a recipe that an agent applies to your site." layout={2}>
+      <div class="mt-12"><ExpRibbon bare /></div>
+    </Section>
+    <section class="mt-20 border-t border-border py-20" id="faq">
+      <div class="grid gap-6 md:grid-cols-2 md:gap-8">
+        <h2 class={big}>Questions</h2>
+        <AccordionGroup class="my-0 min-w-0 [&_.leading-relaxed]:leading-6!">
+          {faq.map(([q, a], i) => (
+            <Accordion open={i === 0}>
+              <AccordionTrigger>{q}</AccordionTrigger>
+              <AccordionContent>{a.includes(installCmd) ? <>{a.split(installCmd)[0]}<code class="font-mono text-[0.85em] text-foreground">{installCmd}</code>{a.split(installCmd)[1]}</> : a}</AccordionContent>
+            </Accordion>
+          ))}
+        </AccordionGroup>
+      </div>
+    </section>
+
+    <!-- Get started: the last thing before the footer -->
+    <section id="start" class="border-t border-border py-10"><ExpStart /></section>
+
+  </main>
+
+  <footer class="border-t border-border">
+    <div class="mx-auto grid max-w-[1440px] gap-10 px-6 py-16 md:grid-cols-2 md:gap-8">
+      <div class="flex flex-col justify-between gap-10">
+        <a href="/" class="flex items-center" aria-label="Nimbus">
+          <Logo class="h-6 w-auto text-foreground" />
+        </a>
+        <p class="text-sm text-muted-foreground">© 2026 Cloudflare, Inc. MIT licensed.</p>
+      </div>
+      <div class="grid grid-cols-2 gap-8 text-sm sm:grid-cols-3">
+        <div>
+          <p class="text-[13px] leading-5 text-muted-foreground">Product</p>
+          <ul class="mt-4 space-y-2.5">
+            <li><a href="/quickstart" class="hover:underline">Get started</a></li>
+            <li><a href="/components" class="hover:underline">Components</a></li>
+            <li><a href="/registry" class="hover:underline">Registry</a></li>
+            <li><a href="/cli" class="hover:underline">CLI</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="text-[13px] leading-5 text-muted-foreground">Resources</p>
+          <ul class="mt-4 space-y-2.5">
+            <li><a href="/why-nimbus" class="hover:underline">Philosophy</a></li>
+            <li><a href="/ai/docs-for-agents" class="hover:underline">Docs for agents</a></li>
+            <li><a href="/writing/linting" class="hover:underline">Linting</a></li>
+            <li><a href="/llms.txt" class="hover:underline">llms.txt</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="text-[13px] leading-5 text-muted-foreground">Project</p>
+          <ul class="mt-4 space-y-2.5">
+            <li><a href="https://github.com/cloudflare/nimbus" class="hover:underline">GitHub</a></li>
+            <li><a href="https://www.npmjs.com/package/@cloudflare/nimbus-docs" class="hover:underline">npm</a></li>
+            <li><a href="https://cloudflare.com" class="hover:underline">Cloudflare</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+<script>
+  import { codeCopy } from "@cloudflare/nimbus-docs/client";
+  // The header's rule appears only once the page has scrolled under it.
+  const siteHeader = document.querySelector<HTMLElement>("[data-site-header]");
+  if (siteHeader) { const mark = () => siteHeader.toggleAttribute("data-scrolled", scrollY > 4); mark(); addEventListener("scroll", mark, { passive: true }); }
+  codeCopy();
+
+  // Close the phone menu on Escape or a tap outside it.
+  const menu = document.querySelector<HTMLDetailsElement>("[data-menu]");
+  if (menu) {
+    addEventListener("keydown", (e) => { if (e.key === "Escape") menu.open = false; });
+    document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.target as Node)) menu.open = false; });
+  }
+</script>

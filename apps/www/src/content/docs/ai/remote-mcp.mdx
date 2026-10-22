@@ -4,6 +4,7 @@ description: Serve your documentation to agents over MCP from the site's own ser
 aiGenerated: true
 sidebar:
   order: 5
+  label: Remote MCP
 ---
 
 import PackageManagers from "@/components/ui/package-managers/PackageManagers.astro";
@@ -44,7 +45,9 @@ To turn it off, set `agents.mcp` to `false`: `/mcp`, the card and the Copy MCP U
 
 <PackageManagers pkg="@modelcontextprotocol/inspector" type="dlx" args="--cli http://localhost:4321/mcp --transport http --method tools/list" />
 
-To try the production build, run it the way the adapter runs in production: on Node, `node dist/server/entry.mjs` (set `HOST` and `PORT`), which serves `dist/client` next to it; on Cloudflare, `wrangler dev`. The URLs the server returns, and the one the Copy MCP URL action copies, are built from `site`, not from the address you requested; point the client at the local address yourself.
+To try the production build, run it as the adapter does in production: `node dist/server/entry.mjs` on Node (set `HOST` and `PORT`), or `wrangler dev` on Cloudflare.
+
+The URLs the server returns, and the Copy MCP URL action, use `site`, not the local address, so point your client at the local address yourself.
 
 ## What the site serves
 
@@ -55,13 +58,18 @@ To try the production build, run it the way the adapter runs in production: on N
 
 The card is listed in `/.well-known/ai-catalog.json` (unless `agents.discovery` is `false`), and `llms.txt` names the endpoint, so agents that start from either find the server. The server's name is the site's hostname reversed plus `/docs`: `docs.example.com` becomes `com.example.docs/docs`. A site on `localhost` or an IP address is `local.nimbus/docs`.
 
-Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"` the paths are `/mcp/` and `/mcp/server-card/`. Use exactly that form: `astro dev` answers the other with `404`, and a production server may redirect it. The Node adapter redirects with a `301`, which clients follow as a `GET`, so the server answers `405`. Redirects also carry no CORS headers. The card, `llms.txt` and the Copy MCP URL action all give the right form.
+Under a `base`, both paths sit under it: `https://docs.example.com/docs/mcp`. With `trailingSlash: "always"`, they're `/mcp/` and `/mcp/server-card/`.
+
+Use exactly that form. The other one gets a `404` in `astro dev`, and a redirect in production that MCP clients can't follow. The card, `llms.txt` and the Copy MCP URL action all give the right form.
 
 A page, content entry or public file at either path fails the build, since the server would hide it.
 
 ## The tools
 
-**`list_pages`** returns pages with their `title`, `url`, `markdownUrl` and `section`, plus `description` and `version` when the page has them, 200 at a time. Pass `nextCursor` back as `cursor` for the next page. Filter by `section`, the first path segment (`guide` for `/guide/install/`; a root content page is `index`), or by one `version` from the site's [`versions`](/configuration#site-config) manifest, the docs versions that `nimbus-docs add new-version` sets up. A `version` filter returns that version's docs pages only; pages outside the docs versions, such as a blog or an API reference, have no version and appear in the unfiltered list.
+**`list_pages`** returns pages 200 at a time, each with its `title`, `url`, `markdownUrl` and `section`, plus `description` and `version` when it has them. Pass `nextCursor` back as `cursor` for the next batch.
+
+- **`section`** filters by the first path segment: `guide` for `/guide/install/`, or `index` for a root page.
+- **`version`** filters by one of the site's [docs versions](/reference/configuration#site-config). Pages outside the docs versions, such as an API reference, appear only unfiltered.
 
 ```json
 { "section": "guide" }
@@ -73,13 +81,21 @@ A page, content entry or public file at either path fails the build, since the s
 { "url": "https://docs.example.com/guide/" }
 ```
 
-Both tools return their result as JSON in a text content block. They return errors in the result, with `isError` set. Arguments that don't match the tool's schema get the MCP SDK's validation message. Other errors are `{ "error": { "code", "message" } }`, with the code `invalid_input` (an unknown version, or a cursor from other filters), `not_found` (no published page at that URL) or `unavailable` (the site's published files couldn't be read).
+Both tools return JSON in a text content block. Errors come back in the result with `isError` set, as `{ "error": { "code", "message" } }`:
+
+| Code | Meaning |
+|---|---|
+| `invalid_input` | An unknown version, or a cursor from other filters. Arguments that don't match the schema get the MCP SDK's message instead. |
+| `not_found` | No published page at that URL. |
+| `unavailable` | The site's published files couldn't be read. |
 
 ## Which pages
 
 The tools see the pages that have a Markdown version: collections made with `docsCollection()` and `apiCollection()`, in every rendering mode. A collection defined by hand with Astro's `defineCollection` has no Markdown version and is not listed, the same as in `llms.txt`.
 
-By default `list_pages` matches site search: pages with `noindex: true` are left out unless they set `searchable: true`, and deprecated versions are left out unless you ask for one by `version`. Hidden versions and drafts are never listed and never served. `get_page` also reads `noindex` pages by URL, and resolves an API URL with `?version=` to the default version, which is the one with a Markdown version.
+`list_pages` matches site search: it leaves out `noindex` pages unless they set `searchable: true`, and deprecated versions unless you ask for one. Drafts and hidden versions are never listed or served.
+
+`get_page` also reads `noindex` pages by URL. An API URL with `?version=` resolves to the default version, the one with Markdown.
 
 A homepage made in `src/pages` instead of a content entry isn't a page here: `get_page` with `/` finds nothing, and `/index.md` serves the `llms.txt` index instead.
 
@@ -88,14 +104,6 @@ A homepage made in `src/pages` instead of a content entry isn't a page here: `ge
 Give the client the endpoint URL using its own remote MCP setup instructions. Configuration formats differ between clients.
 
 The starter's docs layout shows a **Copy MCP URL** page action whenever the server is on. Clicking it copies the endpoint URL and briefly changes the label to **Copied**.
-
-A site made before the action existed can add the two starter files:
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/ConnectMcp.astro --apply" />
-
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="diff src/components/connect-mcp.client.ts --apply" />
-
-`diff` needs a site on a released version. Otherwise, copy both files from a newly scaffolded site.
 
 Then in `src/layouts/DocsLayout.astro`, pass it to `PageActions`, which renders it after its own actions:
 
@@ -114,12 +122,16 @@ The guard keeps the action's script off sites without the server. A `PageActions
 
 ## Limits and safety
 
-The server is read-only and public: it serves what the site already publishes, with `Access-Control-Allow-Origin: *` so browser-based clients can connect. A request with a malformed or `null` `Origin` header is refused with `403`, and a body over 64 KB with `413`. There is no authentication; private documentation stays behind your own access control, as with the rest of the site.
+The server is read-only and public. It serves what the site already publishes, with `Access-Control-Allow-Origin: *` so browser clients can connect. There's no authentication, so keep private docs behind your own access control.
+
+A malformed or `null` `Origin` header gets `403`, and a body over 64 KB gets `413`.
 
 Rate limiting is the host's job: add a rule for the `/mcp` path in its firewall, or in a proxy in front of the site. The server itself does none.
 
 ## Adapters
 
-Nimbus tests the server on the Node and Cloudflare adapters. On Node it reads the published Markdown from the deployed `dist/client` directory; on Cloudflare, through the site's asset binding. Other adapters work when the server can read `dist/client`, or fetch it from the site's own URL; verify a `tools/call` on the deployed site. A preview deployment behind access protection, such as Vercel's, answers that fetch with `401`, and the tools report `unavailable`.
+Nimbus tests the server on the Node and Cloudflare adapters. Node reads the published Markdown from `dist/client`; Cloudflare reads it through the asset binding.
+
+Other adapters work when the server can read `dist/client` or fetch it from the site's URL; test a `tools/call` on the deployed site. A preview behind access protection answers that fetch with `401`, and the tools report `unavailable`.
 
 With the server on, the server bundle carries the MCP SDK, about 140 KB gzipped, loaded the first time `/mcp` is called.

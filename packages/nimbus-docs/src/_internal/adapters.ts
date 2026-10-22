@@ -42,6 +42,8 @@ export interface AdapterRecipe {
   importStatement: string;
   adapterExpression: string;
   serverWrangler?: ServerWranglerRecipe;
+  /** Dependencies whose build scripts pnpm should skip; the site doesn't need them. */
+  declinedBuildScripts?: string[];
 }
 
 /**
@@ -109,6 +111,9 @@ export const ADAPTER_RECIPES: Record<AdapterId, AdapterRecipe> = {
     // prerenderEnvironment:"node" avoids workerd's node:wasi during prerender and
     // lets Sätteri tree-shake out of a no-feature worker.
     adapterExpression: 'cloudflare({ prerenderEnvironment: "node" })',
+    // wrangler pulls workerd, whose build script only fetches a binary the
+    // package already ships for supported platforms.
+    declinedBuildScripts: ["workerd"],
     serverWrangler: {
       // Above @astrojs/cloudflare 14.3's wrangler peer floor (^4.125.0).
       wranglerFloor: "wrangler@^4.127.1",

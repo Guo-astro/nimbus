@@ -645,3 +645,50 @@ test("brings the starter's route files in step with the request rendering it set
   assert.equal(again.status, "noop");
   if (again.status === "noop") assert.deepEqual(again.routeFiles.updated, []);
 });
+
+test("cloudflare on pnpm declines workerd's build script before installing", async () => {
+  const root = scratch();
+  // The site's own workspace file, a site inside a workspace, and a site with none.
+  const own = join(root, "own");
+  const nested = join(root, "workspace", "docs");
+  const bare = join(root, "bare");
+  for (const dir of [own, nested, bare]) {
+    mkdirSync(dir, { recursive: true });
+    project(dir);
+  }
+  writeFileSync(join(own, "pnpm-lock.yaml"), "");
+  writeFileSync(join(own, "pnpm-workspace.yaml"), "allowBuilds:\n  esbuild: true\n  workerd: set this to true or false\n");
+  writeFileSync(join(root, "workspace", "pnpm-lock.yaml"), "");
+  writeFileSync(join(root, "workspace", "pnpm-workspace.yaml"), "packages:\n  - docs\n");
+  writeFileSync(join(bare, "pnpm-lock.yaml"), "");
+
+  for (const [dir, file] of [
+    [own, join(own, "pnpm-workspace.yaml")],
+    [nested, join(root, "workspace", "pnpm-workspace.yaml")],
+    [bare, join(bare, "pnpm-workspace.yaml")],
+  ] as const) {
+    let atInstall = "";
+    const res = await installAdapter("cloudflare", {
+      cwd: dir,
+      installDeps: async () => {
+        atInstall = readFileSync(file, "utf8");
+        return { ok: true };
+      },
+    });
+    assert.equal(res.status, "applied", dir);
+    assert.match(atInstall, /^ {2}workerd: false$/m, dir);
+    assert.doesNotMatch(atInstall, /set this to true or false/, dir);
+    assert.deepEqual(res.status !== "error" && res.declinedBuildScripts, { file, names: ["workerd"] });
+  }
+  assert.equal(existsSync(join(nested, "pnpm-workspace.yaml")), false, "the workspace's file, not a new one");
+});
+
+test("cloudflare on npm leaves pnpm's settings alone", async () => {
+  const dir = scratch();
+  project(dir);
+  writeFileSync(join(dir, "package-lock.json"), "{}");
+  const res = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(res.status, "applied");
+  assert.equal(res.status !== "error" && res.declinedBuildScripts, undefined);
+  assert.equal(existsSync(join(dir, "pnpm-workspace.yaml")), false);
+});

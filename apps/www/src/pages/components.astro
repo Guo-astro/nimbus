@@ -18,6 +18,8 @@ import { Banner } from "@/components/ui/banner";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CardGrid } from "@/components/ui/card-grid";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { Code } from "@/components/ui/code";
 import { CodeGroup } from "@/components/ui/code-group";
 import { CopyPrompt } from "@/components/ui/copy-prompt";
@@ -55,12 +57,13 @@ const jsSample = `// inferred`;
   title="Components"
   description="Every component, one variant per card. Click a title for the full showcase."
   sidebar={sidebar}
-  headings={[]}
-  mode="custom"
+  headings={false}
   breadcrumbs={[]}
   prevNext={{ prev: undefined, next: undefined }}
+  collection="components"
 >
-  <div class="nb-cmp-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+  <h1 slot="page-title" class="sr-only">Components</h1>
+  <div class="nb-cmp-grid not-prose grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
     {/* Accordion */}
     <div class="nb-cmp-card group/card">
       <div class="nb-cmp-preview">
@@ -174,6 +177,22 @@ const jsSample = `// inferred`;
       </a>
     </div>
 
+    {/* CardGrid */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="w-full">
+          <CardGrid>
+            <Card title="Fast">Static output.</Card>
+            <Card title="Owned">Files you edit.</Card>
+          </CardGrid>
+        </div>
+      </div>
+      <a href={componentHref("card-grid")} class="nb-cmp-link">
+        <span>CardGrid</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
     {/* Code */}
     <div class="nb-cmp-card group/card">
       <div class="nb-cmp-preview">
@@ -199,6 +218,22 @@ const jsSample = `// inferred`;
       </div>
       <a href={componentHref("code-group")} class="nb-cmp-link">
         <span>CodeGroup</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
+    {/* Collapsible */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="w-full">
+          <Collapsible class="rounded-lg ring ring-border overflow-hidden bg-card">
+            <CollapsibleTrigger class="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-accent transition-colors">What's inside?</CollapsibleTrigger>
+            <CollapsibleContent><p class="px-4 pb-3 text-sm text-muted-foreground">Anything you put in it.</p></CollapsibleContent>
+          </Collapsible>
+        </div>
+      </div>
+      <a href={componentHref("collapsible")} class="nb-cmp-link">
+        <span>Collapsible</span>
         <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
       </a>
     </div>
@@ -313,6 +348,20 @@ const jsSample = `// inferred`;
       </div>
       <a href={componentHref("icon")} class="nb-cmp-link">
         <span>Icon</span>
+        <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
+      </a>
+    </div>
+
+    {/* ImageZoom */}
+    <div class="nb-cmp-card group/card">
+      <div class="nb-cmp-preview">
+        <div class="flex flex-col items-center gap-2 text-sm text-muted-foreground">
+          <Icon name="ph:magnifying-glass-plus" class="w-6 h-6" />
+          <span>Click any image in a page to zoom it.</span>
+        </div>
+      </div>
+      <a href={componentHref("image-zoom")} class="nb-cmp-link">
+        <span>ImageZoom</span>
         <Icon name="ph:arrow-right" class="w-4 h-4 opacity-50 group-hover/card:translate-x-0.5 transition-transform" />
       </a>
     </div>
@@ -553,10 +602,14 @@ const jsSample = `// inferred`;
 </DocsLayout>
 
 <style is:global>
-  /* Grid reaches the main column edges directly. Top + left borders
-     come from the site header (bottom) and sidebar (right) — drawing
-     them here too would double up the 1px line. Each card draws right
-     + bottom so adjacent cards share a single 1px line internally. */
+  /* The grid fills the whole main column: this page drops the content
+     column's width limit and padding. */
+  #main-content > div {
+    max-width: none;
+    padding: 0;
+  }
+  /* Top and left edges come from the header and the sidebar. Each card
+     draws right + bottom so adjacent cards share a single 1px line. */
   .nb-cmp-grid {
     background: var(--nb-card);
   }

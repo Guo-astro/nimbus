@@ -45,36 +45,36 @@ const linkSvg = `<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a
     )}
     <div class="fl-body">
       <div class="fl-sig">
-        <span
+        <div
           class:list={["fl-name", field.deprecated && "fl-name--deprecated"]}
           title={field.union ? unionTitle(field.union) : undefined}
         >
           {field.name}
-        </span>
-        {field.deprecated && <span class="fl-deprecated-badge">deprecated</span>}
-        {!field.required && !field.deprecated && <span class="fl-optional">optional</span>}
+        </div>
+        {field.deprecated && <div class="fl-deprecated-badge">deprecated</div>}
+        {!field.required && !field.deprecated && <div class="fl-optional">optional</div>}
         {toks.length > 0 && (
-          <span class="fl-type-group">
+          <div class="fl-type-group">
             {toks.map((t) =>
               t.href ? (
                 <a href={withBase(t.href, import.meta.env.BASE_URL)} class="fl-type-link" title={t.title}>{t.text}</a>
               ) : (
-                <span class="fl-type" title={t.title}>{t.text}</span>
+                <div class="fl-type" title={t.title}>{t.text}</div>
               )
             )}
-          </span>
+          </div>
         )}
-        {field.nullable && <span class="fl-nullable">or null</span>}
+        {field.nullable && <div class="fl-nullable">or null</div>}
         {(field.required || expandable) && (
           /* Kept on one line so the brace never wraps away from "required". */
-          <span class="fl-sig-tail">
-            {field.required && <span class="fl-required">required</span>}
+          <div class="fl-sig-tail">
+            {field.required && <div class="fl-required">required</div>}
             {expandable && (
-              <button type="button" class="fl-count" data-fl-toggle aria-expanded={startOpen ? "true" : "false"}>
+              <button type="button" class="fl-count" data-fl-toggle data-pagefind-ignore aria-expanded={startOpen ? "true" : "false"}>
                 <span class="fl-count-brace" aria-hidden="true">{"{"}</span><span class="fl-count-text">{field.union ? countLabel(field.union.variants.length, "variant") : countLabel(field.childCount, "property")}</span><span class="fl-count-brace" aria-hidden="true">{"}"}</span>
               </button>
             )}
-          </span>
+          </div>
         )}
       </div>
 
@@ -106,7 +106,7 @@ const linkSvg = `<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a
               )}
             </ul>
           )}
-          <span class="fl-fold-close" aria-hidden="true">{"}"}</span>
+          <span class="fl-fold-close" aria-hidden="true" data-pagefind-ignore>{"}"}</span>
         </details>
       )}
     </div>

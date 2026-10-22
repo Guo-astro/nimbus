@@ -297,6 +297,46 @@ test("internal-link skips links to the same page", () => {
   }
 });
 
+test("internal-link accepts relative links between a content source's pages", () => {
+  const setup = setupProject(baseTruth());
+  const folder = path.join(setup.root, ".nimbus/sources/local/abc/docs");
+  try {
+    fs.mkdirSync(path.join(folder, "guide"), { recursive: true });
+    fs.writeFileSync(path.join(folder, "2-options.md"), "# Options\n\n## Signal\n");
+    fs.writeFileSync(path.join(folder, "guide/next.mdx"), "# Next\n");
+    const absPath = path.join(folder, "index.mdx");
+    const source = `${FM}
+# Title
+
+[Options](./2-options.md#signal), [next](guide/next.mdx), [readme](../readme.md), [other](./other).
+`;
+    const run = (sourceFolder?: string) => {
+      _resetInternalLinkCacheForTests();
+      const parsed = parseSource(source, {
+        path: "local: docs/index.mdx",
+        absPath,
+        collection: "external",
+        projectRoot: setup.root,
+      });
+      return lintFile(parsed, {
+        rules: { "nimbus/internal-link": "error" },
+        sourceFolder: () => sourceFolder,
+      }).filter((d) => d.code === "nimbus/internal-link");
+    };
+    assert.deepEqual(
+      run(folder).map((d) => d.message),
+      [
+        `relative link "../readme.md" isn't a page of this collection; the build leaves it as written.`,
+        `relative link "./other" — internal docs links should be root-relative (e.g. /foo).`,
+      ],
+    );
+    // Outside a content source, every relative link is still reported as one.
+    assert.equal(run(undefined).length, 4);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
 test("internal-link tolerates relative links when allowRelative is on", () => {
   const setup = setupProject(baseTruth());
   try {

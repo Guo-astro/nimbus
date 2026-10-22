@@ -1,14 +1,32 @@
 ---
-title: Markdown and llms.txt endpoints
-description: Add alternate Markdown/MDX versions, llms.txt indexes, and llms-full.txt.
+title: Markdown and llms.txt
+description: The Markdown version of every page, the llms.txt indexes and llms-full.txt that every site publishes, and the routes behind them.
 aiGenerated: true
 sidebar:
-  order: 2
+  order: 1
 ---
 
-Add the five endpoints that serve alternate Markdown/MDX versions, site and section `llms.txt` indexes, and `llms-full.txt`. The Nimbus integration must already be present in `astro.config.ts`.
+Every Nimbus site publishes a plain-text copy of itself for agents and other tools. New sites have the routes already.
 
-## 1. Add alternate page versions
+## What every site publishes
+
+| Path | What it is |
+| --- | --- |
+| `/<slug>/index.md` | The page as clean Markdown, with components converted to text. Links to its `.mdx` source. |
+| `/<slug>/index.mdx` | The page's authored source, with imports, JSX and directives. Not published for API pages. |
+| `/llms.txt` | An index of the current docs: top-level pages and a link to each section's index. |
+| `/<section>/llms.txt` | An index for each top-level group and collection, and each folder below it, linked from its parent. |
+| `/llms-full.txt` | Every current page in one Markdown document. Over 25 MiB, it becomes an index of one `llms-full.txt` per section. |
+| `/<version>/llms.txt` | An index for each older docs version, which the site index leaves out. |
+
+On a versioned site, every Markdown version's frontmatter has a `version:` key, so agents can pin a version. Every page's head also carries JSON-LD structured data. Pages with `draft: true` or `noindex: true` are left out of the indexes; see [Docs for agents](/ai/docs-for-agents#how-pages-are-indexed) for the full rules.
+
+## Add the routes to an older site
+
+A site created before these routes shipped adds five endpoints. The Nimbus integration must already be present in `astro.config.ts`.
+
+
+### 1. Add alternate page versions
 
 Create the clean Markdown version:
 
@@ -28,9 +46,9 @@ export const { GET, getStaticPaths } = markdownSourceRoute();
 
 These two routes serve every collection, including docs versions, a blog at `/blog`, and API references. API pages have a `.md` version but no `.mdx` source. Pages in hidden versions have neither. Collections you add later need no new route files. To customize the output for some or all pages, see [Override a default](/ai/override-markdown).
 
-On a static site these routes build ahead of time. With a [`rendering` policy](/configuration#rendering), a page's Markdown follows its collection's rendering mode: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files. Run `nimbus-docs check --fix` after changing the policy to write each route's mode into the file.
+On a static site these routes build ahead of time. With a [`rendering` policy](/reference/rendering), a page's Markdown follows its collection's rendering mode automatically: a request-rendered collection serves its Markdown and MDX versions on request from these same routes, and prerendered collections keep their static files. Run `nimbus-docs check --fix` after changing the policy to write each route's mode into the file.
 
-## 2. Add the site index
+### 2. Add the site index
 
 Create the site-wide discovery index:
 
@@ -40,7 +58,7 @@ import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 export const { GET } = llmsRoute();
 ```
 
-## 3. Add llms-full.txt
+### 3. Add llms-full.txt
 
 Create the file containing all discoverable documentation:
 
@@ -60,7 +78,7 @@ When the document would be over 25 MiB (Cloudflare's per-file limit), `/llms-ful
 
 The build log lists the files it wrote. On Cloudflare (the adapter, or a `wrangler` file), the build warns about any agent file over 25 MiB, including a single page's Markdown, because that file would fail the deploy.
 
-## 4. Add section indexes
+### 4. Add section indexes
 
 Create the route for paths such as `/writing/llms.txt` and `/reference/functions/llms.txt`:
 
@@ -70,13 +88,17 @@ import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 export const { GET, getStaticPaths } = llmsSectionRoute();
 ```
 
-Each section index lists the pages directly in its folder, then links each sub-folder's own `llms.txt` under "Sections", so an agent descends one level at a time. A folder with even one page gets its own index; a folder holding only an `index.mdx` is a page of its parent. A section is named by its index page's `sidebar.group.label`, then its title, then the folder name. A route in a `[section]` folder (from an older starter) still works: it serves one index per top-level section listing every page under it. Rename the folder to `[...section]` to get the nested indexes.
+Each section index lists the pages in its folder, then links each sub-folder's `llms.txt` under "Sections", so an agent descends one level at a time. A folder with only an `index.mdx` is a page of its parent.
+
+A section is named by its index page's `sidebar.group.label`, then its title, then the folder name.
 
 Each `GET` returns `404` for an unknown section. Rendered on request, it returns a `500` without details when an index can't be read, and logs the error. To change what a route serves, see [Override a default](/ai/override-markdown#override-an-llmstxt-index).
 
-The `llms.txt` endpoints follow the rendering policy the same way: the site index and `llms-full.txt` render in `rendering.default`, and a section index renders in the mode of the collection it lists. The `agent-endpoints` helpers support either mode and require the Nimbus Astro integration. The build still warns about a Markdown version or `llms.txt` index in a prerendered collection that no route generated, and names the route that serves it.
+The `llms.txt` endpoints follow the rendering policy too: the site index and `llms-full.txt` use `rendering.default`, and a section index uses its collection's mode.
 
-## Verify
+The build warns when a prerendered collection's Markdown or `llms.txt` has no route, and names the route to add.
+
+### Verify
 
 Run a production build, then start Astro's production preview:
 
@@ -85,17 +107,19 @@ pnpm build
 pnpm preview
 ```
 
-In another terminal, replace `get-started` and `writing` with routes that exist in the project. If Astro has a deployment base, prefix each path with it:
+In another terminal, replace `guides/install` and `writing` with routes that exist in the project. If Astro has a deployment base, prefix each path with it:
 
 ```sh
-curl --fail http://localhost:4321/get-started/index.md
-curl --fail http://localhost:4321/get-started/index.mdx
+curl --fail http://localhost:4321/guides/install/index.md
+curl --fail http://localhost:4321/guides/install/index.mdx
 curl --fail http://localhost:4321/llms.txt
 curl --fail http://localhost:4321/llms-full.txt
 curl --fail http://localhost:4321/writing/llms.txt
 ```
 
-Each command must return content with a successful status. A `404` means the corresponding route file is missing, or the collection isn't a page collection — only collections made with Nimbus's helpers publish Markdown; wrap a custom loader with `withNimbusMarkdown()` as described in [Other collections](/writing/pages-and-routing#other-collections). If a section index is absent, confirm that the section has discoverable pages and appears in `/llms.txt`.
+Each command should return content with a success status. A `404` means the route file is missing, or the collection isn't a page collection; wrap a custom loader with [`withNimbusMarkdown()`](/writing/collections#add-a-collection).
+
+If a section index is missing, check that the section has discoverable pages and appears in `/llms.txt`.
 
 ## Direct rendering
 
@@ -104,5 +128,6 @@ Each command must return content with a successful status. A `404` means the cor
 ## Next steps
 
 - [Understand docs for agents](/ai/docs-for-agents)
-- [Customize generated Markdown](/configuration#customize-generated-markdown)
-- [Configure custom content loaders](/writing/pages-and-routing#other-collections)
+- [Override generated Markdown](/ai/override-markdown)
+- [Customize generated Markdown](/reference/configuration#customize-generated-markdown)
+- [Configure custom content loaders](/writing/collections#add-a-collection)

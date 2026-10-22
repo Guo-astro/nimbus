@@ -1,0 +1,116 @@
+---
+title: Routes and coordinates
+description: How Nimbus names each OpenAPI item and chooses its URL, and how to keep URLs stable.
+aiGenerated: true
+sidebar:
+  order: 2
+---
+
+Nimbus treats identity and routing separately. A **coordinate** identifies an API item in citations, cross-version matching, anchors, and the coordinate manifest. A **route** is the URL of its generated page.
+
+Operations use their OpenAPI `operationId` as the coordinate:
+
+```yaml
+paths:
+  /v1/events/{event_id}:
+    get:
+      operationId: retrieveEvent
+      summary: Retrieve an event
+      tags: [Events]
+```
+
+This operation's coordinate is `retrieveEvent`. Without a route policy, its first tag and operation ID produce `/api/Events/retrieveEvent`. A config without `routes` keeps these URLs, so an existing site never moves.
+
+Sites set up with the recipe get the `resource-action-v2` policy, which derives routes from HTTP methods and paths instead:
+
+```ts
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    requireOperationId: true,
+    routes: {
+      convention: "resource-action-v2",
+      stripPathPrefixes: ["/v1"],
+    },
+  },
+],
+```
+
+Here, Nimbus removes `/v1` and publishes the operation at `/api/events/retrieve`; its coordinate remains `retrieveEvent`.
+
+Derivation recognizes `/<resource>` and `/<resource>/{parameter}` after prefix removal. It maps collection `GET`/`POST` to `list`/`create`, and member `GET`/`PUT`/`PATCH`/`DELETE` to `retrieve`/`update`/`update`/`delete`. Tags do not affect operation routes derived by either convention. Other shapes or unsupported method/shape combinations normally fall back to a normalized coordinate with a build warning; the build fails if that coordinate cannot produce a non-empty route.
+
+Tag pages follow the convention too. `resource-action-v2` lowercases them, so `User Management` is at `/api/tags/user-management`. The earlier `resource-action-v1` keeps the tag's casing: `/api/tags/User-Management`. A tag's coordinate, such as `tags.Locations`, is the same under both.
+
+A convention never changes once released; new routing ships under a new name.
+
+An explicit operation override, keyed by the exact usable `operationId`, takes precedence and can preserve an existing URL or handle a path that cannot be derived:
+
+```ts
+routes: {
+  convention: "resource-action-v2",
+  operations: {
+    retrieveEvent: "events/get",
+  },
+},
+```
+
+Without a usable `operationId`, Nimbus derives a fallback coordinate from the method and path. `requireOperationId: true` rejects that fallback, but changing an existing operation ID still changes the coordinate. Webhooks always use their map keys as coordinates and publish below `webhooks/<key>`; configuring an operation override for a webhook fails the build.
+
+Renaming a coordinate requires updating citations and affects cross-version matching. Changing only a route leaves coordinate-based citations intact, but breaks direct links to the previous URL. Nimbus does not create that redirect automatically; add it in Astro or on the deployment platform.
+
+### Switching conventions
+
+Moving from `resource-action-v1` to `resource-action-v2` changes only tag page URLs. Adding `routes` to a collection that had none changes operation URLs too. Citations keep working, since they name coordinates, but add redirects for the old URLs.
+
+Each version in a family can use a different convention; the version picker still pairs pages by coordinate.
+
+### Coordinate shapes
+
+Operations are not the only addressable items. Nimbus assigns coordinates to pages and to details within them:
+
+| API item | Coordinate example |
+| --- | --- |
+| API root | `api` |
+| Tag | `tags.Events` |
+| Operation | `retrieveEvent` |
+| Request body field | `retrieveEvent.name` |
+| Parameter | `retrieveEvent.path.event_id` |
+| Response | `retrieveEvent.response.200` |
+| Response field in an additional media type | `retrieveEvent.response.200.text-csv.id` |
+| Schema (with [schema pages](#schema-pages) on) | `Event` |
+| Schema field (with schema pages on) | `Event.created_at` |
+| Webhook | `delivery.succeeded` |
+
+Request field lists leave out `readOnly` properties, and response field lists leave out `writeOnly` ones, so those fields have no coordinate there. A webhook's payload follows the response rule.
+
+Cite a `readOnly` field in the response, where it appears. A citation to it under the request fails the build and names the response field.
+
+Use `/nimbus-api/coordinates.json` to inspect the exact coordinates and resolved URLs published by a built site.
+
+## Schema pages
+
+By default, types show only inline, on the operations that use them: request and response fields, and the properties previewed under each union variant, come from `components/schemas`, but a schema gets no page of its own. In a large API, schema pages would outnumber operation pages.
+
+To publish a page for every schema at `/api/schemas/<Name>`, set `schemaPages: true`:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    schemaPages: true,
+  },
+],
+```
+
+Each schema then also gets:
+
+- a Markdown version and an OG image;
+- sitemap, search, and `llms.txt` entries;
+- coordinates, for the schema and its fields, in citations and `coordinates.json`.
+
+Type names such as union variants, discriminator mappings, and `map<Name>` value types link to their schema pages; without them, they render as text. A union variant previews its properties one level deep, so turn schema pages on if readers need a variant's nested fields.
+
+With schema pages off, an `api.ref:` citation in your content to a schema or a schema field fails the build and names the setting. Cite an operation that uses the type instead. Schema names claim their `schemas/<Name>` routes either way, so turning schema pages on can't collide with an operation. The setting applies to every version of a family.

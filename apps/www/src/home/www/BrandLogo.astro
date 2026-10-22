@@ -1,0 +1,13 @@
+---
+/* Source logos for the Content loaders tile, inlined so they need no icon
+   package. Notion and Google Docs keep their brand colours; GitHub follows
+   the text colour so it reads in dark mode. */
+import notion from "./logos/notion.svg?raw";
+import gdocs from "./logos/gdocs.svg?raw";
+import repo from "./logos/repo.svg?raw";
+
+interface Props { id: "notion" | "gdocs" | "repo"; class?: string }
+const { id, class: cls = "" } = Astro.props;
+const svg = { notion, gdocs, repo }[id];
+---
+<span class:list={["inline-flex shrink-0 [&>svg]:size-full", cls]} aria-hidden="true" set:html={svg} />

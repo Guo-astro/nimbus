@@ -1,0 +1,30 @@
+---
+/* Section header, two treatments (chosen Oct 9, 2026):
+   1 · label left, headline at the midline (Polar)
+   2 · headline left, paragraph right, no label
+   The headline is the <h2>; the label is a visual cue only. */
+// `bodyShort` replaces `body` below the md breakpoint, where long copy runs to many lines.
+// `bodyClass` styles the paragraph, such as `md:hidden` to show it on phones only.
+interface Props { id: string; label: string; h1: string; h2?: string; body?: string; bodyShort?: string; bodyClass?: string; layout?: 1 | 2; class?: string }
+const { id, label, h1, h2, body, bodyShort, bodyClass, layout = 1, class: cls = "" } = Astro.props;
+const H = "text-balance text-[22px] leading-7 md:text-[26px] md:leading-8";
+const L = "font-display text-[22px] leading-7 text-foreground md:text-[26px] md:leading-8";
+const P = "text-pretty text-lg leading-7 tracking-[0.01em] text-muted-foreground md:text-[18px] md:leading-7";
+---
+<section id={id} class:list={["border-t border-border pt-20", cls]}>
+  {layout === 1 ? (
+    <div class="grid gap-6 md:grid-cols-2 md:gap-8">
+      <p class={L} aria-hidden="true">{label}</p>
+      <div class="min-w-0">
+        <h2 class={H}><span class="block text-foreground">{h1}</span>{h2 && <span class="block text-muted-foreground">{h2}</span>}</h2>
+        {body && <p class:list={[P, "mt-5 max-w-lg", bodyClass]}>{bodyShort ? <><span class="md:hidden">{bodyShort}</span><span class="hidden md:inline">{body}</span></> : body}</p>}
+      </div>
+    </div>
+  ) : (
+    <div class="grid gap-6 md:grid-cols-2 md:gap-8">
+      <h2 class={H}><span class="block text-foreground">{h1}</span>{h2 && <span class="block text-muted-foreground">{h2}</span>}</h2>
+      {body && <p class:list={[P, "max-w-lg md:pt-1.5"]}>{bodyShort ? <><span class="md:hidden">{bodyShort}</span><span class="hidden md:inline">{body}</span></> : body}</p>}
+    </div>
+  )}
+  <slot />
+</section>

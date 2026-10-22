@@ -1,0 +1,230 @@
+---
+title: Content from another repository
+description: Build part of the site from another git repository, a Notion database, or any provider, with pages that behave like the site's own.
+sidebar:
+  label: Git repositories
+  order: 1
+---
+
+A product with several repositories keeps its docs next to its code: the SDK's guides in the SDK repository, the API's spec with the API. Nimbus can build part of a site from them without copying anything in. Start from the CLI, which hands your coding agent a guide for the source you name:
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source github --print | claude" />
+
+| `add source …` | What it adds |
+| --- | --- |
+| `git`, or `github`, `gitlab`, `bitbucket` | Pages from another git repository, checked out at build time (this page) |
+| `notion` | Pages from a Notion database, through a loader your agent writes into your site ([Content from Notion](/content-sources/notion)) |
+| a URL | A guide for writing a loader for any other provider, starting from its docs |
+
+`add source` alone lists them.
+
+## Declare a git source
+
+A **content source** is a git repository Nimbus checks out before content sync. Declare it once in the Nimbus config:
+
+```ts title="astro.config.ts"
+const nimbusConfig = defineNimbusConfig({
+  site: "https://docs.example.com",
+  title: "Acme",
+  sources: {
+    sdk: {
+      repo: "https://github.com/acme/sdk.git",
+      ref: process.env.SDK_DOCS_REF ?? "4f2c1e9a0b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f",
+      path: "docs",
+      editPattern: "https://github.com/acme/sdk/edit/main/{path}",
+    },
+  },
+});
+```
+
+| Key | Notes |
+| --- | --- |
+| `repo` | Anything `git clone` accepts: an `https` or `ssh` URL, or a local path (relative to the project root). Never a credential; see [Private repositories](#private-repositories). |
+| `ref` | A 40-character commit, or a branch or tag name. |
+| `path` | The folder to check out, relative to the repository root. `""` is the whole repository. Nothing outside it is fetched. |
+| `editPattern` | Optional edit links for the source's pages. See [Edit links](#edit-links). |
+
+The name (`sdk`) is lowercase letters, digits and dashes.
+
+Then register one collection per mount. `base` is a folder inside the source's `path` (default: all of it):
+
+```ts title="src/content.config.ts"
+export const collections = {
+  docs: defineCollection(docsCollection()),
+  "sdk-guides": defineCollection(docsCollection({ source: "sdk", base: "guides" })),
+  "sdk-reference": defineCollection(docsCollection({ source: "sdk", base: "reference" })),
+};
+```
+
+Like any collection, each one needs a route file and a sidebar entry; `nimbus-docs add new-collection --print` prints the steps for both. One source can feed any number of collections from one checkout.
+
+- **Sidebar.** Without `sidebar.items`, the sidebar shows only `docs`. Once you add `sidebar.items`, list `docs` there too, since the list replaces the default.
+- **Landing page.** A collection's own URL, such as `/sdk-guides/`, is its `index.md`. Without one, the section tabs link to a missing page.
+
+## Docs written for GitHub
+
+A repository's docs folder usually works as written:
+
+- **Titles.** A page with no `title` in its frontmatter takes its first heading (`## Promise API`), else its file name. The heading still shows in the page, under the title.
+- **Links between pages.** A relative link to another page of the collection, such as `2-options.md#signal`, becomes that page's URL on the site. A relative link to a file the collection doesn't publish, such as `../readme.md`, stays as written, and the build warns so you can point it at a page or a full URL.
+- **Lint.** `nimbus-docs lint` reads `.mdx` files; it says how many `.md` pages that leaves out.
+
+The pages are pages in every way a local page is: callouts, components (including ones imported beside the page), images, `api.ref:` citations, link checking, collision checks, MDX validation, Markdown versions, `llms.txt` and search. Two entries that resolve to one URL fail the build, whichever collections they come from.
+
+## What happens at build time
+
+Each source resolves to a **snapshot**: a sparse, history-free checkout of `path` at one commit, under `.nimbus/sources/`, with its `.git` folder removed. The build log names the source and the commit:
+
+```text
+nimbus: source "sdk" (https://github.com/acme/sdk.git @ 4f2c1e9…): fetched commit 4f2c1e9a0b3d.
+```
+
+`.nimbus/` is ignored by git (add it to `.gitignore` on a site adopted with `nimbus-docs init`). Snapshots belong to the repository, ref and path that made them; a running dev server or build keeps the one it reads until it exits, and a later build prunes snapshots nothing reads or declares.
+
+Pages from a source have no git history of their own, so they get no last-updated date unless their frontmatter sets `lastUpdated`.
+
+## Pin a commit, or follow a branch
+
+A **commit** is fetched once and reused with no network call. A site that pins its sources builds the same pages every time, offline. This is the default to aim for.
+
+A **branch or tag** is resolved on every build with one `git ls-remote`, so pages can change between builds; `nimbus-docs check` reports it as `nimbus/source-floating-ref`.
+
+When the remote can't be reached, a branch builds from its last snapshot, with a warning naming the commit. These fail instead:
+
+- a source whose `path` or `ref` changed since that snapshot;
+- a pinned commit that was never fetched;
+- a `path` missing at the commit.
+
+Templating the ref, as above, lets a preview build any commit while production keeps the pin; `check` reads a templated ref through its fallback.
+
+## Private repositories
+
+Nimbus never takes a credential. A `repo` with a token or password in it (`https://<token>@github.com/…`, `https://user:<token>@…`) fails config validation before git runs, and the message shows the URL as `https://***@…`. Give the credential to git instead:
+
+- **Locally:** git's credential helper, or an SSH remote (`git@github.com:acme/sdk.git`), already works.
+- **In CI:** set git's `extraHeader` through environment variables, which is how `actions/checkout` authenticates:
+
+  ```yaml
+  env:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: http.https://github.com/.extraHeader
+    GIT_CONFIG_VALUE_0: "Authorization: Basic ${{ secrets.SDK_DOCS_BASIC_AUTH }}"
+  ```
+
+  The secret is the base64 of `x-access-token:<token>` on GitHub, `gitlab-ci-token:<token>` on GitLab, and `x-token-auth:<access token>` on Bitbucket.
+
+Git runs without a terminal prompt, so a missing credential fails at once with git's own error instead of waiting for a timeout.
+
+<Aside type="caution" title="A source is trusted code">
+MDX from a source runs at build time exactly like local MDX: it can import modules and render components. Pin a commit on a repository you don't control; a branch runs whatever anyone who can merge there pushes.
+</Aside>
+
+## API specs from a source
+
+An `api` entry can read its spec from a source. `path` is the file's path inside the repository and must lie under the source's `path`:
+
+```ts title="astro.config.ts"
+api: [{ collection: "api", spec: { source: "sdk", path: "docs/openapi.json" } }],
+```
+
+## Edit links
+
+The site's `editPattern` points at the docs repository, so a source gets its own. `{path}` is the file's path in the source repository, and `{ref}` is the configured `ref`. Without one, the source's pages have no edit link.
+
+With a pinned commit, write the branch name into the pattern, such as `edit/main/{path}`: on most hosts, an edit URL with a commit opens read-only.
+
+| Host | `editPattern` |
+| --- | --- |
+| GitHub | `https://github.com/<owner>/<repo>/edit/main/{path}` |
+| GitLab | `https://gitlab.com/<group>/<project>/-/edit/main/{path}` |
+| Bitbucket | `https://bitbucket.org/<workspace>/<repo>/src/main/{path}?mode=edit` |
+
+## Development server, lint and check
+
+`astro dev` resolves each source when it starts and keeps that snapshot; restart it to follow a branch that has moved. `.nimbus/sources` isn't watched. A source it can't fetch and has no snapshot of leaves its collections empty: see [Build without a source](#build-without-a-source).
+
+`nimbus-docs lint` and `check` read the snapshots the last build or dev start selected, and report a problem in one by source and repository path (`sdk: docs/guides/intro.mdx:12`), where its author fixes it. `--fix` never writes a snapshot: its fixable findings stay in the report. Before the first build there is no snapshot, and lint names the collection as not inspected.
+
+`check` also reports, without a build:
+
+- `nimbus/source-floating-ref` (warning): a literal branch or tag `ref`.
+- `nimbus/source-unreferenced` (warning): a source no collection and no `api` entry reads.
+
+A `sources` map that is computed beyond a templated ref defers only the checks that need it.
+
+## Build without a source
+
+`astro build` is strict; every other command starts without a source it can't fetch.
+
+**A partial build fetches only what it reads.** With [`NIMBUS_BUILD_ONLY`](/publish/partial-builds), a build fetches a source when a collection in the slice reads it, or any `api` entry does. Other sources keep their last snapshot, so `lint` and the next full build still find them:
+
+```text
+nimbus: source "acme-sdk" not fetched: no collection in NIMBUS_BUILD_ONLY=docs reads it.
+```
+
+The build reads `src/content.config.ts` as text, without running it, so write `source` as a string literal in `docsCollection()`. A variable, a helper, an imported collection or a spread hides the read, and the slice then fetches every source and names what hid it:
+
+```text
+nimbus: NIMBUS_BUILD_ONLY fetches every source: collection "sdk" sets its source in a way the build can't read without running src/content.config.ts. Write source as a string literal to let slices skip it.
+```
+
+A schema field named `source` counts as a read too; `schema: docsCollection().schema` reads nothing. A loader imported from another module (`defineCollection({ loader: sdkLoader })`) can't be seen at all: a slice that skips its source fails, naming the collection and the source.
+
+**A build fails without a source.** A source that can't be fetched and has no snapshot fails `astro build` with git's error, what reads the source, and where to give git a credential:
+
+```text
+nimbus-docs: could not fetch source "acme-sdk" (https://github.com/acme/acme-sdk.git @ main): <git's error>. No snapshot of this repo, ref and path exists under .nimbus/sources/acme-sdk/.
+  Read by: collection "sdk".
+  Give git a credential: https://nimbus-docs.com/content-sources/git/#private-repositories
+```
+
+**Everything else starts without it.** `astro dev` and `astro sync` (which `astro check` runs) start without such a source: its collections are empty, the rest of the site works, and the log says so once per start:
+
+```text
+nimbus: source "acme-sdk" (https://github.com/acme/acme-sdk.git @ main) is unavailable; collections "sdk", "sdk-guides" are empty until it can be fetched (restart to retry). A full build fails until then. git: <git's error>
+```
+
+`astro preview` runs no git command and reads the existing snapshots; a source with none leaves its collections empty.
+
+A source that an `api` entry reads still fails these commands, because an API reference can't render without its spec. So does a config error, such as a `path` missing at the commit. A first fetch of a large repository can wait for the full timeout; a missing credential fails in seconds.
+
+## Timeouts
+
+Resolving a branch or tag has 30 seconds, fetching a commit 10 minutes. `NIMBUS_SOURCES_RESOLVE_TIMEOUT` and `NIMBUS_SOURCES_FETCH_TIMEOUT` (seconds) change them.
+
+## Operating a multi-repository site
+
+**Pinned production with a bump PR.** Keep production on a commit, and let the source repository propose the next one. A workflow in the source repository opens a pull request on the docs repository when its docs change; the diff is the review:
+
+```yaml title=".github/workflows/bump-docs.yml (in the source repository)"
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**"]
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: acme/docs
+          token: ${{ secrets.DOCS_REPO_TOKEN }}
+      - run: |
+          sed -i -E 's/(SDK_DOCS_REF \?\? ")[0-9a-f]{40}/\1${{ github.sha }}/' astro.config.ts
+          git switch -c bump-sdk-docs-${{ github.sha }}
+          git commit -am "bump sdk docs to ${{ github.sha }}"
+          git push origin HEAD
+          gh pr create --fill --repo acme/docs
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_REPO_TOKEN }}
+```
+
+**Floating staging.** A staging deployment can set `SDK_DOCS_REF=main` and rebuild from a deploy hook the source repository calls on push.
+
+**Previews from the source repository.** A pull request in the source repository can preview its docs on the docs site. Trigger the docs site's preview build with `SDK_DOCS_REF` set to the pull request's head commit, or on GitHub to `refs/pull/<number>/head`; a `ref` starting with `refs/` is used as written.
+
+For a private source, give the preview environment a read token for git, as above, not for Nimbus.
+
+**Caching.** Cache `.nimbus/sources` between CI runs; a pinned commit is then a cache hit with no fetch. A build keeps only the snapshots its own declaration selects, so a preview build with another ref prunes production's snapshot from a shared cache. Key the cache on the ref (for example `sources-${{ env.SDK_DOCS_REF }}`) so previews and production don't share one.
+
+**Git on the build image.** Builds run `git`. Most CI and hosting images include it; check yours.

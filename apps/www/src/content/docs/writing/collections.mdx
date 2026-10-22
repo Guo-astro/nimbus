@@ -1,0 +1,94 @@
+---
+title: Collections
+description: Add a collection beside your docs, such as a blog or an SDK guide, and choose the URL it's served at.
+aiGenerated: true
+sidebar:
+  order: 2
+---
+
+## Add a collection
+
+`src/content/docs/` is the primary collection, mounted at the site root. Additional collections (a `blog`, an `api`, a versioned `docs-v2`) are served at their own URL: where their route file is, or `/<name>` by default (see [Collection URLs](#collection-urls)). Register them in `src/content.config.ts` with the factories from `@cloudflare/nimbus-docs/content`.
+
+Nimbus's `docsCollection()`, `partialsCollection()`, and `componentsCollection()` factories prepare content for links, alternate Markdown/MDX versions, `llms-full.txt`, and partial headings automatically. If you register a loader that stores Markdown bodies directly, wrap it with `withNimbusMarkdown()`:
+
+```ts title="src/content.config.ts"
+import { defineCollection } from "astro:content";
+import { glob } from "astro/loaders";
+import { withNimbusMarkdown } from "@cloudflare/nimbus-docs/content";
+
+export const collections = {
+  blog: defineCollection({
+    loader: withNimbusMarkdown(
+      glob({ base: "./src/content/blog", pattern: "**/*.{md,mdx}" }),
+    ),
+  }),
+};
+```
+
+The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`.
+
+A page collection's files can live anywhere. For content in another repository or a CMS, see [Content from another repository](/content-sources/git).
+
+- **A folder outside `src/`**, such as a shared folder in a monorepo, works exactly like a page under `src/content`.
+- **A loader with no files**, such as a CMS, gets routes, the sidebar, citations, links, Markdown versions, `llms.txt` and search. Its pages are Markdown only, so no callouts or components, and lint skips it. It must reject duplicate ids itself, because without files Nimbus can't tell a collision from an update.
+
+Two files with the same slug fail the build.
+
+A collection made with `docsCollection()`, `componentsCollection()` or a `withNimbusMarkdown()` loader becomes pages: routed, and included in search, the sitemap, `llms.txt` and Markdown versions. `apiCollection()` does the same for API references, with Nimbus's renderer.
+
+Every other collection is plain Astro data. Nimbus leaves it alone, and `getCollection()` works as usual. Collection names carry no meaning.
+
+## Collection URLs
+
+A collection is served where its route file is. Put the route at `src/pages/products/sdk/[...slug].astro` and the `sdk` collection is served at `/products/sdk/…`: pages, the sidebar, breadcrumbs, Markdown versions, `llms.txt`, the sitemap, search, social cards and, for an API, `openapi.json` and the API catalog. There is no config key; moving a section is moving its folder.
+
+```astro title="src/pages/products/sdk/[...slug].astro"
+---
+import DocsLayout from "../../../layouts/DocsLayout.astro";
+import { getCollectionPage, getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+
+export const getStaticPaths = getCollectionStaticPaths("sdk");
+
+const page = await getCollectionPage(Astro, "sdk");
+if (page instanceof Response) return page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
+// The rest matches your root src/pages/[...slug].astro: sidebar, previous and next, layout.
+---
+```
+
+`nimbus-docs add new-collection` writes the whole route for you. Relative imports such as the layout's grow one `../` per folder level.
+
+Nimbus reads the collection from the route's exported `getStaticPaths`: `getCollectionStaticPaths("…")`, `getApiStaticPaths("…")` or `getDocsStaticPaths`, assigned directly (`export const getStaticPaths = …`), or returned from `export async function getStaticPaths()`. Every collection route also names the collection in its page helper: `getCollectionPage(Astro, "sdk")`, and likewise `getCollectionPageProps`, `getApiRoute` and `getApiPage`. That's what a route rendered on request, which has no `getStaticPaths`, needs, and naming it on built routes too keeps the file the same in either mode. The names must match. Docs routes use `getDocsPage(Astro)`, whose name says the collection. Pass the collection name as a string literal, or an exported const holding one. Astro runs `getStaticPaths` apart from the rest of the frontmatter, so anything it uses at the top level must be imported or exported (`export const name = "sdk"`); `export { getStaticPaths }` doesn't compile.
+
+A route Nimbus can't read, such as a wrapper imported from another module, keeps the collection at its default URL. The build and `check` warn about one in a nested folder (`nimbus/collection-unread-route`), and its pages fail the build when they render, naming the route.
+
+The rules:
+
+- `docs` is served at the site root, and a docs version (`docs-v1`) at `/v1`. A docs route away from the root isn't supported yet; for a site that is all docs under one path, set Astro's `base` (`base: "/docs"`).
+- Any other collection with a route is served at the route's folder, the root included. Without one, it's served at `/<name>`, as before.
+- One route file serves one collection. A route under a dynamic folder (`src/pages/[locale]/sdk/[...slug].astro`) doesn't set a URL; a collection other than `docs` served only from routes like that is an error. Rendered on request, such a route finds its collection by the URL segment before the page, so it serves only collections at a one-segment URL (`/sdk`).
+- Several static routes for one collection: the one at its default URL serves it. The others still build their pages (or serve them, for a collection rendered on request), which duplicate the collection's in the sitemap and search, so the build and `check` warn (`nimbus/collection-alias-route`); delete them or redirect them. With none at the default, it's an error.
+- A collection a route moved owns everything below its URL. Another collection's page under `/products/sdk` is an error, except under a collection nested deeper (`/products/sdk/cli` is its own). A collection at its default URL (`/sdk`) leaves pages under it as they were.
+- An API collection can be served at the site root, for a site that is only an API reference: put its route at `src/pages/[...slug].astro` and leave out `docs`.
+
+`nimbus-docs check` lists where each collection is served when a route moves one, and `check --json` always includes the list as `collections`.
+
+To link to a collection from a component, use `getCollectionUrl`, which returns the URL without `base`. A name that isn't a page collection fails the build:
+
+```astro
+---
+import { getCollectionUrl, withBase } from "@cloudflare/nimbus-docs/runtime";
+const sdkHref = withBase(await getCollectionUrl("sdk"), import.meta.env.BASE_URL);
+---
+```
+
+Moving a route moves every URL in that collection, so add a [redirect](/navigation/redirects) from the old URLs. Until you do, `nimbus-docs lint` reports links to them as broken and suggests the new URL. Afterwards, [`nimbus/redirected-link`](/writing/linting) finds links still going through the redirect.
+
+In `astro dev`, moving a route file restarts the server and logs the redirect to add. After that restart, restart the dev server yourself if content edits stop showing.
+
+A collection nested inside a docs folder appears inside that folder in the sidebar, breadcrumbs and previous and next links; see [Show a collection inside a folder](/navigation/sidebar#show-a-collection-inside-a-folder).
+
+A nested collection's own `llms.txt` needs the starter's `src/pages/[...section]/llms.txt.ts` route. With a `[section]` route instead, the root `llms.txt` lists the collection's pages.
+
+The build and `nimbus-docs check` report collection routing mistakes with the file and the fix. See [Build and check findings](/reference/lint-rules#build-and-check-findings) for every code.

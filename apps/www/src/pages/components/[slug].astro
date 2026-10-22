@@ -9,15 +9,13 @@
  * `props` array, not by hand-authored prose.
  */
 import { getCollection, getEntry, render } from "astro:content";
-import ShowcaseLayout from "@/layouts/ShowcaseLayout.astro";
+import DocsLayout from "@/layouts/DocsLayout.astro";
 import PropTable from "@/components/showcase/PropTable.astro";
-import { Breadcrumbs } from "@/components/ui/breadcrumbs";
-import { PageActions } from "@/components/ui/page-actions";
 import { PackageManagers } from "@/components/ui/package-managers";
 import { components } from "../../components";
 import { Code } from "@/components/ui/code";
-import { Pagination } from "@/components/ui/pagination";
 import { MANIFESTS } from "@/../registry/manifests";
+import { STARTER_MANIFEST } from "../../../../../packages/nimbus-starter-source/starter.manifest.mjs";
 import { getSidebar } from "@cloudflare/nimbus-docs";
 import type { TOCItem } from "@cloudflare/nimbus-docs/types";
 
@@ -36,6 +34,10 @@ if (!entry) return new Response("Not found", { status: 404 });
 
 const manifest = MANIFESTS[slug as keyof typeof MANIFESTS];
 const isBuiltin = !manifest || manifest.type !== "registry:ui";
+// Where the component comes from: the package itself, the starter every new
+// site ships, or the registry, installed with `nimbus-docs add`.
+const registryOnly = (STARTER_MANIFEST.registryOnlyComponents as readonly string[]).includes(slug);
+const installState = isBuiltin ? "builtin" : registryOnly ? "install" : "included";
 
 const { tagline, props } = entry.data;
 const hasProps = props.length > 0;
@@ -82,144 +84,54 @@ const breadcrumbs = [
 ];
 ---
 
-<ShowcaseLayout
-  title={`${name} — Components`}
+<DocsLayout
+  title={name}
   description={tagline}
   markdownUrl={markdownUrl}
   sidebar={sidebar}
   headings={headings}
+  breadcrumbs={breadcrumbs}
+  prevNext={prevNext}
+  collection="components"
+  entryId={slug}
 >
-  <div
-    class="nb-showcase-content mx-auto max-w-(--nb-content-max) px-4 lg:px-6 pt-8 pb-32"
-  >
-    <Breadcrumbs items={breadcrumbs} class="pb-2" />
+  <h2 id="installation">Installation</h2>
+  {installState === "builtin" && (
+    <>
+      <p><strong>Built into nimbus-docs.</strong> Import it from the package.</p>
+      <Code code={`import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";`} lang="ts" />
+    </>
+  )}
+  {installState === "included" && (
+    <>
+      <p><strong>Included in the starter.</strong> Every new site has it in <code>src/components/ui/{slug}/</code>. Import it where you need it, or register it in <code>src/components.ts</code> to use it on every page. If your site predates it, install it:</p>
+      <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
+    </>
+  )}
+  {installState === "install" && (
+    <>
+      <p><strong>Install with <code>nimbus-docs add {slug}</code>.</strong> It lands in <code>src/components/ui/{slug}/</code>, yours to edit.</p>
+      <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
+    </>
+  )}
 
-    <h1
-      class="text-foreground mb-0 leading-tight mt-6"
-      style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)"
-    >
-      {name}
-    </h1>
+  <Content components={components} />
 
-    <p
-      class="text-[0.9375rem] sm:text-[1.0625rem] text-muted-foreground leading-relaxed mt-2 mb-2"
-    >
-      {tagline}
-    </p>
-
-    <PageActions markdownUrl={markdownUrl} />
-
-    <div class="mt-4 mb-16 h-px w-full bg-border" role="none"></div>
-
-    <div class="flex flex-col gap-24">
-      <section id="installation" class="scroll-mt-20 flex flex-col gap-5">
-          <h2 class="text-xl font-semibold text-foreground tracking-tight">
-            Installation
-          </h2>
-          {isBuiltin
-            ? <Code code={`import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";`} lang="ts" raw />
-            : <PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args={`add ${slug}`} />
-        }
-      </section>
-
-      <div class="nb-showcase-body flex flex-col gap-10">
-        <Content components={components} />
-      </div>
-
-      {hasProps && (
-        <section id="api-reference" class="scroll-mt-20 flex flex-col gap-6">
-          <header>
-            <h2 class="text-xl font-semibold text-foreground tracking-tight mb-1.5">
-              API reference
-            </h2>
-            <p class="text-sm text-muted-foreground">
-              Every prop the component accepts, sourced from a single declaration.
-            </p>
-          </header>
-          <PropTable props={props} />
-        </section>
-      )}
-
-      <Pagination prevNext={prevNext} class="mt-12" />
-    </div>
-  </div>
-</ShowcaseLayout>
+  {hasProps && (
+    <>
+      <h2 id="api-reference">API reference</h2>
+      <p>Every prop the component accepts, sourced from a single declaration.</p>
+      <PropTable props={props} />
+    </>
+  )}
+</DocsLayout>
 
 <style is:global>
-  /* Showcase code blocks: hide the language badge — it's noise alongside
-     the obvious component label. Also hide the language chip inside
-     titled figcaptions; the filename stays. */
-  .nb-showcase-content .nb-code-figure::before,
-  .nb-showcase-content .nb-code-title-lang {
-    display: none !important;
-  }
-  /* Preview + Code pair: drop the code's top border-radius and top border
-     so the pair reads as a single box with the stage's bottom border as
-     the divider. */
+  /* Preview + Code pair: the code joins the stage above it as one box. */
   .nb-showcase-pair-code .nb-code-figure {
     margin-top: 0;
     border-top: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
-  }
-  /* MDX body styling: section h2s match the surrounding chrome h2s; example
-     h3s sit smaller above their preview stages with a tight description.
-     `:not([class])` keeps these scoped to authored markdown headings — a
-     classed heading is component-owned (e.g. a LinkCard's own <h3>+<p>),
-     and the negative-margin caption rule below would otherwise yank its
-     description on top of its title. */
-  .nb-showcase-body h2:not([class]) {
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: -0.025em;
-    color: var(--nb-foreground);
-    scroll-margin-top: 5rem;
-    margin: 0 0 0.375rem;
-  }
-  .nb-showcase-body h3:not([class]) {
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--nb-foreground);
-    scroll-margin-top: 5rem;
-    margin: 0 0 0.25rem;
-  }
-  .nb-showcase-body h3:not([class]) + p:not([class]) {
-    font-size: 0.875rem;
-    color: var(--nb-muted-foreground);
-    line-height: 1.6;
-    max-width: 42rem;
-    /* Pull the description up tight against its heading. The parent
-       has `gap-10` for spacing between example blocks; a caption is
-       not a block — it belongs to the heading above it. Negative
-       margin compensates for the flex gap that would otherwise
-       separate them by 2.5rem. */
-    margin: -2.25rem 0 0;
-  }
-  /* Mobile: the flex `gap-10` between section h2s and the first example
-     h3 reads too loose on narrow viewports — pull the first h3 closer
-     to its section heading so the group stays cohesive. */
-  @media (max-width: 767px) {
-    .nb-showcase-body h2:not([class]) + h3:not([class]) {
-      margin-top: -1.5rem;
-    }
-  }
-  /* Override the global hide so a literal "mdx" pill appears for code
-     that's typed as tsx (for shiki tokenization) but is really mdx. */
-  .nb-showcase-content .nb-showcase-mdx-tag .nb-code-figure::before {
-    content: "mdx";
-    display: inline-block !important;
-    position: absolute;
-    top: 0.5rem;
-    right: 0.625rem;
-    padding: 0.0625rem 0.375rem;
-    border-radius: 0.25rem;
-    background: var(--nb-muted);
-    color: var(--nb-muted-foreground);
-    font-family: var(--nb-font-mono);
-    font-size: 0.6875rem;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    opacity: 0.75;
-    z-index: 1;
   }
 </style>

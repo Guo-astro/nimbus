@@ -15,7 +15,7 @@ import type { CollectionRoutes } from "./collection-routes.js";
 export const PRIMARY_COLLECTION = "docs";
 
 /** The docs section every collection-URL error links to. */
-export const COLLECTION_URLS_DOCS = "https://nimbus-docs.com/writing/pages-and-routing/#collection-urls";
+export const COLLECTION_URLS_DOCS = "https://nimbus-docs.com/writing/collections/#collection-urls";
 
 export interface VersionInfo {
   /** Non-current version slugs (`docs-<slug>` collections mount at `/<slug>`). */

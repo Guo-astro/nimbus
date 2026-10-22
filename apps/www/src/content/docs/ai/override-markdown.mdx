@@ -1,9 +1,10 @@
 ---
-title: Override a default
+title: Override generated Markdown
 description: Customize the Markdown versions, llms.txt indexes, and OG cards without giving up the shared routes.
 aiGenerated: true
 sidebar:
   order: 3
+  label: Custom Markdown
 ---
 
 The starter's `src/pages/[...slug]/index.md.ts` and `src/pages/[...slug]/index.mdx.ts` routes serve the Markdown and source versions of every page. You can change what they serve at three levels:
@@ -179,6 +180,8 @@ A page whose frontmatter sets `socialImage` uses that image instead, because the
 
 An override changes only what that route serves. `llms-full.txt` and hosted MCP keep the Markdown Nimbus generates.
 
-The shared routes and routes that call an agent factory render the same way as the pages they describe: ahead of time on a static site, and in their collection's mode with a [`rendering` policy](/configuration#mix-build-and-request-rendering). `nimbus-docs check --fix` writes that mode into the file; for a route it can't edit, such as a wrapped one, it says what to change.
+The shared routes and routes that call an agent factory render the same way as the pages they describe: ahead of time on a static site, and in their collection's mode with a [`rendering` policy](/reference/rendering). `nimbus-docs check --fix` writes that mode into the file; for a route it can't edit, such as a wrapped one, it says what to change.
 
-Call the factory in the route file itself, as the examples above do. Like Astro's own `prerender` detection, Nimbus finds it by reading the route file, so a factory re-exported from another module is not checked when the build starts. At the end of the build, Nimbus warns about every Markdown version and `llms.txt` index that no prerendered route generated, and names the route that serves it.
+Call the factory in the route file itself, as above. Nimbus finds it by reading the route file, as Astro does for `prerender`, so a factory re-exported from another module isn't checked at startup.
+
+At the end of the build, Nimbus warns about any Markdown version or `llms.txt` index that no route generated, and names the route to add.

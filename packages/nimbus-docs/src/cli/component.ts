@@ -24,7 +24,7 @@ import * as p from "@clack/prompts";
 import { componentsMapBody } from "../_internal/parse-components-registry.js";
 import { stripComments, stripStrings } from "../_internal/parse-object-literal.js";
 import { readTreeFile, resolveTemplateTree, type FetchedTree } from "./_templates.js";
-import { bytesHash, type NimbusJson } from "./nimbus-json.js";
+import { bytesHash, fileHash, type NimbusJson } from "./nimbus-json.js";
 import { addCommand, detectPackageManager, invocation } from "./pm.js";
 import { progress } from "./progress.js";
 import type { ComponentItem } from "./resolver.js";
@@ -47,7 +47,7 @@ export interface InstallOptions {
   /** Src dir to write against, relative to `cwd` (default `"src"`; monorepo root from nimbus.json). */
   srcRoot?: string;
   /** Each installed slug's record in nimbus.json, to tell local edits from upstream changes. */
-  recorded?: ReadonlyMap<string, { hash: string | null; files: readonly string[] }>;
+  recorded?: ReadonlyMap<string, InstallRecord>;
   /** The starter release the site came from, to tell edits on components it shipped. */
   starter?: StarterBaseline | null;
 }
@@ -68,17 +68,24 @@ export interface InstallReport {
   keptUnasked: KeptComponent[];
   /** Components kept under `--overwrite` because the user answered no. */
   keptDeclined: KeptComponent[];
-  /** Under `--overwrite --yes`: replaced files that carried local edits, and
-   *  replaced files whose edits couldn't be checked. */
-  replacedEdited: number;
+  /** Under `--overwrite --yes`: the replaced files that carried local edits;
+   *  components with edits in files their install record can't name; and the
+   *  number of replaced files whose edits couldn't be checked. */
+  replacedEdited: string[];
+  replacedEditedUnplaced: string[];
   replacedUncompared: number;
   npmDepsInstalled: string[];
 }
 
 export interface KeptComponent {
   slug: string;
-  /** Project-relative paths of the kept files. */
+  /** Project-relative paths of the kept files: the ones that differ from the registry. */
   files: string[];
+  /** How many files the component has, kept or not. */
+  size: number;
+  /** With reason `edited`: the files that carry the edits, when the install
+   *  record or starter release can say; absent when it can't. */
+  edited?: string[];
   /** `edited`: differs from the version the site installed or came with;
    *  `unknown`: no install record, and no starter release shipped the files
    *  or it couldn't be fetched. */
@@ -110,7 +117,19 @@ export function keptLines(
     list.flatMap((k) => k.files.map((f) => `    ${f.padEnd(width)}   ${k.slug}`));
   const edited = group.filter((k) => k.reason === "edited");
   const unknown = group.filter((k) => k.reason === "unknown");
-  if (edited.length > 0) lines.push(`↷ Kept ${count(edited)} with local edits (${why}):`, ...rows(edited));
+  if (edited.length > 0) {
+    // A component is kept or replaced whole, so name it once, with the files
+    // that carry the edits.
+    lines.push(`↷ Kept ${edited.length === 1 ? "a component" : `${edited.length} components`} with local edits (${why}):`);
+    for (const k of edited) {
+      const size = `${k.size} file${k.size === 1 ? "" : "s"}`;
+      lines.push(
+        k.edited?.length
+          ? `    ${k.slug} (${size}): ${k.edited.join(", ")} ${k.edited.length === 1 ? "has" : "have"} local edits`
+          : `    ${k.slug} (${size}): it has local edits; its install record predates per-file tracking`,
+      );
+    }
+  }
   if (unknown.length > 0) {
     lines.push(`↷ Kept ${count(unknown)} that may have local edits (${why}):`, ...rows(unknown));
     if (!starter) lines.push("  Could not compare: no recorded content hash or starter release.");
@@ -158,7 +177,8 @@ export async function installComponents(
     kept: [],
     keptUnasked: [],
     keptDeclined: [],
-    replacedEdited: 0,
+    replacedEdited: [],
+    replacedEditedUnplaced: [],
     replacedUncompared: 0,
     npmDepsInstalled: [],
   };
@@ -225,18 +245,28 @@ export async function installComponents(
         baseline: options.starter ?? null,
       });
       const files = conflicts.map((f) => f.targetRel);
+      const changed =
+        edits === "edited"
+          ? await editedFiles(options.recorded?.get(item.name), options.cwd, options.starter ?? null, conflicts.map((f) => f.targetRel))
+          : null;
+      const which = changed ? { edited: changed } : {};
       if (edits === "none") {
         // Upstream changed, the user didn't: replace freely.
       } else if (options.yes) {
-        if (edits === "edited") report.replacedEdited += conflicts.length;
-        else report.replacedUncompared += conflicts.length;
+        if (edits === "unknown") report.replacedUncompared += conflicts.length;
+        else if (changed) report.replacedEdited.push(...changed);
+        else report.replacedEditedUnplaced.push(item.name);
       } else if (tty) {
         // `--overwrite` replaces upstream changes freely, but asks before
         // discarding edits made since the item was installed.
+        const state =
+          edits === "unknown"
+            ? "may have local edits (no install record)"
+            : changed
+              ? `has local edits in ${changed.join(", ")}`
+              : "has local edits";
         const replace = await prompts.confirm({
-          message:
-            `${item.name} ${edits === "edited" ? "has local edits" : "may have local edits (no install record)"}. ` +
-            `Replace these files?\n${files.map((f) => `  ${f}`).join("\n")}`,
+          message: `${item.name} ${state}. Replace these files?\n${files.map((f) => `  ${f}`).join("\n")}`,
           initialValue: false,
         });
         if (p.isCancel(replace)) {
@@ -245,11 +275,11 @@ export async function installComponents(
         }
         if (!replace) {
           keep = true;
-          report.keptDeclined.push({ slug: item.name, files, reason: edits });
+          report.keptDeclined.push({ slug: item.name, files, size: item.files.length, reason: edits, ...which });
         }
       } else {
         keep = true;
-        report.keptUnasked.push({ slug: item.name, files, reason: edits });
+        report.keptUnasked.push({ slug: item.name, files, size: item.files.length, reason: edits, ...which });
       }
     } else if (item.type === "registry:lib") {
       // Utilities (e.g. cn) are transitive deps users often customize — keep
@@ -395,7 +425,7 @@ function assertResolvedInsideSrc(
  * shipped doesn't count.
  */
 export async function localEdits(
-  record: { hash: string | null; files: readonly string[] } | undefined,
+  record: InstallRecord | undefined,
   cwd: string,
   srcRoot: string,
   starter?: { files: readonly string[]; baseline: StarterBaseline | null },
@@ -426,6 +456,44 @@ export async function localEdits(
     compared++;
   }
   return compared > 0 ? "none" : "unknown";
+}
+
+export interface InstallRecord {
+  hash: string | null;
+  files: readonly string[];
+  fileHashes?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Which files carry local edits, once `localEdits` found some, as
+ * project-relative paths: the recorded files whose hash changed or that are
+ * gone, else the `conflicts` that differ from the starter release. `null`
+ * when neither can say, as for a record written before per-file hashes.
+ */
+async function editedFiles(
+  record: InstallRecord | undefined,
+  cwd: string,
+  baseline: StarterBaseline | null,
+  conflicts: readonly string[],
+): Promise<string[] | null> {
+  const posixPath = (file: string) => file.split(sep).join("/");
+  if (record?.hash) {
+    const hashes = record.fileHashes;
+    if (!hashes) return null;
+    const edited = record.files.filter((file) => {
+      const abs = resolve(cwd, file);
+      return !hashes[file] || !existsSync(abs) || fileHash(readFileSync(abs, "utf8")) !== hashes[file];
+    });
+    return edited.length > 0 ? edited.map((file) => file.split("/").join(sep)) : null;
+  }
+  if (!baseline) return null;
+  const edited: string[] = [];
+  for (const file of conflicts) {
+    const shipped = await baseline.read(posixPath(file)).catch(() => undefined);
+    if (shipped === undefined) return null;
+    if (shipped !== null && readFileSync(resolve(cwd, file), "utf8") !== shipped) edited.push(file);
+  }
+  return edited.length > 0 ? edited : null;
 }
 
 export interface StarterBaseline {

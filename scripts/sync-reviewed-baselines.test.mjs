@@ -12,9 +12,11 @@ test("versioning advances first-party reviewed baselines", () => {
     fs.mkdirSync(path.join(root, "packages/nimbus-docs"), { recursive: true });
     fs.mkdirSync(path.join(root, "packages/nimbus-starter-source"), { recursive: true });
     fs.mkdirSync(path.join(root, "apps/www"), { recursive: true });
+    fs.mkdirSync(path.join(root, "apps/demo"), { recursive: true });
     fs.writeFileSync(path.join(root, "packages/nimbus-docs/package.json"), JSON.stringify({ version: "0.14.0" }));
     fs.writeFileSync(path.join(root, "packages/nimbus-starter-source/nimbus.json"), JSON.stringify({ custom: true, lastReviewedNimbusVersion: "0.13.1" }));
     fs.writeFileSync(path.join(root, "apps/www/nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: "0.13.1" }));
+    fs.writeFileSync(path.join(root, "apps/demo/nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: "0.13.1" }));
 
     syncReviewedBaselines(root);
 
@@ -22,10 +24,12 @@ test("versioning advances first-party reviewed baselines", () => {
       custom: true,
       lastReviewedNimbusVersion: "0.14.0",
     });
-    assert.equal(
-      JSON.parse(fs.readFileSync(path.join(root, "apps/www/nimbus.json"), "utf8")).lastReviewedNimbusVersion,
-      "0.14.0",
-    );
+    for (const app of ["apps/www", "apps/demo"]) {
+      assert.equal(
+        JSON.parse(fs.readFileSync(path.join(root, app, "nimbus.json"), "utf8")).lastReviewedNimbusVersion,
+        "0.14.0",
+      );
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

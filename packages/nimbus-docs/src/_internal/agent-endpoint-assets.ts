@@ -1546,7 +1546,8 @@ export async function stageAgentEndpointAssets(
   const manifestBytes = utf8Length(manifestBody);
   if (manifestBytes > limitBytes) {
     throw new Error(
-      `nimbus-docs: _nimbus/agent-endpoint-assets/manifest.json is ${mebibytes(manifestBytes)}, over Cloudflare's 25 MiB static file limit, so the deploy would fail.`,
+      `nimbus-docs: _nimbus/agent-endpoint-assets/manifest.json is ${mebibytes(manifestBytes)}, over Cloudflare's 25 MiB static file limit, so the deploy would fail. ` +
+        "It holds one entry per Markdown twin and llms file, so fewer pages shrink it; a site this large needs splitting.",
     );
   }
   const sourceRoot = agentEndpointAssetRoot(projectRoot);

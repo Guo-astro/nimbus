@@ -38,6 +38,7 @@ import {
   stageAgentEndpointAssets,
 } from "../src/_internal/agent-endpoint-assets.ts";
 import { collectionUrlsKey } from "../src/_internal/collection-mount.ts";
+import { renderApiPageMarkdown } from "../src/_internal/api/markdown.ts";
 
 const roots: string[] = [];
 const capability = { generation: 1, base: "/docs" };
@@ -1227,6 +1228,10 @@ test("bakes every Markdown asset at its public URL, API pages included, hidden A
     ].join("\n"),
   );
   assert.doesNotMatch(api.content, /^# /);
+  assert.equal(
+    api.content,
+    renderApiPageMarkdown(visible.data.prepared.page as never, { base: "/docs" }),
+  );
 });
 
 test("bakes the MCP page index only for a site that serves /mcp; API pages carry no docs version", async () => {

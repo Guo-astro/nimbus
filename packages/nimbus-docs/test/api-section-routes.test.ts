@@ -123,7 +123,7 @@ describe("hierarchical sections", () => {
   test("two pages on one path fail naming both", async () => {
     await assert.rejects(
       () => slugsOf("tree-dup", [{ name: "zones" }, { name: "zones-dns", parent: "zones" }, { name: "dns", parent: "zones" }], TREE),
-      /"tags\.zones-dns"[\s\S]*"tags\.dns"[\s\S]*both map to the\s+route slug "zones\/dns"/,
+      /"tags\.zones-dns"[\s\S]*"tags\.dns"[\s\S]*both map to the\s+route slug "zones\/dns"[\s\S]*give tag "zones-dns" another segment in `routes\.tagSegments`/,
     );
     const spec = {
       openapi: "3.0.0",
@@ -133,7 +133,7 @@ describe("hierarchical sections", () => {
     };
     await assert.rejects(
       () => buildApiModel({ collection: "tree-op", spec, routes: { ...TREE, operations: { listZones: "zones/dns" } } }),
-      /"tags\.zones-dns"[\s\S]*"listZones"[\s\S]*both map to the\s+route slug "zones\/dns"/,
+      /"tags\.zones-dns"[\s\S]*"listZones"[\s\S]*both map to the\s+route slug "zones\/dns"[\s\S]*give tag "zones-dns" another segment in `routes\.tagSegments`/,
     );
   });
 

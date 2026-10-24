@@ -562,7 +562,7 @@ export class CoordinateRegistry {
             `a derived slug comes from the operation's method and path, so renaming the operationId will not change it.`
           : `Rename one operation, schema, tag, or webhook so their URLs stay distinct.`;
       // A tag page's segment is set in config, so name that remedy when a tag is one side.
-      const tag = [prior, coordinate].find((c) => c.startsWith("tags."))?.slice("tags.".length);
+      const tag = [coordinate, prior].find((c) => c.startsWith("tags."))?.slice("tags.".length);
       const tagAdvice = tag ? ` Or give tag "${tag}" another segment in \`routes.tagSegments\`.` : "";
       this.error(
         `pages "${prior}"${at(priorReg)}${via(prior)} and "${coordinate}"${at(currReg)}${via(coordinate)} both map to the ` +

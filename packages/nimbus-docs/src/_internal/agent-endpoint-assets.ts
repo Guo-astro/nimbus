@@ -1537,9 +1537,18 @@ export async function removeAgentEndpointAssets(
 export async function stageAgentEndpointAssets(
   root: URL | string,
   outputRoot: string,
+  limitBytes = LLMS_FULL_LIMIT_BYTES,
 ): Promise<void> {
   const projectRoot = preparedMarkdownRootKey(root);
   const manifest = await ensureAgentEndpointAssets(projectRoot);
+  // Every agent endpoint reads this one file, so a server build cannot ship without it.
+  const manifestBody = JSON.stringify(stagedManifest(manifest));
+  const manifestBytes = utf8Length(manifestBody);
+  if (manifestBytes > limitBytes) {
+    throw new Error(
+      `nimbus-docs: _nimbus/agent-endpoint-assets/manifest.json is ${mebibytes(manifestBytes)}, over Cloudflare's 25 MiB static file limit, so the deploy would fail.`,
+    );
+  }
   const sourceRoot = agentEndpointAssetRoot(projectRoot);
   const targetRoot = path.join(outputRoot, "_nimbus", "agent-endpoint-assets");
   const assets = manifestAssets(manifest);
@@ -1572,11 +1581,7 @@ export async function stageAgentEndpointAssets(
       }),
     );
   }
-  await writeFile(
-    path.join(targetRoot, "manifest.json"),
-    JSON.stringify(stagedManifest(manifest)),
-    "utf8",
-  );
+  await writeFile(path.join(targetRoot, "manifest.json"), manifestBody, "utf8");
 }
 
 export function configureAgentEndpointAssetRoot(

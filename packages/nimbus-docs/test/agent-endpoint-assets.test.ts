@@ -1620,3 +1620,22 @@ test("an index listing too many entries warns that the deploy will fail", async 
   await bakeAgentEndpointAssets(options);
   assert.ok(warnings.some((warning) => /^\/llms-full\.txt is \d+ KiB, over Cloudflare's 25 MiB file limit, so the deploy will fail\.$/.test(warning)), warnings.join("\n"));
 });
+
+test("a manifest over the static file limit fails staging before any file is copied", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "guide", body: "Unique prepared body", data: { title: "Guide" } },
+  ]);
+  configure(projectRoot, {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+  });
+  const output = path.join(projectRoot, "dist", "client");
+  await assert.rejects(
+    stageAgentEndpointAssets(projectRoot, output, 64),
+    /manifest\.json is \d+ KiB, over Cloudflare's 25 MiB static file limit/,
+  );
+  await assert.rejects(readdir(path.join(output, "_nimbus")), { code: "ENOENT" });
+});

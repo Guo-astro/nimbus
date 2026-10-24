@@ -40,6 +40,7 @@ import type { ApiSamples } from "../../types.js";
 import { collectSecuritySchemes } from "./facts.js";
 import { loadSampleTools } from "./samples.js";
 import type { SampleTools } from "./samples.js";
+import { refProbe, refProbeIntact } from "./ref-probe.js";
 import { SchemaResolver, docNeedsRawDoc } from "./schema-resolver.js";
 import { asString, isPlainObject } from "./schema-algebra.js";
 import { parseOperations } from "./operations.js";
@@ -182,13 +183,16 @@ export async function parseOpenApi(source: SpecSource, onceKey?: string): Promis
 
     // One parse serves the walk and the ref-preserving copy below: Scalar's
     // `dereference` structured-clones before resolving, so the document it is
-    // handed keeps its `$ref`s.
-    const parsed = parser.normalize(source.spec);
+    // handed keeps its `$ref`s. The probe notices a parser that resolves in
+    // place instead; the copy is then parsed again rather than losing links.
+    let parsed = parser.normalize(source.spec);
     if (parsed === undefined) throw new Error("the document is empty, or neither JSON nor YAML");
+    const probe = refProbe(parsed);
 
     // Unresolved references degrade gracefully — the affected field renders as
     // an unknown type rather than aborting a 3,000-operation build.
     const { schema: document, errors } = await parser.dereference(parsed);
+    if (!refProbeIntact(probe)) parsed = parser.normalize(source.spec) ?? parsed;
     for (const e of errors ?? []) {
       preDiagnostics.push({
         level: "warning",

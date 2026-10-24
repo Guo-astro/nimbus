@@ -38,7 +38,7 @@ import type {
 import type { RoutePolicy } from "./route-policy.js";
 import type { ApiSamples } from "../../types.js";
 import { collectSecuritySchemes } from "./facts.js";
-import { loadSampleTools } from "./samples.js";
+import { GENERATED_SAMPLE_LANGS, loadSampleTools } from "./samples.js";
 import type { SampleTools } from "./samples.js";
 import { refProbe, refProbeIntact } from "./ref-probe.js";
 import { SchemaResolver, docNeedsRawDoc } from "./schema-resolver.js";
@@ -212,14 +212,15 @@ export async function parseOpenApi(source: SpecSource, onceKey?: string): Promis
     // so the only thing lost without a raw doc is the link, never the page.
     const rawDoc = docNeedsRawDoc(document) ? parsed : undefined;
 
-    // Code samples are best-effort: derived when the optional tooling is
-    // present, silently absent (never fatal) when it is not.
+    // Generated samples are best-effort: derived when the optional tooling is
+    // present, absent (never fatal) when it is not.
     const sampleTools = await loadSampleTools();
-    if (!sampleTools && hasCallableOperations(document)) {
+    const generate = source.samples?.generate ?? GENERATED_SAMPLE_LANGS;
+    if (!sampleTools && generate.length > 0 && hasCallableOperations(document)) {
       preDiagnostics.push({
         level: "warning",
         message:
-          "Code samples omitted — install openapi-sampler and @readme/httpsnippet to derive curl/TypeScript/Python examples (the api-layout registry recipe pulls both).",
+          `Generated code samples omitted — install openapi-sampler and @readme/httpsnippet to derive ${generate.join(", ")} examples, or set \`samples.generate: []\` to publish authored samples only.`,
         source: label,
       });
     }

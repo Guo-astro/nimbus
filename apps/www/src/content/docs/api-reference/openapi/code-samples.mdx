@@ -100,7 +100,7 @@ curl --request GET \
 
 ## Authored samples
 
-An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language.
+An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Every entry is shown, in order, including several in one language. Authored samples need neither generator package; a site that authors every sample can set `samples.generate: []` and build without them.
 
 Each entry's `label` names it in the code rail and the Markdown version. Without one, its `lang` is used, and repeats are numbered: `Python`, `Python (2)`.
 

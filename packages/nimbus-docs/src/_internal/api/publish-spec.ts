@@ -34,18 +34,24 @@ function externalRefs(node: unknown, out = new Set<string>()): Set<string> {
 
 const INVALID_REFERENCE = "Can't resolve reference: ";
 
-/** `$ref` keys whose value isn't a string: where each is, and how the parser prints it. */
-function nonStringRefs(
-  node: unknown,
-  pointer = "#",
-  out: { at: string; printed: string }[] = [],
-): { at: string; printed: string }[] {
+// JSON Schema keywords whose values map names to schemas; a `$ref` key under
+// one is a schema's name, not a reference.
+const NAMED_SCHEMA_MAPS = new Set(["properties", "patternProperties", "dependentSchemas", "definitions", "$defs"]);
+
+interface NonStringRef {
+  at: string;
+  printed: string;
+  named: boolean;
+}
+
+/** `$ref` keys whose value isn't a string: where each is, how the parser prints it, and whether it names a schema. */
+function nonStringRefs(node: unknown, pointer = "#", inMap = false, out: NonStringRef[] = []): NonStringRef[] {
   if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       const at = `${pointer}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
       if (key === "$ref" && typeof value !== "string")
-        out.push({ at, printed: String(value) });
-      nonStringRefs(value, at, out);
+        out.push({ at, printed: String(value), named: inMap });
+      nonStringRefs(value, at, !inMap && NAMED_SCHEMA_MAPS.has(key), out);
     }
   }
   return out;
@@ -100,7 +106,8 @@ export async function publishOpenApiSpec(
     const { errors } = await dereference(parsed as never);
     if (errors?.length) {
       // The parser prints a non-string `$ref` value as is ("[object Object]");
-      // name where each one is instead.
+      // name where each one is instead. An error explained only by properties
+      // named `$ref` is the parser's misreading, not a fault in the document.
       const refs = nonStringRefs(parsed);
       const located = (at: string) => {
         const [, hash, rest = ""] = /^#\/x-ext\/([^/]+)(.*)$/.exec(at) ?? [];
@@ -108,20 +115,20 @@ export async function publishOpenApiSpec(
           ? `${bundledFiles[hash]}#${rest}`
           : at;
       };
-      const messages = errors.map(({ message }) => {
+      const messages = errors.flatMap(({ message }) => {
         const printed = message.startsWith(INVALID_REFERENCE)
           ? message.slice(INVALID_REFERENCE.length)
           : undefined;
-        const places = refs
-          .filter((ref) => ref.printed === printed)
-          .map((ref) => located(ref.at));
-        if (!places.length) return message;
+        const hits = refs.filter((ref) => ref.printed === printed);
+        if (!hits.length) return [message];
+        const places = hits.filter((ref) => !ref.named).map((ref) => located(ref.at));
+        if (!places.length) return [];
         const listed =
           places.slice(0, 3).join(", ") +
           (places.length > 3 ? ` and ${places.length - 3} more` : "");
-        return `"$ref" isn't a reference string at ${listed}`;
+        return [`"$ref" isn't a reference string at ${listed}`];
       });
-      return { error: [...new Set(messages)].join("; ") };
+      if (messages.length) return { error: [...new Set(messages)].join("; ") };
     }
   } catch (error) {
     return { error: (error as Error).message };

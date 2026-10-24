@@ -104,6 +104,8 @@ An operation's `x-codeSamples` replace the generated samples, and Nimbus never c
 
 Each entry's `label` names it in the code rail and the Markdown version. Without one, its `lang` is used, and repeats are numbered: `Python`, `Python (2)`.
 
+An authored sample is highlighted when its `lang`, in any case, is a language Shiki knows, such as `hcl`, `rust` or `kotlin`; any other `lang` renders as plain text.
+
 The request body appears inside the code samples, and the Markdown version also lists it as an example request. An operation with no samples at all shows its request example on the page instead.
 
 ## Choose languages

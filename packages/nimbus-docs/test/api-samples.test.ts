@@ -2141,3 +2141,49 @@ describe("authored samples without the generator packages", () => {
     );
   });
 });
+
+describe("authored sample highlighting", () => {
+  const source = 'resource "probe_ping" "x" {\n  name = "x"\n}';
+  const shell = "curl -s https://api.probe.test/v1/ping | jq .";
+  const samplesSpec = (samples: Record<string, string>[]) => ({
+    ...baseSpec,
+    paths: {
+      "/ping": { get: { operationId: "ping", "x-codeSamples": samples, responses: { "200": { description: "ok" } } } },
+    },
+  });
+  const highlighted = async (samples: Record<string, string>[]) => {
+    const page = await prepareApiPageCode(await operationPage(samplesSpec(samples), "ping"));
+    assert.equal(page.kind, "operation");
+    return (page as ApiOperationPage).samples;
+  };
+
+  test("a sample in any language the bundled Shiki knows is highlighted", async () => {
+    const [hcl, text, unknown] = await highlighted([
+      { lang: "hcl", source },
+      { lang: "text", source },
+      { lang: "notalanguage", source },
+    ]);
+    assert.equal(unknown!.highlightedHtml, text!.highlightedHtml);
+    assert.ok((hcl!.highlightedHtml!.match(/<span class="/g) ?? []).length > (text!.highlightedHtml!.match(/<span class="/g) ?? []).length);
+  });
+
+  test("curl in any case highlights as bash, and other languages are matched case-insensitively", async () => {
+    const [curl, upper, bash, mixed] = await highlighted([
+      { lang: "curl", source: shell },
+      { lang: "CURL", source: shell },
+      { lang: "bash", source: shell },
+      { lang: "Shell", source: shell },
+    ]);
+    assert.equal(curl!.highlightedHtml, bash!.highlightedHtml);
+    assert.equal(upper!.highlightedHtml, bash!.highlightedHtml);
+    assert.equal(mixed!.highlightedHtml!.replaceAll('data-nb-lang="shell"', 'data-nb-lang="bash"'), bash!.highlightedHtml);
+  });
+
+  test("highlighting leaves ids, languages and the Markdown twin as authored", async () => {
+    const op = await operationPage(samplesSpec([{ lang: "HCL", label: "Terraform", source }, { lang: "CURL", source: shell }]), "ping");
+    const rail = await prepareApiPageCode(op);
+    assert.equal(rail.kind, "operation");
+    assert.deepEqual((rail as ApiOperationPage).samples.map((s) => [s.id, s.lang]), [["HCL", "HCL"], ["CURL", "CURL"]]);
+    assert.match(renderApiPageMarkdown(op), /### Terraform\n\n```HCL\nresource/);
+  });
+});

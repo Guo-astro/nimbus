@@ -528,7 +528,17 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
   assert.ok(source);
   assert.doesNotMatch(source, /Unique prepared body/);
   assert.match(source, /assets\//);
+  assert.doesNotMatch(source, /headings/);
   assert.equal(isAgentEndpointAssetRequested(projectRoot), true);
+  const server = agentEndpointAssetsRuntimePlugin(projectRoot, () => true);
+  assert.match(
+    (await server.load.call({ environment: { name: "ssr" } }, id)) ?? "",
+    /export const manifest = null;/,
+  );
+  assert.match(
+    (await server.load.call({ environment: { name: "prerender" } }, id)) ?? "",
+    /assets\//,
+  );
 
   const output = path.join(projectRoot, "dist", "client");
   const stale = path.join(
@@ -553,6 +563,16 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
   await assert.rejects(readFile(stale, "utf8"), { code: "ENOENT" });
   await assert.rejects(readFile(legacyStale, "utf8"), { code: "ENOENT" });
   const manifest = await ensureAgentEndpointAssets(projectRoot);
+  const { headings: _headings, ...staged } = manifest;
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        path.join(output, "_nimbus", "agent-endpoint-assets", "manifest.json"),
+        "utf8",
+      ),
+    ),
+    JSON.parse(JSON.stringify(staged)),
+  );
   for (const asset of [
     ...manifest.markdownAssets,
     ...manifest.llmsAssets,

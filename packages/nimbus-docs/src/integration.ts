@@ -2824,6 +2824,7 @@ export function nimbus(
               agentEndpointAssets.preparedHeadingsPlugin(astroConfig.root),
               agentEndpointAssets.agentEndpointAssetsRuntimePlugin(
                 astroConfig.root,
+                () => building && outputModeForBuild === "server",
               ),
               markdownRoutes.plugin,
               agentEndpointAssets.agentEndpointAssetLoaderPlugin(

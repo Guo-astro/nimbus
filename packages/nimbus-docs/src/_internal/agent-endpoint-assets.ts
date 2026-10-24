@@ -11,6 +11,7 @@ import {
   realpath,
   rename,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -110,6 +111,14 @@ export interface AgentEndpointAssetManifest {
   llmsAssets: LlmsEndpointAsset[];
   pageIndex?: PageIndexAsset;
   headings: PreparedHeadingRecord[];
+}
+
+/** What a deployed server reads: the manifest without the build-only headings. */
+export type StagedAgentEndpointManifest = Omit<AgentEndpointAssetManifest, "headings">;
+
+function stagedManifest(manifest: AgentEndpointAssetManifest): StagedAgentEndpointManifest {
+  const { headings: _headings, ...staged } = manifest;
+  return staged;
 }
 
 function manifestAssets(manifest: AgentEndpointAssetManifest): Array<{ path: string }> {
@@ -1464,6 +1473,7 @@ export function preparedHeadingsPlugin(
 
 export function agentEndpointAssetsRuntimePlugin(
   root: URL | string,
+  serverBuild: () => boolean = () => false,
 ): PreparedHeadingsPlugin {
   return {
     name: "nimbus-docs:agent-endpoint-assets-runtime",
@@ -1472,17 +1482,11 @@ export function agentEndpointAssetsRuntimePlugin(
     },
     async load(id) {
       if (id !== ARTIFACTS_RESOLVED_ID) return undefined;
-      if (this.environment?.name === "ssr") {
-        registerAgentEndpointAssetDemand(root);
-      }
+      const server = this.environment?.name === "ssr";
+      if (server) registerAgentEndpointAssetDemand(root);
       const manifest = await ensureAgentEndpointAssets(root);
-      return (
-        `export const projectRoot = ${JSON.stringify(preparedMarkdownRootKey(root))};\n` +
-        `export const base = ${JSON.stringify(manifest.base)};\n` +
-        `export const markdownAssets = ${JSON.stringify(manifest.markdownAssets)};\n` +
-        `export const llmsAssets = ${JSON.stringify(manifest.llmsAssets)};\n` +
-        `export const pageIndex = ${JSON.stringify(manifest.pageIndex ?? null)};\n`
-      );
+      const literal = server && serverBuild() ? null : stagedManifest(manifest);
+      return `export const manifest = ${JSON.stringify(literal)};\n`;
     },
     handleHotUpdate(context) {
       invalidateDevModules(context.server, [ARTIFACTS_RESOLVED_ID]);
@@ -1568,6 +1572,11 @@ export async function stageAgentEndpointAssets(
       }),
     );
   }
+  await writeFile(
+    path.join(targetRoot, "manifest.json"),
+    JSON.stringify(stagedManifest(manifest)),
+    "utf8",
+  );
 }
 
 export function configureAgentEndpointAssetRoot(

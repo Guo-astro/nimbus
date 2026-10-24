@@ -359,8 +359,8 @@ export async function apiPreparationEnvironment(
 }
 
 /** The inputs the last preparation of a version hashed, kept so a miss can say
- * which of them changed. Diagnostic only: nothing is reused from it, and the
- * directory holds one small file per version ever configured. */
+ * which of them changed. Diagnostic only: nothing is reused from it, and each
+ * version's one small file is pruned with the version. */
 interface PreparationInputs {
   inputHash: string;
   components: Record<string, string>;
@@ -1026,9 +1026,18 @@ export async function pruneApiPageAssetCache(
       /* Uncacheable sources have no version artifact to retain. */
     }
   }
+  const inputsDirectory = path.join(cache, "inputs");
+  const currentInputs = new Set<string>();
+  for (const filename of await readdir(inputsDirectory).catch(() => [])) {
+    const remembered = await readPreparationInputs(
+      path.join(inputsDirectory, filename),
+    );
+    if (remembered && inputs.has(remembered.inputHash)) currentInputs.add(filename);
+  }
   const retain: Record<string, (filename: string) => boolean> = {
     citations: (filename) =>
       citationHashes.has(filename.replace(/\.json$/, "")),
+    inputs: (filename) => currentInputs.has(filename),
     assets: (filename) => files.has(filename),
     versions: (filename) =>
       inputs.has(filename.replace(/(?:\.citations)?\.json$/, "")),

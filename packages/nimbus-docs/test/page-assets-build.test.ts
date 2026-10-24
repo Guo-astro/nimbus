@@ -241,6 +241,13 @@ test("successful-build pruning keeps every current family and excludes stale dep
       (await readdir(path.join(root, "dist/client/_nimbus/pages"))).sort(),
       reachable,
     );
+    const inputsDirectory = path.join(root, ".nimbus/cache/page-assets/inputs");
+    const remembered = (await readdir(inputsDirectory)).sort();
+    assert.ok(remembered.length > 0);
+    await writeFile(
+      path.join(inputsDirectory, `${"0".repeat(64)}.json`),
+      JSON.stringify({ inputHash: "gone", components: {} }),
+    );
     await pruneApiPageAssetCache(root);
     await assert.rejects(
       readFile(
@@ -252,6 +259,7 @@ test("successful-build pruning keeps every current family and excludes stale dep
       ),
       /ENOENT/,
     );
+    assert.deepEqual((await readdir(inputsDirectory)).sort(), remembered);
     assert.ok(await readFile(other.versions[0]!.prepared.citationSummaryPath));
     const again = await prepareApiAssetFamily(root, {
       ...family(spec()),

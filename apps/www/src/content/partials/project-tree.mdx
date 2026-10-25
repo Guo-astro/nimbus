@@ -1,0 +1,26 @@
+---
+title: Project tree
+---
+import { FileTree } from "@/components/ui/file-tree";
+
+<FileTree>
+- my-docs/
+  - src/
+    - components/
+      - ui/
+    - content/
+      - docs/
+        - **index.mdx**
+    - layouts/
+    - pages/
+    - styles/
+      - globals.css
+    - components.ts
+  - AGENT.md
+  - astro.config.ts
+  - nimbus.json
+  - package.json
+  - wrangler.jsonc
+</FileTree>
+
+Your pages are in `src/content/docs/`, and the components and layouts that draw them are in `src/components/` and `src/layouts/`, yours to edit. `src/styles/globals.css` holds the design tokens, and `src/components.ts` lists the components every page can use without an import. `nimbus.json` records the Nimbus version your site has caught up with; keep it committed. `wrangler.jsonc` is there only when you deploy to Cloudflare.

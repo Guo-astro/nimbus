@@ -3,7 +3,7 @@ title: Reusable snippets
 description: Write content once as a partial and include it anywhere with Render.
 aiGenerated: true
 sidebar:
-  order: 5
+  order: 4
 ---
 
 Partials are reusable content fragments. Write a snippet once, include it in many pages, and edit it in one place.
@@ -62,9 +62,9 @@ Route-level `partialHeadings` options are not supported. Configure prepared head
 
 ## Parameters
 
-Declare accepted params in the partial's frontmatter — suffix optional ones with `?`. They arrive as props:
+Declare accepted params in the partial's frontmatter — suffix optional ones with `?`. They arrive as props, which only an `.mdx` partial can read: a `.md` partial is plain Markdown and shows `{props.runtime}` as written.
 
-```md title="src/content/partials/runtime-note.md"
+```mdx title="src/content/partials/runtime-note.mdx"
 ---
 params: [runtime, version?]
 ---

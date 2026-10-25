@@ -1,10 +1,10 @@
 /**
  * Lint-side data shapes + the `nimbus/duplicate-slug` build validator.
  *
- * Route truth for `nimbus/internal-link` comes from Astro itself
- * (`astro:build:done` hands us the emitted `pages` array — the single
- * source of truth for served URLs). The integration writes that to
- * `.nimbus/routes.json`; the type lives here only so the rule and the
+ * Route truth for `nimbus/internal-link` comes from the build itself: at
+ * the end of `astro:build:done` the integration records Astro's `pages`
+ * plus every file in the build output, and writes them to
+ * `.nimbus/routes.json`. The type lives here only so the rule and the
  * writer agree on the shape.
  *
  * The duplicate-slug validator runs *before* the build because Astro
@@ -17,12 +17,18 @@
  * a much smaller maintenance surface.
  */
 
+import fs from "node:fs";
+import picomatch from "picomatch";
+
+import type { NormalizedRedirect } from "../_internal/redirect-emitters.js";
 import path from "node:path";
 
-import { canonicalEntryUrl, canonicalSlug } from "../_internal/astro-slug.js";
+import { canonicalEntryUrl, canonicalSlug, entryRouteUrl } from "../_internal/astro-slug.js";
+import { frontmatterSlug } from "../_internal/scan-version-frontmatter.js";
 import { walkFilesSync } from "../_internal/fs-walk.js";
 import {
   collectionMountPrefix,
+  type MountContext,
   type VersionInfo,
 } from "../_internal/collection-mount.js";
 
@@ -38,6 +44,32 @@ export interface ContentEntry {
   id: string;
   /** Path relative to the content root (`<collection>/<id>.mdx`), for display. */
   relPath: string;
+  /** Frontmatter `slug`: Astro's final entry ID, used instead of `id`. */
+  slug?: string;
+}
+
+// Runs on every dev start and `check`, so read only as far as the
+// frontmatter: the first block, and the whole file only when the frontmatter
+// runs past it.
+const FRONTMATTER_PROBE_BYTES = 4096;
+
+function readSlug(file: string): string | undefined {
+  try {
+    const fd = fs.openSync(file, "r");
+    let head: string;
+    try {
+      const buffer = Buffer.alloc(FRONTMATTER_PROBE_BYTES);
+      const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      head = buffer.toString("utf8", 0, read);
+      if (!head.startsWith("---")) return undefined;
+      if (read === buffer.length && !/\n---[ \t]*\r?(?:\n|$)/.test(head)) head = fs.readFileSync(file, "utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+    return frontmatterSlug(head);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -49,13 +81,15 @@ export interface ContentEntry {
  */
 export function enumerateEntries(contentRoot: string): ContentEntry[] {
   const out: ContentEntry[] = [];
-  for (const { rel } of walkFilesSync(contentRoot, { extensions: [".mdx"] })) {
+  for (const { abs, rel } of walkFilesSync(contentRoot, { extensions: [".mdx"] })) {
     const slash = rel.indexOf("/");
     if (slash === -1) continue; // loose top-level file, not under a collection
+    const slug = readSlug(abs);
     out.push({
       collection: rel.slice(0, slash),
       id: rel.slice(slash + 1).replace(/\.mdx$/, ""),
       relPath: rel,
+      ...(slug === undefined ? {} : { slug }),
     });
   }
   return out;
@@ -80,13 +114,45 @@ export function enumerateEntriesByBase(
   const out: ContentEntry[] = [];
   for (const [folder, key] of folderToKey) {
     const baseDir = path.join(contentRoot, folder);
-    for (const { rel } of walkFilesSync(baseDir, { extensions: [".mdx"] })) {
+    for (const { abs, rel } of walkFilesSync(baseDir, { extensions: [".mdx"] })) {
+      const slug = readSlug(abs);
       out.push({
         collection: key,
         id: rel.replace(/\.mdx$/, ""),
         relPath: `${folder}/${rel}`,
+        ...(slug === undefined ? {} : { slug }),
       });
     }
+  }
+  return out;
+}
+
+/**
+ * Walk one Nimbus-constructed glob: the folder and pattern a collection
+ * factory passed to `glob()`, wherever the folder is. Ids follow the glob
+ * loader (path without extension, frontmatter `slug` wins); `relPath` is
+ * project-relative for messages. Only `.md` and `.mdx` are pages.
+ */
+export function enumerateGlobEntries(
+  collection: string,
+  base: string,
+  pattern: string | readonly string[],
+  projectRoot: string,
+): ContentEntry[] {
+  const patterns = typeof pattern === "string" ? [pattern] : [...pattern];
+  const positive = patterns.filter((p) => !p.startsWith("!"));
+  const negative = patterns.filter((p) => p.startsWith("!")).map((p) => p.slice(1));
+  const matches = picomatch(positive, negative.length > 0 ? { ignore: negative } : {});
+  const out: ContentEntry[] = [];
+  for (const { abs, rel } of walkFilesSync(base, { extensions: [".md", ".mdx"] })) {
+    if (!matches(rel)) continue;
+    const slug = readSlug(abs);
+    out.push({
+      collection,
+      id: rel.replace(/\.mdx?$/, ""),
+      relPath: path.relative(projectRoot, abs).split(path.sep).join("/"),
+      ...(slug === undefined ? {} : { slug }),
+    });
   }
   return out;
 }
@@ -136,8 +202,7 @@ export interface DuplicateGroup {
  *     Catches the page-vs-content collision (`pages/search.astro`
  *     shadowing `content/docs/search.mdx` at `/search`).
  *
- * Doesn't honor `data.slug` frontmatter overrides, so entries that use them
- * may produce false negatives.
+ * A frontmatter `slug` replaces the path, as in Astro's glob loader.
  */
 export function findDuplicateRoutes(
   owners: readonly RouteOwner[],
@@ -286,31 +351,77 @@ function fileToRoute(parts: string[], ext: string): string {
  */
 export function contentEntryUrl(
   entry: ContentEntry,
-  versions?: VersionInfo | null,
+  context: MountContext,
 ): string {
-  const prefix = collectionMountPrefix(entry.collection, versions);
-  return canonicalEntryUrl(prefix, entry.id);
+  const prefix = collectionMountPrefix(entry.collection, context);
+  return entry.slug === undefined ? canonicalEntryUrl(prefix, entry.id) : entryRouteUrl(prefix, entry.slug);
 }
 
 // ---------------------------------------------------------------------------
 // Route truth — shape only. The integration's `astro:build:done` hook
-// constructs and writes this; `internal-link.ts` reads it.
+// constructs and writes this; `route-truth.ts` reads it for `internal-link`.
 // ---------------------------------------------------------------------------
 
+/**
+ * Version 2: `knownRoutes` covers every emitted file, and lint no longer
+ * strips `base` from links. Version 3 adds redirects.
+ */
+export const ROUTE_TRUTH_VERSION = 3;
+
+/**
+ * Written over `.nimbus/routes.json` when a build can't delete the previous
+ * build's file, so lint reports an unfinished build instead of using it.
+ */
+export const INCOMPLETE_ROUTE_TRUTH = { incomplete: true } as const;
+
 export interface RouteTruth {
-  /** Schema version. Bump if the shape changes. */
-  version: 1;
-  /** Astro `base` config (`"/docs"`, `""`). Empty string when unset. */
+  /**
+   * Schema version. Bump when the shape or the meaning of `knownRoutes`
+   * changes, so lint refuses a file an older build wrote.
+   */
+  version: typeof ROUTE_TRUTH_VERSION;
+  /**
+   * Astro `base` config (`"/docs"`, `""`). Empty string when unset. For
+   * reference only: `knownRoutes` and authored links are both base-free.
+   */
   base: string;
   /**
-   * Every URL Astro emitted during the last build, canonicalized to
-   * `/foo` form (no trailing slash unless root). The lint rule resolves
-   * internal links against this set.
+   * Every URL the last build produced, as route keys
+   * (`_internal/route-key.ts`): pages, endpoints, `.md` alternates, and
+   * `public/` files, plus request-rendered pages and concrete on-demand
+   * routes. The lint rule resolves internal links against this set.
    */
   knownRoutes: string[];
+  /** Rules from the output's `_redirects`, then `redirectsFile`. */
+  redirects: NormalizedRedirect[];
+  /** Astro's `redirects`, which a static build writes as meta-refresh pages. */
+  redirectPages: NormalizedRedirect[];
+  redirectRules: "cloudflare" | "netlify";
   /**
    * Reserved for future SSR-route handling — URL prefixes that can't be
    * statically enumerated. Empty in the current all-prerendered path.
    */
   opaqueNamespaces: string[];
+  /** Every page collection's mount (`""` for the root collection). Absent in files older builds wrote. */
+  mounts?: Record<string, string>;
+  /**
+   * Present when the build was partial (`NIMBUS_BUILD_ONLY`). Lint never
+   * reads such a file as full truth: a link into a collection outside the
+   * slice is checked against the previous build's routes when the file
+   * covers it, and reported as a warning; otherwise it is skipped.
+   */
+  slice?: RouteTruthSlice;
+  /** When the build wrote the file (ISO 8601). Absent in files older builds wrote. */
+  builtAt?: string;
+}
+
+export interface RouteTruthSlice {
+  /** The collections the build held. */
+  collections: string[];
+  /** Every page collection's mount (`""` for the root collection). */
+  mounts: Record<string, string>;
+  /** The collections whose routes `knownRoutes` holds: the slice, plus what the previous file covered. */
+  covered: string[];
+  /** When the previous build, whose routes this file borrows, wrote its file. */
+  priorBuiltAt?: string;
 }

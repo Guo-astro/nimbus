@@ -52,6 +52,16 @@ function project(dir: string, opts: { config?: string; astroDep?: boolean } = {}
       dependencies: astroDep ? { astro: "^7.0.0" } : {},
     }),
   );
+  installWrangler(dir);
+}
+
+/** An installed wrangler, so a new wrangler.jsonc's date never reaches the registry. */
+function installWrangler(dir: string): void {
+  mkdirSync(join(dir, "node_modules", "wrangler"), { recursive: true });
+  writeFileSync(
+    join(dir, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
 }
 
 test("applies the adapter: flips config, installs deps, records provenance", async () => {
@@ -356,7 +366,7 @@ for (const [adapter, pkg, range] of [
   ["vercel", "@astrojs/vercel", "^12"],
   ["node", "@astrojs/node", "^11"],
   ["netlify", "@astrojs/netlify", "^9"],
-  ["cloudflare", "@astrojs/cloudflare", "^14.2.0"],
+  ["cloudflare", "@astrojs/cloudflare", "~14.1.0"],
 ] as const) {
   test(`rejects a declared ${adapter} range outside Nimbus compatibility`, async () => {
     const dir = scratch();
@@ -606,4 +616,79 @@ test("does not warn about a switch on a same-adapter re-run", async () => {
     !res.warnings.some((w) => /Switched from/.test(w)),
     "idempotent re-run must not emit a switch warning",
   );
+});
+
+test("brings the starter's route files in step with the request rendering it sets", async () => {
+  const dir = scratch();
+  const starter = new URL("../../nimbus-starter-source/", import.meta.url);
+  project(dir, { config: readFileSync(new URL("astro.config.ts", starter), "utf8") });
+  const routes = ["[...slug].astro", "[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts", "llms.txt.ts", "llms-full.txt.ts"];
+  for (const route of routes) {
+    mkdirSync(join(dir, "src/pages", route, ".."), { recursive: true });
+    writeFileSync(join(dir, "src/pages", route), readFileSync(new URL(`src/pages/${route}`, starter), "utf8"));
+  }
+  mkdirSync(join(dir, "src/content/docs"), { recursive: true });
+
+  const res = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(res.status, "applied");
+  if (res.status !== "applied") return;
+  assert.deepEqual(
+    res.routeFiles.updated.sort(),
+    routes.filter((route) => route.startsWith("[")).map((route) => `src/pages/${route}`).sort(),
+  );
+  for (const route of routes) {
+    const source = readFileSync(join(dir, "src/pages", route), "utf8");
+    assert.doesNotMatch(source, /prerender|getStaticPaths/, route);
+  }
+
+  const again = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(again.status, "noop");
+  if (again.status === "noop") assert.deepEqual(again.routeFiles.updated, []);
+});
+
+test("cloudflare on pnpm declines workerd's build script before installing", async () => {
+  const root = scratch();
+  // The site's own workspace file, a site inside a workspace, and a site with none.
+  const own = join(root, "own");
+  const nested = join(root, "workspace", "docs");
+  const bare = join(root, "bare");
+  for (const dir of [own, nested, bare]) {
+    mkdirSync(dir, { recursive: true });
+    project(dir);
+  }
+  writeFileSync(join(own, "pnpm-lock.yaml"), "");
+  writeFileSync(join(own, "pnpm-workspace.yaml"), "allowBuilds:\n  esbuild: true\n  workerd: set this to true or false\n");
+  writeFileSync(join(root, "workspace", "pnpm-lock.yaml"), "");
+  writeFileSync(join(root, "workspace", "pnpm-workspace.yaml"), "packages:\n  - docs\n");
+  writeFileSync(join(bare, "pnpm-lock.yaml"), "");
+
+  for (const [dir, file] of [
+    [own, join(own, "pnpm-workspace.yaml")],
+    [nested, join(root, "workspace", "pnpm-workspace.yaml")],
+    [bare, join(bare, "pnpm-workspace.yaml")],
+  ] as const) {
+    let atInstall = "";
+    const res = await installAdapter("cloudflare", {
+      cwd: dir,
+      installDeps: async () => {
+        atInstall = readFileSync(file, "utf8");
+        return { ok: true };
+      },
+    });
+    assert.equal(res.status, "applied", dir);
+    assert.match(atInstall, /^ {2}workerd: false$/m, dir);
+    assert.doesNotMatch(atInstall, /set this to true or false/, dir);
+    assert.deepEqual(res.status !== "error" && res.declinedBuildScripts, { file, names: ["workerd"] });
+  }
+  assert.equal(existsSync(join(nested, "pnpm-workspace.yaml")), false, "the workspace's file, not a new one");
+});
+
+test("cloudflare on npm leaves pnpm's settings alone", async () => {
+  const dir = scratch();
+  project(dir);
+  writeFileSync(join(dir, "package-lock.json"), "{}");
+  const res = await installAdapter("cloudflare", { cwd: dir, installDeps: recordingInstaller().installer });
+  assert.equal(res.status, "applied");
+  assert.equal(res.status !== "error" && res.declinedBuildScripts, undefined);
+  assert.equal(existsSync(join(dir, "pnpm-workspace.yaml")), false);
 });

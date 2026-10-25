@@ -15,6 +15,7 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { generateTemplates, variantNames } from "../scripts/copy-template.mjs";
+import { STARTER_MANIFEST } from "../../nimbus-starter-source/starter.manifest.mjs";
 import { STARTER_ROUTE_INVENTORY } from "../../nimbus-docs/src/_internal/route-ownership.js";
 
 function routeEntrypoints(root: string): string[] {
@@ -54,11 +55,35 @@ test("every generated variant ships the adapter marker and implicit build defaul
       assert.doesNotMatch(cfg, /rendering:\s*\{/);
       const gitignore = fs.readFileSync(path.join(dir, "gitignore"), "utf8");
       assert.match(gitignore, /^\.nimbus\/$/m);
+      const nimbusVersion = JSON.parse(
+        fs.readFileSync(new URL("../../nimbus-docs/package.json", import.meta.url), "utf8"),
+      ).version;
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync(path.join(dir, "nimbus.json"), "utf8")),
+        {
+          $schema: "https://nimbus-docs.com/schema/nimbus.json",
+          lastReviewedNimbusVersion: nimbusVersion,
+        },
+        `${path.basename(dir)} must carry the reviewed baseline of its pinned framework`,
+      );
 
+      const excluded = new Set(
+        (STARTER_MANIFEST.templates[path.basename(dir)]?.excludePaths ?? []).map((file) => file.replace(/^src\//, "")),
+      );
+      // One source per URL: a landing page and a docs index both claim `/`.
+      const docsIndex = ["index.mdx", "index.md"].some((file) => fs.existsSync(path.join(dir, "src/content/docs", file)));
+      // A docs index takes the place of the optional landing page.
       assert.deepEqual(
         routeEntrypoints(dir),
-        STARTER_ROUTE_INVENTORY.map((route) => route.entrypoint).sort(),
+        STARTER_ROUTE_INVENTORY.filter((route) => !excluded.has(route.entrypoint) && !(docsIndex && route.allowsContentShadow))
+          .map((route) => route.entrypoint)
+          .sort(),
         `${path.basename(dir)} has an unclassified or missing route entrypoint`,
+      );
+      assert.equal(
+        docsIndex && fs.existsSync(path.join(dir, "src/pages/index.astro")),
+        false,
+        `${path.basename(dir)} ships two home routes`,
       );
       assert.deepEqual(
         STARTER_ROUTE_INVENTORY.filter(
@@ -80,6 +105,25 @@ test("every generated variant ships the adapter marker and implicit build defaul
         ),
         [{ pattern: "/", entrypoint: "pages/index.astro" }],
       );
+    }
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
+});
+
+// AGENT.md tells authors the frontmatter `title` is the page's H1, so the
+// starter's own pages must not add a second one.
+test("no generated page repeats its title as a body H1", () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-gen-h1-"));
+  try {
+    for (const dir of generateTemplates(out)) {
+      const docs = path.join(dir, "src", "content", "docs");
+      for (const file of fs.readdirSync(docs, { recursive: true }) as string[]) {
+        if (!/\.mdx?$/.test(file)) continue;
+        const body = fs.readFileSync(path.join(docs, file), "utf8").replace(/^---\n[\s\S]*?\n---\n/, "");
+        const prose = body.replace(/^(```|~~~)[\s\S]*?^\1/gm, "");
+        assert.doesNotMatch(prose, /^# /m, `${path.basename(dir)}/${file} has a body H1`);
+      }
     }
   } finally {
     fs.rmSync(out, { recursive: true, force: true });

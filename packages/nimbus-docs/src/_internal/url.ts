@@ -1,23 +1,20 @@
 /**
  * Internal URL helpers — one shape for matching, one shape for rendering.
  *
- * Static hosts that serve `page/index.html` (Astro's default `build.format:
- * "directory"`) canonicalize to a trailing-slash URL. If framework helpers
- * emit slashless hrefs, every sidebar click costs a 307 redirect before
- * Astro's client router can pick up the page. The fix splits href shape
- * into two forms:
+ * Generated hrefs must match the URL Astro serves for `trailingSlash`, or
+ * every sidebar click costs a redirect (or a 404 in `preview`). Href shape
+ * splits into two forms:
  *
  *   - `toRouteKey(href)` — slashless canonical form. Used wherever the
  *     framework compares paths for identity (active sidebar state,
  *     prev/next lookup, validation against the indexed route set).
  *
  *   - `toBrowserHref(href)` — what we emit into `<a href>` / `<link>` for
- *     HTML document routes. Adds a trailing slash so the URL matches the
- *     directory-index page the host serves directly.
+ *     HTML document routes, shaped by Astro's `trailingSlash`.
  *
  * Asset URLs (`.md`, `.png`, `.txt`, …), external URLs, and anchor-only
  * hrefs are returned unchanged by `toBrowserHref` — they aren't HTML
- * document routes and adding a slash would break them.
+ * document routes and a slash would break them.
  *
  * `withBase` is public because starter-owned layouts and routes must apply the
  * same sub-path rule as framework-owned metadata. Site-relative inputs are
@@ -51,6 +48,9 @@ export function withBase(path: string, base: string): string {
   const prefix = base.slice(0, end);
   const [pathname, suffix] = splitSuffix(path);
   const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  // The site root under a base is a page like any other: without trailing
+  // slashes Astro serves `/docs`, not `/docs/`.
+  if (normalized === "/" && prefix && !appendsSlash(linkPolicy())) return `${prefix}${suffix}`;
   return `${prefix}${normalized}${suffix}`;
 }
 
@@ -70,16 +70,16 @@ export function stripBase(path: string, base: string): string {
  * `build.format: "directory"`; assets like `/og/card.png`,
  * `/llms.txt`, and `/cli/index.md` do.
  *
- * Conservative: only treats short, ASCII-letter-only extensions as files,
- * so paths with dots inside a segment (`/v1.2/foo`, version slugs) still
- * count as document routes.
+ * Conservative: only treats short ASCII extensions containing a letter as
+ * files (`.png`, `.mp4`, `.woff2`), so dotted version slugs and numeric
+ * segments (`/v1.2`, `/v1.2/foo`, `/1.1.1.1`) still count as document routes.
  */
 function hasFileExtension(pathname: string): boolean {
   const lastSegment = pathname.slice(pathname.lastIndexOf("/") + 1);
   const dot = lastSegment.lastIndexOf(".");
   if (dot <= 0) return false;
   const ext = lastSegment.slice(dot + 1);
-  return ext.length > 0 && ext.length <= 6 && /^[a-zA-Z0-9]+$/.test(ext);
+  return ext.length <= 6 && /^[a-zA-Z0-9]+$/.test(ext) && /[a-zA-Z]/.test(ext);
 }
 
 /** `decodeURIComponent` that returns its input untouched on malformed sequences. */
@@ -123,12 +123,56 @@ export function toRouteKey(href: string): string {
 }
 
 /**
- * Trailing-slash form for browser-facing hrefs to HTML document routes.
- * Preserves query and hash; root, external URLs, anchor-only hrefs, and
- * asset URLs (paths with a file extension) are returned unchanged.
+ * A page path as Nimbus's routes know it. Under `build.format: "file"`,
+ * `Astro.url.pathname` ends in `.html` (`/guides/setup.html`, `/index.html`)
+ * while every route, link, and sidebar href has none. Entry IDs can't end in
+ * `.html` (Astro's slugger drops the dot), so this never strips a real slug.
+ */
+export function withoutHtmlExtension(path: string): string {
+  return path.replace(/(?:\/index)?\.html$/, "") || "/";
+}
+
+/** The Astro config that decides a document URL's trailing slash. */
+export interface LinkPolicy {
+  trailingSlash: "always" | "never" | "ignore";
+  format: "directory" | "file" | "preserve";
+}
+
+// On globalThis: the integration, Vite, and the content layer load separate
+// copies of this module in one process, and all of them build links.
+const LINK_POLICY_KEY = Symbol.for("@cloudflare/nimbus-docs/link-policy");
+const ASTRO_DEFAULT_POLICY: LinkPolicy = { trailingSlash: "ignore", format: "directory" };
+type PolicyHost = { [LINK_POLICY_KEY]?: LinkPolicy };
+
+/**
+ * Follow Astro's URL shape in generated document hrefs. Set from Astro's config
+ * by the integration (build-time work) and by the runtime config bridge (page
+ * rendering), so every generated link matches the canonical URL.
+ */
+export function setLinkPolicy(policy: LinkPolicy): void {
+  (globalThis as PolicyHost)[LINK_POLICY_KEY] = policy;
+}
+
+export function linkPolicy(): LinkPolicy {
+  return (globalThis as PolicyHost)[LINK_POLICY_KEY] ?? ASTRO_DEFAULT_POLICY;
+}
+
+// Mirrors Astro's internal `shouldAppendForwardSlash(trailingSlash, build.format)`.
+function appendsSlash({ trailingSlash, format }: LinkPolicy): boolean {
+  if (trailingSlash === "always") return true;
+  if (trailingSlash === "never") return false;
+  return format === "directory";
+}
+
+/**
+ * Browser-facing href for an HTML document route, with a trailing slash
+ * exactly when Astro adds one: `"always"`, or `"ignore"` with the default
+ * `build.format: "directory"`. Preserves query and hash; root, external URLs,
+ * anchor-only hrefs, and asset URLs (paths with a file extension) are
+ * returned unchanged.
  *
- *   /cli              → /cli/
- *   /cli/             → /cli/
+ *   /cli              → /cli/   (no slash: /cli)
+ *   /cli/             → /cli/   (no slash: /cli)
  *   /cli#install      → /cli/#install
  *   /cli?v=1          → /cli/?v=1
  *   /                 → /
@@ -146,9 +190,23 @@ export function toBrowserHref(href: string): string {
   // Anything that isn't an absolute site path: don't touch it.
   if (!href.startsWith("/")) return href;
 
+  if (hasFileExtension(splitSuffix(href)[0])) return href;
+  return toDocumentHref(href);
+}
+
+/**
+ * `toBrowserHref` for a path known to be a page, such as an API route, even
+ * when its last segment looks like a file (`/api/reports.list`).
+ */
+export function toDocumentHref(href: string): string {
+  if (isAbsoluteUrl(href) || !href.startsWith("/")) return href;
   const [pathname, suffix] = splitSuffix(href);
   if (pathname === "/") return href;
-  if (hasFileExtension(pathname)) return href;
+  if (!appendsSlash(linkPolicy())) {
+    let end = pathname.length;
+    while (end > 1 && pathname[end - 1] === "/") end--;
+    return `${pathname.slice(0, end)}${suffix}`;
+  }
   if (pathname.endsWith("/")) return href;
   return `${pathname}/${suffix}`;
 }

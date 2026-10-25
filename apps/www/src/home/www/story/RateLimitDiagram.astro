@@ -1,0 +1,58 @@
+---
+/* A small, static Nimbus diagram for the rate-limits page, in the welded style of the real <Diagram> showcase:
+   notched cards, brand wires with square connectors, and a dashed boundary with a mono label. */
+
+type Rect = { l: number; t: number; w: number; h: number };
+type Side = "left" | "right";
+const RX = 6, NW = 4, ND = 2;
+// Rounded rect with a notch at the middle of each listed side, where a wire docks.
+const notched = ({ l, t, w, h }: Rect, sides: Side[]) => {
+  const r = l + w, b = t + h, cy = t + h / 2;
+  const p = [`M ${l + RX},${t}`, `L ${r - RX},${t}`, `Q ${r},${t} ${r},${t + RX}`];
+  if (sides.includes("right")) p.push(`L ${r},${cy - NW}`, `C ${r},${cy - NW * 0.5} ${r - ND},${cy - NW * 0.4} ${r - ND},${cy}`, `C ${r - ND},${cy + NW * 0.4} ${r},${cy + NW * 0.5} ${r},${cy + NW}`);
+  p.push(`L ${r},${b - RX}`, `Q ${r},${b} ${r - RX},${b}`, `L ${l + RX},${b}`, `Q ${l},${b} ${l},${b - RX}`);
+  if (sides.includes("left")) p.push(`L ${l},${cy + NW}`, `C ${l},${cy + NW * 0.5} ${l + ND},${cy + NW * 0.4} ${l + ND},${cy}`, `C ${l + ND},${cy - NW * 0.4} ${l},${cy - NW * 0.5} ${l},${cy - NW}`);
+  p.push(`L ${l},${t + RX}`, `Q ${l},${t} ${l + RX},${t}`, "Z");
+  return p.join(" ");
+};
+const nodes = [
+  { id: "client", label: "Client", rect: { l: 14, t: 48, w: 96, h: 40 }, sides: ["right"] as Side[] },
+  { id: "worker", label: "Worker", rect: { l: 176, t: 48, w: 104, h: 40 }, sides: ["left", "right"] as Side[] },
+  { id: "kv", label: "KV", rect: { l: 312, t: 48, w: 104, h: 40 }, sides: ["left"] as Side[] },
+];
+const docks = [110, 176, 280, 312];
+---
+<figure class="rate-diagram overflow-hidden rounded-lg border border-border py-4" data-rate-diagram>
+  <svg viewBox="0 0 440 132" preserveAspectRatio="xMidYMid meet" class="block h-[136px] w-full" role="img" aria-label="A request goes from the client to a Worker, which checks the key's counter in KV">
+    <!-- Boundary -->
+    <rect x="150" y="16" width="283" height="104" rx="6" fill="none" class="rd-line" stroke-dasharray="6 4" />
+    <rect x="240" y="10" width="104" height="12" class="rd-bg" />
+    <text x="292" y="16" text-anchor="middle" dominant-baseline="middle" class="rd-label">Your account</text>
+    <!-- Wires -->
+    <line x1="110" y1="68" x2="176" y2="68" class="rd-wire" />
+    <line x1="280" y1="68" x2="312" y2="68" class="rd-wire" />
+    <!-- Cards -->
+    {nodes.map((n) => (
+      <g data-node={n.id}>
+        <path d={notched(n.rect, n.sides)} class="rd-card" />
+        <text x={n.rect.l + n.rect.w / 2} y={n.rect.t + n.rect.h / 2} text-anchor="middle" dominant-baseline="central" class="rd-name">{n.label}</text>
+      </g>
+    ))}
+    <!-- Connectors -->
+    {docks.map((x) => <rect x={x - 2.5} y="65.5" width="5" height="5" class="rd-dock" />)}
+    <!-- Counter -->
+    <text x="364" y="106" text-anchor="middle" class="rd-meta" >941 / 1,000</text>
+  </svg>
+</figure>
+
+<style is:global>
+  .rate-diagram { --rd-brand: var(--nb-info); }
+  .rate-diagram .rd-line { stroke: color-mix(in oklch, var(--nb-foreground) 25%, transparent); stroke-width: 1; }
+  .rate-diagram .rd-bg { fill: var(--nb-card); }
+  .rate-diagram .rd-label { fill: var(--nb-foreground); font: 500 10px var(--nb-font-mono); letter-spacing: 0.15em; text-transform: uppercase; }
+  .rate-diagram .rd-wire { stroke: var(--rd-brand); stroke-width: 1.5; stroke-linecap: round; opacity: 0.3; }
+  .rate-diagram .rd-card { fill: var(--nb-card); stroke: color-mix(in oklch, var(--nb-foreground) 15%, transparent); stroke-width: 1; }
+  .rate-diagram .rd-name { fill: var(--nb-foreground); font: 500 13px var(--nb-font-mono); }
+  .rate-diagram .rd-dock { fill: var(--rd-brand); }
+  .rate-diagram .rd-meta { fill: var(--nb-muted-foreground); font: 11px var(--nb-font-mono); }
+</style>

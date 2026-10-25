@@ -27,6 +27,7 @@ export type NodeKind =
   | "schema"
   | "response"
   | "requestBody"
+  | "responseMedia"
   | "errorCode"
   | "change";
 
@@ -81,6 +82,7 @@ export type Facts =
   | SchemaFacts
   | ResponseFacts
   | RequestBodyFacts
+  | ResponseMediaFacts
   | ErrorCodeFacts
   | ChangeFacts;
 
@@ -110,7 +112,11 @@ export interface SectionFacts {
   kind: "section";
   /** Tag summary (OAS 3.2 parent/kind hierarchy). */
   name: string;
+  /** Reader-facing label from the tag's `x-displayName`, when it differs from `name`. */
+  displayName?: string;
   description?: string;
+  /** Its position in `x-tagGroups`, when it names a tag group. */
+  group?: number;
 }
 
 export interface AuthRequirement {
@@ -141,10 +147,17 @@ export interface OperationFacts {
   /** The primary request body's media type, when the operation has a body — so
    *  the renderer labels it correctly instead of assuming JSON. */
   bodyMediaType?: string;
+  /** `requestBody.required`, when the spec states it. Shared by every media
+   *  type, so it lives here beside the primary body rather than per media node. */
+  bodyRequired?: boolean;
+  /** `requestBody.description`, when authored. Shared by every media type. */
+  bodyDescription?: string;
   /** Response children, all statuses. */
   responses: Coordinate[];
   /** Minimal valid request — computed, can't lie. */
   example?: DerivedExample;
+  /** Authored named examples for the primary request media type. */
+  requestExamples?: NamedRequestExample[];
   /** Per-language; `x-codeSamples` from the spec always win. */
   samples: CodeSample[];
   /**
@@ -155,6 +168,8 @@ export interface OperationFacts {
   server?: string;
   /** e.g. `{ method, path }` — rendered by components, never keyed on. */
   protocol: Record<string, unknown>;
+  /** The configured `x-*` fields the operation declares, values unchanged. */
+  extensions?: Record<string, unknown>;
 }
 
 export type ParameterLocation = "path" | "query" | "header" | "cookie";
@@ -182,6 +197,8 @@ export interface FieldFacts {
    * page. Absent for a scalar-valued map (`map<string>`) or a free-form object.
    */
   typeRef?: VariantRef;
+  /** The configured `x-*` fields the field declares, values unchanged. */
+  extensions?: Record<string, unknown>;
 }
 
 /**
@@ -273,6 +290,9 @@ export interface ResponseFacts {
    * union response renders its variants instead of an empty body section.
    */
   union?: UnionShape;
+  /** The primary media type, when the response declares content. Chosen by the
+   *  same precedence as the request body's (`orderedMediaEntries`). */
+  mediaType?: string;
 }
 
 /**
@@ -283,6 +303,19 @@ export interface ResponseFacts {
  */
 export interface RequestBodyFacts {
   kind: "requestBody";
+  mediaType: string;
+  example?: DerivedExample;
+  union?: UnionShape;
+}
+
+/**
+ * A non-primary response media type (e.g. `text/csv` beside the primary JSON
+ * body), a child of its `response` node. The response counterpart of
+ * `RequestBodyFacts`: its fields are child `field` nodes, so the same
+ * field→view→citation pipeline applies.
+ */
+export interface ResponseMediaFacts {
+  kind: "responseMedia";
   mediaType: string;
   example?: DerivedExample;
   union?: UnionShape;
@@ -311,8 +344,17 @@ export interface DerivedExample {
   value: unknown;
 }
 
+export interface NamedRequestExample extends DerivedExample {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export interface CodeSample {
-  /** `curl`, `typescript`, `python`, … */
+  /** Unique within the operation: the language for its first sample, then
+   *  `<lang>-2`, `<lang>-3`, … for further samples in the same language. */
+  id: string;
+  /** `curl`, `typescript`, `python`, …: the syntax, not the sample's identity. */
   lang: string;
   label: string;
   source: string;
@@ -368,6 +410,13 @@ export interface DocsModel {
    * shared coordinate.
    */
   mountPath?: string;
+  /**
+   * Public URL base when it differs from `mountPath` (query-mode versions
+   * share the version-free family base while their stores stay versioned).
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   nodes: Map<Coordinate, Node>;
   pages: PageGraph;
   nav: NavTree;

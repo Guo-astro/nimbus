@@ -8,13 +8,16 @@
 export type RegistryEntryType =
   | "registry:ui"
   | "registry:lib"
-  | "registry:feature";
+  | "registry:feature"
+  | "registry:source";
 
 export interface RegistryIndexEntry {
   name: string;
   type: RegistryEntryType;
   title: string;
   description: string;
+  /** `registry:source` only: other names for the entry, each with the host it names. */
+  aliases?: Record<string, string>;
 }
 
 export interface BundledIndex {
@@ -27,13 +30,19 @@ export const REGISTRY_BASE_URL = "https://nimbus-docs.com/registry";
 
 export const BUNDLED_INDEX: BundledIndex = {
   "version": 1,
-  "registryVersion": "0.13.1",
+  "registryVersion": "0.19.0",
   "items": {
     "cn": {
       "name": "cn",
       "type": "registry:lib",
       "title": "cn",
       "description": "Tailwind-aware className merger built on clsx + tailwind-merge."
+    },
+    "variants": {
+      "name": "variants",
+      "type": "registry:lib",
+      "title": "variants",
+      "description": "Turns a component's variant tables into one class function; Badge and Button pick their look with it."
     },
     "accordion": {
       "name": "accordion",
@@ -100,6 +109,12 @@ export const BUNDLED_INDEX: BundledIndex = {
       "type": "registry:ui",
       "title": "Collapsible",
       "description": "Headless show/hide primitive — building block for Accordion and Sidebar groups."
+    },
+    "copy-prompt": {
+      "name": "copy-prompt",
+      "type": "registry:ui",
+      "title": "CopyPrompt",
+      "description": "One-line prompt with a Copy prompt button, for pasting into an AI coding agent."
     },
     "dialog": {
       "name": "dialog",
@@ -197,6 +212,12 @@ export const BUNDLED_INDEX: BundledIndex = {
       "title": "ThemeToggle",
       "description": "Light / dark theme switcher button."
     },
+    "image-zoom": {
+      "name": "image-zoom",
+      "type": "registry:ui",
+      "title": "ImageZoom",
+      "description": "Opens content images at full size in one native dialog. Render it once in the docs layout."
+    },
     "toc": {
       "name": "toc",
       "type": "registry:ui",
@@ -207,13 +228,13 @@ export const BUNDLED_INDEX: BundledIndex = {
       "name": "version-switcher",
       "type": "registry:ui",
       "title": "VersionSwitcher",
-      "description": "Header dropdown for switching between docs versions. Reads `versions` from nimbus.config.ts, uses the build-time alternates table to land readers on the same logical page in the target version. Includes deprecation badge and hidden-version exclusion. Renders nothing when versioning is off or only one version is configured."
+      "description": "Header dropdown for switching between docs versions. Reads `versions` from the Nimbus config, uses the build-time alternates table to land readers on the same logical page in the target version. Includes deprecation badge and hidden-version exclusion. Renders nothing when versioning is off or only one version is configured."
     },
     "api-field-row": {
       "name": "api-field-row",
       "type": "registry:ui",
       "title": "ApiFieldRow",
-      "description": "One `ApiFieldView` rendered recursively, plus a titled `ApiFieldList` group. Type links, required/nullable/deprecated flags, constraints/enum/default/example, nested children with omitted-count. Anchored by the field's coordinate id. Reads the view-model only."
+      "description": "One `ApiFieldView` rendered recursively, plus a titled `ApiFieldList` group. Type links, required/nullable/deprecated flags, constraints/enum/default, nested children with omitted-count. Anchored by the field's coordinate id. Reads the view-model only."
     },
     "api-sidebar": {
       "name": "api-sidebar",
@@ -267,7 +288,7 @@ export const BUNDLED_INDEX: BundledIndex = {
       "name": "changelog",
       "type": "registry:feature",
       "title": "Changelog",
-      "description": "Add a reverse-chronological changelog at /changelog — a dated timeline feed that renders full entries inline, with tag filtering, year-grouped load-more pagination, per-entry permalinks, OG cards, markdown alternates, and an optional RSS feed. Generic: tags are opaque strings you define. For a feed-style changelog; for a docs-shaped tree use `nimbus-docs add new-collection`."
+      "description": "Add a changelog at /changelog: release notes newest first, 10 a page with Newer / Older and a \"More releases\" list, a page per release with its sections in \"On this page\", Markdown versions with each release's date and tags, OG cards, and an optional RSS feed. For a docs-shaped tree use `nimbus-docs add new-collection`."
     },
     "component-showcase": {
       "name": "component-showcase",
@@ -358,6 +379,23 @@ export const BUNDLED_INDEX: BundledIndex = {
       "type": "registry:feature",
       "title": "Pagefind search",
       "description": "Add static Pagefind indexing and the Nimbus search dialog to an existing docs site."
+    },
+    "git": {
+      "name": "git",
+      "type": "registry:source",
+      "title": "Git repository",
+      "description": "Pages from another git repository: a pinned commit cached locally, edit links into that repository, previews from its pull requests.",
+      "aliases": {
+        "github": "GitHub",
+        "gitlab": "GitLab",
+        "bitbucket": "Bitbucket"
+      }
+    },
+    "notion": {
+      "name": "notion",
+      "type": "registry:source",
+      "title": "Notion database",
+      "description": "Pages from a Notion database: title, description, slug, order and publishing from its properties."
     }
   }
 };

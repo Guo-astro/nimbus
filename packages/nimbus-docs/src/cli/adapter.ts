@@ -12,6 +12,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { parse as parseYaml } from "yaml";
 
+import { alignRouteFiles } from "../_internal/route-files.js";
 import {
   ADAPTER_IDS,
   ADAPTER_RECIPES,
@@ -28,9 +29,11 @@ import {
   type AdapterRecipe,
   type RequestRenderingEdit,
   type WranglerInputs,
+  workersCompatibilityDate,
 } from "../_internal/adapters.js";
 import { isRangeSubset, satisfies } from "../_internal/semver-lite.js";
-import { invocation, quoteForDisplay } from "./pm.js";
+import { declineBuildScript, pnpmWorkspaceFile } from "../_internal/pnpm-build-scripts.js";
+import { detectPackageManager, invocation, quoteForDisplay } from "./pm.js";
 import { writeFileAtomic } from "./fs-atomic.js";
 import {
   NIMBUS_JSON,
@@ -84,20 +87,30 @@ export type AdapterInstallOutcome =
       adapter: AdapterId;
       configPath: string;
       depsInstalled: string[];
+      /** Build scripts declined in a `pnpm-workspace.yaml`, when it changed. */
+      declinedBuildScripts?: DeclinedBuildScripts;
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
+      routeFiles: ReturnType<typeof alignRouteFiles>;
     }
   | {
       status: "noop";
       adapter: AdapterId;
       configPath: string;
       depsInstalled: string[];
+      declinedBuildScripts?: DeclinedBuildScripts;
       warnings: string[];
       wrangler: WranglerWriteResult | null;
       requestRendering?: RequestRenderingEdit;
+      routeFiles: ReturnType<typeof alignRouteFiles>;
     }
   | { status: "error"; code: AdapterInstallErrorCode; message: string };
+
+export interface DeclinedBuildScripts {
+  file: string;
+  names: string[];
+}
 
 export type AdapterInstallErrorCode =
   | "non-astro-project"
@@ -134,17 +147,19 @@ Ensure the site uses the Cloudflare Astro adapter with server output, and defaul
 ## Steps
 
 1. Inspect the active Astro config in Astro's resolution order: astro.config.mjs, astro.config.js, astro.config.ts, then astro.config.mts.
-2. If Cloudflare server output is not wired yet, install \`@astrojs/cloudflare@>=14.1.0 <14.2.0\`, import its default export, set Astro \`output: "server"\`, and set \`adapter: cloudflare({ prerenderEnvironment: "node" })\`. Preserve unrelated config and fail rather than replacing another adapter.
+2. If Cloudflare server output is not wired yet, install \`${ADAPTER_RECIPES.cloudflare.installSpec}\`, import its default export, set Astro \`output: "server"\`, and set \`adapter: cloudflare({ prerenderEnvironment: "node" })\`. Preserve unrelated config and fail rather than replacing another adapter.
 3. Ensure the project has a server-compatible Wrangler config. Preserve custom Wrangler settings; use \`nodejs_compat\` and do not configure a static assets directory for Nimbus server output.
 4. Find the default Nimbus integration imported from \`@cloudflare/nimbus-docs\`, then locate the config object passed as its first argument. Follow local imports if that config lives in another file.
 5. If the object has no \`rendering\` property, add \`rendering: { default: "request" }\`. If it already has a rendering policy, preserve it and report what it does instead of overwriting user intent.
-6. Do not add parser dependencies, magic comments, or broad formatting changes.
-7. Inspect the diff, run the project's build command, then run \`${invocation("check")}\` if available. Fix only failures caused by this change.
+6. Run \`${invocation("check --fix")}\` so the route files match \`rendering\`: request-rendered routes drop \`export const prerender\` and \`getStaticPaths\`. Apply by hand any edit it prints for a customized route file.
+7. Do not add parser dependencies, magic comments, or broad formatting changes.
+8. Inspect the diff, run the project's build command, then run \`${invocation("check")}\` if available. Fix only failures caused by this change.
 
 ## Acceptance
 
 - Astro uses \`output: "server"\` and \`@astrojs/cloudflare\`.
 - Nimbus defaults to request rendering, or an existing explicit rendering policy is preserved and reported.
+- \`${invocation("check")}\` reports no route file that doesn't match \`rendering\`.
 - The project build passes.
 `;
 }
@@ -293,6 +308,8 @@ export async function installAdapter(
     ...detectWranglerFloor(recipe, cwd),
     ...detectAdapterSwitch(cwd, adapter, priorAdapter),
   );
+  // After the install, so the date comes from the runtime the project now has.
+  const compatibilityDate = recipe.serverWrangler ? await workersCompatibilityDate(cwd) : "";
 
   // Re-read AFTER the install and re-apply to the CURRENT bytes: a postinstall,
   // a formatter, or a concurrent edit may have rewritten the config between the
@@ -327,12 +344,14 @@ export async function installAdapter(
   if (edit.status === "noop") {
     // Already wired (hand-edit, recovery, or the install itself); deps ensured.
     recordAdapterProvenance(cwd, adapter);
-    const wr = manageServerWrangler(recipe, cwd);
+    const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
     return {
+      routeFiles: alignRouteFiles(cwd),
       status: "noop",
       adapter,
       configPath: fresh.path,
       depsInstalled: depResult.installed,
+      declinedBuildScripts: depResult.declinedBuildScripts,
       warnings: [...warnings, ...wr.warnings],
       wrangler: wr.result,
       requestRendering: edit.requestRendering,
@@ -354,13 +373,15 @@ export async function installAdapter(
   }
 
   recordAdapterProvenance(cwd, adapter);
-  const wr = manageServerWrangler(recipe, cwd);
+  const wr = manageServerWrangler(recipe, cwd, compatibilityDate);
 
   return {
+    routeFiles: alignRouteFiles(cwd),
     status: "applied",
     adapter,
     configPath: fresh.path,
     depsInstalled: depResult.installed,
+    declinedBuildScripts: depResult.declinedBuildScripts,
     warnings: [...warnings, ...wr.warnings],
     wrangler: wr.result,
     requestRendering: edit.requestRendering,
@@ -482,6 +503,8 @@ function redirectBaseWarnings(cwd: string): string[] {
 function manageServerWrangler(
   recipe: AdapterRecipe,
   cwd: string,
+  /** For a config without a valid one of its own (`workersCompatibilityDate`). */
+  compatibilityDate: string,
 ): { result: WranglerWriteResult | null; warnings: string[] } {
   const serverWrangler = recipe.serverWrangler;
   if (!serverWrangler) return { result: null, warnings: [] };
@@ -501,7 +524,7 @@ function manageServerWrangler(
     compatibilityDate:
       isValidCompatibilityDate(existing?.compatibility_date)
         ? existing.compatibility_date
-        : today(),
+        : compatibilityDate,
   });
   const mergeSettingsFrom = (existing?: Record<string, unknown>) => {
     const cfg = buildServerWranglerConfig(recipe, inputsFrom(existing))!;
@@ -711,16 +734,12 @@ function detectWranglerFloor(recipe: AdapterRecipe, cwd: string): string[] {
   return [];
 }
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 async function installMissingDeps(
   recipe: (typeof ADAPTER_RECIPES)[AdapterId],
   cwd: string,
   pkg: Record<string, unknown> | null,
   installDeps: DepInstaller,
-): Promise<{ ok: boolean; installed: string[]; message?: string }> {
+): Promise<{ ok: boolean; installed: string[]; declinedBuildScripts?: DeclinedBuildScripts; message?: string }> {
   const wanted = [recipe.installSpec, ...recipe.extraDeps];
   const dependencies = (pkg?.dependencies as Record<string, unknown>) ?? {};
   const devDependencies = (pkg?.devDependencies as Record<string, unknown>) ?? {};
@@ -770,6 +789,14 @@ async function installMissingDeps(
   const missing = wanted.filter((spec) => !already.has(depName(spec)));
   if (missing.length === 0) return { ok: true, installed: [] };
 
+  // Decide pnpm's build scripts first: an undecided one fails the install.
+  let declinedBuildScripts: DeclinedBuildScripts | undefined;
+  if (recipe.declinedBuildScripts?.length && detectPackageManager(cwd) === "pnpm") {
+    const file = pnpmWorkspaceFile(cwd) ?? join(cwd, "pnpm-workspace.yaml");
+    const names = recipe.declinedBuildScripts.filter((name) => declineBuildScript(file, name));
+    if (names.length > 0) declinedBuildScripts = { file, names };
+  }
+
   const res = await installDeps(missing, cwd);
   if (!res.ok) {
     return {
@@ -780,7 +807,7 @@ async function installMissingDeps(
         `Failed to install ${missing.join(", ")}. Install them manually and re-run.`,
     };
   }
-  return { ok: true, installed: missing };
+  return { ok: true, installed: missing, declinedBuildScripts };
 }
 
 // `@scope/pkg@range` → `@scope/pkg` (a leading `@` scope isn't a version separator).

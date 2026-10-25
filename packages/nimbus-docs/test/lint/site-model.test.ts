@@ -15,6 +15,9 @@ import {
   type ContentEntry,
   type RouteOwner,
 } from "../../src/lint/site-model.js";
+import { NO_ROUTES } from "../../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 function entry(collection: string, id: string): ContentEntry {
   return { collection, id, relPath: `${collection}/${id}.mdx` };
@@ -28,7 +31,7 @@ function contentOwner(
 ): RouteOwner {
   const e = entry(collection, id);
   return {
-    url: contentEntryUrl(e, versions),
+    url: contentEntryUrl(e, { versions: versions ?? null, routes: NO_ROUTES }),
     source: `src/content/${e.relPath}`,
   };
 }
@@ -375,6 +378,26 @@ test("enumerateEntriesByBase walks each collection at its configured base, tags 
     );
     const tagged = entries.map((e) => `${e.collection}:${e.id}`).sort();
     assert.deepEqual(tagged, ["blog:hello", "docs:intro"]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a frontmatter slug decides the entry's route, so it collides with the page already there", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-slug-"));
+  try {
+    fs.mkdirSync(path.join(root, "docs", "1.2.3"), { recursive: true });
+    fs.writeFileSync(path.join(root, "docs/a.mdx"), "---\ntitle: A\nslug: b\n---\n");
+    fs.writeFileSync(path.join(root, "docs/b.mdx"), "---\ntitle: B\n---\n");
+    fs.writeFileSync(path.join(root, "docs/1.2.3/notes.mdx"), '---\ntitle: Notes\nslug: "1.2.3/notes"\n---\n');
+    // Frontmatter longer than the first read still has its slug found.
+    fs.writeFileSync(path.join(root, "docs/long.mdx"), `---\ndescription: "${"x".repeat(5000)}"\nslug: far\n---\n`);
+
+    const entries = enumerateEntriesByBase(root, new Map([["docs", "docs"]]));
+    const urls = entries.map((e) => contentEntryUrl(e, DEFAULT_URLS)).sort();
+    assert.deepEqual(urls, ["/1.2.3/notes", "/b", "/b", "/far"]);
+    const dups = findDuplicateRoutes(entries.map((e) => ({ url: contentEntryUrl(e, DEFAULT_URLS), source: e.relPath })));
+    assert.deepEqual(dups.map((d) => [d.url, [...d.sources].sort()]), [["/b", ["docs/a.mdx", "docs/b.mdx"]]]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

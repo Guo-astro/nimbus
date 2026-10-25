@@ -8,6 +8,7 @@
  * user-facing menu.
  */
 
+import { leaseCurrentSources } from "../_internal/content-sources.js";
 import {
   parseNimbusConfig,
   type ConfigLocation,
@@ -24,6 +25,7 @@ import {
   summarize,
   type CheckFinding,
   type CheckSummary,
+  type CollectionUrl,
   type Readiness,
   type ScopeReport,
   type ScopeStatus,
@@ -72,6 +74,8 @@ export interface CheckResult {
   parsed: ConfigParseResult;
   /** Present when the config object was locatable — the `--fix` write handle. */
   location: ConfigLocation | null;
+  /** Where each page collection is served, when `structure` ran. */
+  collections?: CollectionUrl[];
 }
 
 export async function runChecks(
@@ -84,15 +88,24 @@ export async function runChecks(
   const parsed = parseNimbusConfig(cwd);
 
   const reports: ScopeReport[] = [];
-  if (scopes.env) reports.push(checkEnv(cwd, parsed));
-  if (scopes.structure) reports.push(await checkStructure(cwd, parsed));
-  if (scopes.migrations) reports.push(checkMigrations(cwd, options.srcDir));
-  if (scopes.authoring) reports.push(checkAuthoring(cwd));
-  if (scopes.types) reports.push(checkTypes(cwd));
+  // Source snapshots are read under a lease, so a build can't prune one mid-read.
+  const sources = scopes.structure || scopes.authoring
+    ? await leaseCurrentSources(cwd)
+    : { snapshots: new Map(), release: () => {} };
+  try {
+    if (scopes.env) reports.push(checkEnv(cwd, parsed));
+    if (scopes.structure) reports.push(await checkStructure(cwd, parsed, sources.snapshots, options.srcDir));
+    if (scopes.migrations) reports.push(checkMigrations(cwd, options.srcDir));
+    if (scopes.authoring) reports.push(checkAuthoring(cwd, sources.snapshots));
+    if (scopes.types) reports.push(checkTypes(cwd));
+  } finally {
+    sources.release();
+  }
 
   const findings = sortFindings(reports.flatMap((r) => r.findings));
   const noteCount = reports.reduce((n, r) => n + r.notes.length, 0);
   const durationMs = Math.round(performance.now() - started);
+  const collections = reports.find((r) => r.collections)?.collections;
 
   const summary = summarize(findings, noteCount, durationMs);
   const scopeResults: ScopeResult[] = reports.map((r) => ({
@@ -110,5 +123,6 @@ export async function runChecks(
     requested: scopes,
     parsed,
     location: parsed.ok ? parsed.location : null,
+    ...(collections ? { collections } : {}),
   };
 }

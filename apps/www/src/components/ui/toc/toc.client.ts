@@ -39,11 +39,13 @@ function initToc(root: HTMLElement): () => void {
   // static gray rail, capturing each link's arc-length range as we go.
   function buildRail() {
     const navRect = nav!.getBoundingClientRect();
+    // The rail is the links' inline-start border: their left edge, or right in RTL.
+    const rtl = getComputedStyle(nav!).direction === "rtl";
 
     const m = Array.from(links).map((link) => {
       const r = link.getBoundingClientRect();
       return {
-        x: r.left - navRect.left + 1,
+        x: rtl ? r.right - navRect.left - 1 : r.left - navRect.left + 1,
         yTop: r.top - navRect.top,
         yBot: r.top - navRect.top + r.height,
       };
@@ -52,6 +54,22 @@ function initToc(root: HTMLElement): () => void {
     let d = "";
     const newSegments: { start: number; length: number }[] = [];
 
+    // Measure each command in isolation (O(1)) and accumulate, rather than
+    // re-measuring the whole cumulatively-growing path with getTotalLength()
+    // on every iteration — the latter is O(n^2) and blocks the main thread on
+    // pages with hundreds of headings. Arc length is additive across
+    // contiguous commands, so summing isolated sub-paths matches the total.
+    // activePath doubles as the scratch measurer here; the full `d` is written
+    // back once at the end.
+    const measure = (subPath: string) => {
+      activePath!.setAttribute("d", subPath);
+      return activePath!.getTotalLength();
+    };
+
+    let cumulative = 0;
+    let prevX = 0;
+    let prevYBot = 0;
+
     for (let i = 0; i < m.length; i++) {
       const cur = m[i];
 
@@ -59,27 +77,33 @@ function initToc(root: HTMLElement): () => void {
         d += `M ${cur.x} ${cur.yTop} `;
       } else {
         const prev = m[i - 1];
+        let connector: string;
         if (Math.abs(cur.x - prev.x) < 0.5) {
-          d += `L ${cur.x} ${cur.yTop} `;
+          connector = `L ${cur.x} ${cur.yTop} `;
         } else {
           // Indent change → S-curve matching the static gap SVG.
           const midY = (prev.yBot + cur.yTop) / 2;
-          d += `C ${prev.x} ${midY}, ${cur.x} ${midY}, ${cur.x} ${cur.yTop} `;
+          connector = `C ${prev.x} ${midY}, ${cur.x} ${midY}, ${cur.x} ${cur.yTop} `;
         }
+        d += connector;
+        cumulative += measure(`M ${prevX} ${prevYBot} ${connector}`);
       }
 
-      activePath!.setAttribute("d", d);
-      const start = activePath!.getTotalLength();
+      const start = cumulative;
 
-      d += `L ${cur.x} ${cur.yBot} `;
-      activePath!.setAttribute("d", d);
-      const end = activePath!.getTotalLength();
+      const seg = `L ${cur.x} ${cur.yBot} `;
+      d += seg;
+      cumulative += measure(`M ${cur.x} ${cur.yTop} ${seg}`);
 
-      newSegments.push({ start, length: end - start });
+      newSegments.push({ start, length: cumulative - start });
+
+      prevX = cur.x;
+      prevYBot = cur.yBot;
     }
 
+    activePath!.setAttribute("d", d);
     segments = newSegments;
-    totalLength = activePath!.getTotalLength();
+    totalLength = cumulative;
   }
 
   function applyActive(index: number, instant: boolean) {
@@ -293,6 +317,27 @@ function initToc(root: HTMLElement): () => void {
     passive: true,
     signal: controller.signal,
   });
+  // Content that loads later (the API home's parts) dispatches
+  // `nb:toc-headings`: track the headings that have appeared since.
+  document.addEventListener(
+    "nb:toc-headings",
+    () => {
+      let added = false;
+      slugs.forEach((slug, index) => {
+        if (observed.some((o) => o.index === index)) return;
+        const el = document.getElementById(slug);
+        if (!el) return;
+        observed.push({ el, index });
+        indexOfEl.set(el, index);
+        spy.observe(el);
+        added = true;
+      });
+      if (!added) return;
+      observed.sort((a, b) => a.index - b.index);
+      onLayoutChange();
+    },
+    { signal: controller.signal },
+  );
 
   const ro = new ResizeObserver(onLayoutChange);
   ro.observe(nav);

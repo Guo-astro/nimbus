@@ -6,16 +6,25 @@
  * payload). Version lives in the path via `mountPath`, never in the coordinate.
  */
 
+import { apiVersionQuery, targetUrlFields } from "./resolve-versions.js";
+import { projectMountContext } from "../project-mount-context.js";
 import {
   buildApiModel,
+  type ApiModel,
   getApiFieldCitations,
   getApiPageProps,
   getApiPageSlugs,
 } from "../../api/index.js";
 import type { ApiSpec } from "../../types.js";
+import type { Coordinate, DocsModel } from "./model.js";
+import { unwrapModel } from "./model-handle.js";
+import { createPageGroups } from "./coordinate-manifest.js";
 import { citationKey, isSafeCitationPath } from "./citations.js";
 import { resolveSpecSource } from "./resolve-spec.js";
-import { resolveAllApiCollections } from "./resolve-versions.js";
+import {
+  resolveAllApiCollections,
+  type ResolvedApiVersion,
+} from "./resolve-versions.js";
 
 export type { CoordinatesManifest } from "../../types.js";
 import type { CoordinatesManifest } from "../../types.js";
@@ -24,10 +33,125 @@ export interface CitationIndexResult {
   /** `collection:coordinate` / `collection@version:coordinate` → URL. */
   index: Map<string, string>;
   manifest: CoordinatesManifest;
+  /**
+   * Citation keys that name a real schema or schema field of a collection with
+   * `schemaPages: false` → the schema's name. They have no page to resolve to, so
+   * they stay out of `index`; this lets an authored citation fail with a named
+   * reason instead of "does not resolve".
+   */
+  unpublished: Map<string, string>;
 }
 
-function pageUrl(mountPath: string, slug: string): string {
-  return slug === "" ? mountPath : `${mountPath}/${slug}`;
+/** Schema and schema-field coordinates whose schema has no page, mapped to the
+ *  schema's name. A field is attributed by walking its parent chain to the
+ *  schema node (nested fields parent to their container field). */
+function pagelessSchemaCoordinates(model: DocsModel): Map<Coordinate, string> {
+  const owner = new Map<Coordinate, string | null>();
+  const schemaOf = (coordinate: Coordinate): string | null => {
+    const known = owner.get(coordinate);
+    if (known !== undefined) return known;
+    const node = model.nodes.get(coordinate);
+    let result: string | null = null;
+    if (node?.kind === "schema" && node.facts.kind === "schema") {
+      result = model.pages.pages.has(coordinate) ? null : node.facts.name;
+    } else if (node?.kind === "field" && node.parent !== null) {
+      result = schemaOf(node.parent);
+    }
+    owner.set(coordinate, result);
+    return result;
+  };
+  const out = new Map<Coordinate, string>();
+  for (const node of model.nodes.values()) {
+    if (node.kind !== "schema" && node.kind !== "field") continue;
+    const schema = schemaOf(node.id);
+    if (schema !== null) out.set(node.id, schema);
+  }
+  return out;
+}
+
+function pageUrl(
+  target: {
+    familyPath: string;
+    mountPath: string;
+    versionMode: "path" | "query";
+    versionParam: string;
+    isDefault: boolean;
+    version: string | null;
+  },
+  slug: string,
+): string {
+  // Query mode: one version-free path per operation; a non-default version's
+  // citations carry its version query (`resolveCitation` shapes only the
+  // pathname, so the query survives `toDocumentHref`).
+  const base =
+    target.versionMode === "query" ? target.familyPath : target.mountPath;
+  const path = slug === "" ? base : `${base}/${slug}`;
+  return `${path || "/"}${apiVersionQuery(target)}`;
+}
+
+/** Version-neutral build artifact; never embedded in request indexes. */
+export interface ApiCitationSummary {
+  targets: Array<{ coordinate: string; slug: string; anchor?: string }>;
+  unpublished: Record<string, string>;
+}
+
+/** `schemaPages` true publishes every schema, so none is unpublished (as in 0.17). */
+export function collectApiCitationSummary(
+  model: ApiModel,
+  schemaPages = false,
+): ApiCitationSummary {
+  const targets: ApiCitationSummary["targets"] = [];
+  for (const { coordinate, slug } of getApiPageSlugs(model)) {
+    targets.push({ coordinate, slug });
+    const page = getApiPageProps(model, coordinate);
+    if (page.kind === "operation") {
+      for (const response of page.responses) {
+        targets.push({
+          coordinate: response.coordinate,
+          slug,
+          anchor: response.anchor,
+        });
+      }
+    }
+  }
+  for (const { coordinate, slug, anchor } of getApiFieldCitations(model)) {
+    targets.push({ coordinate, slug, anchor });
+  }
+  return {
+    targets,
+    unpublished: schemaPages
+      ? {}
+      : Object.fromEntries(pagelessSchemaCoordinates(unwrapModel(model))),
+  };
+}
+
+export interface PreparedApiCitationSource {
+  /** Build-only synchronous reader; retain a filename, not all version payloads. */
+  read(): ApiCitationSummary;
+}
+
+export interface BuildCitationIndexOptions {
+  preparedVersions?: ReadonlyMap<string, PreparedApiCitationSource>;
+}
+
+/** Iteration deliberately exposes published citations only; authored resolution
+ * can still look up exact historical versions without bundling their history. */
+class AuthoredCitationMap extends Map<string, string> {
+  constructor(
+    private readonly historical: (key: string) => string | undefined,
+    private readonly historicalKeys: (scope: string) => Iterable<string>,
+  ) {
+    super();
+  }
+  override get(key: string): string | undefined {
+    return super.get(key) ?? this.historical(key);
+  }
+  override has(key: string): boolean {
+    return super.has(key) || this.historical(key) !== undefined;
+  }
+  keysForVersion(scope: string): Iterable<string> {
+    return this.historicalKeys(scope);
+  }
 }
 
 /**
@@ -39,116 +163,137 @@ function pageUrl(mountPath: string, slug: string): string {
 export async function buildCitationIndex(
   api: ApiSpec[] | undefined,
   root: string,
+  options: BuildCitationIndexOptions = {},
 ): Promise<CitationIndexResult> {
-  const index = new Map<string, string>();
+  const historical = new Map<
+    string,
+    { target: ResolvedApiVersion; source: PreparedApiCitationSource }
+  >();
+  // Bound build-time demand reads to one historical version. Repeated citations
+  // in a document reuse it; different documents cannot retain all history.
+  let cached:
+    | {
+        key: string;
+        index: Map<string, string>;
+        unpublished: Map<string, string>;
+      }
+    | undefined;
+  const lookup = (key: string, kind: "index" | "unpublished") => {
+    const colon = key.indexOf(":");
+    if (colon < 0) return undefined;
+    const versionKey = key.slice(0, colon);
+    const prepared = historical.get(versionKey);
+    if (!prepared) return undefined;
+    if (cached?.key !== versionKey) {
+      const summary = prepared.source.read();
+      const index = new Map<string, string>();
+      const unpublished = new Map<string, string>();
+      for (const { coordinate, slug, anchor } of summary.targets) {
+        const url = `${pageUrl(prepared.target, slug)}${anchor === undefined ? "" : `#${anchor}`}`;
+        if (isSafeCitationPath(url))
+          index.set(`${versionKey}:${coordinate}`, url);
+      }
+      for (const [coordinate, schema] of Object.entries(summary.unpublished)) {
+        unpublished.set(`${versionKey}:${coordinate}`, schema);
+      }
+      cached = { key: versionKey, index, unpublished };
+    }
+    return cached[kind].get(key);
+  };
+  const index = options.preparedVersions
+    ? new AuthoredCitationMap((key) => lookup(key, "index"), (scope) => {
+        lookup(`${scope}:`, "index");
+        return cached?.key === scope ? cached.index.keys() : [];
+      })
+    : new Map<string, string>();
+  const unpublished = options.preparedVersions
+    ? new AuthoredCitationMap((key) => lookup(key, "unpublished"), () => [])
+    : new Map<string, string>();
   // Null-prototype maps: coordinates and collection names come from arbitrary
   // (possibly third-party) specs, so keys like `__proto__` or `constructor`
   // must land as plain own properties, never mutate a prototype.
-  const manifest: CoordinatesManifest = { version: 1, collections: Object.create(null) };
+  const manifest: CoordinatesManifest = { version: 2, collections: Object.create(null) };
 
-  for (const target of resolveAllApiCollections(api)) {
-    const source = await resolveSpecSource(
-      {
-        collection: target.namespace,
-        spec: target.spec,
-        label: target.label,
-        mountPath: target.mountPath,
-        requireOperationId: target.requireOperationId,
-        routes: target.routes,
-      },
-      root,
-    );
-    const model = await buildApiModel(source);
+  for (const target of resolveAllApiCollections(api, projectMountContext(root))) {
+    const prepared = options.preparedVersions?.get(target.versionKey);
+    if (prepared && !target.isDefault) {
+      historical.set(target.versionKey, { target, source: prepared });
+      continue;
+    }
+    let summary: ApiCitationSummary;
+    if (prepared) {
+      summary = prepared.read();
+    } else {
+      const source = await resolveSpecSource(
+        {
+          collection: target.namespace,
+          spec: target.spec,
+          label: target.label,
+          mountPath: target.mountPath,
+          ...targetUrlFields(target),
+          requireOperationId: target.requireOperationId,
+          schemaPages: target.schemaPages,
+          routes: target.routes,
+          samples: target.samples,
+          extensions: target.extensions,
+        },
+        root,
+      );
+      summary = collectApiCitationSummary(
+        await buildApiModel(source),
+        target.schemaPages ?? false,
+      );
+    }
+    for (const [coordinate, schema] of Object.entries(summary.unpublished)) {
+      if (target.version)
+        unpublished.set(
+          citationKey(target.namespace, target.version, coordinate),
+          schema,
+        );
+      if (target.isDefault)
+        unpublished.set(
+          citationKey(target.namespace, undefined, coordinate),
+          schema,
+        );
+    }
 
     const collection =
       manifest.collections[target.namespace] ??
-      (manifest.collections[target.namespace] = { defaultVersion: null, entries: Object.create(null) });
+      (manifest.collections[target.namespace] = { defaultVersion: null, pages: [] });
     if (target.isDefault) collection.defaultVersion = target.version;
 
-    const targets: Array<{ coordinate: string; url: string }> = [];
-    for (const { coordinate, slug } of getApiPageSlugs(model)) {
-      targets.push({ coordinate, url: pageUrl(target.mountPath, slug) });
-      const page = getApiPageProps(model, coordinate);
-      if (page.kind === "operation") {
-        for (const response of page.responses) {
-          targets.push({
-            coordinate: response.coordinate,
-            url: `${pageUrl(target.mountPath, slug)}#${response.anchor}`,
-          });
-        }
-      }
+    const targets = summary.targets.map(({ coordinate, slug, anchor }) => ({
+      coordinate,
+      url: `${pageUrl(target, slug)}${anchor === undefined ? "" : `#${anchor}`}`,
+    }));
+
+    const validTargets = targets.filter(({ url }) => isSafeCitationPath(url));
+    const pages = createPageGroups(validTargets);
+    if (target.version) {
+      (collection.versions ??= Object.create(null))[target.version] = pages;
     }
+    if (target.isDefault) collection.pages = pages;
 
-    for (const { coordinate, slug, anchor } of getApiFieldCitations(model)) {
-      targets.push({ coordinate, url: `${pageUrl(target.mountPath, slug)}#${anchor}` });
-    }
-
-    for (const { coordinate, url } of targets) {
-      if (!isSafeCitationPath(url)) continue;
-
-      const entry = collection.entries[coordinate] ?? (collection.entries[coordinate] = {});
+    for (const { coordinate, url } of validTargets) {
       if (target.version) {
         index.set(citationKey(target.namespace, target.version, coordinate), url);
-        (entry.versions ??= Object.create(null))[target.version] = url;
       }
       if (target.isDefault) {
         index.set(citationKey(target.namespace, undefined, coordinate), url);
-        entry.url = url;
       }
     }
   }
 
-  return { index, manifest };
-}
-
-/**
- * Fold a remote collection's manifest into an existing citation index, under the
- * consumer-declared `collection` name and trusted `origin`. Every value is
- * re-validated on ingest; an unsafe value is dropped with a diagnostic and never
- * baked, so a hostile or buggy manifest cannot inject a dangerous href (the
- * worst it can do is a bad path on an origin the author already trusted).
- */
-export function ingestRemoteManifest(
-  citationIndex: Map<string, string>,
-  collection: string,
-  manifest: CoordinatesManifest,
-  origin?: string,
-): string[] {
-  const diagnostics: string[] = [];
-  // An array is a `typeof "object"` too — reject it explicitly at every level so
-  // a hostile manifest can't smuggle values in via numeric indices.
-  const isRecord = (v: unknown): v is Record<string, unknown> =>
-    typeof v === "object" && v !== null && !Array.isArray(v);
-  const collectionRecord = manifest.collections?.[collection];
-  const entries = isRecord(collectionRecord) ? collectionRecord.entries : undefined;
-  if (!isRecord(entries)) {
-    diagnostics.push(
-      `remote manifest for "${collection}" has no such collection (or a malformed one) — citations to it will resolve to "#".`,
+  // Stable transport bytes independent of declaration ordering.
+  manifest.collections = Object.assign(Object.create(null), Object.fromEntries(
+    Object.entries(manifest.collections).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
+  ));
+  for (const collection of Object.values(manifest.collections)) {
+    if (collection.versions) collection.versions = Object.fromEntries(
+      Object.entries(collection.versions).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
     );
-    return diagnostics;
   }
-  const trustedOrigin = origin ? origin.replace(/\/$/, "") : "";
-  const place = (version: string | undefined, coordinate: string, path: unknown): void => {
-    if (typeof path !== "string" || !isSafeCitationPath(path)) {
-      diagnostics.push(`remote manifest for "${collection}": dropped unsafe path ${JSON.stringify(path)}.`);
-      return;
-    }
-    citationIndex.set(citationKey(collection, version, coordinate), `${trustedOrigin}${path}`);
-  };
-  for (const [coordinate, entry] of Object.entries(entries)) {
-    if (!isRecord(entry)) {
-      diagnostics.push(`remote manifest for "${collection}": dropped malformed entry "${coordinate}".`);
-      continue;
-    }
-    const { url, versions } = entry as { url?: unknown; versions?: unknown };
-    if (url !== undefined) place(undefined, coordinate, url);
-    if (versions !== undefined) {
-      if (!isRecord(versions)) {
-        diagnostics.push(`remote manifest for "${collection}": dropped malformed "versions" for "${coordinate}".`);
-      } else {
-        for (const [version, path] of Object.entries(versions)) place(version, coordinate, path);
-      }
-    }
-  }
-  return diagnostics;
+  return { index, manifest, unpublished };
 }
+
+export { ingestRemoteManifest } from "./coordinate-manifest.js";

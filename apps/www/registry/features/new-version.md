@@ -66,8 +66,16 @@ Before prompting the user or writing anything, inspect the project:
   extras almost certainly correspond to the `schemaFields` you'll
   capture below; they must be forwarded on the new version's route
   too (step 4d explains how).
-- `src/pages/[...slug]/index.md.ts` — the primary `.md` alternate
-  route. Same.
+- `src/pages/[...slug]/index.md.ts` and `src/pages/[...slug]/index.mdx.ts`
+  — confirm they call `markdownRoute()` and `markdownSourceRoute()` from
+  `@cloudflare/nimbus-docs/agent-endpoints`. These shared routes serve the
+  Markdown and source versions of every collection, versions included, so
+  the new version needs no Markdown routes.
+  If either file instead passes `collection: "docs"` (an older starter),
+  stop: the new pages would get no `.md` or `.mdx` files. Ask the user to
+  update it first with `nimbus-docs diff <file> --apply` if it is
+  unmodified, or to replace it with the three-line version from the
+  `ai-native` recipe, wrapping it to keep any customizations.
 - `src/layouts/DocsLayout.astro` — must accept `collection` and
   `entryId` props and forward them. If those props are missing, the
   user is on an older starter; tell them to upgrade before continuing
@@ -95,12 +103,14 @@ default later ones.
 
 The slug is the URL prefix. Common shapes:
 - Major versions: `v0`, `v1`, `v2`, `v3` — best for SDKs / frameworks
+- Minor versions: `v1.2`, `v2.0` — when minor releases need their own docs
 - Calendar versions: `2024-q4`, `2025-q1` — best for APIs
 - Named versions: `legacy`, `archive` — best when "v1 vs v2" overstates the change
 
 Rules:
-- Lowercase, `a-z` / `0-9` / `-` / `_` only — no dots, no spaces. The
-  slug feeds into URLs.
+- Lowercase, `a-z` / `0-9` / `-` / `_` / `.` only, starting with a
+  letter or digit — no spaces, no slashes, no `..`. The slug feeds into
+  URLs and the collection name `docs-<slug>`.
 - Must not equal the existing `versions.current` value (if one is set).
 
 Tell the user the resulting URL prefix will be `/<slug>/<page>`.
@@ -152,7 +162,7 @@ If yes, the recipe adds `<slug>` to `versions.hidden`. That means the
 version's URLs resolve but it's excluded from:
 - The picker dropdown
 - Pagefind search index entirely
-- `/llms.txt` (root + per-version)
+- `/<slug>/llms.txt` — a hidden version gets no index
 - Cross-version `<link rel="alternate">` tags
 
 Useful for in-progress drafts, marketing-published-but-incomplete
@@ -176,12 +186,11 @@ Print an exact plan before writing anything. Example:
 >    }
 >    ```
 > 4. Write `src/pages/v1/[...slug].astro` (page route).
-> 5. Write `src/pages/v1/[...slug]/index.md.ts` (markdown alternate).
-> 6. Copy `VersionSwitcher.astro`, `index.ts`, and `README.md` into
+> 5. Copy `VersionSwitcher.astro`, `index.ts`, and `README.md` into
 >    `src/components/ui/version-switcher/`.
-> 7. Edit `src/components/Header.astro` to render `<VersionSwitcher
+> 6. Edit `src/components/Header.astro` to render `<VersionSwitcher
 >    collection={collection} entryId={entryId} />`.
-> 8. Edit `src/layouts/DocsLayout.astro` to render the mobile picker
+> 7. Edit `src/layouts/DocsLayout.astro` to render the mobile picker
 >    inside the sidebar drawer.
 >
 > Final result: visit `/` (v2 current) and `/v1/<page>` (frozen v1).
@@ -337,8 +346,8 @@ siblings:
 
 - `getCollectionStaticPaths("docs-<slug>")` — takes the collection
   name as an argument
-- `getCollectionPage<"docs-<slug>">(Astro)` — takes the
-  collection name as a TypeScript generic
+- `getCollectionPage(Astro, "docs-<slug>")` — takes the
+  collection name as its second argument
 
 The snippet below uses the correct helpers. Copy it verbatim and
 substitute `<slug>` — do not be tempted to "match" the primary
@@ -360,17 +369,15 @@ import {
   getLastUpdated,
   getRouteFlags,
   getTOC,
-  entryRouteKey,
   stripBase,
 } from "@cloudflare/nimbus-docs";
 import { components } from "../../components";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("docs-<slug>");
 
-const page = await getCollectionPage<"docs-<slug>">(Astro);
+const page = await getCollectionPage(Astro, "docs-<slug>");
 if (page instanceof Response) return page;
-const { entry, Content, headings } = page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
 const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
 const { tableOfContents: tocOn } = await getRouteFlags(entry);
@@ -385,12 +392,7 @@ const lastUpdated = entry.data.lastUpdated ??
   await getLastUpdated(entry);
 const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
-const routeKey = entryRouteKey(entry.id);
-const markdownPath = routeKey
-  ? `/<slug>/${routeKey}/index.md`
-  : "/<slug>/index.md";
-const markdownUrl = markdownPath;
-const socialImage = entry.data.socialImage ?? `/og/<slug>/${entry.id}.png`;
+const socialImage = entry.data.socialImage ?? ogImageUrl;
 ---
 
 <DocsLayout
@@ -422,6 +424,15 @@ the snippet above (the directory name in the file path, plus the
 several references inside the file body). Don't ship literal angle
 brackets to the user's repo.
 
+The route is written for a site built ahead of time on
+`output: "static"`. Then run `nimbus-docs check --fix`, so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
+
 The `collection={entry.collection}` and `entryId={entry.id}` props on
 `<DocsLayout>` are required — they're what drives the picker, the
 deprecation banner, the cross-version alternates, and the canonical
@@ -448,58 +459,7 @@ if the primary route has
 v0 pages with `audience: "human"` render the same "For humans"
 treatment as v1 pages.
 
-### 4e. Scaffold the version's `.md` alternate route
-
-Write `src/pages/<slug>/[...slug]/index.md.ts`:
-
-```ts
-import {
-  getMarkdownPayload,
-  getMarkdownStaticPaths,
-  type MarkdownEndpointReference,
-} from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
-
-const COLLECTION = "docs-<slug>";
-
-interface SlugProps {
-  reference: MarkdownEndpointReference;
-}
-
-interface SlugContext {
-  params: { slug?: string };
-  props: Partial<SlugProps>;
-  request: Request;
-}
-
-export const getStaticPaths = async () =>
-  getMarkdownStaticPaths({ collection: COLLECTION, surface: "markdown" });
-
-export async function GET({ params, props, request }: SlugContext) {
-  const payload = await getMarkdownPayload({
-    collection: COLLECTION,
-    surface: "markdown",
-    slug: params.slug,
-    reference: props.reference,
-    context: { request },
-  });
-  if (!payload) return new Response("Not found", { status: 404 });
-  return new Response(payload.body, {
-    headers: { "Content-Type": payload.mediaType },
-  });
-}
-```
-
-Substitute the user's version slug for every `<slug>` token in the
-snippet above (the directory name in the file path, plus the
-`COLLECTION` constant value at the top).
-
-The endpoint payload includes the version frontmatter so agents can pin a
-version. To also serve the expanded source form, mirror this route with
-`surface: "source"` at `src/pages/<slug>/[...slug]/index.mdx.ts`.
-
-### 4f. Install the version-switcher picker (skip if already installed)
+### 4e. Install the version-switcher picker (skip if already installed)
 
 If `src/components/ui/version-switcher/` already exists, skip this
 step — the component is already installed.
@@ -507,7 +467,7 @@ step — the component is already installed.
 Otherwise, install it via the registry CLI:
 
 ```sh
-pnpm exec nimbus-docs add version-switcher --yes
+npx @cloudflare/nimbus-docs add version-switcher --yes
 ```
 
 That command copies three files into the user's project:
@@ -536,42 +496,49 @@ recover in this priority order:**
    ```sh
    # Terminal 2
    export NIMBUS_REGISTRY_URL=http://localhost:8901
-   pnpm exec nimbus-docs add version-switcher --yes
+   npx @cloudflare/nimbus-docs add version-switcher --yes
    ```
 
 2. **You're a fresh user and the live registry is down or stale.**
    Fall back to copying the files directly from the framework's
    GitHub repo (the registry hosts the same content):
 
+   `VersionSwitcher.astro` imports `../popover`, which fresh sites
+   don't ship either, so copy both components (the CLI installs
+   `popover` for you as a registry dependency):
+
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/cloudflare/nimbus/main/packages/nimbus-starter-source/src/components/ui/version-switcher/VersionSwitcher.astro \
-     -o src/components/ui/version-switcher/VersionSwitcher.astro
-   curl -fsSL https://raw.githubusercontent.com/cloudflare/nimbus/main/packages/nimbus-starter-source/src/components/ui/version-switcher/index.ts \
-     -o src/components/ui/version-switcher/index.ts
-   curl -fsSL https://raw.githubusercontent.com/cloudflare/nimbus/main/packages/nimbus-starter-source/src/components/ui/version-switcher/README.md \
-     -o src/components/ui/version-switcher/README.md
+   base=https://raw.githubusercontent.com/cloudflare/nimbus/main/packages/nimbus-starter-source/src/components/ui
+   mkdir -p src/components/ui/popover src/components/ui/version-switcher
+   for f in Popover.astro PopoverContent.astro PopoverTrigger.astro index.ts popover.client.ts; do
+     curl -fsSL "$base/popover/$f" -o "src/components/ui/popover/$f"
+   done
+   for f in VersionSwitcher.astro index.ts README.md; do
+     curl -fsSL "$base/version-switcher/$f" -o "src/components/ui/version-switcher/$f"
+   done
    ```
 
-   (Create `src/components/ui/version-switcher/` first if it doesn't
-   exist.)
+   Skip the popover files if `src/components/ui/popover/` already
+   exists.
 
 3. **You're an agent running inside the Nimbus monorepo (file system
    access) and neither of the above is convenient.** Read the source
    directly:
 
    ```
+   packages/nimbus-starter-source/src/components/ui/popover/
    packages/nimbus-starter-source/src/components/ui/version-switcher/
    ```
 
-   Copy `VersionSwitcher.astro`, `index.ts`, and `README.md` verbatim
-   into the user's `src/components/ui/version-switcher/`.
+   Copy both folders verbatim into the user's `src/components/ui/`
+   (skip `popover/` if the user already has it).
 
 Do NOT abandon the recipe at this step. If you can't get the picker
 files in via ANY of these three paths, that's a bug — report it
 specifically rather than silently skipping the picker (a "successful"
 recipe run with no picker is the worst outcome).
 
-### 4g. Wire the picker into Header and DocsLayout (skip if already wired)
+### 4f. Wire the picker into Header and DocsLayout (skip if already wired)
 
 **Edit `src/components/Header.astro`:**
 
@@ -615,42 +582,38 @@ import { VersionSwitcher } from "@/components/ui/version-switcher";
 ```
 
 Find the mobile sidebar drawer — the `<dialog data-mobile-sidebar>`
-block. Inside it, there's a `<nav>` that renders the sidebar. The
-starter ships this with a `hasSidebar` slot conditional that lets
-parent layouts override the sidebar entirely:
+block. Its panel has a "Navigation" header bar, then an empty
+`data-nb-sidebar-drawer-slot` div. The rail's sidebar tree moves into
+that slot while the drawer is open, so don't put anything inside it:
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  {hasSidebar ? <slot name="sidebar" /> : (
-    <Fragment>
-      <SidebarFilter />
-      <Sidebar items={sidebar} />
-    </Fragment>
-  )}
-</nav>
+<div data-mobile-sidebar-panel class="...">
+  <div class="sticky top-0 ...">
+    <span class="...">Navigation</span>
+    <button data-close-sidebar ...>...</button>
+  </div>
+  <div data-nb-sidebar-drawer-slot class="..."></div>
+</div>
 ```
 
-Add the picker as the **first child of the `<nav>`, BEFORE the
-conditional.** That way it shows on every page regardless of
-whether the parent provides a custom sidebar slot — matching the
-desktop header's unconditional render:
+Add the picker **between the header bar and the slot**. It shows on
+every page, matching the desktop header's unconditional render:
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  <VersionSwitcher collection={collection} entryId={entryId} variant="sidebar" />
-  {hasSidebar ? <slot name="sidebar" /> : (
-    <Fragment>
-      <SidebarFilter />
-      <Sidebar items={sidebar} />
-    </Fragment>
-  )}
-</nav>
+<div data-mobile-sidebar-panel class="...">
+  <div class="sticky top-0 ...">
+    <span class="...">Navigation</span>
+    <button data-close-sidebar ...>...</button>
+  </div>
+  <VersionSwitcher collection={collection} entryId={entryId} variant="sidebar" class="mx-4 mt-4" />
+  <div data-nb-sidebar-drawer-slot class="..."></div>
+</div>
 ```
 
-If the layout you're editing has NO `hasSidebar` conditional (older
-starter or custom layout), just add the picker above the existing
-sidebar/filter render. The placement principle is the same: picker
-at the top of the drawer's nav region.
+If the layout you're editing has no drawer slot (older starter or
+custom layout), add the picker above the drawer's sidebar render
+instead. The placement principle is the same: picker at the top of
+the drawer's navigation.
 
 Confirm the layout already forwards `collection` and `entryId` to
 `<Header />`:
@@ -670,8 +633,11 @@ After writing all files:
 2. Confirm the build completes without errors.
 3. Confirm the dist output contains:
    - `dist/<slug>/welcome/index.html` (or the equivalent first entry)
-   - `dist/<slug>/welcome/index.md`
-   - `dist/<slug>/llms.txt` (if the version has ≥ 2 entries)
+   - `dist/<slug>/welcome/index.md` and `index.mdx` (served by the shared
+     Markdown routes)
+   - `dist/<slug>/llms.txt`, unless the version is hidden. The root
+     `dist/llms.txt` lists only the current version, so it doesn't link
+     `/<slug>/llms.txt` for any older version, hidden or not.
 4. Tell the user the URLs to visit:
    - `http://localhost:<port>/` (current version)
    - `http://localhost:<port>/<slug>/<page>` (frozen version)

@@ -17,6 +17,7 @@ import {
   hasCitation,
   type CitationIndex,
 } from "../src/_internal/api/citations.ts";
+import { setLinkPolicy } from "../src/_internal/url.ts";
 
 const index: CitationIndex = new Map([
   ["zones:createZone", "/zones/create"],
@@ -85,16 +86,27 @@ describe("parseCitation: the token grammar", () => {
 
 describe("citationKey + resolveCitation", () => {
   test("unversioned key resolves the family default", () => {
-    assert.equal(resolveCitation({ collection: "zones", coordinate: "createZone" }, index), "/zones/create");
+    assert.equal(resolveCitation({ collection: "zones", coordinate: "createZone" }, index), "/zones/create/");
   });
   test("versioned key resolves that version", () => {
     assert.equal(
       resolveCitation({ collection: "zones", version: "v1", coordinate: "createZone" }, index),
-      "/zones/v1/create",
+      "/zones/v1/create/",
     );
   });
   test("unknown resolves to undefined", () => {
     assert.equal(resolveCitation({ collection: "zones", coordinate: "nope" }, index), undefined);
+  });
+  test("resolved URLs follow Astro's trailingSlash like other page links", (t) => {
+    t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+    setLinkPolicy({ trailingSlash: "never", format: "directory" });
+    assert.equal(resolveCitation({ collection: "zones", coordinate: "createZone" }, index), "/zones/create");
+    assert.equal(
+      resolveCitations("[a](api.ref:zones:createZone)", { mode: "author", citationIndex: index }).code,
+      "[a](/zones/create)",
+    );
+    setLinkPolicy({ trailingSlash: "always", format: "directory" });
+    assert.equal(resolveCitation({ collection: "zones", coordinate: "createZone" }, index), "/zones/create/");
   });
   test("key shape", () => {
     assert.equal(citationKey("zones", undefined, "createZone"), "zones:createZone");
@@ -124,7 +136,7 @@ describe("resolveCitations: rewriting link targets", () => {
       "See [create a zone](api.ref:zones:createZone) to start.",
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, "See [create a zone](/zones/create) to start.");
+    assert.equal(code, "See [create a zone](/zones/create/) to start.");
     assert.equal(diagnostics.length, 0);
   });
 
@@ -133,7 +145,7 @@ describe("resolveCitations: rewriting link targets", () => {
       `<a href="api.ref:accounts:list">list</a>`,
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, `<a href="/accounts/list">list</a>`);
+    assert.equal(code, `<a href="/accounts/list/">list</a>`);
   });
 
   test("rewrites a versioned citation", () => {
@@ -141,7 +153,7 @@ describe("resolveCitations: rewriting link targets", () => {
       "[old](api.ref:zones@v1:createZone)",
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, "[old](/zones/v1/create)");
+    assert.equal(code, "[old](/zones/v1/create/)");
   });
 
   test("author mode: unknown coordinate is a build error, no token leaks", () => {
@@ -177,6 +189,50 @@ describe("resolveCitations: rewriting link targets", () => {
     assert.equal(diagnostics[0]?.level, "warning");
   });
 
+  test("a request field that is only listed under the response points there", () => {
+    const withResponse: CitationIndex = new Map([
+      ...index,
+      ["zones:createZone.response.201", "/api/zones/create-zone/#response-201"],
+      ["zones:createZone.response.201.id", "/api/zones/create-zone/#response-201-id"],
+    ]);
+    const { diagnostics } = resolveCitations("[x](api.ref:zones:createZone.id)", { mode: "author", citationIndex: withResponse });
+    assert.equal(diagnostics[0]?.level, "error");
+    assert.match(diagnostics[0]?.message ?? "", /leave out readOnly fields; if it is readOnly, cite it under the response: "api\.ref:zones:createZone\.response\.201\.id"/);
+  });
+
+  test("a dotted operation ID never suggests a response from another operation", () => {
+    const withResponse: CitationIndex = new Map([
+      ...index,
+      ["zones:users", "/api/zones/users"],
+      ["zones:users.create", "/api/zones/users/create"],
+      ["zones:users.response.201", "/api/zones/users/#response-201"],
+      ["zones:users.response.201.create.id", "/api/zones/users/#response-201-create-id"],
+      ["zones:users.create.response.201", "/api/zones/users/create/#response-201"],
+      ["zones:users.create.response.201.id", "/api/zones/users/create/#response-201-id"],
+    ]);
+    const { diagnostics } = resolveCitations("[x](api.ref:zones:users.create.id)", { mode: "author", citationIndex: withResponse });
+    assert.match(diagnostics[0]?.message ?? "", /"api\.ref:zones:users\.create\.response\.201\.id"/);
+    assert.doesNotMatch(diagnostics[0]?.message ?? "", /"api\.ref:zones:users\.response\.201\.create\.id"/);
+  });
+
+  test("a nested field and an additional response media field suggest their response coordinates", () => {
+    const withResponse: CitationIndex = new Map([
+      ...index,
+      ["zones:createZone.profile", "/zones/create/#request-profile"],
+      ["zones:createZone.response.201", "/zones/create/#response-201"],
+      ["zones:createZone.response.201.profile.id", "/zones/create/#response-201-profile-id"],
+      ["zones:createZone.response.201.text-csv", "/zones/create/#response-201-text-csv"],
+      ["zones:createZone.response.201.text-csv.code", "/zones/create/#response-201-text-csv-code"],
+    ]);
+    for (const [field, target] of [
+      ["profile.id", "createZone.response.201.profile.id"],
+      ["code", "createZone.response.201.text-csv.code"],
+    ]) {
+      const { diagnostics } = resolveCitations(`[x](api.ref:zones:createZone.${field})`, { mode: "author", citationIndex: withResponse });
+      assert.ok(diagnostics[0]?.message.includes(`"api.ref:zones:${target}"`), diagnostics[0]?.message);
+    }
+  });
+
   test("a near-miss gets a Levenshtein hint", () => {
     const { diagnostics } = resolveCitations(
       "[x](api.ref:zones:createZon)",
@@ -200,12 +256,19 @@ describe("resolveCitations: rewriting link targets", () => {
     assert.equal(diagnostics.length, 0);
   });
 
+  test("a longer fence keeps the shorter fence inside it as code", () => {
+    const src = "````md\n```\n[x](api.ref:zones:nope)\n```\n````\n";
+    const { code, diagnostics } = resolveCitations(src, { mode: "author", citationIndex: index });
+    assert.equal(code, src);
+    assert.equal(diagnostics.length, 0);
+  });
+
   test("multiple citations in one source all resolve", () => {
     const { code } = resolveCitations(
       "[a](api.ref:zones:createZone) and [b](api.ref:accounts:list)",
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, "[a](/zones/create) and [b](/accounts/list)");
+    assert.equal(code, "[a](/zones/create/) and [b](/accounts/list/)");
   });
 
   test("angle-bracket destination cites a space-bearing coordinate; brackets are dropped", () => {
@@ -213,7 +276,7 @@ describe("resolveCitations: rewriting link targets", () => {
       "[section](<api.ref:zones:tags.User Management>)",
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, "[section](/zones/tags/User-Management)");
+    assert.equal(code, "[section](/zones/tags/User-Management/)");
     assert.equal(diagnostics.length, 0);
   });
 
@@ -222,7 +285,7 @@ describe("resolveCitations: rewriting link targets", () => {
       "[c](<api.ref:zones:createZone>)",
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, "[c](/zones/create)");
+    assert.equal(code, "[c](/zones/create/)");
   });
 
   test("interior padding inside the angle brackets is tolerated and trimmed", () => {
@@ -232,7 +295,7 @@ describe("resolveCitations: rewriting link targets", () => {
       "[c](<  api.ref:zones:tags.User Management  >)",
     ]) {
       const { code, diagnostics } = resolveCitations(src, { mode: "author", citationIndex: index });
-      assert.match(code, /\]\(\/zones\/tags\/User-Management\)/);
+      assert.match(code, /\]\(\/zones\/tags\/User-Management\/\)/);
       assert.equal(diagnostics.length, 0);
     }
   });
@@ -242,7 +305,7 @@ describe("resolveCitations: rewriting link targets", () => {
       `<a href="api.ref:zones:tags.User Management">section</a>`,
       { mode: "author", citationIndex: index },
     );
-    assert.equal(code, `<a href="/zones/tags/User-Management">section</a>`);
+    assert.equal(code, `<a href="/zones/tags/User-Management/">section</a>`);
     assert.equal(diagnostics.length, 0);
   });
 

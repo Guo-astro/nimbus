@@ -7,7 +7,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -16,6 +15,7 @@ import { build } from "astro";
 
 import nimbus from "../src/index.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const roots: string[] = [];
 
@@ -35,7 +35,7 @@ afterEach(async () => {
 
 test("bakes agent-endpoint assets at astro:build:start for prerendered endpoints", async () => {
   const root = await mkdtemp(
-    path.join(os.tmpdir(), "nimbus-generated-markdown-lifecycle-"),
+    path.join(TEST_TMP, "nimbus-generated-markdown-lifecycle-"),
   );
   roots.push(root);
   await markReviewed(root);
@@ -217,7 +217,7 @@ export async function GET({ props, request }) {
 
 test("does not bake for unrelated Markdown endpoints", async () => {
   const root = await mkdtemp(
-    path.join(os.tmpdir(), "nimbus-unrelated-markdown-route-"),
+    path.join(TEST_TMP, "nimbus-unrelated-markdown-route-"),
   );
   roots.push(root);
   await markReviewed(root);

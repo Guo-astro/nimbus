@@ -13,11 +13,11 @@ A page is a `.md` or `.mdx` file under `src/content/docs/`. Its path on disk is 
 
 | File | URL |
 |---|---|
-| `src/content/docs/get-started.mdx` | `/get-started` |
-| `src/content/docs/guides/styling.mdx` | `/guides/styling` |
-| `src/content/docs/guides/index.mdx` | `/guides` |
+| `src/content/docs/guides/install.mdx` | `/guides/install/` |
+| `src/content/docs/guides/styling.mdx` | `/guides/styling/` |
+| `src/content/docs/guides/index.mdx` | `/guides/` |
 
-Slugs are lowercased and folder `index` files collapse to the directory URL. A directory's `index.mdx` becomes the landing page for that section.
+The URLs end in a slash with Astro's default `trailingSlash` and `build.format`; see [Links and trailing slashes](/reference/configuration#links-and-trailing-slashes). Slugs are lowercased and folder `index` files collapse to the directory URL. A directory's `index.mdx` becomes the landing page for that section.
 
 <FileTree>
 - src/content/docs/
@@ -51,7 +51,7 @@ Use `export const prerender = true` to emit a custom route as static output duri
 
 This boundary is not limited to `prerender`. Dynamic segments, endpoint methods, redirects and responses, and other native Astro route behavior remain controlled by the route itself. Nimbus only intervenes when a route claims the exact pattern of a configured canonical content route, package-injected infrastructure, an active feature, or a published content entry.
 
-Nimbus's `rendering` configuration controls canonical content-collection routes, not other files under `src/pages/`. Files scaffolded for `llms.txt`, Markdown alternates, Open Graph images, and `robots.txt` belong to your project and may use Astro's native rendering behavior like any other route.
+Nimbus's `rendering` configuration controls the routes it manages: each collection's catch-all route, and the scaffolded `llms.txt` and Markdown routes that call a Nimbus factory. Those files are yours to edit, but `rendering` decides how they render; `nimbus-docs check --fix` keeps them in step. Other files under `src/pages/`, such as Open Graph images and `robots.txt`, use Astro's native rendering behavior like any other route.
 
 ## Page modes
 
@@ -77,50 +77,6 @@ draft: true
 ---
 ```
 
-## Redirecting a sidebar entry
+## Collections
 
-`external_link` rewrites where the sidebar links a page without changing where it builds — useful for pointing an entry at another section or an off-site URL. See [Redirects](/navigation/redirects).
-
-## Other collections
-
-`src/content/docs/` is the primary collection, mounted at the site root. Additional collections (a `blog`, an `api`, a versioned `docs-v2`) mount under their own URL namespace. Register them in `src/content.config.ts` with the factories from `nimbus-docs/content`.
-
-Nimbus's `docsCollection()`, `partialsCollection()`, and `componentsCollection()` factories prepare content for links, alternate Markdown/MDX versions, `llms-full.txt`, and partial headings automatically. If you register a loader that stores Markdown bodies directly, wrap it with `withNimbusMarkdown()`:
-
-```ts title="src/content.config.ts"
-import { defineCollection } from "astro:content";
-import { glob } from "astro/loaders";
-import { withNimbusMarkdown } from "@cloudflare/nimbus-docs/content";
-
-export const collections = {
-  blog: defineCollection({
-    loader: withNimbusMarkdown(
-      glob({ base: "./src/content/blog", pattern: "**/*.{md,mdx}" }),
-    ),
-  }),
-};
-```
-
-The wrapper preserves the loader's methods and lifecycle. Use it when a loader stores entries with a Markdown `body`. Every general-purpose indexed collection must provide prepared Markdown for alternate Markdown/MDX versions and `llms-full.txt`; arbitrary data-only collections are not supported. `apiCollection()` is the purpose-built exception because Nimbus supplies its renderer. If a collection is not prepared, the build names it and tells you to wrap its loader.
-
-## Custom route helpers
-
-Route matching uses logical, unbased paths; links sent to a browser use based paths. Nimbus exports helpers for both sides from `@cloudflare/nimbus-docs/runtime`:
-
-```ts
-import {
-  entryRouteKey,
-  stripBase,
-  withBase,
-} from "@cloudflare/nimbus-docs/runtime";
-
-const route = entryRouteKey(entry.id);
-const requestedRoute = stripBase(Astro.url.pathname, import.meta.env.BASE_URL);
-const href = withBase(`/${route}`, import.meta.env.BASE_URL);
-```
-
-- `entryRouteKey()` preserves Astro entry IDs while collapsing a final `/index`.
-- `stripBase()` removes the configured base before route matching.
-- `withBase()` adds the configured base when producing a browser URL.
-
-Nimbus rejects ambiguous or unsafe generated routes during the build. Common causes include both `foo` and `foo/index`, collisions with reserved `llms.txt` routes, encoded path separators, and encoded `.` or `..` segments. The build error names the conflicting entries.
+`src/content/docs/` is the primary collection, served at the site root. To add another, such as a blog, see [Collections](/writing/collections). For route and URL helpers, see [Package API](/styling/package-api#urls).

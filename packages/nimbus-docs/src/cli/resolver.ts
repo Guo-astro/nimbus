@@ -15,6 +15,7 @@
  * an `NIMBUS_REGISTRY_URL` env override for local development.
  */
 
+import { coerce, lt } from "semver";
 import { z } from "astro/zod";
 
 import {
@@ -38,6 +39,8 @@ export interface ComponentItem {
   version?: string;
   dependencies: string[];
   registryDependencies: string[];
+  /** Next step to show after installing, in place of the `components.ts` hint. */
+  docs?: string;
   files: RegistryFile[];
 }
 
@@ -77,6 +80,7 @@ const componentItemSchema = z.object({
   registryDependencies: z.array(
     z.string().regex(SLUG_RE, "is not a valid registry slug"),
   ),
+  docs: z.string().optional(),
   files: z.array(registryFileSchema),
 });
 
@@ -104,6 +108,32 @@ function getBaseUrl(): string {
 /** The registry host in use (honors `NIMBUS_REGISTRY_URL`) — recorded as a component's `source`. */
 export function registrySource(): string {
   return getBaseUrl();
+}
+
+/**
+ * Warning string when the registry's components come from a different
+ * nimbus-docs release than the project's, else `null`. Pure.
+ *
+ * The registry is a single channel that updates when the docs site is
+ * deployed, so right after a release it can still serve the previous
+ * release's components (which may lack what the new package expects), and a
+ * project behind the latest release gets components newer than its package.
+ * Prerelease tags are ignored: a preview of 0.16.0 matches the 0.16.0 registry.
+ */
+export function registryVersionWarning(
+  registryVersion: string | undefined,
+  installedVersion: string | null,
+): string | null {
+  const core = (v: string | null | undefined) => (v ? coerce(v)?.version : undefined);
+  const registry = core(registryVersion);
+  const installed = core(installedVersion);
+  if (!registry || !installed || registry === installed) return null;
+  return lt(registry, installed)
+    ? `The registry (${getBaseUrl()}) still serves components from nimbus-docs ${registry}, ` +
+        `older than this project's ${installed}. It updates when the docs site is deployed for ` +
+        `${installed}; until then, components may lack features ${installed} documents.`
+    : `The registry serves components from nimbus-docs ${registry}, newer than this project's ` +
+        `${installed}. They may use APIs ${installed} lacks; update @cloudflare/nimbus-docs first.`;
 }
 
 /**
@@ -232,7 +262,20 @@ export async function fetchComponent(slug: string): Promise<ComponentItem> {
 }
 
 export async function fetchFeatureMarkdown(slug: string): Promise<string> {
-  const url = `${getBaseUrl()}/features/${slug}.md`;
+  return fetchGuideMarkdown(`features/${slug}.md`, slug);
+}
+
+/**
+ * A content source's guide (`add source <name>`). The name is a listed
+ * registry name, never a URL: the URL form fetches the fixed `from-url` guide.
+ */
+export async function fetchSourceMarkdown(name: string): Promise<string> {
+  if (!SLUG_RE.test(name)) throw new Error(`"${name}" is not a valid source name.`);
+  return fetchGuideMarkdown(`sources/${name}.md`, name);
+}
+
+async function fetchGuideMarkdown(relative: string, slug: string): Promise<string> {
+  const url = `${getBaseUrl()}/${relative}`;
   const res = await httpGet(url, "text/markdown");
 
   // Features pipe straight into a coding agent; markdown can't be schema-

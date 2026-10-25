@@ -12,7 +12,7 @@
 import { createHash } from "node:crypto";
 
 import { parseOpenApi } from "../_internal/api/parse.js";
-import type { DocsModel } from "../_internal/api/model.js";
+import { unwrapModel as unwrap, wrapModel as wrap } from "../_internal/api/model-handle.js";
 import {
   projectNav,
   projectPageProps,
@@ -39,6 +39,10 @@ export type {
   ApiSchemaPage,
   ApiSectionPage,
   ApiRootPage,
+  ApiRootIndex,
+  ApiIndexGroup,
+  ApiIndexSection,
+  ApiOperationRef,
   ApiFieldView,
   ApiTypeShape,
   ApiScalarView,
@@ -49,7 +53,9 @@ export type {
   ApiAuthView,
   ApiCodeSampleView,
   ApiExampleView,
+  ApiRequestExampleView,
   ApiRequestBodyView,
+  ApiResponseMediaView,
   ApiResponseView,
   ApiRouteProvenance,
   ApiBreadcrumb,
@@ -63,12 +69,10 @@ export { ApiBuildError } from "../_internal/api/coordinates.js";
 export type { Diagnostic } from "../_internal/api/coordinates.js";
 export { renderApiPageMarkdown } from "../_internal/api/markdown.js";
 
-const modelStore = new WeakMap<object, DocsModel>();
 const handleCache = new Map<string, Promise<ApiModel>>();
-// Per-collection resolved-source cache, so repeated render-time `getApiModel`
-// calls across Markdown, HTML, and llms-full.txt routes don't re-read
-// and re-hash the whole spec file. Distinct from `handleCache` (content-keyed).
-const sourceCache = new Map<string, Promise<SpecSource>>();
+// Per-version configured-model cache, so repeated render-time `getApiModel`
+// calls across Markdown and HTML routes neither re-read nor re-hash the spec.
+const configuredModelCache = new Map<string, Promise<ApiModel>>();
 
 /** SHA-256 → base64url. Collision-resistant *and* content-addressed. */
 function specDigest(raw: string): string {
@@ -88,20 +92,9 @@ function stableStringify(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
-function wrap(model: DocsModel): ApiModel {
-  const handle = Object.freeze({}) as ApiModel;
-  modelStore.set(handle as unknown as object, model);
-  return handle;
-}
-
-function unwrap(model: ApiModel): DocsModel {
-  const docs = modelStore.get(model as unknown as object);
-  if (!docs) {
-    throw new Error(
-      "Invalid ApiModel handle — pass the value returned by buildApiModel().",
-    );
-  }
-  return docs;
+/** A model cache key's prefix: quoted, so no collection name prefixes another's. */
+function collectionKey(collection: string): string {
+  return `${JSON.stringify(collection)}::`;
 }
 
 /**
@@ -114,15 +107,26 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
     typeof source.spec === "string" ? source.spec : JSON.stringify(source.spec);
   // Content-addressed: the key follows the *bytes*, not a path, so an edited
   // spec is a cache miss (dev hot-reload gets a fresh parse for free). The mount
-  // path, `requireOperationId`, and the route policy are keyed too, since each
-  // changes the output — two versions with identical spec bytes but different
-  // policies must never alias.
-  const key = `${source.collection}::${source.mountPath ?? ""}::${
-    source.requireOperationId ? "strictOpId" : ""
-  }::${stableStringify(source.routes)}::${specDigest(raw)}`;
+  // path, `requireOperationId`, `schemaPages`, the route policy, and the sample
+  // policy are keyed too, since each changes the output — two versions with
+  // identical spec bytes but different policies must never alias. The label and
+  // path are keyed so a diagnostic always names its own source.
+  const options = stableStringify({
+    label: source.label,
+    path: source.path,
+    mountPath: source.mountPath,
+    urlBasePath: source.urlBasePath,
+    urlQuery: source.urlQuery,
+    requireOperationId: Boolean(source.requireOperationId),
+    schemaPages: Boolean(source.schemaPages),
+    routes: source.routes,
+    samples: source.samples,
+    extensions: source.extensions,
+  });
+  const key = `${collectionKey(source.collection)}${options}::${specDigest(raw)}`;
   const cached = handleCache.get(key);
   if (cached) return cached;
-  const promise = parseOpenApi(source).then((r) => wrap(r.model));
+  const promise = parseOpenApi(source, key).then((r) => wrap(r.model));
   handleCache.set(key, promise);
   // Never leave a rejected promise cached — a transient parse failure in dev
   // would otherwise be sticky until the server restarts.
@@ -138,24 +142,29 @@ export async function buildApiModel(source: SpecSource): Promise<ApiModel> {
  */
 export function clearApiModelCache(collection: string): void {
   // Every version of a family shares the namespace (`collection`), so the
-  // `${collection}::` handle prefix already spans them all.
-  const prefix = `${collection}::`;
+  // collection's key prefix already spans them all.
+  const prefix = collectionKey(collection);
   for (const key of [...handleCache.keys()]) {
     if (key.startsWith(prefix)) handleCache.delete(key);
   }
-  // Drop the resolved-source memos too, so a watched-spec change forces a
-  // fresh read on the next render. Source keys are per-version (`collection`
+  // Drop the configured model memos too, so a watched-spec change forces a
+  // fresh read on the next render. Keys are per-version (`collection`
   // or `collection@<version>`), so evict the family name and every version.
+  const unversionedPrefix = `${collection}::`;
   const versionPrefix = `${collection}@`;
-  for (const key of [...sourceCache.keys()]) {
-    if (key === collection || key.startsWith(versionPrefix)) {
-      sourceCache.delete(key);
+  for (const key of [...configuredModelCache.keys()]) {
+    if (
+      key === collection ||
+      key.startsWith(unversionedPrefix) ||
+      key.startsWith(versionPrefix)
+    ) {
+      configuredModelCache.delete(key);
     }
   }
 }
 
 /**
- * Build (or reuse) the model for a `nimbus.config.ts`-declared collection —
+ * Build (or reuse) the model for a collection declared in the Nimbus config's `api` —
  * the render-side entry point a copied `/<collection>/[...slug]` route uses.
  * Reads the same `api[]` declaration the loader indexed and re-derives the
  * model from the spec (memoized per graph), so render never depends on the
@@ -172,23 +181,24 @@ export async function getApiModel(
     await import("../_internal/api/runtime-build-config.js");
   const { resolveSpecSource } =
     await import("../_internal/api/resolve-spec.js");
-  const { resolveApiVersion } =
+  const { resolveApiVersion, targetUrlFields } =
     await import("../_internal/api/resolve-versions.js");
   const { api, root } = await loadApiBuildConfig();
-  const resolved = resolveApiVersion(api, collection, version ?? null);
+  const { loadMountContext } = await import("../_internal/runtime-config.js");
+  const resolved = resolveApiVersion(api, collection, version ?? null, await loadMountContext());
   if (!resolved) {
     const suffix = version ? ` version "${version}"` : "";
     throw new Error(
       `nimbus-docs api: no spec registered for collection "${collection}"${suffix}. ` +
-        `Declare it in \`nimbus.config.ts\`: api: [{ collection: "${collection}", spec: "./openapi.yaml" }].`,
+        `Declare it in the Nimbus config (astro.config.*): api: [{ collection: "${collection}", spec: "./openapi.yaml" }].`,
     );
   }
 
   // The cache key carries the version so two versions of one family never
   // alias (they share a namespace but not a spec/mount).
   const cacheKey = resolved.versionKey;
-  const cachedSource = sourceCache.get(cacheKey);
-  if (cachedSource) return buildApiModel(await cachedSource);
+  const cached = configuredModelCache.get(cacheKey);
+  if (cached) return cached;
 
   // Resolve against the loader's base (astroConfig.root), not process.cwd() —
   // they differ under monorepo/subpackage/`--root`/Cloudflare builds.
@@ -198,19 +208,24 @@ export async function getApiModel(
       spec: resolved.spec,
       label: resolved.label,
       mountPath: resolved.mountPath,
+      ...targetUrlFields(resolved),
       requireOperationId: resolved.requireOperationId,
+      schemaPages: resolved.schemaPages,
       routes: resolved.routes,
+      samples: resolved.samples,
+      extensions: resolved.extensions,
     },
     root,
-  );
-  sourceCache.set(cacheKey, promise);
-  // Never leave a rejected resolution cached — a transient read failure (an
-  // editor's atomic write-then-rename) would otherwise stick until the next
-  // watched-file event, mirroring the `handleCache` guard above.
+  ).then(buildApiModel);
+  configuredModelCache.set(cacheKey, promise);
+  // Never leave a rejected load cached — an editor's atomic write-then-rename
+  // can transiently fail before the content watcher sees the replacement.
   promise.catch(() => {
-    if (sourceCache.get(cacheKey) === promise) sourceCache.delete(cacheKey);
+    if (configuredModelCache.get(cacheKey) === promise) {
+      configuredModelCache.delete(cacheKey);
+    }
   });
-  return buildApiModel(await promise);
+  return promise;
 }
 
 export function getApiPageProps(

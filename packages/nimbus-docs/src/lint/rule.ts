@@ -17,6 +17,12 @@ export interface RuleReport {
   endLine?: number;
   endColumn?: number;
   fix?: DiagnosticFix;
+  /**
+   * Lower this finding to a warning whatever the configured severity. A rule
+   * can only lower a finding, never raise it: `internal-link` uses it for
+   * links into another slice of a partial build, which are advisory.
+   */
+  severity?: "warn";
 }
 
 export interface RuleContext {
@@ -31,6 +37,12 @@ export interface RuleContext {
    * unit tests parsing a fixture directly.
    */
   site?: string;
+  /** The deployment base in the renderer's form (`"/docs"`, `""` at the root). */
+  base?: string;
+  /** The folder the file's content-source collection reads; unset for any other file. */
+  sourceFolder?: string;
+  /** Another rule's resolved options for this file, so related rules agree. */
+  optionsOf?(code: AuthoringRuleCode): Record<string, unknown>;
   report(report: RuleReport): void;
 }
 

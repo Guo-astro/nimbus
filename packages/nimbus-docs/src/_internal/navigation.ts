@@ -1,6 +1,6 @@
 import type { Breadcrumb, PrevNext, PrevNextOverrides, SidebarItem } from "../types.js";
 import { findActivePath, flattenSidebar } from "./sidebar.js";
-import { safeDecode, toBrowserHref, toRouteKey } from "./url.js";
+import { safeDecode, toBrowserHref, toDocumentHref, toRouteKey } from "./url.js";
 
 export type { Breadcrumb, PrevNext, PrevNextOverrides };
 
@@ -96,19 +96,32 @@ export function composeRouteBreadcrumbs(
   });
 }
 
+/** A crumb label made from a URL segment: decoded and title-cased. */
+export function segmentLabel(part: string): string {
+  return safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 /**
  * URL-segment fallback for pages with no node in the tree, so a stray
  * page still gets a root-anchored trail.
  */
-export function breadcrumbsFromUrl(slug: string, homeLabel = "Home"): Breadcrumb[] {
+export function breadcrumbsFromUrl(slug: string, homeLabel = "Home", mount = ""): Breadcrumb[] {
   const parts = slug.split("/").filter(Boolean);
   const crumbs: Breadcrumb[] = [{ label: homeLabel, href: "/" }];
+  const label = segmentLabel;
 
+  // A collection served at a nested URL (`/products/sdk`) starts at its own
+  // root: `/products` is no page.
+  const mountParts = mount.split("/").filter(Boolean);
+  const inMount = mountParts.length > 0 && mountParts.every((part, index) => parts[index] === part);
   let path = "";
-  for (const part of parts) {
+  if (inMount) {
+    path = `/${mountParts.join("/")}`;
+    crumbs.push({ label: label(mountParts.at(-1)!), href: toDocumentHref(path) });
+  }
+  for (const part of inMount ? parts.slice(mountParts.length) : parts) {
     path += `/${part}`;
-    const label = safeDecode(part).replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    crumbs.push({ label, href: toBrowserHref(path) });
+    crumbs.push({ label: label(part), href: toDocumentHref(path) });
   }
 
   return crumbs;
@@ -164,7 +177,15 @@ export function getPrevNext(
   overrides?: PrevNextOverrides,
   validInternalLinks?: Set<string>,
 ): PrevNext {
-  const flat = flattenSidebar(sidebarTree);
+  // A page the tree reaches twice (a landing that's also a child link, a
+  // page in two groups) would otherwise neighbour itself.
+  const seen = new Set<string>();
+  const flat = flattenSidebar(sidebarTree).filter((item) => {
+    const key = toRouteKey(item.href);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   // Sidebar hrefs are trailing-slash browser-form; `currentPath` from
   // routes may be either form. Compare via route key so they line up.
   const currentKey = toRouteKey(currentPath);

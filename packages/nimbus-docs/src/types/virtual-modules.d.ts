@@ -1,6 +1,7 @@
 /**
  * Ambient declarations for virtual modules referenced from this package.
  *
+ *   - `astro:config/client` — Astro's serializable config subset.
  *   - `virtual:nimbus/config` — emitted by the integration's Vite plugin
  *     at build time; resolves at runtime in the consuming Astro project.
  *   - `astro:content` — Astro's content-layer virtual module, generated
@@ -15,15 +16,51 @@
  * static imports).
  */
 
+// The subset of Astro's client config this package reads, typed from Astro's
+// own config. Referencing all of `astro/client` would also replace the
+// `astro:content` stub below with Astro's generic declarations.
+declare module "astro:config/client" {
+  export const trailingSlash: import("astro").AstroConfig["trailingSlash"];
+  export const build: Pick<import("astro").AstroConfig["build"], "format">;
+}
+
 declare module "virtual:nimbus/config" {
-  export const config: import("../types.js").NimbusConfig;
+  export const config: import("../types.js").RuntimeNimbusConfig;
   export const indexedCollections: readonly string[];
+  export const emptyCollections: readonly string[];
+  /** Whether `content.config.ts` provably declares no `docs` collection. */
+  export const primaryCollectionAbsent: boolean;
+  /**
+   * The partial build (`NIMBUS_BUILD_ONLY`) this output is, or null. A slice
+   * without the root collection keeps its site-wide files under `prefix`
+   * (base-free, like every output path); `search` holds served URLs.
+   */
+  export const buildSlice: {
+    collections: readonly string[];
+    prefix: string;
+    search: { bundle: string; merge: readonly string[] };
+  } | null;
+  /** The Pagefind bundle to load and the bundles to merge into it: served URLs, base included. */
+  export const searchIndex: { bundle: string; merge: readonly string[] };
   export const requestRenderingCollections: readonly string[];
   export const versionAlternates: import("../_internal/version-alternates.js").VersionAlternatesTable;
   export const apiCollections: readonly string[];
+  /** [collection, where it's served] for collections served by a route helper. */
+  export const collectionRoutes: ReadonlyArray<[string, import("../_internal/collection-routes.js").CollectionMount]>;
+  /** Static-folder routes that import a route helper in a shape the build couldn't read. */
+  export const unreadCollectionRoutes: ReadonlyArray<import("../_internal/collection-routes.js").UnreadRoute>;
+  /** Whether the section `llms.txt` route serves nested sections (`[...section]`). */
+  export const nestedLlmsSections: boolean;
+  export const pageAssets: import("../_internal/api/page-assets-runtime.js").ApiPageAssetManifest;
+  /** collection → version ("" when unversioned) → page list filename, for versions with an on-demand sidebar. */
+  export const navLists: Record<string, Record<string, string>>;
+  /** collection → version ("" when unversioned) → page list filename, for every version. */
+  export const apiLists: Record<string, Record<string, string>>;
   export const headDefaults: {
     favicon: { file: string; type: string };
     socialImage: string;
+    ogCard: { sitePath: string; pagePrefix: string; size: { width: number; height: number } };
+    imageSizes: Record<string, { width: number; height: number }>;
   };
 }
 
@@ -31,13 +68,24 @@ declare module "virtual:nimbus/headings" {
   export const generation: number;
   export const base: string;
   export const records: import("../_internal/prepared-headings.js").PreparedHeadingRecord[];
+  /** Dev only: the module holding just this page's record. */
+  export const load:
+    | ((collection: string, id: string) => Promise<{
+        generation: number;
+        base: string;
+        records: import("../_internal/prepared-headings.js").PreparedHeadingRecord[];
+      }>)
+    | undefined;
 }
 
 declare module "virtual:nimbus/agent-endpoint-assets" {
-  export const projectRoot: string;
-  export const base: string;
-  export const markdownAssets: import("../_internal/agent-endpoint-assets.js").MarkdownEndpointAsset[];
-  export const llmsAssets: import("../_internal/agent-endpoint-assets.js").LlmsEndpointAsset[];
+  export const manifest:
+    | import("../_internal/agent-endpoint-assets.js").StagedAgentEndpointManifest
+    | null;
+}
+
+declare module "virtual:nimbus/markdown-routes" {
+  export const routes: import("../_internal/markdown-routes.js").MarkdownRouteRecord[];
 }
 
 declare module "virtual:nimbus/agent-endpoint-asset-loader" {
@@ -97,6 +145,14 @@ declare module "astro:content" {
     id: string,
   ): Promise<CollectionEntry<C> | undefined>;
 
+  export function getLiveEntry(
+    collection: string,
+    filter: Record<string, unknown>,
+  ): Promise<{
+    entry?: { id: string; data: Record<string, unknown> };
+    error?: Error;
+  }>;
+
   export function render(entry: CollectionEntry<string>): Promise<{
     Content: import("astro/runtime/server/index.js").AstroComponentFactory;
     headings: { depth: number; text: string; slug: string }[];
@@ -117,4 +173,18 @@ interface ImportMetaEnv {
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
+}
+
+declare module "virtual:nimbus/agent-capabilities" {
+  export const capabilities: import("../types.js").AgentCapabilities;
+  export const options: import("../_internal/agent-discovery.js").AgentDiscoveryOptions;
+}
+
+declare module "virtual:nimbus/staged-asset-loader" {
+  export const base: string;
+  export function fetchStagedAsset(
+    path: string,
+    request: Request,
+  ): Promise<Response | null> | Response | null;
+  export function readStagedAssetFile(path: string): Promise<string | null>;
 }

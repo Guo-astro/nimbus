@@ -1,22 +1,16 @@
 import { entryRouteUrl } from "./astro-slug.js";
 
-export function requestInventoryEntryUrl(
-  prefix: string,
-  entryId: string,
-  api: boolean,
-): string {
-  const id = api && entryId === "index" ? "" : entryId;
-  return id === "" ? prefix || "/" : `${prefix}/${id}`;
+export function requestInventoryEntryUrl(prefix: string, entryId: string): string {
+  return entryId === "index" ? prefix || "/" : `${prefix}/${entryId}`;
 }
 
 export function contentInventoryEntryUrl(
   prefix: string,
   entryId: string,
-  api: boolean,
   request: boolean,
 ): string {
   return request
-    ? requestInventoryEntryUrl(prefix, entryId, api)
+    ? requestInventoryEntryUrl(prefix, entryId)
     : entryRouteUrl(prefix, entryId);
 }
 

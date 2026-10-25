@@ -5,7 +5,7 @@ import { formatCheckPretty } from "../../src/check/format.js";
 import type { CheckResult, ScopeResult } from "../../src/check/run.js";
 import type { CheckFinding } from "../../src/check/finding.js";
 
-const OPTS = { color: false, invocation: "nimbus-docs check --fix" };
+const OPTS = { color: false, invocation: "nimbus-docs check --fix", rerun: "nimbus-docs check" };
 
 function scope(over: Partial<ScopeResult>): ScopeResult {
   return { scope: "env", findings: [], notes: [], evaluated: true, status: "passed", ...over };
@@ -130,6 +130,82 @@ test("failed + blocked → Not buildable", () => {
     OPTS,
   );
   assert.match(out, /✗ Not buildable — 1 problem · 1 needs input → run `nimbus-docs check --fix`/);
+});
+
+test("after a non-interactive --fix, the footer says the prompts need a terminal", () => {
+  const placeholder: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "error",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const out = formatCheckPretty(
+    result({
+      status: "failed",
+      readiness: "blocked",
+      findings: [placeholder],
+      scopes: [scope({ status: "failed", findings: [placeholder] })],
+    }),
+    { ...OPTS, skippedFixes: ["needs-terminal"] },
+  );
+  assert.match(out, /Some fixes ask for a value: edit it by hand, or run `nimbus-docs check --fix` in an interactive terminal/);
+  assert.equal(out.match(/check --fix/g)?.length, 1);
+});
+
+test("when installs and a value were both skipped, the footer names --yes for the installs", () => {
+  const placeholder: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "warn",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const missing: CheckFinding = {
+    scope: "env",
+    code: "nimbus/pagefind-missing",
+    severity: "error",
+    message: "pagefind is not installed",
+    fixable: true,
+    fix: { kind: "install-dep", package: "pagefind" },
+  };
+  const skippedBoth = formatCheckPretty(
+    result({
+      status: "failed",
+      readiness: "blocked",
+      findings: [missing, placeholder],
+      scopes: [scope({ status: "failed", findings: [missing, placeholder] })],
+    }),
+    { ...OPTS, skippedFixes: ["needs-terminal", "needs-yes"] },
+  );
+  assert.match(skippedBoth, /Some fixes install packages: run `nimbus-docs check --fix --yes` to allow them/);
+  assert.match(skippedBoth, /Some fixes ask for a value/);
+  // Once the installs ran, only the value is left: no --yes line.
+  const onlyValue = formatCheckPretty(
+    result({ status: "passed", readiness: "buildable", findings: [placeholder], scopes: [scope({ findings: [placeholder] })] }),
+    { ...OPTS, skippedFixes: ["needs-terminal"] },
+  );
+  assert.doesNotMatch(onlyValue, /--yes/);
+});
+
+test("--quiet drops the skipped-fix hint when only a hidden warning needs it", () => {
+  const warning: CheckFinding = {
+    code: "nimbus/site-placeholder",
+    scope: "env",
+    severity: "warn",
+    message: "site is still the placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const run = (quiet: boolean) =>
+    formatCheckPretty(
+      result({ status: "passed", readiness: "buildable", findings: [warning], scopes: [scope({ findings: [warning] })] }),
+      { ...OPTS, quiet, skippedFixes: ["needs-terminal"] },
+    );
+  assert.match(run(false), /Some fixes ask for a value/);
+  assert.doesNotMatch(run(true), /Some fixes ask for a value/);
 });
 
 test("passed full run → Ready", () => {
@@ -264,4 +340,92 @@ test("partial + buildable with gaps → Buildable + coverage line", () => {
   assert.match(out, /✓ Buildable — checked env \+ structure/);
   assert.match(out, /2 correctness checks not evaluated yet: opt-in authoring rules, types/);
   assert.match(out, /Types\s+○ not evaluated/);
+});
+
+// A preview's missing baseline needs input, not a build: telling the user to
+// build and check again would loop forever.
+test("partial + buildable with a gap that needs input → names what it needs, not a build", () => {
+  const baselineNote = {
+    code: "nimbus/upgrade-baseline-missing",
+    reason: "This preview has no reviewed Nimbus release. Run `npx nimbus-docs migrate --from <version>`.",
+    requiresInput: true,
+  };
+  const render = (typesEvaluated: boolean) =>
+    formatCheckPretty(
+      result({
+        status: "partial",
+        readiness: "buildable",
+        summary: { errors: 0, warnings: 0, notes: 1, fixable: 0, durationMs: 400 },
+        scopes: [
+          scope({}),
+          scope({ scope: "structure" }),
+          scope({ scope: "migrations", notes: [baselineNote] }),
+          typesEvaluated
+            ? scope({ scope: "types" })
+            : scope({ scope: "types", evaluated: false, status: "not_evaluated", reason: ".astro/types.d.ts missing" }),
+        ],
+      }),
+      OPTS,
+    );
+
+  const built = render(true);
+  assert.match(built, /1 correctness check not evaluated yet: migrations/);
+  assert.equal(built.split("This preview has no reviewed Nimbus release").length - 1, 1, "the note prints once, on its scope line");
+  assert.doesNotMatch(built, /run a build/);
+
+  const unbuilt = render(false);
+  assert.match(unbuilt, /→ run a build, then `nimbus-docs check` again/);
+});
+
+test("a scope that skipped some checks is partly checked; a fully run one is ✓; types names .astro", () => {
+  const out = formatCheckPretty(
+    result({
+      status: "partial",
+      scopes: [
+        scope({
+          scope: "structure",
+          notes: [{ code: "nimbus/page-collections-skipped", reason: "page-collection checks skipped", requiresBuild: true }],
+        }),
+        scope({ scope: "env" }),
+        scope({ scope: "types" }),
+        scope({ scope: "migrations", evaluated: false, status: "not_evaluated", reason: "no nimbus.json" }),
+      ],
+    }),
+    OPTS,
+  );
+  assert.match(out, /Structure\s+◐ ok, partly checked · page-collection checks skipped \(needs a build\)/);
+  assert.match(out, /Environment\s+✓ ok\n/);
+  assert.match(out, /Types\s+✓ ok \(\.ts and \.tsx files\)\. \.astro files aren't type-checked here: run `astro check`\./);
+  assert.match(out, /Migrations\s+○ not evaluated — no nimbus\.json/);
+  assert.doesNotMatch(out, /✓ ok ·/);
+});
+
+test("without a terminal, the hint is what --fix can do there", () => {
+  const needsInput: CheckFinding = {
+    scope: "env",
+    code: "nimbus/site-placeholder",
+    severity: "error",
+    message: "site is still a placeholder",
+    fixable: true,
+    fix: { kind: "set-config", path: "site", requiresInput: true },
+  };
+  const install: CheckFinding = {
+    scope: "env",
+    code: "nimbus/openapi-parser-missing",
+    severity: "error",
+    message: "the parser is missing",
+    fixable: true,
+    fix: { kind: "install-dep", package: "@scalar/openapi-parser", dev: false },
+  };
+  const deps: CheckFinding = { scope: "env", code: "nimbus/dependencies-missing", severity: "error", message: "install first", fixable: false };
+  const render = (findings: CheckFinding[], interactive: boolean) =>
+    formatCheckPretty(
+      result({ status: "failed", readiness: "blocked", findings, scopes: [scope({ status: "failed", findings })] }),
+      { ...OPTS, interactive },
+    );
+  assert.match(render([needsInput], false), /1 needs input → edit by hand \(it needs a choice only you can make\)/);
+  assert.doesNotMatch(render([needsInput], false), /check --fix/);
+  assert.match(render([install], false), /→ run `nimbus-docs check --fix --yes`/);
+  assert.doesNotMatch(render([install, deps], false), /check --fix/);
+  assert.match(render([needsInput], true), /→ run `nimbus-docs check --fix`$/m);
 });

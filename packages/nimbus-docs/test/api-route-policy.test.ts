@@ -699,7 +699,7 @@ describe("cross-version drift", () => {
   test("one coordinate deriving different slugs across versions warns (non-gating)", async () => {
     const logs = await runFamily("rp-drift", [v1, v0]);
     assert.ok(
-      logs.some((l) => /coordinate "chargeList" derives different resource-action-v1 slugs/.test(l)),
+      logs.some((l) => /coordinate "chargeList" derives different route slugs/.test(l)),
       "drift warning is emitted",
     );
   });
@@ -711,7 +711,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-pinned", [v1, pinned]);
     assert.ok(
-      !logs.some((l) => /derives different resource-action-v1 slugs/.test(l)),
+      !logs.some((l) => /derives different route slugs/.test(l)),
       "an overridden version is not compared, so no drift is reported",
     );
   });
@@ -733,7 +733,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-fallback", [derived, fell]);
     assert.ok(
-      !logs.some((l) => /derives different resource-action-v1 slugs/.test(l)),
+      !logs.some((l) => /derives different route slugs/.test(l)),
       "a fallback version is not compared, so differing slugs do not warn",
     );
   });
@@ -755,7 +755,7 @@ describe("cross-version drift", () => {
     };
     const logs = await runFamily("rp-drift-hidden", [shown, hidden]);
     assert.ok(
-      logs.some((l) => /coordinate "chargeList" derives different resource-action-v1 slugs/.test(l)),
+      logs.some((l) => /coordinate "chargeList" derives different route slugs/.test(l)),
       "a hidden version's derived slug drift is still reported",
     );
   });
@@ -807,8 +807,8 @@ describe("routes config validation — rejected", () => {
   const cases: Array<[string, unknown, RegExp]> = [
     [
       "an unknown convention",
-      [{ collection: "s", spec: "./s.json", routes: { convention: "resource-action-v2" } }],
-      /resource-action-v1/,
+      [{ collection: "s", spec: "./s.json", routes: { convention: "resource-action-v3" } }],
+      /"resource-action-v1" or "resource-action-v2"/,
     ],
     [
       "a prefix with a {parameter} segment",
@@ -877,4 +877,36 @@ describe("routes config validation — rejected", () => {
       assert.throws(() => validateNimbusConfig(withApi(api)), pattern);
     });
   }
+});
+
+describe("fallback routes in the build log", () => {
+  test("many fallbacks print one summary and never hide other warnings", async (t) => {
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (message: string) => void lines.push(message));
+    const paths: Record<string, PathItem> = {
+      "/v1/charges": { get: { operationId: "listCharge", ...OK } },
+      "/v1/refunds": { get: { operationId: "listcharge", ...OK } },
+    };
+    for (let i = 0; i < 30; i++) paths[`/v1/${"_".repeat(i + 3)}`] = { get: { operationId: `doThing${i}`, ...OK } };
+    const { diagnostics } = await parseWith("rp-fallback-log", paths);
+    assert.equal(diagnostics.filter((d) => d.code === "route-fallback").length, 30);
+    const fallbackLines = lines.filter((line) => /coordinate as the URL slug|falling back/.test(line));
+    assert.equal(fallbackLines.length, 1);
+    assert.match(fallbackLines[0]!, /30 operation\(s\).*doThing0, doThing1, doThing2, doThing3, doThing4, …/);
+    assert.ok(lines.some((line) => /case/i.test(line)), "the case warning stays visible");
+  });
+
+  test("an identical parse in the same build prints its warnings once", async (t) => {
+    const lines: string[] = [];
+    t.mock.method(console, "warn", (message: string) => void lines.push(message));
+    const source = { collection: "rp-once", spec: spec({ "/v1/___": { get: { operationId: "doThing", ...OK } } }), routes: RESOURCE_ACTION_V1 };
+    await parseOpenApi(source, "rp-once-key");
+    const first = lines.length;
+    assert.ok(first > 0);
+    await parseOpenApi(source, "rp-once-key");
+    assert.equal(lines.length, first);
+    // A direct parse without a key always reports.
+    await parseOpenApi(source);
+    assert.equal(lines.length, first * 2);
+  });
 });

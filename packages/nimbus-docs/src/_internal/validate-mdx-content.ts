@@ -40,10 +40,18 @@ export interface ValidateMdxContentOptions {
   /** Names available globally (from `src/components.ts`). */
   globals: ReadonlyArray<string>;
   /**
-   * Absolute paths to scan. Typically `[<projectRoot>/src/content]`.
-   * Each path is walked recursively for `.mdx` files.
+   * Absolute paths to scan. Typically the page and partials collections'
+   * source folders. Each path is walked recursively for `.mdx` files.
    */
   contentDirs: ReadonlyArray<string>;
+  /**
+   * Exact `.mdx` files to validate (absolute paths), in place of walking
+   * `contentDirs` — the build passes the files the prepared-markdown
+   * registry recorded, so only what Nimbus renders is checked, whatever
+   * loader base or pattern produced it. Non-`.mdx` and missing files are
+   * skipped.
+   */
+  files?: ReadonlyArray<string>;
   /**
    * Optional filter to skip files (e.g. vendored MDX). Receives the
    * absolute path; return `true` to skip validation.
@@ -70,11 +78,23 @@ export async function validateMdxContent(
   const globalsSet = new Set(options.globals);
   const failures: ValidationFailure[] = [];
 
-  for (const dir of options.contentDirs) {
-    const files = await walkMdx(dir);
+  const fileSets = options.files
+    ? [
+        [...new Set(options.files)]
+          .filter((file) => /\.mdx$/i.test(file))
+          .sort(),
+      ]
+    : await Promise.all(options.contentDirs.map((dir) => walkMdx(dir)));
+  for (const files of fileSets) {
     for (const file of files) {
       if (options.skip?.(file)) continue;
-      const source = await fs.readFile(file, "utf8");
+      let source: string;
+      try {
+        source = await fs.readFile(file, "utf8");
+      } catch {
+        if (options.files) continue;
+        throw new Error(`nimbus-docs: cannot read ${file} for MDX validation.`);
+      }
       const fileFailures = scanFile(source, globalsSet);
       for (const f of fileFailures) {
         const knownNames = [...globalsSet, ...f.imports];

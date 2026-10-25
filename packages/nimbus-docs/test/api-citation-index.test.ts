@@ -5,10 +5,15 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { mkdtemp } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { buildCitationIndex, ingestRemoteManifest, type CoordinatesManifest } from "../src/_internal/api/citation-index.ts";
+import { resolveCitations } from "../src/_internal/api/citations.ts";
+import { setMountContext } from "../src/_internal/collection-mount.ts";
 import type { ApiSpec } from "../src/types.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 function fixturePath(rel: string): string {
   return fileURLToPath(new URL(`./fixtures/api/${rel}`, import.meta.url));
@@ -17,7 +22,7 @@ function fixturePath(rel: string): string {
 const root = fileURLToPath(new URL(".", import.meta.url));
 
 describe("buildCitationIndex: unversioned collection", () => {
-  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml") }];
+  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml"), schemaPages: true }];
 
   test("keys pages under collection:coordinate with site-absolute /collection URLs", async () => {
     const { index } = await buildCitationIndex(api, root);
@@ -30,22 +35,17 @@ describe("buildCitationIndex: unversioned collection", () => {
 
   test("manifest carries the collection with a null defaultVersion", async () => {
     const { manifest } = await buildCitationIndex(api, root);
-    assert.equal(manifest.version, 1);
+    assert.equal(manifest.version, 2);
     assert.equal(manifest.collections.smallco?.defaultVersion, null);
-    const entries = manifest.collections.smallco!.entries;
-    assert.ok(Object.keys(entries).length > 0);
-    // entries are keyed by the opaque coordinate; each is a structured record
-    // with a default `url` (unversioned collection → no per-version map).
-    for (const entry of Object.values(entries)) {
-      assert.equal(typeof entry.url, "string");
-      assert.equal(entry.versions, undefined);
-    }
+    assert.ok(manifest.collections.smallco!.pages.length > 0);
+    assert.equal(manifest.collections.smallco!.versions, undefined);
+    assert.deepEqual(read(manifest), (await buildCitationIndex(api, root)).index);
   });
 
   test("manifest maps are null-prototype (a '__proto__'/'constructor' key can never pollute)", async () => {
     const { manifest } = await buildCitationIndex(api, root);
     assert.equal(Object.getPrototypeOf(manifest.collections), null);
-    assert.equal(Object.getPrototypeOf(manifest.collections.smallco!.entries), null);
+    assert.equal(Object.getPrototypeOf(manifest.collections.smallco!.pages[0]!.entries), null);
   });
 });
 
@@ -81,7 +81,7 @@ describe("buildCitationIndex: versioned family (v2 default + v1)", () => {
 });
 
 describe("buildCitationIndex: field coordinates resolve to <page>#<anchor>", () => {
-  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml") }];
+  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml"), schemaPages: true }];
 
   test("a body field, a parameter, and a schema field each cite their owning page plus a lossless anchor", async () => {
     const { index } = await buildCitationIndex(api, root);
@@ -106,14 +106,12 @@ describe("buildCitationIndex: field coordinates resolve to <page>#<anchor>", () 
 
   test("field coordinates are published in the manifest alongside pages", async () => {
     const { manifest } = await buildCitationIndex(api, root);
-    const entries = manifest.collections.smallco!.entries;
-    assert.equal(typeof entries["create.amount"]?.url, "string");
-    assert.match(entries["create.amount"]!.url!, /#create\.amount$/);
+    assert.match(read(manifest).get("smallco:create.amount")!, /#create\.amount$/);
   });
 });
 
 describe("buildCitationIndex: response coordinates resolve to rendered anchors", () => {
-  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml") }];
+  const api: ApiSpec[] = [{ collection: "smallco", spec: fixturePath("smallco.yaml"), schemaPages: true }];
 
   test("bare responses are addressable in the index and manifest", async () => {
     const { index, manifest } = await buildCitationIndex(api, root);
@@ -122,14 +120,14 @@ describe("buildCitationIndex: response coordinates resolve to rendered anchors",
       `${index.get("smallco:create")}#response-200`,
     );
     assert.equal(
-      manifest.collections.smallco!.entries["create.response.200"]?.url,
+      read(manifest).get("smallco:create.response.200"),
       `${index.get("smallco:create")}#response-200`,
     );
   });
 
   test("deviant response statuses use the exact rendered anchor", async () => {
     const { index } = await buildCitationIndex(
-      [{ collection: "dev", spec: fixturePath("deviant.yaml") }],
+      [{ collection: "dev", spec: fixturePath("deviant.yaml"), schemaPages: true }],
       root,
     );
     assert.equal(
@@ -152,7 +150,7 @@ describe("buildCitationIndex: response coordinates resolve to rendered anchors",
       },
     };
     const { index } = await buildCitationIndex(
-      [{ collection: "odd", spec }],
+      [{ collection: "odd", spec, schemaPages: true }],
       root,
     );
     const url = index.get("odd:oddStatus.response.2:00");
@@ -162,128 +160,139 @@ describe("buildCitationIndex: response coordinates resolve to rendered anchors",
   });
 });
 
-describe("ingestRemoteManifest", () => {
-  const manifest: CoordinatesManifest = {
-    version: 1,
-    collections: {
-      zones: {
-        defaultVersion: "v2",
-        entries: { createZone: { url: "/zones/create", versions: { v1: "/zones/v1/create" } } },
-      },
-    },
-  };
 
-  test("folds remote entries under the consumer collection name + trusted origin", () => {
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "zones", manifest, "https://api.example.com");
-    assert.equal(diags.length, 0);
-    assert.equal(index.get("zones:createZone"), "https://api.example.com/zones/create");
-    assert.equal(index.get("zones@v1:createZone"), "https://api.example.com/zones/v1/create");
-  });
+function read(manifest: CoordinatesManifest) {
+  const index = new Map<string, string>();
+  for (const name of Object.keys(manifest.collections)) {
+    assert.deepEqual(ingestRemoteManifest(index, name, JSON.parse(JSON.stringify(manifest))), []);
+  }
+  return index;
+}
 
-  test("no origin → site-absolute path preserved", () => {
-    const index = new Map<string, string>();
-    ingestRemoteManifest(index, "zones", manifest);
-    assert.equal(index.get("zones:createZone"), "/zones/create");
-  });
-
-  test("coordinates containing '@' round-trip losslessly (no key ambiguity)", () => {
-    // A structured entry keys by the opaque coordinate, so a coordinate that
-    // itself contains '@' can never collide with the version separator.
-    const withAt: CoordinatesManifest = {
-      version: 1,
-      collections: {
-        zones: {
-          defaultVersion: "v2",
-          entries: { "getUser@v2": { url: "/zones/get-user", versions: { v1: "/zones/v1/get-user" } } },
-        },
-      },
-    };
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "zones", withAt);
-    assert.equal(diags.length, 0);
-    assert.equal(index.get("zones:getUser@v2"), "/zones/get-user");
-    assert.equal(index.get("zones@v1:getUser@v2"), "/zones/v1/get-user");
-  });
-
-  test("an unsafe manifest value is dropped, never baked", () => {
-    const hostile: CoordinatesManifest = {
-      version: 1,
-      collections: {
-        zones: {
-          defaultVersion: null,
-          entries: { evil: { url: "javascript:alert(1)" }, ok: { url: "/zones/ok" } },
-        },
-      },
-    };
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "zones", hostile, "https://api.example.com");
-    assert.equal(index.has("zones:evil"), false);
-    assert.equal(index.get("zones:ok"), "https://api.example.com/zones/ok");
-    assert.equal(diags.length, 1);
-  });
-
-  test("arrays are rejected at every level (never iterated by numeric index)", () => {
-    // An array is `typeof "object"`, so a naive guard would let `Object.entries`
-    // fold `["/zones/v0"]` in as version "0". Reject arrays outright.
-    const arrayVersions = {
-      version: 1,
-      collections: {
-        zones: { defaultVersion: null, entries: { badV: { versions: ["/zones/v0"] } } },
-      },
-    } as unknown as CoordinatesManifest;
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "zones", arrayVersions);
-    assert.equal(index.has("zones@0:badV"), false);
-    assert.equal(index.size, 0);
-    assert.ok(diags.some((d) => /versions/.test(d)));
-
-    // entries-as-array, and collection-record-as-array, both fold nothing.
-    const arrayEntries = {
-      version: 1,
-      collections: { zones: { defaultVersion: null, entries: [{ url: "/x" }] } },
-    } as unknown as CoordinatesManifest;
-    const index2 = new Map<string, string>();
-    const diags2 = ingestRemoteManifest(index2, "zones", arrayEntries);
-    assert.equal(index2.size, 0);
-    assert.equal(diags2.length, 1);
-
-    const arrayCollection = {
-      version: 1,
-      collections: { zones: [{ url: "/x" }] },
-    } as unknown as CoordinatesManifest;
-    const index3 = new Map<string, string>();
-    const diags3 = ingestRemoteManifest(index3, "zones", arrayCollection);
-    assert.equal(index3.size, 0);
-    assert.equal(diags3.length, 1);
-  });
-
-  test("malformed entries are dropped defensively, valid siblings survive", () => {
-    const malformed = {
-      version: 1,
-      collections: {
-        zones: {
-          defaultVersion: null,
-          entries: {
-            bad: "not-an-object",
-            badVersions: { versions: "nope" },
-            good: { url: "/zones/good" },
+describe("prepared API citations: historical authored lookup without published history", () => {
+  test("cached summaries avoid parsing and preserve old fields and responses", async () => {
+    const reads = new Map<string, number>();
+    const versions = ["v3", "v2", "v1"];
+    const preparedVersions = new Map(
+      versions.map((version) => [
+        `svc@${version}`,
+        {
+          read() {
+            reads.set(version, (reads.get(version) ?? 0) + 1);
+            return {
+              targets: [
+                { coordinate: "svc", slug: "" },
+                { coordinate: `operation-${version}`, slug: `slug-${version}` },
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.profile`, slug: `slug-${version}`, anchor: "request-profile" }] : []),
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201`, slug: `slug-${version}`, anchor: "response-201" }] : []),
+                {
+                  coordinate: `operation-${version}.field`,
+                  slug: `slug-${version}`,
+                  anchor: "field",
+                },
+                {
+                  coordinate: `operation-${version}.response.200`,
+                  slug: `slug-${version}`,
+                  anchor: "response-200",
+                },
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201.hidden`, slug: `slug-${version}`, anchor: "response-201-hidden" }] : []),
+                ...(version === "v2" ? [{ coordinate: `operation-${version}.response.201.profile.hidden`, slug: `slug-${version}`, anchor: "response-201-profile-hidden" }] : []),
+              ],
+              unpublished: { UnpublishedSchema: "UnpublishedSchema" },
+            };
           },
         },
-      },
-    } as unknown as CoordinatesManifest;
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "zones", malformed);
-    assert.equal(index.get("zones:good"), "/zones/good");
-    assert.equal(index.has("zones:bad"), false);
-    assert.equal(index.has("zones:badVersions"), false);
-    assert.ok(diags.length >= 2);
+      ]),
+    );
+    const { index, manifest, unpublished } = await buildCitationIndex(
+      [
+        {
+          collection: "svc",
+          versionUrl: { in: "query" },
+          versions: versions.map((version, i) => ({
+            version,
+            spec: "/does/not/exist.json",
+            default: i === 0,
+          })),
+        },
+      ],
+      root,
+      { preparedVersions },
+    );
+    assert.equal(reads.get("v3"), 1);
+    assert.equal(reads.has("v2"), false);
+    assert.equal(
+      index.get("svc@v2:operation-v2.field"),
+      "/svc/slug-v2?version=v2#field",
+    );
+    assert.equal(
+      index.get("svc@v2:operation-v2.response.200"),
+      "/svc/slug-v2?version=v2#response-200",
+    );
+    assert.equal(
+      unpublished.get("svc@v2:UnpublishedSchema"),
+      "UnpublishedSchema",
+    );
+    assert.equal(
+      reads.get("v2"),
+      1,
+      "one summary read serves all fields and diagnostics in this version",
+    );
+    assert.equal(index.has("svc@v2:operation-v2"), true);
+    const { diagnostics } = resolveCitations("[x](api.ref:svc@v2:operation-v2.hidden)", { mode: "author", citationIndex: index });
+    assert.match(diagnostics[0]?.message ?? "", /cite it under the response: "api\.ref:svc@v2:operation-v2\.response\.201\.hidden"/);
+    const nested = resolveCitations("[x](api.ref:svc@v2:operation-v2.profile.hidden)", { mode: "author", citationIndex: index });
+    assert.match(nested.diagnostics[0]?.message ?? "", /cite it under the response: "api\.ref:svc@v2:operation-v2\.response\.201\.profile\.hidden"/);
+    assert.equal(reads.get("v2"), 1, "the hint reuses the cached historical version");
+    assert.equal(
+      index.get("svc@v1:operation-v1"),
+      "/svc/slug-v1?version=v1",
+    );
+    assert.equal(
+      index.get("svc@v2:operation-v2"),
+      "/svc/slug-v2?version=v2",
+    );
+    assert.equal(reads.get("v2"), 2, "cache retains one historical version");
+    assert.equal(index.get("svc@missing:operation-v2"), undefined);
+    assert.equal(index.get("svc@v2:missing"), undefined);
+    assert.deepEqual(Object.keys(manifest.collections.svc!.versions!), ["v3"]);
+    assert.ok(
+      [...index.keys()].every(
+        (key) => !key.includes("@v1:") && !key.includes("@v2:"),
+      ),
+    );
+    assert.doesNotMatch(
+      JSON.stringify(Object.fromEntries(index)),
+      /operation-v[12]/,
+      "virtual module contains published default only even after authored reads",
+    );
+  });
+});
+
+describe("buildCitationIndex: an API served at the site root", () => {
+  const spec = fixturePath("smallco.yaml");
+  const rootFor = async (collection: string) => {
+    const dir = await mkdtemp(path.join(TEST_TMP, "nimbus-citation-root-"));
+    const route = { mount: "", file: "src/pages/[...slug].astro", aliases: [] };
+    setMountContext(pathToFileURL(`${dir}/`), { versions: null, routes: new Map([[collection, route]]) });
+    return dir;
+  };
+
+  test("cites the home at / and the pages below it", async () => {
+    const dir = await rootFor("smallco");
+    const { index } = await buildCitationIndex([{ collection: "smallco", spec: fixturePath("smallco.yaml") }], dir);
+    assert.equal(index.get("smallco:smallco"), "/");
+    for (const [, url] of index) assert.match(url, /^\/(?!\/)/);
+    assert.equal(resolveCitations("[home](api.ref:smallco:smallco)", { mode: "author", citationIndex: index }).diagnostics.length, 0);
   });
 
-  test("a missing collection warns and folds nothing", () => {
-    const index = new Map<string, string>();
-    const diags = ingestRemoteManifest(index, "nope", manifest);
-    assert.equal(index.size, 0);
-    assert.equal(diags.length, 1);
+  test("cites a query-mode old version's home at /?version=", async () => {
+    const dir = await rootFor("svc");
+    const { index } = await buildCitationIndex(
+      [{ collection: "svc", versionUrl: { in: "query" }, versions: [{ version: "v2", default: true, spec }, { version: "v1", spec }] }],
+      dir,
+    );
+    assert.equal(index.get("svc:svc"), "/");
+    assert.equal(index.get("svc@v1:svc"), "/?version=v1");
   });
 });

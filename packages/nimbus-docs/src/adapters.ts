@@ -4,9 +4,12 @@
  * Public-but-unstable subpath (`@cloudflare/nimbus-docs/adapters`). It exists so
  * `@cloudflare/create-nimbus-docs` can run the *exact* server-output opt-in the
  * `nimbus-docs add adapter-*` CLI runs — the config edit + adapter recipe + the
- * Cloudflare server-wrangler emitter — without forking the transform. Fresh
- * Cloudflare scaffolds additionally enable request rendering when the project
- * has not declared an explicit rendering policy.
+ * Cloudflare server-wrangler emitter — without forking the transform. The
+ * scaffolder bundles it at build time. Fresh server scaffolds additionally
+ * enable request rendering (every collection on Cloudflare, docs elsewhere)
+ * when the project has not declared an explicit rendering policy;
+ * `add adapter-*` does that only for Cloudflare. Both then bring the route
+ * files in step with `rendering` (`alignRouteFiles`).
  *
  * Curated re-export, never `export *`: the internal-only helpers (config
  * classifiers, idempotency detectors, id list) stay private. No external
@@ -19,7 +22,10 @@ export {
   applyAdapterToConfig,
   buildServerWranglerConfig,
   sanitizeWorkerName,
+  workersCompatibilityDate,
 } from "./_internal/adapters.js";
+export { alignRouteFiles } from "./_internal/route-files.js";
+export { declineBuildScript } from "./_internal/pnpm-build-scripts.js";
 export type {
   AdapterId,
   AdapterRecipe,

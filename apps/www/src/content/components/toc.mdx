@@ -14,22 +14,24 @@ import { TOC } from "@/components/ui/toc";
 
 <Showcase code={`<TOC
   headings={[
-    { depth: 2, text: "Getting started", slug: "getting-started" },
-    { depth: 2, text: "Configuration", slug: "configuration" },
-    { depth: 3, text: "Sidebar", slug: "sidebar" },
-    { depth: 3, text: "Search", slug: "search" },
-    { depth: 2, text: "Deployment", slug: "deployment" },
+    { depth: 2, text: "Installation", slug: "installation" },
+    { depth: 2, text: "Preview", slug: "preview" },
+    { depth: 3, text: "Nested headings", slug: "nested-headings" },
+    { depth: 2, text: "API reference", slug: "api-reference" },
   ]}
 />`}>
   <div class="w-full max-w-xs text-left">
     <TOC
       headings={[
-        { depth: 2, text: "Getting started", slug: "getting-started" },
-        { depth: 2, text: "Configuration", slug: "configuration" },
-        { depth: 3, text: "Sidebar", slug: "sidebar" },
-        { depth: 3, text: "Search", slug: "search" },
-        { depth: 2, text: "Deployment", slug: "deployment" },
+        { depth: 2, text: "Installation", slug: "installation" },
+        { depth: 2, text: "Preview", slug: "preview" },
+        { depth: 3, text: "Nested headings", slug: "nested-headings" },
+        { depth: 2, text: "API reference", slug: "api-reference" },
       ]}
     />
   </div>
 </Showcase>
+
+### Nested headings
+
+A third-level heading sits under its section, indented, as this one does in the preview.

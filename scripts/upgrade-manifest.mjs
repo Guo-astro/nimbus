@@ -6,14 +6,14 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { inc, lt, major, valid } from "semver";
+import { inc, lt, lte, major, valid } from "semver";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST = path.join(
   ROOT,
   "packages/nimbus-docs/src/_internal/upgrade-manifest.json",
 );
-const MODES = new Set(["automatic", "detectable-manual", "review-required"]);
+const MODES = new Set(["automatic", "detectable-manual", "review-required", "optional"]);
 
 export function validateUpgradeManifest(value) {
   if (
@@ -44,6 +44,10 @@ export function validateUpgradeManifest(value) {
       throw new Error(`${entry.id} has an invalid mode.`);
     if (entry.mode === "automatic" && !entry.migrationId)
       throw new Error(`${entry.id} automatic entries require migrationId.`);
+    if (entry.mode === "optional" && entry.migrationId)
+      throw new Error(`${entry.id} optional entries cannot have migrationId.`);
+    if (entry.backfill !== undefined && entry.backfill !== true)
+      throw new Error(`${entry.id} backfill must be true when present.`);
     for (const field of ["summary", "affected"]) {
       if (typeof entry[field] !== "string" || !entry[field].trim())
         throw new Error(`${entry.id} requires ${field}.`);
@@ -64,20 +68,33 @@ export function validateUpgradeManifest(value) {
       throw new Error(`${entry.id} has an invalid changeset ID.`);
     }
   }
+  for (const [feature, entryIds] of Object.entries(value.appliesTo ?? {})) {
+    if (feature !== "api")
+      throw new Error(`appliesTo.${feature} is not a known feature (api).`);
+    for (const id of Array.isArray(entryIds) ? entryIds : [null]) {
+      if (!ids.has(id))
+        throw new Error(`appliesTo.${feature} names ${id}, which is not an upgrade entry.`);
+    }
+  }
   return value;
 }
 
+/**
+ * Returns the IDs of the added entries that backfill a shipped release, so the
+ * check can report them for review.
+ */
 export function validateBreakingDeclaration({
   breaking,
   previousEntries,
   currentEntries,
   changesets,
   currentVersion,
+  releasedVersions,
 }) {
-  if (previousEntries === null) return;
+  if (previousEntries === null) return [];
   const previous = new Set(previousEntries.map((entry) => entry.id));
   const added = currentEntries.filter((entry) => !previous.has(entry.id));
-  if (breaking && added.length === 0)
+  if (breaking && !added.some((entry) => !entry.backfill))
     throw new Error(
       "A PR labeled breaking-change must add at least one upgrade manifest entry.",
     );
@@ -90,6 +107,23 @@ export function validateBreakingDeclaration({
         `${entry.id} references missing changeset .changeset/${entry.changeset}.md.`,
       );
     const bump = changesetBump(body, "@cloudflare/nimbus-docs");
+    // A missed entry for a shipped release keeps that release's introducedIn,
+    // so sites upgrading across it are told. It announces nothing new.
+    if (entry.backfill) {
+      if (!currentVersion || !lte(entry.introducedIn, currentVersion) || !releasedVersions?.has(entry.introducedIn))
+        throw new Error(
+          `${entry.id} backfills ${entry.introducedIn}, which is not a shipped @cloudflare/nimbus-docs release.`,
+        );
+      if (entry.mode !== "review-required" || entry.migrationId)
+        throw new Error(
+          `${entry.id} backfills shipped release ${entry.introducedIn}, so it must be review-required without a migrationId.`,
+        );
+      if (!bump)
+        throw new Error(
+          `${entry.id}'s changeset must release @cloudflare/nimbus-docs so users learn about the backfilled entry.`,
+        );
+      continue;
+    }
     const requiredBump = currentVersion && major(currentVersion) > 0 ? "major" : "minor";
     if (bump !== requiredBump) {
       throw new Error(
@@ -105,9 +139,10 @@ export function validateBreakingDeclaration({
       }
     }
   }
+  return added.filter((entry) => entry.backfill).map((entry) => entry.id);
 }
 
-export function validateManifestContinuity(previousManifest, currentManifest) {
+export function validateManifestContinuity(previousManifest, currentManifest, currentVersion) {
   if (previousManifest.oldestSupportedVersion !== currentManifest.oldestSupportedVersion) {
     throw new Error("Upgrade manifest oldestSupportedVersion cannot be changed.");
   }
@@ -118,7 +153,13 @@ export function validateManifestContinuity(previousManifest, currentManifest) {
       throw new Error(
         `Upgrade manifest entry ${previous.id} cannot be removed.`,
       );
-    if (!isDeepStrictEqual(entry, previous))
+    // Unreleased entries may still be refined, but never moved to another
+    // release or relinked to another changeset.
+    const unreleased = Boolean(currentVersion) && lt(currentVersion, previous.introducedIn);
+    const changed = unreleased
+      ? entry.introducedIn !== previous.introducedIn || entry.changeset !== previous.changeset
+      : !isDeepStrictEqual(entry, previous);
+    if (changed)
       throw new Error(
         `Upgrade manifest entry ${previous.id} cannot be changed.`,
       );
@@ -137,44 +178,47 @@ function changesetBump(body, packageName) {
   return null;
 }
 
+function releasedVersions() {
+  const changelog = fs.readFileSync(
+    path.join(ROOT, "packages/nimbus-docs/CHANGELOG.md"),
+    "utf8",
+  );
+  return new Set([...changelog.matchAll(/^## (\S+)$/gm)].map((match) => match[1]));
+}
+
 function loadManifest(file = MANIFEST) {
   return validateUpgradeManifest(JSON.parse(fs.readFileSync(file, "utf8")));
 }
 
-export function loadPreviousManifest(base) {
+/**
+ * The manifest the PR started from: at the merge base of the base branch and
+ * HEAD, so a PR behind `main` isn't blamed for entries `main` gained since.
+ * A base with no shared history reads the base tip; an unknown base fails.
+ */
+export function loadPreviousManifest(base, cwd = ROOT) {
   const relative = path.relative(ROOT, MANIFEST).split(path.sep).join("/");
+  const git = (args, stderr = "ignore") =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", stderr] }).trim();
   const refs = [`origin/${base}`, base];
   let commit = null;
   for (const ref of refs) {
     try {
-      commit = execFileSync(
-        "git",
-        ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`],
-        {
-          cwd: ROOT,
-          encoding: "utf8",
-          stdio: ["ignore", "pipe", "ignore"],
-        },
-      ).trim();
+      commit = git(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`]);
       break;
     } catch {
     }
   }
   if (!commit) throw new Error(`Could not resolve base ref ${base}.`);
   try {
-    execFileSync("git", ["cat-file", "-e", `${commit}:${relative}`], {
-      cwd: ROOT,
-      stdio: "ignore",
-    });
+    commit = git(["merge-base", commit, "HEAD"]);
+  } catch {
+  }
+  try {
+    git(["cat-file", "-e", `${commit}:${relative}`]);
   } catch {
     return null;
   }
-  const raw = execFileSync("git", ["show", `${commit}:${relative}`], {
-    cwd: ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-  });
-  return validateUpgradeManifest(JSON.parse(raw));
+  return validateUpgradeManifest(JSON.parse(git(["show", `${commit}:${relative}`], "inherit")));
 }
 
 function pendingChangesets() {
@@ -189,24 +233,30 @@ function pendingChangesets() {
   return values;
 }
 
+export function resolveUpgradeBaseRef(env = process.env) {
+  return env.BASE_REF?.trim() || env.GITHUB_BASE_REF?.trim() || "main";
+}
+
 export function runUpgradeManifestCheck({
   breaking = false,
   baseRef = "main",
 } = {}) {
   const manifest = loadManifest();
   const previous = loadPreviousManifest(baseRef);
-  if (previous) validateManifestContinuity(previous, manifest);
-  validateBreakingDeclaration({
+  const currentVersion = JSON.parse(
+    fs.readFileSync(
+      path.join(ROOT, "packages/nimbus-docs/package.json"),
+      "utf8",
+    ),
+  ).version;
+  if (previous) validateManifestContinuity(previous, manifest, currentVersion);
+  return validateBreakingDeclaration({
     breaking,
     previousEntries: previous?.entries ?? null,
     currentEntries: manifest.entries,
     changesets: pendingChangesets(),
-    currentVersion: JSON.parse(
-      fs.readFileSync(
-        path.join(ROOT, "packages/nimbus-docs/package.json"),
-        "utf8",
-      ),
-    ).version,
+    currentVersion,
+    releasedVersions: releasedVersions(),
   });
 }
 
@@ -215,12 +265,15 @@ if (
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
-    runUpgradeManifestCheck({
+    const backfills = runUpgradeManifestCheck({
       breaking:
         process.env.BREAKING_CHANGE === "1" ||
         process.env.BREAKING_CHANGE === "true",
-      baseRef: process.env.BASE_REF ?? process.env.GITHUB_BASE_REF ?? "main",
+      baseRef: resolveUpgradeBaseRef(),
     });
+    for (const id of backfills) {
+      console.log(`[upgrade-manifest] backfill: ${id} is added to a shipped release; review it.`);
+    }
     console.log("[upgrade-manifest] valid");
   } catch (error) {
     console.error(

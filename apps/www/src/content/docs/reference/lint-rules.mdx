@@ -1,0 +1,157 @@
+---
+title: Lint rules
+description: Every rule nimbus-docs lint and the build check, with what each flags, its options, and whether it fixes itself.
+aiGenerated: true
+sidebar:
+  order: 3
+---
+
+Nimbus checks content in two ways. **Build validators** catch what would break a page; they always run and fail the build. **Authoring rules** catch what renders but shouldn't ship; they're off until you turn them on, and `nimbus-docs lint` runs them. [Linting](/writing/linting) shows how to turn rules on, set their severity per collection, and use `--fix`.
+
+| Rule | Kind | Fixes itself | Options |
+| --- | --- | --- | --- |
+| [`nimbus/mdx-syntax`](#nimbusmdx-syntax) | Build validator | — | — |
+| [`nimbus/component-pascalcase`](#nimbuscomponent-pascalcase) | Build validator | — | — |
+| [`nimbus/partial-exists`](#nimbuspartial-exists) | Build validator | — | — |
+| [`nimbus/duplicate-slug`](#nimbusduplicate-slug) | Build validator | — | — |
+| [`nimbus/frontmatter-shape`](#nimbusfrontmatter-shape) | Authoring rule | — | — |
+| [`nimbus/description-required`](#nimbusdescription-required) | Authoring rule | — | — |
+| [`nimbus/internal-link`](#nimbusinternal-link) | Authoring rule | — | allowRelative, components, ignore |
+| [`nimbus/redirected-link`](#nimbusredirected-link) | Authoring rule | — | components, ignore |
+| [`nimbus/image-ref`](#nimbusimage-ref) | Authoring rule | — | aliases, components, ignore |
+| [`nimbus/single-h1`](#nimbussingle-h1) | Authoring rule | — | — |
+| [`nimbus/heading-hierarchy`](#nimbusheading-hierarchy) | Authoring rule | — | — |
+| [`nimbus/heading-punctuation`](#nimbusheading-punctuation) | Authoring rule | Yes | — |
+| [`nimbus/duplicate-heading-text`](#nimbusduplicate-heading-text) | Authoring rule | — | — |
+| [`nimbus/code-block-lang`](#nimbuscode-block-lang) | Authoring rule | — | — |
+| [`nimbus/code-block-prompt-prefix`](#nimbuscode-block-prompt-prefix) | Authoring rule | — | — |
+| [`nimbus/no-self-host-url`](#nimbusno-self-host-url) | Authoring rule | — | hosts |
+| [`nimbus/bare-url`](#nimbusbare-url) | Authoring rule | — | — |
+| [`nimbus/list-marker-style`](#nimbuslist-marker-style) | Authoring rule | Yes | style |
+| [`nimbus/emphasis-style`](#nimbusemphasis-style) | Authoring rule | Yes | style |
+
+## Build validators
+
+These run during every build and can't be turned off in the config. To skip one on a single page, use a `nimbusDisableRules` frontmatter entry or an inline disable comment; see [Linting](/writing/linting).
+
+### nimbus/mdx-syntax
+
+A page's MDX doesn't parse, such as an unclosed tag or a stray `{`.
+
+### nimbus/component-pascalcase
+
+A capitalised tag that's neither registered in `src/components.ts` nor imported in the page. MDX would print it as text, so the build stops instead.
+
+### nimbus/partial-exists
+
+`<Render file="…" />` names a partial that doesn't exist in `src/content/partials/`.
+
+### nimbus/duplicate-slug
+
+Two pages resolve to the same URL.
+
+## Authoring rules
+
+Turn these on in `rules` in the Nimbus integration options, with `"error"` or `"warn"`. Rules marked **fixes itself** are applied by `nimbus-docs lint --fix`.
+
+### nimbus/frontmatter-shape
+
+A page's frontmatter isn't valid YAML. It reports the parse error before other rules run. The content schema itself, such as unknown keys and wrong types, is checked by the build.
+
+### nimbus/description-required
+
+A page has no `description`, which search results, share cards and agent indexes use. Turn it off for partials with a collection override.
+
+### nimbus/internal-link
+
+A link to a page or file on the site that doesn't exist. It reads the routes from the last build, so run `astro build` first. Options: `ignore` (paths to skip), `allowRelative`, `components` (extra components whose props hold links).
+
+### nimbus/redirected-link
+
+A link that works only through a permanent redirect; the message gives the URL to write instead. Options: `ignore`, `components`.
+
+### nimbus/image-ref
+
+An image whose file doesn't exist: a path starting with `/` is looked up in `public/`, a relative one next to the page. Options: `aliases`, `ignore`, `components`.
+
+### nimbus/single-h1
+
+More than one `#` heading on a page. The page title already renders as the H1, so a page usually starts at `##`.
+
+### nimbus/heading-hierarchy
+
+A heading that skips a level, such as an `###` straight after an `#`, which breaks the outline readers and screen readers use.
+
+### nimbus/heading-punctuation
+
+A heading that ends in `.`, `,`, `:`, `;` or `!`. A question mark is allowed. **Fixes itself.**
+
+### nimbus/duplicate-heading-text
+
+Two headings with the same text on one page. Their anchors collide, so links land on the wrong one.
+
+### nimbus/code-block-lang
+
+A fenced code block without a language, which loses highlighting and the language badge.
+
+### nimbus/code-block-prompt-prefix
+
+A shell code block whose lines start with `$ `. Readers copy the prompt along with the command.
+
+### nimbus/no-self-host-url
+
+A link to the site written as an absolute URL on its own host, such as `https://docs.example.com/guide`, which breaks on previews. It always flags the configured `site` and localhost. Option: `hosts` (other hostnames that are the same site).
+
+### nimbus/bare-url
+
+A bare URL in prose, or a link whose text is its URL. Write descriptive link text instead.
+
+### nimbus/list-marker-style
+
+A bullet list that uses a different marker from the rest. Option: `style`, `"dash"` (default) or `"asterisk"`. **Fixes itself.**
+
+### nimbus/emphasis-style
+
+Italics that use a different delimiter from the rest. Option: `style`, `"asterisk"` (default) or `"underscore"`. **Fixes itself.**
+
+## Build and check findings
+
+The build and `nimbus-docs check` report these codes with the file and the fix. They aren't lint rules, so they can't be turned off.
+
+### Collection routing
+
+Errors. See [Collection URLs](/writing/collections#collection-urls).
+
+| Code | Cause |
+|---|---|
+| `nimbus/collection-two-routes` | Several static routes for one collection, none at its default URL. Keep one. |
+| `nimbus/collection-same-url` | Two collections at one URL. Move one of their routes. |
+| `nimbus/collection-dynamic-folder` | A collection other than `docs` served only from routes under dynamic folders. Give it a static route. |
+| `nimbus/collection-docs-route` | `docs` routed away from the site root. Move the route to `src/pages/[...slug].astro`, or set Astro's `base`. |
+| `nimbus/collection-version-route` | A docs version routed away from `/<version>`. Move the route there. |
+| `nimbus/collection-route-param` | A route helper in a route whose parameter isn't `slug` (`[...path].astro`). Rename it to `[...slug].astro`. |
+| `nimbus/collection-owns-url` | A page under another collection's moved URL. Move the page. |
+
+A page rendered from a route its collection isn't served from fails the build, naming the route's folder and the collection's route file.
+
+On request, such a route returns not found and logs the same advice. Routes under a dynamic folder, such as `src/pages/[locale]/kit/[...slug].astro`, aren't reported, since their folder depends on the URL.
+
+Warnings:
+
+| Code | Cause |
+|---|---|
+| `nimbus/collection-unread-route` | A route in a nested folder whose `getStaticPaths` Nimbus can't read. The collection stays at its default URL. |
+| `nimbus/collection-alias-route` | Several static routes for one collection; the extra ones duplicate its pages in the sitemap and search. Delete them or redirect them. |
+
+### Content sources
+
+Warnings from `nimbus-docs check`. See [Content from another repository](/content-sources/git).
+
+| Code | Cause |
+|---|---|
+| `nimbus/source-floating-ref` | A source pinned to a literal branch or tag, so its pages can change between builds. |
+| `nimbus/source-unreferenced` | A source that no collection and no `api` entry reads. |
+
+## Reserved codes
+
+`nimbus/orphan-page` and `nimbus/sidebar-entry` are reserved for future rules. Configuring either as `"error"` or `"warn"` stops the build with a message saying so; `"off"` is accepted.

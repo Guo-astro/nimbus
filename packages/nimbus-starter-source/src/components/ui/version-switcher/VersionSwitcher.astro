@@ -2,10 +2,9 @@
 /** Picker for switching between docs versions or API-family versions. */
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import {
-  getApiVersionAlternates,
+  getVersionSwitchUrl,
   getApiVersions,
   getCurrentVersion,
-  getVersionAlternates,
   getVersionLandingUrl,
   getVersions,
   stripBase,
@@ -54,31 +53,18 @@ if (apiCollection) {
   if (visible.length >= 2) {
     const defaultVersion = apiVersions.find((v) => v.isDefault)?.version ?? null;
     const activeVersion = apiVersion ?? defaultVersion;
-    const record =
-      coordinate && activeVersion
-        ? await getApiVersionAlternates(apiCollection, activeVersion, coordinate)
-        : null;
-
-    const altByVersion = new Map<string, string>();
-    if (record) {
-      altByVersion.set(record.self.version, record.self.url);
-      for (const alt of record.alternates) altByVersion.set(alt.version, alt.url);
-    }
-
-    entries = visible.map((v) => {
+    entries = await Promise.all(visible.map(async (v) => {
       const isActive = v.version === activeVersion;
-      // The sibling if the op exists in that version, else the version landing.
+      // The active entry stays on this page, keeping that version's
+      // `?version=` (other query params are dropped); others switch to the
+      // same operation in their version, or its landing.
       const href = isActive
-        ? currentPath
-        : (altByVersion.get(v.version) ?? v.url);
-      return {
-        version: v.version,
-        label: v.label,
-        href,
-        isCurrent: v.isDefault,
-        isActive,
-      };
-    });
+        ? currentPath + new URL(v.url, "http://x").search
+        : coordinate && activeVersion
+          ? await getVersionSwitchUrl({ collection: apiCollection, sourceVersion: activeVersion, id: coordinate, targetVersion: v.version })
+          : v.url;
+      return { version: v.version, label: v.label, href, isCurrent: v.isDefault, isActive };
+    }));
     activeLabel =
       entries.find((e) => e.isActive)?.label ??
       visible.find((v) => v.isDefault)?.label ??
@@ -91,20 +77,10 @@ if (apiCollection) {
 async function buildDocsEntries() {
 const versions = await getVersions();
 
-if (versions && versions.all.length >= 2) {
-  const currentPageVersion =
-    collection ? await getCurrentVersion(collection) : null;
-  const record =
-    collection && entryId
-      ? await getVersionAlternates(collection, entryId)
-      : null;
-
-  const alternateByVersion = new Map<string, string>();
-  if (record) {
-    alternateByVersion.set(record.self.version, record.self.url);
-    for (const alt of record.alternates) alternateByVersion.set(alt.version, alt.url);
-  }
-
+// A page in a collection outside the docs versions (an API reference, a blog)
+// gets no docs picker: it has no version to switch.
+const currentPageVersion = collection ? await getCurrentVersion(collection) : null;
+if (versions && versions.all.length >= 2 && !(collection && currentPageVersion === null)) {
   const visible = versions.all.filter((v) => !versions.hidden.includes(v));
 
   // Fallback landing URL per version, used when the current page has no same-logical-page sibling.
@@ -114,7 +90,7 @@ if (versions && versions.all.length >= 2) {
     ),
   );
 
-  entries = visible
+  entries = await Promise.all(visible
     // Drop entries with no resolvable destination — that version has
     // no indexed pages, so there's nowhere to send the reader. Two
     // exceptions are always kept:
@@ -127,17 +103,17 @@ if (versions && versions.all.length >= 2) {
       v === versions.current ||
       landingByVersion.get(v) != null,
     )
-    .map((v) => {
+    .map(async (v) => {
       const isCurrent = v === versions.current;
       const isActive = v === currentPageVersion;
 
       let href: string;
-      const altHref = alternateByVersion.get(v);
       if (isActive) {
         // No-op nav: stay on this page.
         href = currentPath;
-      } else if (altHref) {
-        href = altHref;
+      } else if (collection && entryId && currentPageVersion) {
+        // The same page in that version, else that version's landing.
+        href = await getVersionSwitchUrl({ collection, sourceVersion: currentPageVersion, id: entryId, targetVersion: v });
       } else if (isCurrent) {
         // Current version always lands at the site root. `/` is the
         // canonical "go to current" target — readers expect the home
@@ -151,7 +127,7 @@ if (versions && versions.all.length >= 2) {
       }
 
       return { version: v, label: v, href, isCurrent, isActive };
-    });
+    }));
 
   const activeEntry = entries.find((e) => e.isActive);
   activeLabel = activeEntry
@@ -169,24 +145,23 @@ const labelId = `nb-version-picker-${Math.random().toString(36).slice(2, 9)}`;
 ---
 
 {entries.length >= 2 && variant === "header" && (
-  <Popover class={cn("hidden md:inline-block", className)}>
+  <Popover data-slot="version-switcher" class={cn("inline-block", className)}>
     <PopoverTrigger
-      class="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[0.8125rem] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors aria-[expanded=true]:bg-accent aria-[expanded=true]:text-foreground"
-      aria-label={`Switch version (current: ${activeLabel})`}
+      class="inline-flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-md text-[0.8125rem] font-medium whitespace-nowrap text-muted-foreground hover:text-foreground hover:bg-accent transition-colors aria-[expanded=true]:bg-accent aria-[expanded=true]:text-foreground"
+      aria-label={`${activeLabel}, switch version`}
     >
-      <Icon name="ph:git-branch" class="w-3.5 h-3.5" />
+      {/* Phones keep the label and caret; the icon returns from 640px. */}
+      <Icon name="ph:git-branch" class="hidden sm:block w-3.5 h-3.5" />
       <span>{activeLabel}</span>
       <Icon name="ph:caret-down" class="w-3 h-3 opacity-60" />
     </PopoverTrigger>
     <PopoverContent placement="bottom-end" class="min-w-[12rem] p-1">
-      <ul class="flex flex-col list-none m-0 p-0" role="listbox" aria-label="Versions">
+      <ul class="flex flex-col list-none m-0 p-0" aria-label="Versions">
         {entries.map((entry) => (
           <li>
             <a
               href={entry.href}
-              role="option"
               aria-current={entry.isActive ? "page" : undefined}
-              aria-selected={entry.isActive}
               class:list={[
                 "flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm no-underline transition-colors",
                 entry.isActive
@@ -197,7 +172,7 @@ const labelId = `nb-version-picker-${Math.random().toString(36).slice(2, 9)}`;
               <span class="flex items-center gap-2">
                 <span>{entry.label}</span>
                 {entry.isCurrent && (
-                  <span class="text-[0.6875rem] uppercase tracking-wide text-muted-foreground/70">
+                  <span class="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
                     latest
                   </span>
                 )}
@@ -217,19 +192,17 @@ const labelId = `nb-version-picker-${Math.random().toString(36).slice(2, 9)}`;
   >
     <h3
       id={labelId}
-      class="flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-wide font-semibold text-muted-foreground/80 mb-2 px-2"
+      class="flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-wide font-semibold text-muted-foreground mb-2 px-2"
     >
       <Icon name="ph:git-branch" class="w-3 h-3" />
       Version
     </h3>
-    <ul class="flex flex-col list-none m-0 p-0" role="listbox" aria-label="Versions">
+    <ul class="flex flex-col list-none m-0 p-0" aria-label="Versions">
       {entries.map((entry) => (
         <li>
           <a
             href={entry.href}
-            role="option"
             aria-current={entry.isActive ? "page" : undefined}
-            aria-selected={entry.isActive}
             class:list={[
               "flex items-center justify-between gap-3 px-3 py-2 rounded-md text-sm no-underline transition-colors",
               entry.isActive
@@ -240,7 +213,7 @@ const labelId = `nb-version-picker-${Math.random().toString(36).slice(2, 9)}`;
             <span class="flex items-center gap-2">
               <span>{entry.label}</span>
               {entry.isCurrent && (
-                <span class="text-[0.6875rem] uppercase tracking-wide text-muted-foreground/70">
+                <span class="text-[0.6875rem] uppercase tracking-wide text-muted-foreground">
                   latest
                 </span>
               )}

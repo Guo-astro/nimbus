@@ -7,7 +7,7 @@
  * against an `absPath` under that root, and asserts the diagnostics.
  *
  * Tests reset the rule's process-level cache between cases via the
- * test-only `_resetInternalLinkCacheForTests` export.
+ * test-only `_resetLinkEnvCacheForTests` export (imported under its old name).
  */
 
 import assert from "node:assert/strict";
@@ -18,8 +18,8 @@ import { test } from "node:test";
 
 import { lintFile } from "../../src/lint/engine.js";
 import { parseSource } from "../../src/lint/parse.js";
-import { _resetInternalLinkCacheForTests } from "../../src/lint/rules/internal-link.js";
-import type { RouteTruth } from "../../src/lint/site-model.js";
+import { _resetLinkEnvCacheForTests as _resetInternalLinkCacheForTests } from "../../src/lint/link-env.js";
+import { ROUTE_TRUTH_VERSION, type RouteTruth } from "../../src/lint/site-model.js";
 
 interface Setup {
   root: string;
@@ -63,9 +63,12 @@ function lint(setup: Setup, mdx: string) {
 
 function baseTruth(overrides: Partial<RouteTruth> = {}): RouteTruth {
   return {
-    version: 1,
+    version: ROUTE_TRUTH_VERSION,
     base: "",
     knownRoutes: ["/", "/workers", "/r2", "/guides/setup", "/search"],
+    redirects: [],
+    redirectPages: [],
+    redirectRules: "cloudflare",
     opaqueNamespaces: [],
     ...overrides,
   };
@@ -133,6 +136,58 @@ Read about [Workers](/worker) — typo.
     assert.match(diags[0]!.message, /broken link "\/worker"/);
     assert.match(diags[0]!.message, /did you mean "\/workers"/);
     assert.ok(diags[0]!.fix, "did-you-mean should populate a fix");
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link suggests where a moved path now lives, never the root", () => {
+  const setup = setupProject(
+    baseTruth({ knownRoutes: ["/", "/products/sdk", "/products/sdk/setup", "/products/cli/setup", "/products/sdk/setup/index.md"] }),
+  );
+  try {
+    const diags = lint(setup, `${FM}\n[a](/sdk) [b](/sdk/setup/) [c](/setup) [d](/abc)\n`);
+    assert.deepEqual(
+      diags.map((d) => d.message),
+      [
+        'broken link "/sdk" — did you mean "/products/sdk"?',
+        'broken link "/sdk/setup/" — did you mean "/products/sdk/setup"?',
+        'broken link "/setup" — no page resolves to this path.',
+        'broken link "/abc" — no page resolves to this path.',
+      ],
+    );
+  } finally {
+    cleanup(setup.root);
+  }
+  const based = setupProject(baseTruth({ base: "/docs/", knownRoutes: ["/", "/products/sdk/setup"] }));
+  try {
+    assert.match(
+      lint(based, `${FM}\n[a](/docs/sdk/setup)\n`)[0]!.message,
+      /^broken link "\/docs\/sdk\/setup" — did you mean "\/products\/sdk\/setup"\? Write links without the base "\/docs"/,
+    );
+  } finally {
+    cleanup(based.root);
+  }
+});
+
+test("internal-link maps a link into a collection to the folder its route moved it to", () => {
+  const setup = setupProject(
+    baseTruth({
+      knownRoutes: ["/", "/404", "/guide", "/products/kit", "/products/kit/setup"],
+      mounts: { docs: "", sdk: "/products/kit" },
+    }),
+  );
+  try {
+    const diags = lint(setup, `${FM}\n[a](/sdk) [b](/sdk/setup) [c](/abc) [d](/sdk/gone)\n`);
+    assert.deepEqual(
+      diags.map((d) => d.message),
+      [
+        'broken link "/sdk" — did you mean "/products/kit"?',
+        'broken link "/sdk/setup" — did you mean "/products/kit/setup"?',
+        'broken link "/abc" — no page resolves to this path.',
+        'broken link "/sdk/gone" — no page resolves to this path.',
+      ],
+    );
   } finally {
     cleanup(setup.root);
   }
@@ -220,6 +275,68 @@ See [./other](./other) and [../up](../up).
   }
 });
 
+test("internal-link treats a bare path as relative, even when a root route has that name", () => {
+  // `[CLI](cli)` on `/guide/page/` requests `/guide/page/cli`, not `/cli`.
+  const setup = setupProject(baseTruth({ knownRoutes: ["/", "/cli"] }));
+  try {
+    const diags = lint(setup, `${FM}\n[CLI](cli) and [CLI](cli/setup#x)\n`);
+    assert.equal(diags.length, 2);
+    assert.match(diags[0]!.message, /relative link "cli"/);
+    assert.match(diags[1]!.message, /relative link "cli\/setup#x"/);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link skips links to the same page", () => {
+  const setup = setupProject(baseTruth({ knownRoutes: ["/workers"] }));
+  try {
+    assert.deepEqual(lint(setup, `${FM}\n[tab](?tab=npm) [section](#setup)\n`), []);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link accepts relative links between a content source's pages", () => {
+  const setup = setupProject(baseTruth());
+  const folder = path.join(setup.root, ".nimbus/sources/local/abc/docs");
+  try {
+    fs.mkdirSync(path.join(folder, "guide"), { recursive: true });
+    fs.writeFileSync(path.join(folder, "2-options.md"), "# Options\n\n## Signal\n");
+    fs.writeFileSync(path.join(folder, "guide/next.mdx"), "# Next\n");
+    const absPath = path.join(folder, "index.mdx");
+    const source = `${FM}
+# Title
+
+[Options](./2-options.md#signal), [next](guide/next.mdx), [readme](../readme.md), [other](./other).
+`;
+    const run = (sourceFolder?: string) => {
+      _resetInternalLinkCacheForTests();
+      const parsed = parseSource(source, {
+        path: "local: docs/index.mdx",
+        absPath,
+        collection: "external",
+        projectRoot: setup.root,
+      });
+      return lintFile(parsed, {
+        rules: { "nimbus/internal-link": "error" },
+        sourceFolder: () => sourceFolder,
+      }).filter((d) => d.code === "nimbus/internal-link");
+    };
+    assert.deepEqual(
+      run(folder).map((d) => d.message),
+      [
+        `relative link "../readme.md" isn't a page of this collection; the build leaves it as written.`,
+        `relative link "./other" — internal docs links should be root-relative (e.g. /foo).`,
+      ],
+    );
+    // Outside a content source, every relative link is still reported as one.
+    assert.equal(run(undefined).length, 4);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
 test("internal-link tolerates relative links when allowRelative is on", () => {
   const setup = setupProject(baseTruth());
   try {
@@ -228,7 +345,7 @@ test("internal-link tolerates relative links when allowRelative is on", () => {
       `${FM}
 # Title
 
-See [./other](./other).
+See [./other](./other) and [bare](other).
 `,
       {
         path: "src/content/docs/page.mdx",
@@ -308,7 +425,10 @@ test("internal-link only resolves links that appear in knownRoutes", () => {
 // base
 // ---------------------------------------------------------------------------
 
-test("internal-link honors the Astro base prefix", () => {
+test("internal-link compares authored links without stripping base", () => {
+  // The renderer prefixes base to every root-relative link, so `/workers`
+  // reaches `/docs/workers` and `/docs/workers` renders as
+  // `/docs/docs/workers`: a 404.
   const setup = setupProject(baseTruth({ base: "/docs" }));
   try {
     const diags = lint(
@@ -317,12 +437,58 @@ test("internal-link honors the Astro base prefix", () => {
 # Title
 
 Without base: [Workers](/workers) resolves.
-With base prefix: [Workers](/docs/workers) also resolves.
-Broken either way: [missing](/docs/missing).
+Repeating base: [Workers](/docs/workers) renders a 404.
 `,
     );
     assert.equal(diags.length, 1);
-    assert.match(diags[0]!.message, /broken link "\/docs\/missing"/);
+    assert.match(diags[0]!.message, /broken link "\/docs\/workers" — did you mean "\/workers"\?/);
+    assert.match(diags[0]!.message, /Write links without the base "\/docs"/);
+    assert.equal(diags[0]!.fix?.description, 'replace "/docs/workers" with "/workers"');
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link accepts a link that repeats base when a page really lives there", () => {
+  const setup = setupProject(
+    baseTruth({ base: "/docs", knownRoutes: ["/", "/docs/x"] }),
+  );
+  try {
+    assert.deepEqual(lint(setup, `${FM}\n[x](/docs/x) and [x/](/docs/x/)\n`), []);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link hints a near-match after the base, and the base root", () => {
+  const setup = setupProject(baseTruth({ base: "/docs/" }));
+  try {
+    const diags = lint(setup, `${FM}\n[a](/docs/worker) [b](/docs)\n`);
+    assert.equal(diags.length, 2);
+    assert.match(diags[0]!.message, /did you mean "\/workers"\?/);
+    assert.match(diags[1]!.message, /broken link "\/docs" — did you mean "\/"\?/);
+  } finally {
+    cleanup(setup.root);
+  }
+});
+
+test("internal-link resolves index.html, .html, and trailing-slash forms to one route", () => {
+  const setup = setupProject(
+    baseTruth({ knownRoutes: ["/", "/foo", "/llms.txt", "/welcome/index.md"] }),
+  );
+  try {
+    const diags = lint(
+      setup,
+      `${FM}
+[a](/foo/) [b](/foo/index.html) [c](/foo.html) [d](/foo?x=1#y)
+[e](/llms.txt) [f](/welcome/index.md) [g](/index.html)
+[h](/welcome/index.md/) [i](/welcome.md)
+`,
+    );
+    // A trailing slash is dropped like any other link, so `/welcome/index.md/`
+    // resolves too; `/welcome.md` doesn't exist.
+    assert.equal(diags.length, 1);
+    assert.match(diags[0]!.message, /broken link "\/welcome\.md"/);
   } finally {
     cleanup(setup.root);
   }
@@ -363,7 +529,7 @@ test("internal-link respects the ignore glob list", () => {
   }
 });
 
-test("internal-link applies ignore against the post-base form (not the raw URL)", () => {
+test("internal-link matches ignore against the authored path, base included", () => {
   const setup = setupProject(baseTruth({ base: "/docs" }));
   try {
     _resetInternalLinkCacheForTests();
@@ -371,7 +537,7 @@ test("internal-link applies ignore against the post-base form (not the raw URL)"
       `${FM}
 # Title
 
-[full path](/docs/api/anything) and [bare path](/api/anything) — both ignored.
+[bare path](/api/anything) is ignored, [full path](/docs/api/anything) is reported.
 `,
       {
         path: "src/content/docs/page.mdx",
@@ -382,7 +548,8 @@ test("internal-link applies ignore against the post-base form (not the raw URL)"
     const diags = lintFile(parsed, {
       rules: { "nimbus/internal-link": ["error", { ignore: ["/api/**"] }] },
     }).filter((d) => d.code === "nimbus/internal-link");
-    assert.deepEqual(diags, []);
+    assert.equal(diags.length, 1);
+    assert.match(diags[0]!.message, /broken link "\/docs\/api\/anything"/);
   } finally {
     cleanup(setup.root);
   }
@@ -514,28 +681,38 @@ test("internal-link ignore tolerates a stray empty-string pattern (no rule-wide 
 });
 
 // ---------------------------------------------------------------------------
-// Missing route truth → silent skip
+// Unusable route truth: the rule reports nothing (the lint CLI fails closed
+// before it runs; see test/lint/route-truth-cli.test.ts)
 // ---------------------------------------------------------------------------
 
-test("internal-link skips silently when routes.json is missing", () => {
-  // Set up a project root WITHOUT writing routes.json.
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-il-skip-"));
-  try {
-    fs.mkdirSync(path.join(root, "src/content/docs"), { recursive: true });
-    _resetInternalLinkCacheForTests();
-    const parsed = parseSource(`${FM}\n# x\n\n[anything](/nope)`, {
-      path: "src/content/docs/page.mdx",
-      absPath: path.join(root, "src/content/docs/page.mdx"),
-      collection: "docs",
-    });
-    const diags = lintFile(parsed, {
-      rules: { "nimbus/internal-link": "error" },
-    }).filter((d) => d.code === "nimbus/internal-link");
-    assert.deepEqual(diags, []);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
+for (const [label, body] of [
+  ["missing", null],
+  ["malformed", "{ not json"],
+  ["an old version", JSON.stringify({ version: 1, base: "", knownRoutes: [], opaqueNamespaces: [] })],
+] as const) {
+  test(`internal-link reports nothing itself when routes.json is ${label}`, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-il-skip-"));
+    try {
+      fs.mkdirSync(path.join(root, "src/content/docs"), { recursive: true });
+      if (body !== null) {
+        fs.mkdirSync(path.join(root, ".nimbus"), { recursive: true });
+        fs.writeFileSync(path.join(root, ".nimbus", "routes.json"), body);
+      }
+      _resetInternalLinkCacheForTests();
+      const parsed = parseSource(`${FM}\n# x\n\n[anything](/nope)`, {
+        path: "src/content/docs/page.mdx",
+        absPath: path.join(root, "src/content/docs/page.mdx"),
+        collection: "docs",
+      });
+      const diags = lintFile(parsed, {
+        rules: { "nimbus/internal-link": "error" },
+      }).filter((d) => d.code === "nimbus/internal-link");
+      assert.deepEqual(diags, []);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("internal-link skips draft sources entirely — frontmatter draft: true short-circuits the rule", () => {
   // Drafts are excluded from `routes.json` (Nimbus filters them from

@@ -1,10 +1,13 @@
 ---
+import Logo from "./Logo.astro";
+import type { SidebarSection } from "@cloudflare/nimbus-docs/types";
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
+import { Button } from "./ui/button";
+import { LinkButton } from "./ui/link-button";
 import { ThemeToggle } from "./ui/theme-toggle";
-import { SearchTrigger } from "./ui/search";
+import SearchTrigger from "./ui/search/SearchTrigger.astro";
 import { config } from "virtual:nimbus/config";
-import { getSidebarSections, stripBase, withBase } from "@cloudflare/nimbus-docs";
-import { Image } from "astro:assets";
+import { getSidebarSections, stripBase, withBase } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   /** Astro collection id for the current page, forwarded from DocsLayout. */
@@ -12,83 +15,108 @@ interface Props {
   /** Astro entry id for the current page, forwarded from DocsLayout. */
   entryId?: string;
   /**
-   * Whether the page has a sidebar to open. When `false`, the mobile menu
-   * button is hidden — pages that opted out via `sidebar: false` shouldn't
-   * show a button that opens an empty dialog. Default `true`.
+   * Whether the page has a sidebar to open. When `false`, the mobile
+   * menu button is hidden — pages that opted out via `sidebar: false`
+   * shouldn't show a button that opens an empty dialog. Default `true`.
    */
   showSidebar?: boolean;
+  sections?: SidebarSection[];
 }
 
-const { collection, entryId, showSidebar = true } = Astro.props;
+// `entryId` is part of Props as a forward-compat hook (the version-switcher
+// recipe reads it) but the base Header doesn't use it — leave it off the
+// destructure to avoid an unused-var warning.
+const { collection, showSidebar = true, sections: sectionsProp } = Astro.props;
 
 // Normalize trailing slash so isActive matches sidebar hrefs.
 const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
-const sections = await getSidebarSections(currentSlug, { collection });
-const showSections = sections.length >= 1;
+const sections =
+  sectionsProp ?? (await getSidebarSections(currentSlug, { collection }));
+const showSections = sections.length >= 2;
 const homeHref = withBase("/", import.meta.env.BASE_URL);
+const resolveSectionHref = (href: string): string =>
+  withBase(href, import.meta.env.BASE_URL);
 ---
 
-<header
-  class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-lg"
->
-  <div class="mx-auto flex items-center justify-between h-14 px-4 lg:px-6">
-    <div class="flex items-center gap-3">
-      <a href={homeHref} class="flex items-center group">
-        <div class="flex items-center justify-center w-14">
-          <Image src={withBase("/logo.svg", import.meta.env.BASE_URL)} alt="Nimbus" width={100} height={100} class="dark:invert" />
-        </div>
-      </a>
+<header class="sticky top-0 z-30 border-b border-border bg-card/80 backdrop-blur-lg">
+  <div class="mx-auto flex items-center justify-between gap-3 h-14 px-4 lg:px-6">
+    <div class="flex items-center gap-3 min-w-0">
+      <slot name="brand">
+        {/* The mark alone; the site title stays as the link's accessible name. */}
+        <a href={homeHref} class="flex shrink-0 items-center text-foreground transition-opacity hover:opacity-70">
+          <Logo class="h-5 w-8 shrink-0" />
+          <span class="sr-only">{config.title}</span>
+        </a>
+      </slot>
 
-      {
-        showSections && (
-          <nav
-            aria-label="Sections"
-            class="hidden md:flex items-center gap-1 ml-4 pl-4 border-l border-border h-6"
-          >
-            {sections.map((section) => (
-              <a
-                href={withBase(section.href, import.meta.env.BASE_URL)}
-                aria-current={section.isActive ? "page" : undefined}
-                class:list={[
-                  "px-2 py-1 rounded-md text-[0.8125rem] font-medium no-underline transition-colors",
-                  section.isActive
-                    ? "text-foreground bg-accent"
-                    : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
-                ]}
-              >
-                {section.label}
-              </a>
-            ))}
-          </nav>
-        )
-      }
+      {showSections && (
+        <nav aria-label="Sections" class="hidden md:flex items-center gap-1 ms-4 ps-4 border-s border-border h-6 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {sections.map((section) => (
+            <a
+              href={resolveSectionHref(section.href)}
+              aria-current={section.isActive ? "page" : undefined}
+              class:list={[
+                "px-2 py-1 rounded-md text-[0.8125rem] font-medium no-underline transition-colors shrink-0 whitespace-nowrap",
+                section.isActive
+                  ? "text-foreground bg-accent"
+                  : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
+              ]}
+            >
+              {section.label}
+            </a>
+          ))}
+        </nav>
+      )}
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 shrink-0">
+      <slot name="actions" />
       {config.search !== false && <SearchTrigger />}
-      {
-        config.github && (
-          <a
-            href={config.github}
-            class="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            aria-label="GitHub"
-            target="_blank"
-            rel="noopener"
-          >
-            <Icon name="ph:github-logo" class="w-4 h-4" />
-          </a>
-        )
-      }
+      {config.github && (
+        <LinkButton
+          href={config.github}
+          variant="minimal"
+          shape="square"
+          size="sm"
+          aria-label="GitHub"
+          target="_blank"
+          rel="noopener"
+          class="text-muted-foreground"
+        >
+          <Icon name="ph:github-logo" class="w-4 h-4" />
+        </LinkButton>
+      )}
       <ThemeToggle />
       {showSidebar && (
-        <button
-          data-menu-btn
-          class="lg:hidden flex items-center justify-center w-8 h-8 rounded-md hover:bg-accent transition-colors"
+        <Button
+          variant="ghost"
+          shape="square"
+          size="sm"
+          icon="ph:list"
           aria-label="Open navigation"
-        >
-          <Icon name="ph:list" class="w-5 h-5 text-muted-foreground" />
-        </button>
+          data-menu-btn
+          class="md:hidden text-muted-foreground"
+        />
       )}
     </div>
   </div>
+  {/* Phones: the tabs on a row of their own under the bar. */}
+  {showSections && (
+    <nav aria-label="Sections" data-nb-header-tabs class="md:hidden flex items-center gap-1 h-10 px-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {sections.map((section) => (
+        <a
+          href={resolveSectionHref(section.href)}
+          aria-current={section.isActive ? "page" : undefined}
+          class:list={[
+            "px-2 py-1 rounded-md text-[0.8125rem] font-medium no-underline transition-colors shrink-0 whitespace-nowrap",
+            section.isActive
+              ? "text-foreground bg-accent"
+              : "text-muted-foreground hover:text-foreground hover:bg-accent/60",
+          ]}
+        >
+          {section.label}
+        </a>
+      ))}
+    </nav>
+  )}
 </header>

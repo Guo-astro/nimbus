@@ -3,13 +3,14 @@ import { basename, join } from "node:path";
 import {
   ADAPTER_RECIPES,
   ASTRO_CONFIG_FILENAMES,
+  alignRouteFiles,
   applyAdapterToConfig,
   buildServerWranglerConfig,
   sanitizeWorkerName,
+  workersCompatibilityDate,
   type AdapterId,
 } from "@cloudflare/nimbus-docs/adapters";
 import { ScaffoldError } from "../scaffold.js";
-import { today } from "./deploy.js";
 
 // Build output an adapter's platform writes into the project root; ignore it so
 // a fresh `git init` doesn't stage it. Cloudflare's `.wrangler/` is already in
@@ -20,7 +21,8 @@ const IGNORE_ENTRIES_BY_ADAPTER: Partial<Record<AdapterId, string[]>> = {
 };
 
 /**
- * Flip the scaffolded `astro.config` to server output and wire the adapter.
+ * Flip the scaffolded `astro.config` to server output, wire the adapter, and
+ * set the route files to the modes `rendering` gives them.
  * Fail-closed: a missing marker, missing/altered `output`, or a pre-wired
  * adapter aborts the scaffold with the framework's actionable message rather
  * than shipping a half-configured project.
@@ -29,7 +31,7 @@ const IGNORE_ENTRIES_BY_ADAPTER: Partial<Record<AdapterId, string[]>> = {
  * (`ASTRO_CONFIG_FILENAMES`); `.cjs` is intentionally absent, so the ESM
  * `import` the edit inserts can never be written into a CommonJS config.
  */
-export async function applyAdapter(dir: string, adapter: AdapterId): Promise<void> {
+export async function applyAdapter(dir: string, adapter: AdapterId, site: { docs: boolean } = { docs: true }): Promise<void> {
   const configPath = ASTRO_CONFIG_FILENAMES.map((f) => join(dir, f)).find(existsSync);
   if (!configPath) {
     throw new ScaffoldError(
@@ -37,22 +39,29 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
     );
   }
 
-  const result = applyAdapterToConfig(readFileSync(configPath, "utf-8"), adapter);
-  if (
-    result.status !== "error" &&
-    adapter === "cloudflare" &&
-    result.requestRendering === "unresolved"
-  ) {
+  // A new server site renders its docs on request, so content negotiation and
+  // agent headers work from the first deploy. Off Cloudflare that's the docs
+  // collection only: generated API pages render on request only there, so an
+  // API-only site keeps building them.
+  const result = applyAdapterToConfig(readFileSync(configPath, "utf-8"), adapter, {
+    requestRendering: adapter === "cloudflare" ? true : site.docs && { collections: ["docs"] },
+  });
+  if (result.status !== "error" && result.requestRendering === "unresolved") {
     throw new ScaffoldError(
       "The template's Nimbus config is customized, so request rendering cannot be enabled safely.",
     );
   }
-  if (result.status === "applied") {
-    writeFileSync(configPath, result.source);
+  if (result.status === "applied") writeFileSync(configPath, result.source);
+  // A fresh template is never pre-wired, but treat idempotent success as success.
+  if (result.status !== "error") {
+    // The route files then say what `rendering` gives them.
+    const routes = alignRouteFiles(dir);
+    if (routes.skipped || routes.manual.length > 0) {
+      const reason = routes.skipped ?? routes.manual.map((entry) => entry.file).join(", ");
+      throw new ScaffoldError(`The template's route files couldn't be set to match \`rendering\`: ${reason}.`);
+    }
     return;
   }
-  // A fresh template is never pre-wired, but treat idempotent success as success.
-  if (result.status === "noop") return;
 
   throw new ScaffoldError(`Could not enable the "${adapter}" adapter: ${result.message}`);
 }
@@ -61,17 +70,18 @@ export async function applyAdapter(dir: string, adapter: AdapterId): Promise<voi
  * Write the user-facing server `wrangler.jsonc` for an adapter that ships one
  * (Cloudflare today), via the same shared emitter and serialization the CLI
  * opt-in uses. Worker name and `compatibility_date` are freshly derived here
- * (from the dir name and today's date), so this file — unlike astro.config —
+ * (from the dir name and the Workers runtime the project will install,
+ * `workersCompatibilityDate`), so this file — unlike astro.config —
  * is not guaranteed byte-identical to a later `add adapter-<id>`. No-op for
  * adapters whose platform owns its own deploy config.
  */
-export function writeServerWrangler(dir: string, adapter: AdapterId): void {
+export async function writeServerWrangler(dir: string, adapter: AdapterId): Promise<void> {
   const recipe = ADAPTER_RECIPES[adapter];
+  if (!recipe.serverWrangler) return;
   const cfg = buildServerWranglerConfig(recipe, {
     name: sanitizeWorkerName(basename(dir)),
-    compatibilityDate: today(),
-  });
-  if (!cfg) return;
+    compatibilityDate: await workersCompatibilityDate(dir),
+  })!;
   writeFileSync(join(dir, "wrangler.jsonc"), JSON.stringify(cfg, null, 2) + "\n");
 }
 

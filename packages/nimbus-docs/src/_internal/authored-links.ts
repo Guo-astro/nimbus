@@ -1,27 +1,18 @@
 import { fromHtml } from "hast-util-from-html";
-import { markdownToMdast, mdxToMdast } from "satteri";
+import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { parseMarkdownSource } from "./markdown-source.js";
 
 interface MdNode {
   type?: string;
   name?: unknown;
+  value?: unknown;
   url?: unknown;
   children?: unknown;
   attributes?: unknown;
   position?: {
     start?: { offset?: number };
     end?: { offset?: number };
-  };
-}
-
-interface HtmlNode {
-  type?: string;
-  tagName?: unknown;
-  properties?: unknown;
-  children?: unknown;
-  content?: unknown;
-  position?: {
-    start?: { offset?: number };
   };
 }
 
@@ -49,6 +40,8 @@ export interface NormalizeAuthoredLinksOptions {
   base: string;
   sourceId?: string;
   format?: "markdown" | "mdx";
+  /** The file `source` was read from, so errors give its line numbers. */
+  filePath?: string;
 }
 
 function fail(
@@ -58,14 +51,19 @@ function fail(
   offset = 0,
 ): never {
   const before = source.slice(0, offset);
-  const line = before.split("\n").length;
-  const column = offset - before.lastIndexOf("\n");
+  const breaks = [...before.matchAll(/\r\n|\r|\n/gu)];
+  const lastBreak = breaks.at(-1);
+  const line = breaks.length + 1;
+  const column =
+    offset -
+    (lastBreak ? lastBreak.index + lastBreak[0].length : 0) +
+    1;
   throw new Error(
     `Nimbus authored-link normalization failed in ${sourceId ?? "Markdown source"}:${line}:${column}: ${message}`,
   );
 }
 
-function basePrefix(base: string): string {
+export function basePrefix(base: string): string {
   if (
     !base.startsWith("/") ||
     base.startsWith("//") ||
@@ -150,52 +148,35 @@ function rootRelativeInsertionOffset(
   return insertionOffset;
 }
 
-function buildOffsetMap(source: string): number[] {
-  const offsets = [0];
-  let index = 0;
-  while (index < source.length) {
-    const codePoint = source.codePointAt(index);
-    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
-    offsets.push(index);
-  }
-  return offsets;
-}
-
 function nodeRange(
   node: MdNode,
-  offsets: number[],
   source: string,
   sourceId: string | undefined,
 ): [number, number] {
-  const codePointStart = node.position?.start?.offset;
-  const codePointEnd = node.position?.end?.offset;
-  if (typeof codePointStart !== "number" || typeof codePointEnd !== "number") {
+  const start = node.position?.start?.offset;
+  const end = node.position?.end?.offset;
+  if (typeof start !== "number" || typeof end !== "number") {
     fail(`missing ${node.type ?? "node"} source position`, source, sourceId);
   }
-  const start = offsets[codePointStart];
-  const end = offsets[codePointEnd];
-  if (start === undefined || end === undefined || end < start) {
+  if (end < start || end > source.length) {
     fail(`invalid ${node.type ?? "node"} source position`, source, sourceId);
   }
   return [start, end];
 }
 
-function destinationOffset(
+export function destinationOffset(
   source: string,
   node: MdNode,
-  offsets: number[],
   sourceId: string | undefined,
 ): number {
-  const [start, end] = nodeRange(node, offsets, source, sourceId);
+  const [start, end] = nodeRange(node, source, sourceId);
   const raw = source.slice(start, end);
   let offset = 0;
   if (node.type === "link") {
     const children = Array.isArray(node.children) ? node.children : [];
     const lastChild = children.at(-1) as MdNode | undefined;
     const childEnd = lastChild?.position?.end?.offset;
-    const childUtf16End =
-      typeof childEnd === "number" ? offsets[childEnd] : undefined;
-    offset = (childUtf16End ?? start) - start;
+    offset = (childEnd ?? start) - start;
     while (offset < raw.length) {
       if (raw[offset] === "]") {
         let opening = offset + 1;
@@ -246,117 +227,6 @@ function visit(node: MdNode, callback: (node: MdNode) => void): void {
   for (const child of node.children) {
     if (child && typeof child === "object") visit(child as MdNode, callback);
   }
-}
-
-function visitHtml(node: HtmlNode, callback: (node: HtmlNode) => void): void {
-  callback(node);
-  for (const descendants of [node.children, (node.content as HtmlNode | undefined)?.children]) {
-    if (!Array.isArray(descendants)) continue;
-    for (const child of descendants) {
-      if (child && typeof child === "object") visitHtml(child as HtmlNode, callback);
-    }
-  }
-}
-
-function htmlAttributeValueOffset(
-  raw: string,
-  tagStart: number,
-  attributeName: string,
-): number | null {
-  const isWhitespace = (value: string | undefined) =>
-    value !== undefined && /[\t\n\f\r ]/u.test(value);
-  let index = tagStart;
-  if (raw[index] !== "<") return null;
-  index += 1;
-  while (index < raw.length && !isWhitespace(raw[index]) && !/[/>]/u.test(raw[index]!)) {
-    index += 1;
-  }
-
-  while (index < raw.length) {
-    while (isWhitespace(raw[index])) index += 1;
-    if (raw[index] === ">" || (raw[index] === "/" && raw[index + 1] === ">")) {
-      return null;
-    }
-
-    const nameStart = index;
-    while (
-      index < raw.length &&
-      !isWhitespace(raw[index]) &&
-      !/[=/>]/u.test(raw[index]!)
-    ) {
-      index += 1;
-    }
-    if (index === nameStart) return null;
-    const name = raw.slice(nameStart, index).toLowerCase();
-    while (isWhitespace(raw[index])) index += 1;
-    if (raw[index] !== "=") continue;
-    index += 1;
-    while (isWhitespace(raw[index])) index += 1;
-
-    const quote = raw[index] === '"' || raw[index] === "'" ? raw[index] : null;
-    if (quote) index += 1;
-    const valueStart = index;
-    if (quote) {
-      while (index < raw.length && raw[index] !== quote) index += 1;
-      if (index >= raw.length) return null;
-      index += 1;
-    } else {
-      while (
-        index < raw.length &&
-        !isWhitespace(raw[index]) &&
-        raw[index] !== ">"
-      ) {
-        index += 1;
-      }
-    }
-    if (name === attributeName) return valueStart;
-  }
-  return null;
-}
-
-function staticHtmlHrefOffsets(
-  raw: string,
-  source: string,
-  sourceId: string | undefined,
-  sourceStart: number,
-): number[] {
-  let tree: HtmlNode;
-  try {
-    tree = fromHtml(raw, { fragment: true }) as HtmlNode;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    fail(`could not parse HTML: ${detail}`, source, sourceId, sourceStart);
-  }
-  const offsets: number[] = [];
-  visitHtml(tree, (node) => {
-    if (
-      node.type !== "element" ||
-      (node.tagName !== "a" && node.tagName !== "area")
-    ) {
-      return;
-    }
-    const properties = node.properties;
-    if (!properties || typeof properties !== "object") return;
-    const href = (properties as Record<string, unknown>).href;
-    if (typeof href !== "string") return;
-    const tagStart = node.position?.start?.offset;
-    if (typeof tagStart !== "number") {
-      fail("missing HTML anchor source position", source, sourceId, sourceStart);
-    }
-    const localOffset = htmlAttributeValueOffset(raw, tagStart, "href");
-    if (localOffset === null) {
-      fail("could not locate HTML href", source, sourceId, sourceStart + tagStart);
-    }
-    const offset = sourceStart + localOffset;
-    const insertionOffset = rootRelativeInsertionOffset(
-      href,
-      source,
-      sourceId,
-      offset,
-    );
-    if (insertionOffset !== null) offsets.push(insertionOffset);
-  });
-  return offsets;
 }
 
 function isHref(node: MdNode, name: string): boolean {
@@ -411,78 +281,54 @@ function expressionLiteral(
   return evaluate(expression);
 }
 
-type ParsedJsxNode = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
-
-interface ParsedJsxRange {
-  node: ParsedJsxNode;
-  sourceFile: ts.SourceFile;
-  sourceBase: number;
-}
-
-function jsxRangeKey(start: number, end: number): string {
-  return `${start}:${end}`;
-}
-
 function staticHrefOffsets(
   raw: string,
   node: MdNode,
   source: string,
   sourceId: string | undefined,
   sourceStart: number,
-  parsedRanges: Map<string, ParsedJsxRange>,
 ): number[] {
   if (!Array.isArray(node.attributes)) {
     fail("missing JSX attributes", source, sourceId, sourceStart);
   }
-  if (!node.attributes.some((attribute) =>
-    attribute?.type === "mdxJsxAttribute" &&
-    typeof attribute.name === "string" &&
-    isHref(node, attribute.name)
-  )) return [];
-  const key = jsxRangeKey(sourceStart, sourceStart + raw.length);
-  if (!parsedRanges.has(key)) {
-    const prefix = "const element = (";
-    const parsed = ts.createSourceFile(
-      "nimbus-authored-link.tsx",
-      `${prefix}${raw});`,
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
-    const sourceBase = sourceStart - prefix.length;
-    const matchingStart: ParsedJsxRange[] = [];
-    const collect = (candidate: ts.Node) => {
-      if (
-        ts.isJsxElement(candidate) ||
-        ts.isJsxSelfClosingElement(candidate) ||
-        ts.isJsxFragment(candidate)
-      ) {
-        const range = { node: candidate, sourceFile: parsed, sourceBase };
-        const start = candidate.getStart(parsed) + sourceBase;
-        parsedRanges.set(jsxRangeKey(start, candidate.getEnd() + sourceBase), range);
-        if (start === sourceStart) matchingStart.push(range);
-      }
-      ts.forEachChild(candidate, collect);
-    };
-    collect(parsed);
-    if (!parsedRanges.has(key) && matchingStart.length === 1) {
-      parsedRanges.set(key, matchingStart[0]!);
-    }
-  }
-  const parsedRange = parsedRanges.get(key);
-  if (!parsedRange) {
-    fail("ambiguous JSX range", source, sourceId, sourceStart);
-  }
-  const { node: element, sourceFile: parsed, sourceBase } = parsedRange;
-  if (ts.isJsxFragment(element)) {
-    if (node.attributes.length > 0) {
-      fail("ambiguous JSX fragment", source, sourceId, sourceStart);
-    }
+  // Only the opening tag owns attributes. MDX bodies can contain Markdown and
+  // fenced code that is not valid TSX, so their closing ranges cannot be used
+  // to match TypeScript's JSX nodes to Sätteri's nodes.
+  if (
+    !node.attributes.some((value) => {
+      if (!value || typeof value !== "object") return false;
+      const attribute = value as { name?: unknown };
+      return typeof attribute.name === "string" && isHref(node, attribute.name);
+    })
+  )
     return [];
+  const prefix = "const element = (";
+  const parsed = ts.createSourceFile(
+    "nimbus-authored-link.tsx",
+    `${prefix}${raw});`,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const sourceBase = sourceStart - prefix.length;
+  const statement = parsed.statements[0];
+  let expression =
+    statement && ts.isVariableStatement(statement)
+      ? statement.declarationList.declarations[0]?.initializer
+      : undefined;
+  while (expression && ts.isParenthesizedExpression(expression)) {
+    expression = expression.expression;
   }
-  const properties = ts.isJsxElement(element)
-    ? element.openingElement.attributes.properties
-    : element.attributes.properties;
+  const element =
+    expression && ts.isJsxElement(expression)
+      ? expression.openingElement
+      : expression && ts.isJsxSelfClosingElement(expression)
+        ? expression
+        : undefined;
+  if (!element || element.getStart(parsed) + sourceBase !== sourceStart) {
+    fail("ambiguous JSX opening tag", source, sourceId, sourceStart);
+  }
+  const properties = element.attributes.properties;
   if (properties.length !== node.attributes.length) {
     fail("ambiguous JSX attributes", source, sourceId, sourceStart);
   }
@@ -552,11 +398,11 @@ function staticHrefOffsets(
       const insertionOffset =
         isHref(node, attribute.name) && literal
           ? rootRelativeInsertionOffset(
-          literal.value,
-          source,
-          sourceId,
+              literal.value,
+              source,
+              sourceId,
               literal.slashOffset,
-        )
+            )
           : null;
       if (insertionOffset !== null) offsets.push(insertionOffset);
       continue;
@@ -588,32 +434,121 @@ function staticHrefOffsets(
   return offsets;
 }
 
+// HTML owns its attribute ranges and entity decoding; preserve the authored
+// spelling and insert the base only at the parser-identified href value.
+function htmlHrefOffsets(
+  raw: string,
+  html: string,
+  source: string,
+  sourceId: string | undefined,
+  sourceStart: number,
+): number[] {
+  const offsets: number[] = [];
+  let tree: ReturnType<typeof fromHtml>;
+  try {
+    tree = fromHtml(html, { fragment: true, verbose: true });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    fail(`could not parse HTML: ${detail}`, source, sourceId, sourceStart);
+  }
+  // Native Markdown removes container prefixes from HTML node values. Anchor
+  // parser offsets to each original line's matching suffix, preserving quotes,
+  // list indentation and CRLF without re-parsing Markdown container syntax.
+  const rawLines =
+    raw === html ? [] : [...raw.matchAll(/[^\r\n]*(?:\r\n|\r|\n|$)/gu)];
+  const htmlLines = html.split(/\r\n|\r|\n/u);
+  const sourceOffset = (offset: number) => {
+    if (raw === html) return sourceStart + offset;
+    const breaks = [...html.slice(0, offset).matchAll(/\r\n|\r|\n/gu)];
+    const lastBreak = breaks.at(-1);
+    const column =
+      offset - (lastBreak ? lastBreak.index + lastBreak[0].length : 0);
+    const line = htmlLines[breaks.length] ?? "";
+    const nativeIndent = line.length - line.trimStart().length;
+    const original = rawLines[breaks.length];
+    const originalLine = original?.[0].replace(/[\r\n]+$/u, "") ?? "";
+    if (
+      !original ||
+      column < nativeIndent ||
+      !originalLine.endsWith(line.trimStart())
+    ) {
+      fail("ambiguous HTML source line", source, sourceId, sourceStart);
+    }
+    return (
+      sourceStart + original.index + originalLine.length - line.length + column
+    );
+  };
+  const walk = (node: (typeof tree)["children"][number] | typeof tree) => {
+    if (
+      node.type === "element" &&
+      (node.tagName === "a" || node.tagName === "area")
+    ) {
+      const href = node.properties.href;
+      if (typeof href === "string" && couldBeRootRelativeDestination(href)) {
+        const range = node.data?.position?.properties?.href;
+        const start = range?.start.offset;
+        const end = range?.end.offset;
+        if (start === undefined || end === undefined) {
+          fail(
+            "missing HTML href source position",
+            source,
+            sourceId,
+            sourceStart,
+          );
+        }
+        const attribute = html.slice(start, end);
+        const value = /^[^\s=]+\s*=\s*["']?/u.exec(attribute);
+        if (!value)
+          fail(
+            "ambiguous HTML href value",
+            source,
+            sourceId,
+            sourceStart + start,
+          );
+        const offset = sourceOffset(start + value[0].length);
+        const insertionOffset = rootRelativeInsertionOffset(
+          href,
+          source,
+          sourceId,
+          offset,
+        );
+        if (insertionOffset !== null) offsets.push(insertionOffset);
+      }
+    }
+    if (node.type === "element" && node.content) walk(node.content);
+    if ("children" in node) for (const child of node.children) walk(child);
+  };
+  walk(tree);
+  return offsets;
+}
+
 export function normalizeAuthoredLinks(
   source: string,
   options: NormalizeAuthoredLinksOptions,
 ): string {
   const prefix = basePrefix(options.base);
+  const format =
+    options.format ??
+    (/\.md(?:$|[?#])/iu.test(options.sourceId ?? "") ? "markdown" : "mdx");
 
   let tree: MdNode;
   try {
-    const parse = options.format === "markdown" ||
-        (options.format === undefined && options.sourceId?.endsWith(".md"))
-      ? markdownToMdast
-      : mdxToMdast;
-    tree = parse(source) as MdNode;
+    tree = parseMarkdownSource(source, format) as MdNode;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const location = detail.match(/^(\d+):(\d+):\s*/);
-    if (location) {
-      throw new Error(
-        `Nimbus authored-link normalization failed in ${options.sourceId ?? "Markdown source"}:${location[1]}:${location[2]}: could not parse source: ${detail.slice(location[0].length)}`,
-      );
-    }
-    fail(`could not parse source: ${detail}`, source, options.sourceId);
+    const line = location ? Number(location[1]) : 0;
+    const where = `${options.sourceId ?? "content"}${location ? `:${line + linesBefore(source, options.filePath)}:${location[2]}` : ""}`;
+    const hint = /^#{1,6}\s.*\{#[^}]*\}\s*$/.test(source.split("\n")[line - 1] ?? "")
+      ? " Heading ids like `{#install}` need `markdown.features: { headingAttributes: true }`."
+      : /\(mdx-(?:jsx|expression)[:)]/.test(detail)
+        ? " To write a literal `<` or `{`, escape it with a backslash or put it in backticks."
+        : "";
+    throw new Error(
+      `${format === "mdx" ? "MDX" : "Markdown"} syntax error in ${where}: ${location ? detail.slice(location[0].length) : detail}.${hint}`,
+    );
   }
-  const offsetMap = buildOffsetMap(source);
   const insertions = new Set<number>();
-  const parsedJsxRanges = new Map<string, ParsedJsxRange>();
   let rawTextElement: string | null = null;
   visit(tree, (node) => {
     if (
@@ -621,18 +556,13 @@ export function normalizeAuthoredLinks(
       typeof node.url === "string" &&
       couldBeRootRelativeDestination(node.url)
     ) {
-      const offset = destinationOffset(
-        source,
-        node,
-        offsetMap,
-        options.sourceId,
-      );
+      const offset = destinationOffset(source, node, options.sourceId);
       const insertionOffset = rootRelativeInsertionOffset(
-          node.url,
-          source,
-          options.sourceId,
-          offset,
-        );
+        node.url,
+        source,
+        options.sourceId,
+        offset,
+      );
       if (insertionOffset !== null) {
         insertions.add(insertionOffset);
         return;
@@ -640,26 +570,28 @@ export function normalizeAuthoredLinks(
     }
 
     if (node.type === "html") {
-      const [start, end] = nodeRange(node, offsetMap, source, options.sourceId);
+      const [start, end] = nodeRange(node, source, options.sourceId);
       const raw = source.slice(start, end);
+      const html = typeof node.value === "string" ? node.value : raw;
       if (rawTextElement) {
-        if (raw.toLowerCase().includes(`</${rawTextElement}`)) {
+        if (html.toLowerCase().includes(`</${rawTextElement}`)) {
           rawTextElement = null;
         }
         return;
       }
       const rawTextStart = /^<(script|style|textarea|title|xmp|iframe|noembed|noframes|plaintext)(?:[\t\n\f\r />])/iu.exec(
-        raw,
+        html,
       );
       if (
         rawTextStart &&
-        !raw.toLowerCase().includes(`</${rawTextStart[1]!.toLowerCase()}`)
+        !html.toLowerCase().includes(`</${rawTextStart[1]!.toLowerCase()}`)
       ) {
         rawTextElement = rawTextStart[1]!.toLowerCase();
         return;
       }
-      for (const offset of staticHtmlHrefOffsets(
+      for (const offset of htmlHrefOffsets(
         raw,
+        html,
         source,
         options.sourceId,
         start,
@@ -671,15 +603,21 @@ export function normalizeAuthoredLinks(
 
     if (node.type !== "mdxJsxFlowElement" && node.type !== "mdxJsxTextElement")
       return;
-    const [start, end] = nodeRange(node, offsetMap, source, options.sourceId);
-    const raw = source.slice(start, end);
+    const [start, end] = nodeRange(node, source, options.sourceId);
+    // Sätteri identifies where the body begins. Keep Markdown and fenced
+    // examples out of the TypeScript attribute parser entirely.
+    const firstChild = Array.isArray(node.children)
+      ? (node.children[0] as MdNode | undefined)
+      : undefined;
+    const childOffset = firstChild?.position?.start?.offset;
+    const openingEnd = childOffset ?? end;
+    const raw = source.slice(start, openingEnd);
     for (const offset of staticHrefOffsets(
       raw,
       node,
       source,
       options.sourceId,
       start,
-      parsedJsxRanges,
     )) {
       insertions.add(offset);
     }
@@ -694,4 +632,16 @@ export function normalizeAuthoredLinks(
     transformed = `${transformed.slice(0, offset)}${prefix}${transformed.slice(offset)}`;
   }
   return transformed;
+}
+
+/** Lines of `filePath` above `source`, such as frontmatter a loader removed. */
+function linesBefore(source: string, filePath: string | undefined): number {
+  if (!filePath) return 0;
+  try {
+    const file = readFileSync(filePath, "utf8");
+    const start = file.indexOf(source);
+    return start > 0 ? file.slice(0, start).split("\n").length - 1 : 0;
+  } catch {
+    return 0;
+  }
 }

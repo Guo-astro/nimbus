@@ -17,7 +17,7 @@ The full, browsable version of this recipe, with the complete rationale, lives a
 
 Inspect the repo before writing — do not assume:
 
-- `package.json` — confirm this is a Nimbus project (depends on `nimbus-docs`).
+- `package.json` — confirm this is a Nimbus project (depends on `@cloudflare/nimbus-docs`).
 - `src/components.ts` — the registered MDX components. Quickstarts lean on `Steps`/`Step`, `Code` (fenced blocks with visible output), `PackageManagers` for install commands, and `Aside`/`Callout` sparingly. Use only registered components; install a missing one with `nimbus-docs add <slug>` and register it.
 - `src/content.config.ts` — the docs collection's frontmatter schema, so you only emit fields the site accepts.
 - `src/content/docs/` — where the page belongs; match sibling folder and sidebar-order conventions.
@@ -87,7 +87,7 @@ Create `src/content/docs/<section>/<slug>.mdx` following the skeleton, adapted t
 ## 7. Verify
 
 - Run the quickstart end-to-end against a cold start, matching the user's package manager (`pnpm build`, `npm run build`, …); this page rots fastest of all types, so re-run it on every release that touches its path and stamp `lastVerified`.
-- If the site has lint configured, run `pnpm exec nimbus-docs lint`.
+- If the site has lint configured, run `npx @cloudflare/nimbus-docs lint`.
 - Self-review against the checklist below.
 
 ## Checklist

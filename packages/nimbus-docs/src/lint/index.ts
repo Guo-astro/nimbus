@@ -17,7 +17,9 @@ export {
 export {
   resolveRule,
   resolveRuleForCollection,
+  ruleEnabledAnywhere,
   validateLintOptions,
+  withRuleOff,
   type CollectionLintConfig,
   type CollectionsConfig,
   type RulesConfig,
@@ -25,6 +27,7 @@ export {
   type ValidatedLintOptions,
 } from "./config.js";
 export {
+  guardRouteTruth,
   lintFile,
   lintPaths,
   fixPaths,

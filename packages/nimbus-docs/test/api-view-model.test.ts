@@ -18,9 +18,13 @@ import {
   type ApiModel,
   type ApiNavItem,
   type ApiOperationPage,
+  type ApiRootPage,
   type ApiSchemaPage,
+  type ApiSectionPage,
+  renderApiPageMarkdown,
 } from "../src/api/index.js";
 import { coordinateAnchor } from "../src/_internal/api/view-model.js";
+import { setLinkPolicy } from "../src/_internal/url.js";
 
 function fixture(rel: string): string {
   return fileURLToPath(new URL(`./fixtures/api/${rel}`, import.meta.url));
@@ -67,6 +71,7 @@ let smallco: ApiModel;
 
 before(async () => {
   smallco = await buildApiModel({
+    schemaPages: true,
     collection: "smallco",
     spec: readFileSync(fixture("smallco.yaml"), "utf8"),
     label: "smallco.yaml",
@@ -88,9 +93,30 @@ describe("seam: serializable + version-stamped across page kinds", () => {
     });
   }
 
+  test("API links follow trailingSlash: never, like the rest of the site", async (t) => {
+    t.after(() => setLinkPolicy({ trailingSlash: "ignore", format: "directory" }));
+    setLinkPolicy({ trailingSlash: "never", format: "directory" });
+    // Its own model: the nav is cached per model, and the policy is fixed per build.
+    const model = await buildApiModel({
+      schemaPages: true,
+      collection: "never",
+      spec: readFileSync(fixture("smallco.yaml"), "utf8"),
+      label: "smallco.yaml",
+    });
+    const create = getApiPageProps(model, "create");
+    const links = [
+      create.href,
+      ...create.breadcrumbs.map((crumb) => crumb.href),
+      ...flattenNavItems(getApiNav(model).items).map((item) => item.href),
+    ].filter((href): href is string => href !== undefined);
+    assert.ok(links.length > 3);
+    for (const href of links) assert.ok(!href.endsWith("/"), href);
+    assert.equal(create.markdownHref, "/never/charges/create/index.md");
+  });
+
   test("markdownHref is the pre-resolved .md version of href", () => {
     const create = getApiPageProps(smallco, "create");
-    assert.equal(create.markdownHref, `${create.href}/index.md`);
+    assert.equal(create.markdownHref, `${create.href}index.md`);
   });
 
   test("prepares sanitized HTML for page, response, and field descriptions", () => {
@@ -200,8 +226,8 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       p.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["Card", "/smallco/schemas/Card"],
-        ["BankAccount", "/smallco/schemas/BankAccount"],
+        ["Card", "/smallco/schemas/Card/"],
+        ["BankAccount", "/smallco/schemas/BankAccount/"],
       ],
     );
     assert.doesNotThrow(() => structuredClone(p.union));
@@ -221,7 +247,7 @@ describe("nesting: children, childCount, required-first", () => {
     const p = getApiPageProps(smallco, "Mixed") as ApiSchemaPage;
     assert.equal(p.union!.kind, "anyOf");
     const [card, inline] = p.union!.variants;
-    assert.deepEqual(card, { label: "Card", href: "/smallco/schemas/Card" });
+    assert.deepEqual(card, { label: "Card", href: "/smallco/schemas/Card/" });
     assert.equal(inline.label, "string");
     assert.equal(inline.href, undefined);
   });
@@ -241,8 +267,8 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       mapping!.map((m) => [m.value, m.variant.label, m.variant.href]),
       [
-        ["card", "Card", "/smallco/schemas/Card"],
-        ["bank_account", "BankAccount", "/smallco/schemas/BankAccount"],
+        ["card", "Card", "/smallco/schemas/Card/"],
+        ["bank_account", "BankAccount", "/smallco/schemas/BankAccount/"],
       ],
     );
     const card = mapping!.find((m) => m.value === "card")!.variant;
@@ -265,9 +291,9 @@ describe("nesting: children, childCount, required-first", () => {
     assert.deepEqual(
       p.bodyUnion!.mapping!.map((m) => [m.value, m.variant.label, m.variant.href]),
       [
-        ["fraudulent", "DisputeFraud", "/smallco/schemas/DisputeFraud"],
-        ["duplicate", "DisputeDuplicate", "/smallco/schemas/DisputeDuplicate"],
-        ["product_not_received", "DisputeNotReceived", "/smallco/schemas/DisputeNotReceived"],
+        ["fraudulent", "DisputeFraud", "/smallco/schemas/DisputeFraud/"],
+        ["duplicate", "DisputeDuplicate", "/smallco/schemas/DisputeDuplicate/"],
+        ["product_not_received", "DisputeNotReceived", "/smallco/schemas/DisputeNotReceived/"],
       ],
     );
     const fraud = p.bodyUnion!.mapping!.find((m) => m.value === "fraudulent")!.variant;
@@ -300,6 +326,7 @@ describe("nesting: children, childCount, required-first", () => {
 describe("unions: enrichment edge cases", () => {
   test("a top-level `oneOf` RESPONSE projects onto response.bodyUnion (symmetric with the request)", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "u",
       spec: `
 openapi: 3.1.0
@@ -343,6 +370,7 @@ components:
 
   test("an `anyOf` body recovers named, linked branches from the raw doc", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "u",
       spec: `
 openapi: 3.1.0
@@ -391,6 +419,7 @@ components:
 
   test("a self-referential union terminates: a variant's OWN nested union links out (allowInline=false), not inlined", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "u",
       spec: `
 openapi: 3.1.0
@@ -446,6 +475,7 @@ components:
 describe("unions: raw-ref recovery for bodies, responses, and nested fields", () => {
   test("a nested FIELD anyOf recovers a linked branch (the id-or-object pattern)", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "rr",
       spec: `
 openapi: 3.1.0
@@ -482,6 +512,7 @@ components:
 
   test("a body that is a $ref to a union component links its branches (the DNS shape)", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "rr",
       spec: `
 openapi: 3.1.0
@@ -522,6 +553,7 @@ components:
     // cycle-guarded by resolved-node identity, so `Node.next -> Node` terminates
     // while `Node.child`'s anyOf still resolves to named, linkable branches.
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "rec",
       spec: `
 openapi: 3.1.0
@@ -564,6 +596,7 @@ components:
     // page: the `allOf` folds are cycle-guarded, so the spec still renders and
     // the composed field's own properties survive.
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "cyc",
       spec: `
 openapi: 3.1.0
@@ -607,6 +640,7 @@ describe("allOf folding: leaf field facts survive a single-member allOf wrapper"
   let page: ApiOperationPage;
   before(async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "af",
       spec: `
 openapi: 3.1.0
@@ -695,6 +729,7 @@ describe("additionalProperties: a typed map reads as map<T>, not empty object", 
   let page: ApiOperationPage;
   before(async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "ap",
       spec: `
 openapi: 3.1.0
@@ -768,6 +803,7 @@ describe("schema pages: pure-map components and composed unions no longer render
   let model: Awaited<ReturnType<typeof buildApiModel>>;
   before(async () => {
     model = await buildApiModel({
+      schemaPages: true,
       collection: "sp",
       spec: `
 openapi: 3.1.0
@@ -826,6 +862,7 @@ describe("field typeShape: compound `type` labels split into { kind, inner }", (
   let page: ApiOperationPage;
   before(async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "ts",
       spec: `
 openapi: 3.1.0
@@ -886,6 +923,7 @@ describe("response statusClass: RFC 9110 class of the status", () => {
   let page: ApiOperationPage;
   before(async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "sc",
       spec: `
 openapi: 3.1.0
@@ -978,6 +1016,7 @@ describe("nav: active + ancestor-expanded + verb chips", () => {
 
   test("a dotted operation identifier is treated as a document route", async () => {
     const dotted = await buildApiModel({
+      schemaPages: true,
       collection: "dotted",
       spec: {
         openapi: "3.1.0",
@@ -1000,6 +1039,7 @@ describe("nav: active + ancestor-expanded + verb chips", () => {
 
   test("nested API mounts retain one trailing slash", async () => {
     const mounted = await buildApiModel({
+      schemaPages: true,
       collection: "mounted",
       spec: readFileSync(fixture("smallco.yaml"), "utf8"),
       mountPath: "/core/v1",
@@ -1024,6 +1064,50 @@ describe("nav: active + ancestor-expanded + verb chips", () => {
     const nav = getApiNav(smallco);
     const anyFlagged = JSON.stringify(nav).match(/"(active|expanded)":true/);
     assert.equal(anyFlagged, null);
+  });
+});
+
+describe("x-displayName labels a tag without changing its identity", () => {
+  const spec = {
+    openapi: "3.1.0",
+    info: { title: "Labels", version: "1" },
+    tags: [
+      { name: "workers", "x-displayName": "Workers" },
+      { name: "workers:scripts", "x-displayName": "Scripts", parent: "workers" },
+      { name: "plain" },
+    ],
+    paths: {
+      "/scripts": {
+        get: { operationId: "scriptsList", summary: "List scripts", tags: ["workers:scripts"], responses: { "200": { description: "ok" } } },
+      },
+      "/plain": {
+        get: { operationId: "plainGet", summary: "Get plain", tags: ["plain"], responses: { "200": { description: "ok" } } },
+      },
+    },
+  } as Record<string, never>;
+
+  let model: ApiModel;
+  before(async () => {
+    model = await buildApiModel({ collection: "labels", spec, label: "labels", schemaPages: true });
+  });
+
+  test("nav, page title, breadcrumbs, and Markdown use the display name", () => {
+    const workers = getApiNav(model).items.find((i) => i.coordinate === "tags.workers")!;
+    assert.equal(workers.label, "Workers");
+    assert.equal(workers.children.find((c) => c.coordinate === "tags.workers:scripts")?.label, "Scripts");
+    const page = getApiPageProps(model, "tags.workers:scripts") as ApiSectionPage;
+    assert.equal(page.title, "Scripts");
+    assert.deepEqual(
+      getApiPageProps(model, "scriptsList").breadcrumbs.map((b) => b.label),
+      ["Labels", "Workers", "Scripts"],
+    );
+    assert.match(renderApiPageMarkdown(page), /^Path: Labels › Workers$/m);
+  });
+
+  test("the tag name still decides the coordinate and route; tags without one keep their name", () => {
+    const slugs = new Map(getApiPageSlugs(model).map((s) => [s.coordinate, s.slug]));
+    assert.equal(slugs.get("tags.workers"), "tags/workers");
+    assert.equal(getApiNav(model).items.find((i) => i.coordinate === "tags.plain")?.label, "plain");
   });
 });
 
@@ -1054,7 +1138,7 @@ describe("nav hierarchy: x-tagGroups categories + tag.parent subresources", () =
 
   let grouped: ApiModel;
   before(async () => {
-    grouped = await buildApiModel({ collection: "grouped", spec: groupedSpec, label: "grouped" });
+    grouped = await buildApiModel({ collection: "grouped", spec: groupedSpec, label: "grouped", schemaPages: true });
   });
 
   test("x-tagGroups becomes a top-level category over its member resources", () => {
@@ -1098,6 +1182,21 @@ describe("nav hierarchy: x-tagGroups categories + tag.parent subresources", () =
     assert.equal(byLabel(category.children, "Members"), undefined);
     const accounts = byLabel(category.children, "Accounts")!;
     assert.ok(byLabel(accounts.children, "Members"));
+  });
+
+  test("a section page lists its subsections, so they stay reachable without the sidebar", () => {
+    const accounts = getApiPageProps(grouped, "tags.Accounts") as ApiSectionPage;
+    assert.deepEqual(accounts.sections, [{ label: "Members", href: "/grouped/tags/Members/" }]);
+    const members = getApiPageProps(grouped, "tags.Members") as ApiSectionPage;
+    assert.equal(members.sections, undefined, "a leaf section carries no empty list");
+    const md = renderApiPageMarkdown(accounts);
+    assert.match(md, /## Sections\n\n- \[Members\]\(\/grouped\/tags\/Members\/\)/);
+  });
+
+  test("the root lists a category's member sections, never a link to itself", () => {
+    const root = getApiPageProps(grouped, "grouped") as ApiRootPage;
+    assert.deepEqual(root.sections, [{ label: "Accounts", href: "/grouped/tags/Accounts/" }]);
+    assert.ok(root.sections.every((s) => s.href !== root.href));
   });
 
   test("an active subresource operation expands its whole ancestor chain", () => {
@@ -1179,6 +1278,7 @@ describe("descriptions surface from the spec", () => {
 describe("value coercion at the boundary", () => {
   test("non-finite constraints dropped; Date default → ISO", async () => {
     const edge = await buildApiModel({
+      schemaPages: true,
       collection: "edge",
       spec: {
         openapi: "3.1.0",

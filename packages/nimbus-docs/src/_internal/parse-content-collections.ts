@@ -33,18 +33,25 @@
  *     back to `["docs"]`.
  */
 
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 import {
   findMatchingBrace,
   splitTopLevelCommas,
   stripComments,
+  stripStrings,
 } from "./parse-object-literal.js";
 
 // Locate the start of the `export const collections = {` declaration; the
 // matching close brace is found by walking braces.
 const EXPORT_PREFIX_PATTERN =
   /export\s+const\s+collections\s*(?::\s*[^=]+)?=\s*\{/;
+
+// A statically identifiable collection key: `docs`, `docs-v1`, `docs-v1.2`,
+// `_partials`. See `parseContentCollections` for the rationale.
+const COLLECTION_KEY = /^[A-Za-z_][A-Za-z0-9_.-]*$/;
 
 export interface ParsedContentCollections {
   names: string[];
@@ -89,27 +96,31 @@ export async function parseContentCollections(
     // Collection names are conventionally lowercase identifiers
     // (`docs`, `blog`, `api`), but Astro accepts any non-empty string as a
     // collection ID and the versioning convention (`docs-v1`, `docs-2025-q1`)
-    // relies on hyphens. Accept letters/digits/underscores/hyphens after
-    // a leading letter or underscore (the `_*` underscore convention for
-    // hidden-from-indexing collections stays intact).
-    if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)) names.push(key);
+    // relies on hyphens and, for dotted versions (`docs-v1.2`), dots.
+    // Accept letters/digits/underscores/hyphens/dots after a leading letter
+    // or underscore (the `_*` underscore convention for hidden-from-indexing
+    // collections stays intact).
+    if (COLLECTION_KEY.test(key)) names.push(key);
     else complete = false;
   }
 
-  const remainder = stripped.slice(objectEnd + 1);
-  if (
-    /\bcollections\s*(?:\.\s*[A-Za-z_$][\w$]*|\[[^\]]+\])\s*=/.test(
-      remainder,
-    ) ||
-    /\bdelete\s+collections\s*(?:\.|\[)/.test(remainder) ||
-    /\b(?:Object\.(?:assign|definePropert(?:y|ies))|Reflect\.set)\s*\(\s*collections\b/.test(
-      remainder,
-    )
-  ) {
+  // Any other reference but a type can change the object: a mutation, an
+  // alias (`const registered = collections`), a call that receives it, or a
+  // helper declared above that registers into it.
+  const outside = stripStrings(
+    `${stripped.slice(0, prefixMatch.index)}\n${stripped.slice(objectEnd + 1)}`,
+  ).replace(/\btypeof\s+collections\b/g, "");
+  if (/\bcollections\b/.test(outside)) {
     complete = false;
   }
 
   return { names, complete };
+}
+
+/** Whether the file provably declares no collection `name`: a complete parse without it. */
+export async function declaresNoCollection(filePath: string, name: string): Promise<boolean> {
+  const declared = await parseContentCollections(filePath);
+  return declared?.complete === true && !declared.names.includes(name);
 }
 
 /**
@@ -176,7 +187,7 @@ export async function parseCollectionBases(
     const colonIdx = entry.indexOf(":");
     const rawKey = colonIdx === -1 ? entry : entry.slice(0, colonIdx);
     const key = rawKey.trim().replace(/^['"`]|['"`]$/g, "");
-    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)) continue;
+    if (!COLLECTION_KEY.test(key)) continue;
 
     // Default the folder to the key name. Override if a literal `base:`
     // appears in the entry's value — or, for shorthand entries (`{ docs }`),
@@ -214,6 +225,15 @@ function findLocalDeclarationValue(
   source: string,
   identifier: string,
 ): string {
+  const found = findLocalDeclaration(source, identifier);
+  return found ? source.slice(found.start, found.end) : "";
+}
+
+/** Where `findLocalDeclarationValue`'s value text is, or undefined. */
+function findLocalDeclaration(
+  source: string,
+  identifier: string,
+): { start: number; end: number } | undefined {
   const safeId = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const declRe = new RegExp(`\\b(?:const|let|var)\\s+${safeId}\\b`, "g");
 
@@ -222,10 +242,9 @@ function findLocalDeclarationValue(
     const afterId = match.index + match[0].length;
     const eqIdx = findAssignmentEquals(source, afterId);
     if (eqIdx === -1) continue;
-    const endIdx = findStatementEnd(source, eqIdx + 1);
-    return source.slice(eqIdx + 1, endIdx);
+    return { start: eqIdx + 1, end: findStatementEnd(source, eqIdx + 1) };
   }
-  return "";
+  return undefined;
 }
 
 /**
@@ -319,25 +338,364 @@ function findStatementEnd(source: string, from: number): number {
   return source.length;
 }
 
-// ---------------------------------------------------------------------------
-// Reserved-name filter
-// ---------------------------------------------------------------------------
+/** Where a page collection's files are, as far as the config shows statically. */
+export type StaticPageCollection =
+  | { kind: "folder"; dir: string; pattern: string | string[]; role: "page" | "partials" }
+  /** `docsCollection({ source })`: the folder is inside that source's snapshot. */
+  | { kind: "source"; source: string; base: string; pattern: string | string[]; role: "page" }
+  /** A page collection whose files can't be placed without running the config. */
+  | { kind: "unplaced" };
+
+// The factory as the collection's whole value (`defineCollection(docsCollection(…))`
+// or bare `docsCollection(…)`), not a `schema: docsCollection().schema` inside
+// a hand-written collection.
+const NIMBUS_FACTORY =
+  /^\s*(?:defineCollection\s*\(\s*)?(docsCollection|partialsCollection|componentsCollection)\s*\(/;
+const FACTORY_DEFAULT_BASE: Record<string, string> = {
+  docsCollection: "docs",
+  partialsCollection: "partials",
+  componentsCollection: "components",
+};
+const DEFAULT_PAGE_PATTERN = "**/*.{md,mdx}";
+
+function literalOption(text: string, name: string): string | undefined {
+  return text.match(new RegExp(`\\b${name}\\s*:\\s*["'\`]([^"'\`$]+)["'\`]`))?.[1];
+}
 
 /**
- * Collection names that should never appear in the agent-facing index,
- * regardless of how they were registered. The rule pair is intentionally
- * minimal so the convention is easy to remember:
+ * The static phase of the page-collection contract, for `lint` and `check`
+ * (which run without a build): each page and partials collection in
+ * `content.config.ts` with the folder its files load from.
  *
- *   - `partials` — Nimbus's built-in factory for `<Render slug=…/>`
- *     snippets. They're component content, not pages.
- *   - any name starting with `_` — author-chosen "loaded but internal"
- *     marker (e.g. `_drafts`, `_archive`, `_legacy`).
+ *   - a Nimbus factory (`docsCollection()` and friends): `src/content/<base>`,
+ *     with a literal `pattern` when given;
+ *   - `docsCollection({ source: "<name>" })`: that source, with a literal
+ *     `base` and `pattern`; a `source` that isn't a string literal (a
+ *     variable, the shorthand `{ source }`) is `unplaced`;
+ *   - `withNimbusMarkdown(glob({ base: "…" }))`, written inline or through a
+ *     local `const`: the literal `base`, relative to the project root;
+ *   - any other `withNimbusMarkdown()` loader (in-memory, computed options):
+ *     `unplaced`, so callers can name it as not inspected.
+ *
+ * Plain Astro collections aren't page collections and are left out. `null`
+ * when the file is missing or has no parseable registration.
  */
-const RESERVED_LITERAL = new Set(["partials"]);
-const RESERVED_PREFIX = "_";
+export function parsePageCollectionFolders(
+  projectRoot: string,
+  contentConfigPath: string,
+): Map<string, StaticPageCollection> | null {
+  return readPageCollections(projectRoot, contentConfigPath)?.places ?? null;
+}
 
-export function filterIndexableCollections(names: string[]): string[] {
-  return names.filter(
-    (name) => !RESERVED_LITERAL.has(name) && !name.startsWith(RESERVED_PREFIX),
+/** Which collections read each source, as far as the config shows statically. */
+export interface PageCollectionSources {
+  /** `parsePageCollectionFolders`'s map; null when the file has no parseable registration. */
+  places: Map<string, StaticPageCollection> | null;
+  /** Source name → the collections that read it with a literal `source`, in config order. */
+  readers: Map<string, string[]>;
+  /**
+   * What may read a source without the map showing it: `collection "sdk"`,
+   * ``the entry `...localeCollections` ``, a `docsCollection(…)` call outside
+   * any entry. Empty when the map shows every read.
+   */
+  hidden: string[];
+}
+
+/**
+ * `parsePageCollectionFolders` plus the source reads, for a build that
+ * fetches only the sources its collections read. Only `docsCollection({ source })`
+ * reads a source, so every `docsCollection(` call in the file is looked at:
+ * one with no argument or an object literal without a `source` key
+ * (`docsCollection().schema`, `docsCollection({ base })`) reads nothing; one
+ * the map placed with a literal `source` is in `readers`; any other with a
+ * `source` key or shorthand, a spread, or a non-literal argument hides a
+ * read. So do spread and computed entries, and values that are identifiers
+ * the file doesn't declare (imported collections). A missing file reads
+ * nothing.
+ */
+export function parsePageCollectionSources(
+  projectRoot: string,
+  contentConfigPath: string,
+): PageCollectionSources {
+  return (
+    readPageCollections(projectRoot, contentConfigPath) ?? {
+      places: null,
+      readers: new Map(),
+      hidden: [],
+    }
   );
+}
+
+// A `source` key or shorthand in an options object: `source:`, `"source":`,
+// `{ source }`, `, source,`.
+const SOURCE_KEY = /(?:^|[{,])\s*(["'`]?)source\1\s*(?=[:,}])/;
+
+/** The index of the bracket closing the one at `openIdx`, skipping strings; -1 if none. */
+function findMatchingClose(input: string, openIdx: number): number {
+  let depth = 0;
+  let inString: string | null = null;
+  for (let i = openIdx; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") inString = ch;
+    else if (ch === "{" || ch === "[" || ch === "(") depth++;
+    else if (ch === "}" || ch === "]" || ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** An object literal's text with everything nested inside its values blanked. */
+function topLevelText(object: string): string {
+  let depth = 0;
+  let inString: string | null = null;
+  let out = "";
+  for (let i = 0; i < object.length; i++) {
+    const ch = object[i]!;
+    let keep = depth <= 1;
+    if (inString) {
+      if (ch === "\\") {
+        out += keep ? ch + (object[i + 1] ?? "") : "  ";
+        i++;
+        continue;
+      }
+      if (ch === inString) inString = null;
+    } else if (ch === '"' || ch === "'" || ch === "`") inString = ch;
+    else if (ch === "{" || ch === "[" || ch === "(") {
+      depth++;
+      keep = depth <= 1;
+    } else if (ch === "}" || ch === "]" || ch === ")") depth--;
+    out += keep ? ch : " ";
+  }
+  return out;
+}
+
+const shortText = (text: string) => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 60 ? `${flat.slice(0, 57)}...` : flat;
+};
+
+function readPageCollections(
+  projectRoot: string,
+  contentConfigPath: string,
+): PageCollectionSources | null {
+  let source: string;
+  try {
+    source = readFileSync(contentConfigPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const stripped = stripComments(source);
+  const blanked = stripStrings(stripped);
+  const readers = new Map<string, string[]>();
+  const hidden: string[] = [];
+  // The `(` of each `docsCollection(` call placed as a literal source.
+  const placedCalls = new Set<number>();
+  // Each entry's text, and the declaration a shorthand or identifier names.
+  const entryRanges: Array<{ name: string; start: number; end: number }> = [];
+
+  const prefixMatch = stripped.match(EXPORT_PREFIX_PATTERN);
+  const objectStart =
+    prefixMatch?.index === undefined ? -1 : prefixMatch.index + prefixMatch[0].length;
+  const objectEnd = objectStart === -1 ? -1 : findMatchingBrace(stripped, objectStart - 1);
+  let places: Map<string, StaticPageCollection> | null = null;
+  if (objectEnd === -1) {
+    hidden.push("`export const collections`");
+  } else {
+    places = new Map();
+    let offset = objectStart;
+    for (const raw of splitTopLevelCommas(stripped.slice(objectStart, objectEnd))) {
+      const entryStart = offset + (raw.length - raw.trimStart().length);
+      offset += raw.length + 1;
+      const entry = raw.trim();
+      if (!entry) continue;
+      if (entry.startsWith("...") || entry.startsWith("[")) {
+        hidden.push(`the entry \`${shortText(entry.startsWith("[") ? entry.slice(0, entry.indexOf("]") + 1) : entry)}\``);
+        continue;
+      }
+      const colonIdx = entry.indexOf(":");
+      const key = (colonIdx === -1 ? entry : entry.slice(0, colonIdx))
+        .trim()
+        .replace(/^['"`]|['"`]$/g, "");
+      const name = `collection "${key}"`;
+      entryRanges.push({ name, start: entryStart, end: entryStart + entry.length });
+      let value: string;
+      let valueStart: number;
+      if (colonIdx === -1) {
+        const declaration = findLocalDeclaration(stripped, key);
+        if (!declaration) {
+          hidden.push(name); // Imported.
+          continue;
+        }
+        entryRanges.push({ name, ...declaration });
+        value = stripped.slice(declaration.start, declaration.end);
+        valueStart = declaration.start;
+      } else {
+        value = entry.slice(colonIdx + 1);
+        valueStart = entryStart + colonIdx + 1;
+        // `sdk: sdkCollection` or `defineCollection(sdkOptions)`: follow a
+        // local declaration; an imported one can't be read.
+        const identifier = value.match(
+          /^\s*(?:defineCollection\s*\(\s*)?([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$]*)*)\s*\)?\s*$/,
+        )?.[1];
+        if (identifier) {
+          const declaration = /^[\w$]+$/.test(identifier)
+            ? findLocalDeclaration(stripped, identifier)
+            : undefined;
+          if (!declaration) {
+            hidden.push(name);
+            continue;
+          }
+          entryRanges.push({ name, ...declaration });
+          value = stripped.slice(declaration.start, declaration.end);
+          valueStart = declaration.start;
+        }
+      }
+      if (!COLLECTION_KEY.test(key)) continue;
+      const place = placeEntry(projectRoot, stripped, value);
+      if (!place) {
+        // Not a Nimbus collection the text shows: a helper or imported
+        // function (`makeSdk("b")`), an aliased factory, a conditional may
+        // build a source collection.
+        if (!readsNoSource(value)) hidden.push(name);
+        continue;
+      }
+      places.set(key, place);
+      if (place.kind === "source") {
+        placedCalls.add(valueStart + value.match(NIMBUS_FACTORY)![0].length - 1);
+        const list = readers.get(place.source) ?? [];
+        list.push(key);
+        readers.set(place.source, list);
+      }
+    }
+  }
+
+  // `docsCollection(`, and any name it's imported under
+  // (`import { docsCollection as dc }`); `ns.docsCollection(` matches as is.
+  const aliases = [...stripped.matchAll(/\bdocsCollection\s+as\s+([A-Za-z_$][\w$]*)/g)].map((m) =>
+    m[1]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+  );
+  // Not `\b`: an identifier may start with `$`, which `\b` never precedes.
+  const calls = new RegExp(`(?<![\\w$])(?:${["docsCollection", ...aliases].join("|")})\\s*\\(`, "g");
+  for (const call of blanked.matchAll(calls)) {
+    const open = call.index + call[0].length - 1;
+    if (placedCalls.has(open)) continue;
+    const close = findMatchingClose(stripped, open);
+    const arg = stripped.slice(open + 1, close === -1 ? undefined : close).trim();
+    const argBlanked = blanked.slice(open + 1, close === -1 ? undefined : close).trim();
+    const objectLiteral =
+      arg === "" || (arg.startsWith("{") && findMatchingBrace(arg, 0) === arg.length - 1);
+    if (close !== -1 && objectLiteral && !argBlanked.includes("...") && !SOURCE_KEY.test(arg)) continue;
+    const owner = entryRanges.find((range) => open >= range.start && open < range.end);
+    hidden.push(owner?.name ?? `\`docsCollection(${shortText(arg)})\``);
+  }
+  return { places, readers, hidden: [...new Set(hidden)] };
+}
+
+// Nimbus factories that never read a source.
+const SOURCE_FREE_FACTORY = /^(?:partialsCollection|componentsCollection|apiCollection)\s*\(/;
+
+/**
+ * Whether an entry the map doesn't place reads no source: `defineCollection`
+ * over an object literal (its calls are scanned on their own) or over a
+ * source-free Nimbus factory. Anything else, a call to a helper or an
+ * imported or aliased function, a conditional, may build a source collection.
+ */
+function readsNoSource(value: string): boolean {
+  const text = value.trim().replace(/;$/, "").trim();
+  const wrapped = /^defineCollection\s*\(/.exec(text);
+  const inner = wrapped ? text.slice(wrapped[0].length).trimStart() : text;
+  return (wrapped !== null && inner.startsWith("{")) || SOURCE_FREE_FACTORY.test(inner);
+}
+
+/** Where one collection's files are, from its value text; undefined for a plain Astro collection. */
+function placeEntry(
+  projectRoot: string,
+  stripped: string,
+  value: string,
+): StaticPageCollection | undefined {
+  const factory = value.match(NIMBUS_FACTORY);
+  if (factory) {
+    const options = value.slice(factory.index! + factory[0].length);
+    const source = literalOption(options, "source");
+    // A top-level `source` key; a schema field named `source` isn't one.
+    const object = options.trimStart().startsWith("{")
+      ? options.trimStart().slice(0, findMatchingBrace(options.trimStart(), 0) + 1)
+      : "";
+    if (factory[1] === "docsCollection" && SOURCE_KEY.test(topLevelText(object))) {
+      return source
+        ? {
+            kind: "source",
+            source,
+            base: literalOption(options, "base") ?? "",
+            pattern: literalOption(options, "pattern") ?? DEFAULT_PAGE_PATTERN,
+            role: "page",
+          }
+        : { kind: "unplaced" };
+    }
+    const base = literalOption(options, "base") ?? FACTORY_DEFAULT_BASE[factory[1]!]!;
+    return {
+      kind: "folder",
+      dir: path.join(projectRoot, "src/content", base),
+      pattern: literalOption(options, "pattern") ?? DEFAULT_PAGE_PATTERN,
+      role: factory[1] === "partialsCollection" ? "partials" : "page",
+    };
+  }
+  const wrapper = value.match(/\bwithNimbusMarkdown\s*\(\s*/);
+  if (!wrapper) return undefined;
+  let loaderText = value.slice(wrapper.index! + wrapper[0].length);
+  const identifier = loaderText.match(/^([A-Za-z_$][\w$]*)\s*\)/)?.[1];
+  if (identifier) loaderText = findLocalDeclarationValue(stripped, identifier);
+  const globCall = loaderText.match(/^\s*glob\s*\(\s*\{/);
+  const globOptions = globCall
+    ? loaderText.slice(globCall[0].length, findMatchingBrace(loaderText, globCall[0].length - 1))
+    : "";
+  const base = globCall ? literalOption(globOptions, "base") : undefined;
+  return base
+    ? {
+        kind: "folder",
+        dir: path.resolve(projectRoot, base),
+        pattern: literalOption(globOptions, "pattern") ?? DEFAULT_PAGE_PATTERN,
+        role: "page",
+      }
+    : { kind: "unplaced" };
+}
+
+export type PlacedPageCollection =
+  | { kind: "folder"; dir: string; pattern: string | string[]; role: "page" | "partials"; source?: string }
+  | { kind: "unplaced"; reason: string };
+
+/**
+ * Resolve each `source` collection to a folder inside the snapshot the last
+ * build or dev start selected (`snapshots`: source name → its `path` folder).
+ * A source with no snapshot yet stays unplaced, with the reason.
+ */
+export function placeStaticCollections(
+  parsed: ReadonlyMap<string, StaticPageCollection> | null,
+  snapshots: ReadonlyMap<string, { contentDir: string }>,
+): Map<string, PlacedPageCollection> {
+  const out = new Map<string, PlacedPageCollection>();
+  for (const [key, place] of parsed ?? []) {
+    if (place.kind === "folder") out.set(key, place);
+    else if (place.kind === "unplaced") {
+      out.set(key, { kind: "unplaced", reason: "its loader isn't a glob over a folder" });
+    } else {
+      const snapshot = snapshots.get(place.source);
+      const base = place.base.replaceAll("\\", "/").replace(/^\.\//, "");
+      out.set(
+        key,
+        snapshot && !base.split("/").includes("..")
+          ? { kind: "folder", dir: path.join(snapshot.contentDir, base), pattern: place.pattern, role: "page", source: place.source }
+          : { kind: "unplaced", reason: `source "${place.source}" has no snapshot: not fetched yet, or unreachable at the last start; run a build or start the dev server` },
+      );
+    }
+  }
+  return out;
 }

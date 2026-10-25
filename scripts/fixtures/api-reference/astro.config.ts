@@ -1,8 +1,26 @@
 import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
-import nimbus from "@cloudflare/nimbus-docs";
+import nimbus, {
+  defineConfig as defineNimbusConfig,
+} from "@cloudflare/nimbus-docs";
 import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
-import nimbusConfig from "./nimbus.config";
+
+const nimbusConfig = defineNimbusConfig({
+  site: "https://docs.smallco.test",
+  title: "SmallCo Docs",
+  description: "Documentation and API reference for SmallCo.",
+  locale: "en",
+  github: null,
+  socialImageAlt: "SmallCo documentation preview",
+  api: [
+    {
+      collection: "api",
+      spec: "./src/api/smallco.yaml",
+      label: "SmallCo API",
+      routes: { convention: "resource-action-v2" },
+    },
+  ],
+});
 
 export default defineConfig({
   // nimbus:adapter
@@ -31,10 +49,14 @@ export default defineConfig({
         "nimbus/frontmatter-shape": "error",
         "nimbus/internal-link": "error",
       },
-      // Wrap wide tables so they scroll instead of overflowing the page
-      // (styled by `.nb-table-scroll` in src/styles/prose.css).
       markdown: {
+        // Wrap wide tables so they scroll instead of overflowing the page
+        // (styled by `.nb-table-scroll` in src/styles/prose.css).
         hastPlugins: [tableScroll()],
+        // `## Install {#install}` gives a heading a fixed id. A heading that
+        // ends in other `{…}` text, such as `{account_id}` in a .md file, is
+        // read as attributes too; remove this to keep it as text.
+        features: { headingAttributes: true },
       },
     }),
   ],

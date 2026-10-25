@@ -26,9 +26,11 @@
  * re-doing their head tags.
  */
 
-import { config, headDefaults } from "virtual:nimbus/config";
+import { build, trailingSlash } from "astro:config/client";
+import { buildSlice, config, headDefaults } from "virtual:nimbus/config";
 import {
-  getApiVersionAlternates,
+  getApiVersionHead,
+  getApiVersions,
   getCollectionLlmsUrl,
   getVersionAlternates,
   getVersionStatus,
@@ -51,6 +53,12 @@ export interface Props {
    * if it exists in `public/`, otherwise `/og.png`.
    */
   socialImage?: string;
+  /**
+   * Pixel size of `socialImage`, for `og:image:width`/`height`. Without it,
+   * the size is known for Nimbus's generated cards and for images measured
+   * in `public/`; any other image gets no size tags.
+   */
+  socialImageSize?: { width: number; height: number };
   /** Drives `<meta property="article:modified_time">` on non-home pages. */
   lastUpdated?: Date;
   /** Per-page head extras, appended after `config.head`. */
@@ -78,6 +86,7 @@ const {
   noindex,
   markdownUrl,
   socialImage,
+  socialImageSize,
   lastUpdated,
   head: pageHead = [],
   collection,
@@ -100,12 +109,25 @@ const baseUrl = import.meta.env.BASE_URL;
 // API pages link on the coordinate-identity axis; docs pages on the slug axis.
 const versionRecord = apiVersion
   ? collection && coordinate
-    ? await getApiVersionAlternates(collection, apiVersion, coordinate)
+    ? await getApiVersionHead(collection, apiVersion, coordinate, Astro.request)
     : null
   : collection && entryId
     ? await getVersionAlternates(collection, entryId)
     : null;
 const versionCanonicalPath = versionRecord?.canonical?.url ?? null;
+
+// Query-mode versions: a non-default version renders at the version-free
+// URL plus `?version=`, so it is `noindex` the way hidden versions are,
+// and its canonical is the matched default counterpart's version-free URL
+// (from the alternates table, shape-fallback matches included). With no
+// counterpart there is no canonical at all — the page's own pathname would
+// be a 404 or another operation.
+const isQueryFamily =
+  !!apiVersion &&
+  config.api?.find((entry) => entry.collection === collection)?.versionUrl?.in === "query";
+const isNonDefaultQueryVersion =
+  (isQueryFamily || (versionRecord && "bundled" in versionRecord && !versionRecord.bundled)) &&
+  (await getApiVersions(collection!))?.find((v) => v.isDefault)?.version !== apiVersion;
 
 // Hidden-version suppression. Hidden versions are URL-reachable but
 // excluded from every agent-discovery and SEO surface. When the page
@@ -147,10 +169,19 @@ const llmsIndexUrl =
       : withBase(llmsIndexPath, baseUrl)
     : null;
 
+// The canonical has the page links' shape. Under `build.format: "file"` the
+// pathname ends in `.html`, which links and the sitemap drop; then Astro's
+// slash rule applies. Same rules as the internal `withoutHtmlExtension` and
+// `toDocumentHref` (`_internal/url.ts`), which aren't public.
+const appendsSlash = trailingSlash === "always" || (trailingSlash === "ignore" && build.format === "directory");
+const barePath = Astro.url.pathname.replace(/(?:\/index)?\.html$/, "").replace(/\/+$/, "");
+const pagePath = barePath === "" ? "/" : appendsSlash ? `${barePath}/` : barePath;
 const canonical = Astro.site
   ? versionCanonicalPath
     ? new URL(withBase(versionCanonicalPath, baseUrl), Astro.site).href
-    : new URL(Astro.url.pathname, Astro.site).href
+    : isNonDefaultQueryVersion
+      ? null
+      : new URL(pagePath, Astro.site).href
   : null;
 const resolvedMarkdownUrl =
   markdownUrl
@@ -164,7 +195,7 @@ const resolvedDescription = description ?? config.description;
 const lang = config.locale ?? "en";
 
 const routeKey = (path: string) => path.replace(/\/+$/, "") || "/";
-const isHomePage = routeKey(Astro.url.pathname) === routeKey(withBase("/", baseUrl));
+const isHomePage = routeKey(pagePath) === routeKey(withBase("/", baseUrl));
 const ogType = isHomePage ? "website" : "article";
 
 // Favicon precedence: svg > ico > png. The first file that exists wins;
@@ -182,6 +213,20 @@ const ogImage = socialImagePath
     : withBase(socialImagePath, baseUrl)
   : null;
 const ogImageAlt = config.socialImageAlt;
+// Size precedence: the page's own, a file measured in `public/`, a generated
+// card, else none. A remote image, or a frontmatter image with no size, gets
+// no width/height rather than a wrong one. Files under `public/og/` are
+// measured at setup, so only a path with no file behind it counts as a card.
+const { ogCard } = headDefaults;
+const isOgCard =
+  !!socialImagePath &&
+  (socialImagePath === ogCard.sitePath ||
+    (socialImagePath.startsWith(ogCard.pagePrefix) && socialImagePath.endsWith(".png")));
+const ogImageSize = socialImagePath
+  ? (socialImageSize ??
+    headDefaults.imageSizes[socialImagePath] ??
+    (isOgCard ? ogCard.size : null))
+  : null;
 
 const structuredData = canonical
   ? JSON.stringify({
@@ -210,8 +255,10 @@ const structuredData = canonical
 // Per-HTML last-element-wins semantics: page extras come after config
 // extras so per-page overrides win for any duplicated single-value tag.
 const mergedHead = [...(config.head ?? []), ...pageHead];
+// A partial build without the root collection writes the stylesheet under
+// its prefix, where its own Worker serves it.
 const shikiCssHref = withBase(
-  `/_nimbus/shiki.css${import.meta.env.DEV ? `?v=${Date.now()}` : ""}`,
+  `${buildSlice?.prefix ?? ""}/_nimbus/shiki.css${import.meta.env.DEV ? `?v=${Date.now()}` : ""}`,
   baseUrl,
 );
 ---
@@ -220,7 +267,7 @@ const shikiCssHref = withBase(
 
 <meta name="generator" content={Astro.generator} />
 {resolvedDescription && <meta name="description" content={resolvedDescription} />}
-{(noindex || isHiddenVersion) && <meta name="robots" content="noindex" />}
+{(noindex || isHiddenVersion || isNonDefaultQueryVersion) && <meta name="robots" content="noindex" />}
 
 <link rel="icon" type={faviconType} href={faviconHref} />
 <link rel="stylesheet" href={shikiCssHref} />
@@ -253,8 +300,8 @@ const shikiCssHref = withBase(
 {hasSite && canonical && <meta property="og:url" content={canonical} />}
 {ogImage && <meta property="og:image" content={ogImage} />}
 {ogImage && ogImageAlt && <meta property="og:image:alt" content={ogImageAlt} />}
-{ogImage && <meta property="og:image:width" content="1200" />}
-{ogImage && <meta property="og:image:height" content="630" />}
+{ogImage && ogImageSize && <meta property="og:image:width" content={String(ogImageSize.width)} />}
+{ogImage && ogImageSize && <meta property="og:image:height" content={String(ogImageSize.height)} />}
 {!isHomePage && lastUpdated && (
   <meta property="article:modified_time" content={lastUpdated.toISOString()} />
 )}
@@ -265,7 +312,7 @@ const shikiCssHref = withBase(
 {ogImage && <meta name="twitter:image" content={ogImage} />}
 {ogImage && ogImageAlt && <meta name="twitter:image:alt" content={ogImageAlt} />}
 
-{structuredData && <script type="application/ld+json" set:html={structuredData} />}
+{structuredData && <script type="application/ld+json" set:html={structuredData.replaceAll("<", "\\u003c")} />}
 
 {mergedHead.map(({ tag: Tag, attrs = {}, content }) =>
   content

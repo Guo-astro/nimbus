@@ -54,7 +54,7 @@ pnpm templates:check                             # generate + scaffold + build o
 pnpm local                                       # spin up the local sandbox (generates + scaffolds offline)
 ```
 
-Root `build` runs at default concurrency; `pnpm -r` topo order builds `nimbus-docs` first. `apps/www`'s `build` no longer builds `nimbus-docs`, so a bare `pnpm --filter @nimbus/www build` on a clean checkout fails — deploy via `pnpm run deploy` (its `predeploy` builds the framework) or root `pnpm build`.
+Root `build` runs at default concurrency; `pnpm -r` topo order builds `nimbus-docs` first. `apps/www`'s `build` no longer builds `nimbus-docs`, so a bare `pnpm --filter @nimbus/www build` on a clean checkout (or after a `nimbus-docs` version bump) fails. Build www with `pnpm --filter "@nimbus/www..." build` (www plus its workspace dependencies) or root `pnpm build`. Production deploys only from the Release workflow (see CONTRIBUTING.md, "Releases"); don't deploy it locally.
 
 ## The boundary test (read before adding any file)
 
@@ -130,14 +130,14 @@ If you need framework-side validation/transformation, **use the content-pass pat
 
 ## Commit style
 
-Short imperative phrases, sentence case. Examples from `git log`:
+One lowercase conventional line: `type: summary` or `type(scope): summary`, with `feat`, `fix`, `docs`, `test`, `chore` or `refactor`. Examples from `git log`:
 
-- *Ship MDX PascalCase validator and small polish improvements*
-- *Add starter polish utilities*
-- *Refresh registry output and sidebar collection docs*
-- *Keep static markdown route in Cloudflare scaffolds*
+- *feat: fetch only the sources a build reads*
+- *fix: escape docsCollection aliases like other identifiers*
+- *refactor: move the notion loader into its source guide*
+- *docs: build without a source*
 
-No conventional-commit prefixes (no `feat:`/`fix:`). Each commit targets one cohesive change. Use a body paragraph to explain *why* when non-obvious.
+Each commit targets one cohesive change. Use a body paragraph to explain *why* when it isn't obvious. Changesets go in their own `chore: add changesets` commit.
 
 When committing inside a session where other unrelated WIP exists (the user's working tree may have in-progress changes), use `git commit --only -- <paths>` to commit only the listed files without disturbing other staged work.
 
@@ -155,7 +155,7 @@ pnpm changeset        # pick the package(s) + bump, write a summary
 
 - **On merge to `main`**, `.github/workflows/release.yml` opens or updates a "chore: bump package versions" PR (branch `changeset-release/main`) that applies the pending changesets (bumps versions, writes each package's `CHANGELOG.md`).
 - **Merging that PR** runs `scripts/release.mjs publish`, which: detects what's in the release, generates + verifies the templates against the exact `nimbus-docs` bits, **syncs + tags the orphan `templates` branch (`templates-v<version>`) before publishing**, publishes `nimbus-docs` before the CLI (so a live CLI never pins an unpublished dep), then dispatches the in-repo verify smoke — all unattended, with npm provenance.
-- A half-failed release recovers via the `publish_only` `workflow_dispatch` input (sync is idempotent; an orphan tag is harmless).
+- A half-failed release reruns safely. If npm succeeds before package tags are created, create the missing tags manually at the original release commit; the release script refuses to backfill them at a newer commit.
 - **Hard requirement: the monorepo must be public before the first release.** Unauthenticated giget scaffolds only work against a public repo, and this repo can't expose templates without exposing source. Until the flip, scaffolds need `GIGET_AUTH`. Run a full-history secret scan before going public. The `templates` branch and `templates-v*` tags are protected by repo rulesets (branch: bot-App-only updates; tag: App-only creation + empty-bypass update/delete, so published tags are immutable for everyone).
 
 The root `CHANGELOG.md` is frozen; per-release notes live in `packages/*/CHANGELOG.md`.

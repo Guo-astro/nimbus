@@ -77,3 +77,30 @@ test("quoteForDisplay leaves a clean spec unchanged, quotes shell-unsafe ones", 
     assert.equal(quoteForDisplay(unsafe).startsWith("'"), true, unsafe);
   }
 });
+
+// A scaffold with `--skip-install` has no lockfile yet, and AGENT.md runs the
+// CLI through `npx`: the site's own files must outrank npm's user agent.
+test("before the first install, the site's own declaration outranks the user agent", () => {
+  const saved = process.env.npm_config_user_agent;
+  process.env.npm_config_user_agent = "npm/11.0.0 node/v24";
+  try {
+    for (const [file, content, expected] of [
+      ["pnpm-workspace.yaml", "", "pnpm"],
+      [".yarnrc.yml", "nodeLinker: node-modules\n", "yarn"],
+      ["package.json", JSON.stringify({ packageManager: "pnpm@10.0.0" }), "pnpm"],
+      ["package.json", JSON.stringify({ packageManager: "yarn@4.18.1" }), "yarn"],
+    ] as const) {
+      withTree((root) => {
+        writeFileSync(join(root, file), content);
+        assert.equal(detectPackageManager(root), expected, file);
+      });
+    }
+    withTree((root) => {
+      writeFileSync(join(root, "package.json"), `{ "name": "site" }`);
+      assert.equal(detectPackageManager(root), "npm");
+    });
+  } finally {
+    if (saved === undefined) delete process.env.npm_config_user_agent;
+    else process.env.npm_config_user_agent = saved;
+  }
+});

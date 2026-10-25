@@ -16,6 +16,11 @@ at `/changelog`, a glossary at `/glossary`. Anything that lives
 alongside the primary `docs` collection at its own URL prefix and is
 NOT a frozen version of the docs.
 
+**For content that lives somewhere else** (another git repository, a Notion
+database, a CMS), start with `nimbus-docs add source <name|url>` instead
+(`add source` alone lists them). Its guide sends you back here only for the
+route, rendering-policy and sidebar steps.
+
 **For docs versions, this is the wrong recipe.** A version (`docs-v1`,
 `docs-2025-q1`, etc.) needs the version manifest, the picker install,
 and picker wiring on top of what this recipe does. Use `nimbus-docs add
@@ -36,7 +41,7 @@ recipe for `api` only when they're writing the API docs by hand.
 
 **This recipe owns the whole setup of a non-version collection.** You
 will create the content directory, register the collection in
-`content.config.ts`, scaffold the page and Markdown routes, and
+`content.config.ts`, scaffold the page route, and
 optionally seed a starter entry. The user does not pre-create files or
 edit configs — you do.
 
@@ -51,7 +56,7 @@ conventions:
   tell the user this isn't a Nimbus project.
 - `src/content.config.ts` — read it in full. Note: (1) which collections
   already exist (you must not collide with them), (2) whether they use
-  `docsCollection({ base: "..." })` from `nimbus-docs/content` so you can
+  `docsCollection({ base: "..." })` from `@cloudflare/nimbus-docs/content` so you can
   match their shape, (3) the `defineCollection`/`docsCollection` import
   layout already in place.
 - `astro.config.ts` (or `nimbus.config.ts` if separate) — read the Nimbus
@@ -62,15 +67,23 @@ conventions:
 - `src/pages/[...slug].astro` — read it. The new route will mirror this
   shape exactly except for the helper names (`getCollectionStaticPaths` /
   `getCollectionPage` instead of the `Docs` variants).
-- `src/pages/[...slug]/index.md.ts` — read it. The new Markdown route
-  will mirror it.
+- `src/pages/[...slug]/index.md.ts` and `src/pages/[...slug]/index.mdx.ts`
+  — confirm they call `markdownRoute()` and `markdownSourceRoute()` from
+  `@cloudflare/nimbus-docs/agent-endpoints`. These shared routes serve the
+  Markdown and source versions of every collection, so the new collection
+  needs no Markdown routes.
+  If either file instead passes `collection: "docs"` (an older starter),
+  stop: the new pages would get no `.md` or `.mdx` files. Ask the user to
+  update it first with `nimbus-docs diff <file> --apply` if it is
+  unmodified, or to replace it with the three-line version from the
+  `ai-native` recipe, wrapping it to keep any customizations.
 - `src/layouts/DocsLayout.astro` — confirm it exists. The new route uses
   it.
 - `src/components.ts` — note which MDX globals are registered; the user's
   starter entry should only use these or plain markdown.
 
 If any of the route files above are missing, the user is on a stripped-down
-starter — stop and tell them to run `pnpm exec nimbus-docs add ai-native` first.
+starter — stop and tell them to run `npx @cloudflare/nimbus-docs add ai-native` first.
 
 ## 2. Prompt the user
 
@@ -97,25 +110,25 @@ The collection name **must**:
 - Contain only `a-z`, `0-9`, `-`, `_`
 - Not collide with any existing collection in `content.config.ts`
 - Not be `docs` or `partials` (reserved)
-- Not start with `_` (the "loaded but excluded from indexing" prefix)
 
 If the user picks a `docs-<slug>` name, note that — see step 5 about
 versioning.
 
 ### Q3. Confirm the URL prefix.
 
-The URL prefix is the path segment the collection mounts under. For a `blog`
-collection with prefix `/blog`, pages at `src/content/blog/foo.mdx` render at
-`/blog/foo`. For a `docs-v1` collection with prefix `/v1`, pages render at
-`/v1/foo`.
+The URL prefix is where the collection is served, and the route file goes
+there: `src/pages/<prefix>/[...slug].astro`. For a `blog` collection with
+prefix `/blog`, pages at `src/content/blog/foo.mdx` render at `/blog/foo`.
+The prefix can be nested (`/products/sdk`) and doesn't have to match the
+collection name; Nimbus reads it from the route file's folder, so every URL it
+builds (sidebar, Markdown versions, `llms.txt`, sitemap) follows. Default to
+`/<collection>`.
 
-**Important convention:** when the collection name starts with `docs-`, the
-URL prefix defaults to the part after `docs-`. This matches the versioning
-URL convention — a `docs-v1` collection always mounts at `/v1/`, never at
-`/docs-v1/`.
-
-For every other collection, the URL prefix must match the collection name.
-Alternate Markdown versions and the collection's `llms.txt` index use that identity as their mount prefix.
+**Docs versions:** a collection named in the `versions` config
+(`versions.others` includes `v1` for `docs-v1`) is always served at the part
+after `docs-` (`/v1`), so its route goes in `src/pages/v1/`. A `docs-*`
+collection that isn't listed there (`docs-es`, a translation) is an ordinary
+collection: default its prefix to `/<collection>`, and ask.
 
 ### Q4. Add a starter entry?
 
@@ -130,8 +143,8 @@ frontmatter and one paragraph of body text explaining it's a placeholder.
 Print a short, exact plan to the user **before** writing anything, listing:
 
 - Files to create
-- Existing files to edit (just `content.config.ts`; possibly
-  `astro.config.ts` if versioning wiring is requested in step 5)
+- Existing files to edit (`content.config.ts`; `astro.config.ts` when it sets
+  `rendering` (step 4d) or versioning wiring is requested in step 5)
 - The resulting URLs (e.g. `/blog/welcome`, `/blog/llms.txt`,
   `/blog/welcome/index.md`)
 
@@ -190,7 +203,7 @@ Write `src/pages/<prefix>/[...slug].astro`:
 
 ```astro
 ---
-import DocsLayout from "../../layouts/DocsLayout.astro";
+import DocsLayout from "@/layouts/DocsLayout.astro";
 import {
   getCollectionStaticPaths,
   getCollectionPage,
@@ -201,17 +214,15 @@ import {
   getLastUpdated,
   getRouteFlags,
   getTOC,
-  entryRouteKey,
   stripBase,
-} from "@cloudflare/nimbus-docs";
-import { components } from "../../components";
+} from "@cloudflare/nimbus-docs/runtime";
+import { components } from "@/components";
 
-export const prerender = true;
 export const getStaticPaths = getCollectionStaticPaths("<collection>");
 
-const page = await getCollectionPage<"<collection>">(Astro);
+const page = await getCollectionPage(Astro, "<collection>");
 if (page instanceof Response) return page;
-const { entry, Content, headings } = page;
+const { entry, Content, headings, markdownUrl, ogImageUrl } = page;
 
 const currentSlug = stripBase(Astro.url.pathname, import.meta.env.BASE_URL).replace(/\/$/, "") || "/";
 const { tableOfContents: tocOn } = await getRouteFlags(entry);
@@ -229,12 +240,7 @@ const lastUpdated = entry.data.lastUpdated ??
   await getLastUpdated(entry);
 const tocConfig = entry.data.tableOfContents;
 const toc = tocOn && tocConfig !== false ? getTOC(headings, tocConfig) : false;
-const routeKey = entryRouteKey(entry.id);
-const markdownPath = routeKey
-  ? `/<prefix>/${routeKey}/index.md`
-  : "/<prefix>/index.md";
-const markdownUrl = markdownPath;
-const socialImage = entry.data.socialImage ?? `/og/<prefix>/${entry.id}.png`;
+const socialImage = entry.data.socialImage ?? ogImageUrl;
 ---
 
 <DocsLayout
@@ -261,6 +267,11 @@ const socialImage = entry.data.socialImage ?? `/og/<prefix>/${entry.id}.png`;
 </DocsLayout>
 ```
 
+The `@/` imports resolve from `src/`, whatever the prefix's depth. If the
+site's `tsconfig.json` doesn't map `@/*` to `./src/*`, use relative imports
+instead: `../../` for a one-segment prefix (`/blog`), plus one `../` per extra
+segment.
+
 **The `collection` and `entryId` props are required, not optional.**
 They drive cross-version `<link rel="alternate">`, `<link rel="canonical">`,
 deprecation banner rendering, Pagefind facet emission, hidden-version
@@ -276,60 +287,37 @@ If the user's primary `DocsLayout` accepts an `audience` prop or any other
 field not listed above, mirror it. If it drops one of the props above, drop
 that prop here too.
 
-### 4d. Scaffold the Markdown version
+### 4d. Add the collection to the rendering policy (if one is set)
 
-Write `src/pages/<prefix>/[...slug]/index.md.ts`:
+If the Nimbus config sets `rendering` (Cloudflare scaffolds do, with
+`rendering: { default: "request" }`), add the collection to
+`rendering.collections`. `rendering.default` doesn't cover a page collection
+with its own catch-all route, so the build fails until it's listed:
 
 ```ts
-/**
- * Per-page /<prefix>/<slug>/index.md — clean Markdown version of every
- * indexable entry of the `<collection>` collection. Mirrors the primary
- * Markdown route at src/pages/[...slug]/index.md.ts.
- */
-
-import {
-  getMarkdownPayload,
-  getMarkdownStaticPaths,
-  type MarkdownEndpointReference,
-} from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
-
-const COLLECTION = "<collection>";
-
-interface SlugProps {
-  reference: MarkdownEndpointReference;
-}
-
-interface SlugContext {
-  params: { slug?: string };
-  props: Partial<SlugProps>;
-  request: Request;
-}
-
-export const getStaticPaths = async () =>
-  getMarkdownStaticPaths({ collection: COLLECTION, surface: "markdown" });
-
-export async function GET({ params, props, request }: SlugContext) {
-  const payload = await getMarkdownPayload({
-    collection: COLLECTION,
-    surface: "markdown",
-    slug: params.slug,
-    reference: props.reference,
-    context: { request },
-  });
-  if (!payload) return new Response("Not found", { status: 404 });
-  return new Response(payload.body, {
-    headers: { "Content-Type": payload.mediaType },
-  });
-}
+rendering: {
+  default: "request",
+  collections: { <collection>: "request" },
+},
 ```
 
-Substitute `<collection>` in the `COLLECTION` constant.
+Use `"request"` to render it like the rest of a request-rendered site, or
+`"build"` to prerender it. Without a `rendering` option, skip this step: Nimbus
+builds it ahead of time.
 
-To serve the expanded source URL referenced by the Markdown payload,
-mirror this route at `src/pages/<prefix>/[...slug]/index.mdx.ts` with
-`surface: "source"`.
+The route in 4c is written for a site built ahead of time on
+`output: "static"`. Then run `nimbus-docs check --fix`, so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
+
+`check` reads links against the last build's pages, so until you build it
+reports links to the new collection's pages as broken. Build, then run `check`
+again before treating them as broken.
 
 ## 5. Adding a docs version? Stop and use `nimbus-docs add new-version`
 
@@ -357,11 +345,18 @@ that needs more than route scaffolding.
 
 ## 6. Optional — add to the sidebar
 
-If the user wants the new collection to appear in the site's sidebar, ask
-before editing. Sidebar layout is taste-laden; don't unilaterally drop a new
-group in.
+A collection whose prefix is inside a docs folder (`/integrations/dbt` beside
+`src/content/docs/integrations/`) already appears in that folder's sidebar
+group, with its landing page; skip this step unless the user wants it
+somewhere else. Adding it to `sidebar.items` moves it there.
 
-If yes, find the `sidebar.items` array in the Nimbus config and add:
+Otherwise, if the user wants the new collection to appear in the site's
+sidebar, ask before editing. Sidebar layout is taste-laden; don't
+unilaterally drop a new group in.
+
+If the config has no `sidebar.items`, adding one replaces the sidebar built
+from `src/content/docs/`; add `{ autogenerate: { collection: "docs" } }` to
+keep it. Then add:
 
 ```ts
 { label: "<Display Name>", autogenerate: { collection: "<collection>" } },
@@ -377,9 +372,14 @@ After writing all files:
 1. Run the user's build command — match their package manager (`pnpm`,
    `npm`, `yarn`).
 2. Confirm the build completes without errors.
-3. Confirm the dist output contains the expected files:
+3. If the collection renders on request (it's listed under
+   `rendering.collections` as `"request"`, or `rendering.default` is
+   `"request"`), its pages aren't written to `dist/`: start the built site
+   (or `astro dev`) and request the URLs in step 4 instead, then skip to it.
+   Otherwise, confirm the dist output contains the expected files:
    - `dist/<prefix>/welcome/index.html` (if a starter entry was created)
-   - `dist/<prefix>/welcome/index.md` (the .md alternate)
+   - `dist/<prefix>/welcome/index.md` and `index.mdx` (served by the shared
+     Markdown routes)
    - `dist/<prefix>/llms.txt` (emitted automatically when the collection
      has ≥ 1 entry)
    - The root `dist/llms.txt` lists `<prefix>` as a top-level section.
@@ -400,13 +400,16 @@ Ask the user whether to replace, skip, or show a diff first. The
   to a Nimbus site. Blogs, API references, changelogs, glossaries, versioned
   docs siblings — all the same shape underneath.
 - The framework helpers `getCollectionStaticPaths(collection)` and
-  `getCollectionPage<C>(astro)` are sibling functions to
+  `getCollectionPage(astro, collection)` are sibling functions to
   `getDocsStaticPaths`/`getDocsPageProps`. Use the `Collection` variants in
   scaffolded routes; the `Docs` variants stay for the primary route only.
-- The URL convention is intentional: primary `docs` mounts at root, every
-  other collection mounts at `/<collection>/` or `/<version-slug>/` for
-  version collections. The `getIndexedEntries()` / `getIndexedTopLevel()`
-  helpers already know this convention; the routes you scaffold consume it.
+- The route file's folder sets the URL: primary `docs` is served at the root,
+  a docs version at `/<version-slug>/`, and every other collection where its
+  route is (`/<collection>/` by default). Every URL helper follows it, so
+  keep `getStaticPaths` as `export const getStaticPaths =
+  getCollectionStaticPaths("<collection>")`, and the page helper's
+  collection as a string literal: a request-rendered route has no
+  `getStaticPaths`, so Nimbus finds its collection there.
 - Do not try to register the collection automatically without the user's
   go-ahead in step 3 (the plan). The plan-then-confirm step is what turns
   this from an opaque codegen into a transparent edit.

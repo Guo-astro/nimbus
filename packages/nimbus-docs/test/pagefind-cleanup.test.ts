@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -35,14 +36,116 @@ async function site(t: TestContext): Promise<string> {
   return root;
 }
 
+// A `pagefind` command that records its arguments and working directory to
+// the file named by NIMBUS_PAGEFIND_CAPTURE.
+async function pagefindShim(
+  t: TestContext,
+  binDir: string,
+  capture: string,
+): Promise<void> {
+  await mkdir(binDir, { recursive: true });
+  const record = (argsFrom: number) =>
+    `require('node:fs').writeFileSync(process.env.NIMBUS_PAGEFIND_CAPTURE, JSON.stringify({ args: process.argv.slice(${argsFrom}), cwd: process.cwd() }))`;
+  if (process.platform === "win32") {
+    await writeFile(
+      path.join(binDir, "pagefind.cmd"),
+      `@echo off\r\nnode -e "${record(1)}" -- %*\r\n`,
+      "utf8",
+    );
+  } else {
+    const bin = path.join(binDir, "pagefind");
+    await writeFile(bin, `#!/usr/bin/env node\n${record(2)};\n`, "utf8");
+    await chmod(bin, 0o755);
+  }
+  const original = process.env.NIMBUS_PAGEFIND_CAPTURE;
+  process.env.NIMBUS_PAGEFIND_CAPTURE = capture;
+  t.after(() => {
+    if (original === undefined) delete process.env.NIMBUS_PAGEFIND_CAPTURE;
+    else process.env.NIMBUS_PAGEFIND_CAPTURE = original;
+  });
+}
+
+function withPath(t: TestContext, value: string): void {
+  const original = process.env.PATH;
+  process.env.PATH = value;
+  t.after(() => {
+    if (original === undefined) delete process.env.PATH;
+    else process.env.PATH = original;
+  });
+}
+
+test("Pagefind launches the command on PATH with the site path intact", async (t) => {
+  const root = await site(t);
+  const binDir = path.join(root, "pagefind bin & tools");
+  const siteDir = path.join(root, "site path & output");
+  const capture = path.join(root, "pagefind-run.json");
+  await mkdir(siteDir, { recursive: true });
+  await pagefindShim(t, binDir, capture);
+  withPath(t, `${binDir}${path.delimiter}${process.env.PATH ?? ""}`);
+
+  await runPagefind(siteDir, [], { root });
+
+  assert.deepEqual(JSON.parse(await readFile(capture, "utf8")).args, [
+    "--site",
+    siteDir,
+  ]);
+});
+
+test("Pagefind runs from a workspace's node_modules/.bin, in the project root", async (t) => {
+  const workspace = await site(t);
+  const project = path.join(workspace, "apps", "docs");
+  const siteDir = path.join(project, "dist");
+  const capture = path.join(workspace, "pagefind-run.json");
+  await mkdir(siteDir, { recursive: true });
+  await pagefindShim(t, path.join(workspace, "node_modules", ".bin"), capture);
+  withPath(t, path.dirname(process.execPath));
+
+  await runPagefind(siteDir, [], { root: project });
+
+  const run = JSON.parse(await readFile(capture, "utf8"));
+  assert.deepEqual(run.args, ["--site", siteDir]);
+  assert.equal(fs.realpathSync(run.cwd), fs.realpathSync(project));
+});
+
+test("a Pagefind that isn't installed says to install it; one that fails doesn't", async (t) => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message?: unknown) => warnings.push(String(message));
+  t.after(() => (console.warn = originalWarn));
+  const missing = await site(t);
+  withPath(t, path.dirname(process.execPath));
+  await runPagefind(missing, [], { root: missing });
+
+  const failing = await site(t);
+  await runPagefind(failing, [], {
+    root: failing,
+    execute: async () => ({
+      error: Object.assign(new Error("pagefind exited with code 1"), {
+        code: 1,
+      }),
+      stdout: "",
+      stderr: "",
+    }),
+  });
+
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /Install pagefind as a devDependency/);
+  assert.match(
+    warnings[1],
+    /^\[nimbus-docs\] Pagefind failed: pagefind exited with code 1$/,
+  );
+});
+
 test("Pagefind removes synthetic files and their empty owned directories", async (t) => {
   const root = await site(t);
   const synthetic = path.join(root, "guide", "index.html");
   let staged = false;
 
-  await runPagefind(root, [entry("/guide/")], async () => {
-    staged = fs.existsSync(synthetic);
-    return { error: null, stdout: "", stderr: "" };
+  await runPagefind(root, [entry("/guide/")], {
+    execute: async () => {
+      staged = fs.existsSync(synthetic);
+      return { error: null, stdout: "", stderr: "" };
+    },
   });
 
   assert.equal(staged, true);
@@ -62,11 +165,9 @@ test("missing and nonzero Pagefind executions stay nonfatal and clean up", async
     ]) {
       const root = await site(t);
       await assert.doesNotReject(() =>
-        runPagefind(root, [entry("/guide/")], async () => ({
-          error,
-          stdout: "",
-          stderr: "",
-        })),
+        runPagefind(root, [entry("/guide/")], {
+          execute: async () => ({ error, stdout: "", stderr: "" }),
+        }),
       );
       assert.equal(fs.existsSync(path.join(root, "guide/index.html")), false);
     }
@@ -81,13 +182,11 @@ test("partial Pagefind staging failure removes files already owned", async (t) =
   await writeFile(path.join(root, "blocked"), "real file", "utf8");
 
   await assert.rejects(
-    runPagefind(
-      root,
-      [entry("/first/"), entry("/blocked/second/")],
-      async () => {
+    runPagefind(root, [entry("/first/"), entry("/blocked/second/")], {
+      execute: async () => {
         assert.fail("Pagefind must not run after staging fails");
       },
-    ),
+    }),
     /not a real directory/,
   );
   assert.equal(fs.existsSync(path.join(root, "first/index.html")), false);
@@ -148,11 +247,9 @@ test("Pagefind refuses to stage through symlinked route directories", async (t) 
   }
 
   await assert.rejects(
-    runPagefind(root, [entry("/linked/page/")], async () => ({
-      error: null,
-      stdout: "",
-      stderr: "",
-    })),
+    runPagefind(root, [entry("/linked/page/")], {
+      execute: async () => ({ error: null, stdout: "", stderr: "" }),
+    }),
     /not a real directory/,
   );
   assert.equal(fs.existsSync(path.join(outside, "page/index.html")), false);
@@ -165,11 +262,9 @@ test("Pagefind never overwrites or removes pre-existing HTML", async (t) => {
   await mkdir(path.dirname(realFile), { recursive: true });
   await writeFile(realFile, "real page", "utf8");
 
-  await runPagefind(root, [entry("/guide/")], async () => ({
-    error: null,
-    stdout: "",
-    stderr: "",
-  }));
+  await runPagefind(root, [entry("/guide/")], {
+    execute: async () => ({ error: null, stdout: "", stderr: "" }),
+  });
 
   assert.equal(await readFile(realFile, "utf8"), "real page");
 });
@@ -180,10 +275,12 @@ test("Pagefind does not remove HTML that replaces a staged file", async (t) => {
   const replacement = path.join(root, "replacement.html");
   await writeFile(replacement, "replacement page", "utf8");
 
-  await runPagefind(root, [entry("/guide/")], async () => {
-    await rm(file);
-    await rename(replacement, file);
-    return { error: null, stdout: "", stderr: "" };
+  await runPagefind(root, [entry("/guide/")], {
+    execute: async () => {
+      await rm(file);
+      await rename(replacement, file);
+      return { error: null, stdout: "", stderr: "" };
+    },
   });
 
   assert.equal(await readFile(file, "utf8"), "replacement page");
@@ -206,11 +303,9 @@ test("Pagefind attempts every cleanup and fails if synthetic files remain", asyn
   }) as typeof fs.rmSync;
   try {
     await assert.rejects(
-      runPagefind(
-        root,
-        [entry("/first/"), entry("/second/")],
-        async () => ({ error: null, stdout: "", stderr: "" }),
-      ),
+      runPagefind(root, [entry("/first/"), entry("/second/")], {
+        execute: async () => ({ error: null, stdout: "", stderr: "" }),
+      }),
       /failed to clean up synthetic Pagefind files/,
     );
   } finally {

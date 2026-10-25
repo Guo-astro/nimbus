@@ -16,18 +16,14 @@ The **lint engine** is the on-demand authoring-quality layer. Rules have stable 
 
 ## Run it
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="lint" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="lint" />
 
-Flags — combine with `lint`:
+It walks `src/content/`, runs each authoring rule you've enabled, and exits non-zero when any `error`-severity finding survives. [CLI](/cli#nimbus-docs-lint) lists its flags, such as `--fix` and `--format=json`.
 
-| Flag | Effect |
-|---|---|
-| `--format=json` | agent-readable diagnostics |
-| `--rule=nimbus/single-h1` | run one rule |
-| `--fix` | apply auto-fixes in place |
-| `--quiet` | errors only |
+Lint reads `.mdx` files, and says how many `.md` pages that leaves out. It also reads collections that load from other folders, such as [content sources](/content-sources/git):
 
-It walks `src/content/`, runs each authoring rule you've enabled, and exits non-zero when any `error`-severity finding survives.
+- A problem in a source is reported at its path in the source repository, such as `sdk: docs/guides/intro.mdx:12`. `--fix` leaves sources untouched.
+- A collection with no files on disk, such as a Notion database, is named as not inspected.
 
 ## Configure severities
 
@@ -47,6 +43,70 @@ nimbus(config, {
 
 Per-collection `rules` shallow-merge over the top-level set. Authoring rules are **off by default** — omitting `rules` entirely runs none of them; you opt in per rule.
 
+## Check links
+
+`nimbus/internal-link` reports internal links that don't reach a URL your site serves. It checks them against `.nimbus/routes.json`, which `astro build` writes at the end of the build. The file lists every page and every other file the build produced, such as `/llms.txt`, feeds, `.md` alternates, and files from `public/`. Pages rendered on request are included too.
+
+Run `astro build` before `nimbus-docs lint`. If `.nimbus/routes.json` is missing, invalid, or from another Nimbus version, lint reports one error on it and exits `1`, whatever the rule's severity.
+
+Each build deletes the previous file when it starts, so lint never trusts it after a failed build. If the file can't be deleted or changed, the build fails until you fix its permissions.
+
+Write links without Astro's `base`. Nimbus adds the base when the page renders, so with `base: "/docs"` the link `[Guide](/guide)` goes to `/docs/guide`. Writing `[Guide](/docs/guide)` renders as `/docs/docs/guide`, and lint reports it with the path to use instead. Patterns in the rule's `ignore` option are written the same way, without the base.
+
+Images are the exception: an inline image under a base is written with it, and `nimbus/image-ref` reports one that leaves it out. See [Images under a deployment base](/writing/markdown-and-mdx/#images-under-a-deployment-base). Its `ignore` patterns are still written without the base, as for links.
+
+Files written by an integration that finishes after Nimbus aren't in the list. Add them to `ignore`.
+
+### Redirects
+
+A link through a working redirect passes. Lint follows the redirect, and the link is broken only when the redirect leads to a page that doesn't exist, loops, or takes more than 20 redirects. Temporary redirects (`302`, `303`, `307`) are followed too.
+
+Lint matches redirects the way your platform does. With a `netlify.toml` in the project, Netlify's rules apply; otherwise Cloudflare's:
+
+| | Cloudflare | Netlify |
+|---|---|---|
+| Line without a status | `302` | `301` |
+| Trailing slash | Part of the source: `/old` doesn't match a rule for `/old/`. Lint says which spelling matches. | Ignored: `/old` and `/old/` match the same rule. |
+| A file exists at the source | The redirect still applies. | Only a rule forced with `!` applies. |
+
+On both, the query passes through to a destination that doesn't set its own, and `/guide /guide/ 301` is a redirect, not a loop.
+
+Nimbus reads redirects from the build's `_redirects` file and from Astro's `redirects` config, with no setup. If your deployment reads redirects from a file with another name, such as one a Worker loads, point Nimbus at it. The file uses `_redirects` syntax:
+
+```ts title="astro.config.ts"
+nimbus(config, { redirectsFile: "public/__redirects" });
+```
+
+To find links that go through a permanent redirect (`301`, `308`), turn on `nimbus/redirected-link`. It reports each one with the URL to link to instead, written without `base`. A destination outside `base` is suggested as a full URL on your `site`. It uses `nimbus/internal-link`'s `ignore` to decide whether the destination works, and stays silent when it doesn't.
+
+### Paths served by another system
+
+Some paths on your domain may be served by something other than this build, such as an API reference deployed separately. The build can't see them, so add them to `ignore`:
+
+```ts title="astro.config.ts"
+rules: {
+  "nimbus/internal-link": ["error", { ignore: ["/api/**"] }],
+},
+```
+
+Lint doesn't check links under those paths. To find dead links there, check your deployed site with a link checker.
+
+### Gate CI on links
+
+Run the build and lint in the same job:
+
+```sh
+astro build
+nimbus-docs lint
+```
+
+To lint in a separate job, pass the whole `.nimbus/` directory from the build job as an artifact. Lint also needs `.nimbus/lint.json`, which holds your `rules`.
+
+
+`nimbus-docs check` doesn't build. It checks links against `.nimbus/routes.json` when an earlier build left one, but when the file is missing it skips the rule and leaves a note instead of failing. To gate CI on links, run `astro build` and then `lint`.
+
 ## In-file disables
 
-Turn rules off for a single file with `nimbusDisableRules` frontmatter or inline comments — no config required. The severities authored above are materialized to `.nimbus/lint.json` so the standalone CLI reads the same config the integration does.
+Turn rules off for one file with `nimbusDisableRules` frontmatter or inline comments, with no config.
+
+`astro build` and `astro dev` write your severities to `.nimbus/lint.json`, which the CLI reads. Without it, `nimbus-docs lint` exits `1` and asks you to build first; `--rule` still runs the rule it names.

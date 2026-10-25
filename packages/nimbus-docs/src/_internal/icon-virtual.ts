@@ -15,6 +15,7 @@
  * `config.include` mirrors the include config for type-checking.
  */
 
+import { invalidateDevModules, type DevServerGraphs } from "./dev-invalidation.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getIcons } from "@iconify/utils";
@@ -49,9 +50,8 @@ export interface VitePluginLike {
   enforce?: "pre" | "post" | "normal";
   resolveId(id: string): string | undefined;
   load(id: string): Promise<string | undefined> | string | undefined;
-  configureServer?(server: {
+  configureServer?(server: DevServerGraphs & {
     watcher: { add: (p: string) => void; on: (e: string, cb: (e: string, p: string) => void) => void };
-    moduleGraph: { invalidateAll: () => void };
   }): void;
 }
 
@@ -70,7 +70,7 @@ export function iconVirtualPlugin(
     // Load iconify collections (auto-detect or explicit)
     const collectionsToLoad = include ?? (await detectInstalledCollections(root));
     for (const [name, icons] of Object.entries(collectionsToLoad)) {
-      const collection = await loadCollection(name);
+      const collection = await loadCollection(name, root);
       if (!collection) {
         console.error(
           `[nimbus-icons] "${name}" does not appear to be a valid iconify collection! Did you install the "@iconify-json/${name}" dependency?`,
@@ -122,24 +122,28 @@ export function iconVirtualPlugin(
       }
       return undefined;
     },
-    configureServer({ watcher, moduleGraph }) {
+    configureServer(server) {
+      const { watcher } = server;
       watcher.add(`${iconDir}/**/*.svg`);
       watcher.on("all", async (_event, filepath) => {
         if (!filepath.endsWith(".svg")) return;
         if (!filepath.startsWith(resolvedIconDir)) return;
         collections = null;
-        moduleGraph.invalidateAll();
+        invalidateDevModules(server);
       });
     },
   };
 }
 
+/** Resolve from the site root, not the process's working directory: a build
+ * started elsewhere (`astro build --root`, a programmatic build) must still
+ * find the site's own `@iconify-json/*` packages. */
 async function loadCollection(
   name: string,
-  autoInstall = false,
+  root: string,
 ): Promise<IconifyJSON | undefined> {
   if (!name) return undefined;
-  return loadCollectionFromFS(name, autoInstall) as Promise<
+  return loadCollectionFromFS(name, false, "@iconify-json", root) as Promise<
     IconifyJSON | undefined
   >;
 }

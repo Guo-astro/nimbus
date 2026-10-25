@@ -45,14 +45,14 @@ export function DiagramControls({
       {status != null && (
         <span
           className={cn(
-            "font-mono text-[9px] uppercase tracking-widest text-neutral-500 dark:text-neutral-400 select-none",
+            "font-mono text-[9px] leading-4 uppercase tracking-widest text-neutral-500 dark:text-neutral-400 select-none",
             statusClassName,
           )}
         >
           {status}
         </span>
       )}
-      <ActionBar className="ml-auto">
+      <ActionBar className="ms-auto">
         {playPause && (
           <ActionButton label={ctx.playing ? "Pause" : "Play"} onClick={ctx.toggle} />
         )}

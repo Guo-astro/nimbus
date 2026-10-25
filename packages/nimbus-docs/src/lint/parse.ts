@@ -1,8 +1,8 @@
 /**
  * MDX parsing for the lint engine.
  *
- * Uses Sätteri's own `mdxToMdast` — the *same parser that renders the
- * site* — so the linter never disagrees with what actually ships. No
+ * Uses Sätteri with the site's own features — the *same parser that renders
+ * the site* — so the linter never disagrees with what actually ships. No
  * shadow AST, no reintroduced unified pipeline, and the Rust parser keeps
  * the pass fast. Sätteri exposes `mdxToMdast` and unist positions
  * precisely for this kind of read-only inspection; the remark-plugin
@@ -10,8 +10,9 @@
  * `markdown.processor`, not direct parse calls like this one.
  */
 
-import { mdxToMdast } from "satteri";
 import { parse as parseYaml } from "yaml";
+
+import { parseMarkdownSource } from "../_internal/markdown-source.js";
 
 export interface Point {
   line: number;
@@ -69,6 +70,11 @@ export interface ParsedFile {
   /** Set when the MDX body failed to parse (won't render). Rules are
    * skipped; the engine emits a single `nimbus/mdx-syntax` diagnostic. */
   parseError: { message: string; line: number; column: number } | null;
+  /**
+   * The project root, when the caller knows it. A page collection's file
+   * can live outside `src/`, where the root can't be inferred from its path.
+   */
+  projectRoot?: string;
 }
 
 /** Depth-first walk of an mdast tree, visitor called on every node. */
@@ -137,12 +143,12 @@ export function findNodeAt(
  */
 export function parseSource(
   source: string,
-  meta: { path: string; absPath: string; collection: string | null },
+  meta: { path: string; absPath: string; collection: string | null; projectRoot?: string },
 ): ParsedFile {
   let tree: MdRoot;
   let parseError: ParsedFile["parseError"] = null;
   try {
-    tree = mdxToMdast(source) as unknown as MdRoot;
+    tree = parseMarkdownSource(source) as unknown as MdRoot;
   } catch (err) {
     // A file that won't parse won't render either — surface it instead of
     // crashing the whole lint run.
@@ -170,6 +176,7 @@ export function parseSource(
   }
 
   return {
+    ...(meta.projectRoot === undefined ? {} : { projectRoot: meta.projectRoot }),
     path: meta.path,
     absPath: meta.absPath,
     source,

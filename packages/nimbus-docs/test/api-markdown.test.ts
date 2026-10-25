@@ -76,6 +76,7 @@ let smallco: ApiModel;
 
 before(async () => {
   smallco = await buildApiModel({
+    schemaPages: true,
     collection: "smallco",
     spec: readFileSync(fixture("smallco.yaml"), "utf8"),
     label: "smallco.yaml",
@@ -152,8 +153,8 @@ describe("api markdown emitter", () => {
   test("each field row is titled by its full coordinate, so an agent can cite it", () => {
     const props = getApiPageProps(smallco, "create") as ApiOperationPage;
     const md = renderApiPageMarkdown(props);
-    // The body field `amount` is addressable as `create.amount`, not bare `amount`.
-    assert.match(md, /- `create\.amount` \(/);
+    // The body field `amount` is named as on the page, with `create.amount` beside it to cite.
+    assert.match(md, /- `amount` \(`create\.amount`; /);
     const amount = props.body.find((f) => f.name === "amount");
     assert.equal(amount!.coordinate, "create.amount");
   });
@@ -174,8 +175,8 @@ describe("api markdown emitter", () => {
     const props = getApiPageProps(smallco, "EitherAccount") as ApiSchemaPage;
     const md = renderApiPageMarkdown(props);
     assert.match(md, /^One of:$/m);
-    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\)/);
-    assert.match(md, /- \[BankAccount\]\(\/smallco\/schemas\/BankAccount\)/);
+    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\/\)/);
+    assert.match(md, /- \[BankAccount\]\(\/smallco\/schemas\/BankAccount\/\)/);
     assert.doesNotMatch(md, /No fields documented/);
   });
 
@@ -183,12 +184,13 @@ describe("api markdown emitter", () => {
     const props = getApiPageProps(smallco, "Mixed") as ApiSchemaPage;
     const md = renderApiPageMarkdown(props);
     assert.match(md, /^Any of:$/m);
-    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\)/);
+    assert.match(md, /- \[Card\]\(\/smallco\/schemas\/Card\/\)/);
     assert.match(md, /- `string`/);
   });
 
   test("discriminated union renders the value→variant mapping", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "disc",
       spec: {
         openapi: "3.0.0",
@@ -211,8 +213,8 @@ describe("api markdown emitter", () => {
     });
     const md = renderApiPageMarkdown(getApiPageProps(model, "U"));
     assert.match(md, /Discriminator: `k`/);
-    assert.match(md, /- `a` → \[A\]\(\/disc\/schemas\/A\)/);
-    assert.match(md, /- `b` → \[B\]\(\/disc\/schemas\/B\)/);
+    assert.match(md, /- `a` → \[A\]\(\/disc\/schemas\/A\/\)/);
+    assert.match(md, /- `b` → \[B\]\(\/disc\/schemas\/B\/\)/);
   });
 
   test("a union field renders its variants XOR its children — no hidden coordinates leak", () => {
@@ -234,6 +236,7 @@ describe("api markdown emitter", () => {
 
   test("a backtick in a variant's schema name cannot corrupt the link", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "inj",
       spec: {
         openapi: "3.0.0",
@@ -252,11 +255,12 @@ describe("api markdown emitter", () => {
     // backtick isn't a route delimiter, so the name is legal; the markdown
     // escaper still has to neutralise it (route-hostile names — backslash,
     // control chars, `\ ? #` — are rejected at build; see api-resilience).
-    assert.match(md, /- \[Ev\\`il\]\(\/inj\/schemas\/Ev%60il\)/);
+    assert.match(md, /- \[Ev\\`il\]\(\/inj\/schemas\/Ev%60il\/\)/);
   });
 
   test("malformed non-string schema `type` is coerced, never crashes the emitter", async () => {
     const model = await buildApiModel({
+      schemaPages: true,
       collection: "weird",
       spec: {
         openapi: "3.0.0",
@@ -312,8 +316,8 @@ describe("api markdown emitter", () => {
         }),
       ],
     });
-    assert.match(md, /^- `c\.parent`/m);
-    assert.match(md, /^ {2}- `c\.parent\.child`/m);
+    assert.match(md, /^- `parent` \(`c\.parent`;/m);
+    assert.match(md, /^ {2}- `child` \(`c\.parent\.child`;/m);
   });
 
   test("truncated children emit an omitted-count note", () => {

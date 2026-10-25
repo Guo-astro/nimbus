@@ -6,20 +6,19 @@
  * pnpm, yarn, and bun. Pure data + a string-builder — runs at build
  * time in Astro frontmatter, not in the browser.
  *
- * Currently consumed by the PackageManagers component. Free-standing —
- * customize freely or use elsewhere; you own this code.
+ * Consumed by the PackageManagers component, its Markdown output, and the
+ * CLI's printed commands, so all three agree.
  */
 
 export type Manager = "npm" | "yarn" | "pnpm" | "bun";
 
-export type CommandType =
-  | "add"
-  | "create"
-  | "dlx"
-  | "exec"
-  | "install"
-  | "remove"
-  | "run";
+const COMMAND_TYPES = ["add", "create", "dlx", "exec", "install", "remove", "run"] as const;
+
+export type CommandType = (typeof COMMAND_TYPES)[number];
+
+export function isCommandType(value: string): value is CommandType {
+  return (COMMAND_TYPES as readonly string[]).includes(value);
+}
 
 export interface CommandOptions {
   args?: string;
@@ -85,6 +84,20 @@ const commands: Record<
 
 export const MANAGERS: readonly Manager[] = ["npm", "yarn", "pnpm", "bun"];
 
+/**
+ * `pnpm <x>` and `yarn <x>` run an installed bin, never a package, so `exec`
+ * names the bin a scoped package gets by default: `@cloudflare/nimbus-docs`
+ * → `nimbus-docs`. `npx` and `bunx` take the package and prefer a local
+ * install, and the scoped name keeps them from fetching an unrelated
+ * unscoped package when it isn't installed.
+ */
+function binName(pkg: string): string {
+  // String slicing, not a regex: CodeQL flags `/@[^\s]*$/` as polynomial.
+  const name = pkg.startsWith("@") ? pkg.slice(pkg.indexOf("/") + 1) : pkg;
+  const version = name.indexOf("@");
+  return version > 0 ? name.slice(0, version) : name;
+}
+
 export function getCommand(
   mgr: Manager,
   type: CommandType,
@@ -99,7 +112,9 @@ export function getCommand(
     const processedPkg =
       type === "create" && mgr === "yarn"
         ? pkg.replace(/@(?![^@]*\/)[^\s]*$/, "")
-        : pkg;
+        : type === "exec" && (mgr === "pnpm" || mgr === "yarn")
+          ? binName(pkg)
+          : pkg;
     cmd += ` ${processedPkg}`;
   }
   if (args) {

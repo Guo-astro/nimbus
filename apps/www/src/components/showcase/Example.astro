@@ -11,7 +11,7 @@
  */
 import { Code as AstroCode } from "astro:components";
 import PreviewStage from "./PreviewStage.astro";
-import { Code } from "@/components/ui/code";
+import SourceCode from "./SourceCode.astro";
 
 type CodeProps = Parameters<typeof AstroCode>[0];
 
@@ -46,7 +46,7 @@ const codeWrapperClass = mdxTag
   </PreviewStage>
   {code && (
     <div class={codeWrapperClass}>
-      <Code code={code} lang={lang} raw />
+      <SourceCode code={code} lang={lang} />
     </div>
   )}
 </div>

@@ -40,6 +40,7 @@ import {
 import { validateNimbusConfig } from "../src/_internal/validate.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
 import type { NimbusConfig, RenderingConfig } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
 
 const baseConfig = (rendering?: RenderingConfig): NimbusConfig => ({
   site: "https://example.test",
@@ -48,21 +49,11 @@ const baseConfig = (rendering?: RenderingConfig): NimbusConfig => ({
   ...(rendering ? { rendering } : {}),
 });
 
-test("request inventory preserves prose ids and only collapses the API root", () => {
-  assert.equal(requestInventoryEntryUrl("", "index", false), "/index");
-  assert.equal(
-    requestInventoryEntryUrl("", "guides/index", false),
-    "/guides/index",
-  );
-  assert.equal(
-    requestInventoryEntryUrl("/blog", "index", false),
-    "/blog/index",
-  );
-  assert.equal(requestInventoryEntryUrl("/api", "index", true), "/api");
-  assert.equal(
-    requestInventoryEntryUrl("/api", "guides/index", true),
-    "/api/guides/index",
-  );
+test("request inventory serves an index at its collection's URL and keeps other ids", () => {
+  assert.equal(requestInventoryEntryUrl("", "index"), "/");
+  assert.equal(requestInventoryEntryUrl("", "guides/index"), "/guides/index");
+  assert.equal(requestInventoryEntryUrl("/blog", "index"), "/blog");
+  assert.equal(requestInventoryEntryUrl("/api", "guides/index"), "/api/guides/index");
   assert.equal(
     requestInventoryVersionStatusKey("docs-v1", false, "v1"),
     "docs-v1",
@@ -72,12 +63,12 @@ test("request inventory preserves prose ids and only collapses the API root", ()
 
 test("content inventory uses final IDs and each collection's actual render mode", () => {
   assert.equal(
-    contentInventoryEntryUrl("", "1.1.1.1/encryption", false, false),
+    contentInventoryEntryUrl("", "1.1.1.1/encryption", false),
     "/1.1.1.1/encryption",
   );
-  assert.equal(contentInventoryEntryUrl("", "index", false, false), "/");
-  assert.equal(contentInventoryEntryUrl("", "index", false, true), "/index");
-  assert.equal(contentInventoryEntryUrl("/api", "index", true, true), "/api");
+  assert.equal(contentInventoryEntryUrl("", "index", false), "/");
+  assert.equal(contentInventoryEntryUrl("", "index", true), "/");
+  assert.equal(contentInventoryEntryUrl("/api", "index", true), "/api");
 });
 
 test("request inventory reader removes root and base-prefixed candidates", async (t) => {
@@ -247,15 +238,15 @@ test("canonical route keys respect collection mounts and custom srcDir", () => {
   const versions = { others: ["v1"] };
 
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "docs", versions),
+    canonicalCollectionRouteComponent(srcDir, "docs", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "[...slug].astro"),
   );
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "docs-v1", versions),
+    canonicalCollectionRouteComponent(srcDir, "docs-v1", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "v1", "[...slug].astro"),
   );
   assert.equal(
-    canonicalCollectionRouteComponent(srcDir, "api", versions),
+    canonicalCollectionRouteComponent(srcDir, "api", { versions, routes: NO_ROUTES }, root),
     path.join(srcDir, "pages", "api", "[...slug].astro"),
   );
   assert.deepEqual(
@@ -272,6 +263,9 @@ test("canonical route keys respect collection mounts and custom srcDir", () => {
   );
 });
 
+// A collection route with its paths, as built routes need.
+const ROUTE_STUB = "---\nexport const getStaticPaths = paths;\n---\n";
+
 async function setupIntegration(
   t: TestContext,
   rendering?: RenderingConfig,
@@ -280,6 +274,7 @@ async function setupIntegration(
   api?: NimbusConfig["api"],
   integrationOptions: Partial<NimbusIntegrationOptions> & {
     omitCanonicalDocsRoute?: boolean;
+    files?: Record<string, string>;
   } = {},
   base = "",
   trailingSlash: "always" | "never" | "ignore" = "ignore",
@@ -299,17 +294,18 @@ async function setupIntegration(
   );
   await write("src/content.config.ts", contentConfig);
   await write("src/components.ts", "export const components = {};\n");
-  const { omitCanonicalDocsRoute = false, ...options } = integrationOptions;
+  const { omitCanonicalDocsRoute = false, files = {}, ...options } = integrationOptions;
   if (!omitCanonicalDocsRoute) {
-    await write("src/pages/[...slug].astro", "---\n---\n");
+    await write("src/pages/[...slug].astro", ROUTE_STUB);
   }
-  await write("src/pages/blog/[...slug].astro", "---\n---\n");
-  await write("src/pages/v1/[...slug].astro", "---\n---\n");
-  await write("src/pages/api/[...slug].astro", "---\n---\n");
+  await write("src/pages/blog/[...slug].astro", ROUTE_STUB);
+  await write("src/pages/v1/[...slug].astro", ROUTE_STUB);
+  await write("src/pages/api/[...slug].astro", ROUTE_STUB);
   await write(
     "src/content/docs/index.mdx",
     "# Docs\n\n```js\nconst requestRendered = true;\n```\n",
   );
+  for (const [file, body] of Object.entries(files)) await write(file, body);
 
   const integration = nimbus(
     {
@@ -335,6 +331,7 @@ async function setupIntegration(
       return {} as never;
     },
     injectRoute: (route: unknown) => injectedRoutes.push(route),
+    addWatchFile: () => {},
     config: {
       root: pathToFileURL(`${root}${path.sep}`),
       srcDir: pathToFileURL(`${path.join(root, "src")}${path.sep}`),
@@ -415,6 +412,9 @@ function resolvedNimbusRoutes(
             ? injected.entrypoint.href
             : injected.entrypoint,
         type: "endpoint",
+        patternRegex: new RegExp(
+          `^${injected.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+        ),
         isPrerendered: true,
         origin: "project",
       };
@@ -471,7 +471,7 @@ async function generateRequestSitemap(
     ...resolvedNimbusRoutes(integration.injectedRoutes, renderingMode),
     ...sitemapRoutes,
   ];
-  integration.routesResolved({ routes } as never);
+  integration.routesResolved({ routes, logger: buildLogger } as never);
 
   const sitemapIntegration = integration.configUpdates
     .flatMap(
@@ -547,6 +547,28 @@ test("request-only sitemap uses upstream filtering, serialization, and deduplica
   assert.doesNotMatch(xml, /private|request-route-inventory/);
   assert.match(xml, /<changefreq>daily<\/changefreq>/);
   assert.match(xml, /<priority>0\.7<\/priority>/);
+});
+
+test("noindex pages stay out of a prerendered sitemap with and without base", async (t) => {
+  for (const base of ["/", "/docs"]) {
+    const prefix = base === "/" ? "" : base;
+    const xml = await generateRequestSitemap(
+      t,
+      [
+        { collection: "docs", url: "/public/", discoverable: true },
+        { collection: "docs", url: "/private/", discoverable: false },
+      ],
+      [{ pathname: "public/" }, { pathname: "private/" }],
+      {},
+      base,
+      "ignore",
+      "directory",
+      [],
+      "build",
+    );
+    assert.match(xml, new RegExp(`<loc>https://example\\.test${prefix}/public/</loc>`), base);
+    assert.doesNotMatch(xml, /private/, base);
+  }
 });
 
 test("mixed sitemap includes prerendered and request-rendered pages", async (t) => {
@@ -841,6 +863,7 @@ test("request inventory is removed before downstream build failures", async (t) 
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "build"),
+    logger: buildLogger,
   } as never);
   const dist = path.join(integration.root, "dist");
   const inventory = path.join(dist, "_nimbus/request-route-inventory.json");
@@ -864,7 +887,7 @@ test("request inventory is removed before downstream build failures", async (t) 
 test("route policy independently selects canonical collection catch-alls", async (t) => {
   const { routeSetup } = await setupIntegration(t, {
     default: "request",
-    collections: { docs: "build" },
+    collections: { docs: "build", blog: "request" },
   });
   const docs = { component: "src/pages/[...slug].astro", prerender: false };
   const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
@@ -888,17 +911,31 @@ test("route policy independently selects canonical collection catch-alls", async
   assert.equal(nearMatch.prerender, true);
 });
 
-test("omitted rendering policy leaves existing route decisions untouched", async (t) => {
-  const integration = await setupIntegration(t, undefined, "build");
-  const docs = { component: "src/pages/[...slug].astro", prerender: false };
+test("the rendering default does not reach collections the config does not name", async (t) => {
+  const { routeSetup } = await setupIntegration(t, {
+    default: "request",
+    collections: { docs: "build" },
+  });
   const blog = { component: "src/pages/blog/[...slug].astro", prerender: true };
+  await routeSetup({ route: blog } as never);
+  // `blog` is not `docs`, a version, an API collection, or named in
+  // `rendering.collections`, so the policy leaves its route alone.
+  assert.equal(blog.prerender, true);
+});
+
+test("omitted rendering policy builds every route Nimbus manages, collections included", async (t) => {
+  const integration = await setupIntegration(t, undefined, "build", undefined, undefined, {
+    files: { "src/pages/blog/[...slug].astro": '---\nimport { getCollectionStaticPaths } from "@cloudflare/nimbus-docs/runtime";\nexport const getStaticPaths = getCollectionStaticPaths("blog");\n---\n' },
+  });
+  const docs = { component: "src/pages/[...slug].astro", prerender: false };
+  const blog = { component: "src/pages/blog/[...slug].astro", prerender: false };
 
   await integration.routeSetup({ route: docs } as never);
   await integration.routeSetup({ route: blog } as never);
 
-  assert.equal(docs.prerender, false);
+  assert.equal(docs.prerender, true);
   assert.equal(blog.prerender, true);
-  assert.equal(integration.injectedRoutes.length, 1);
+  assert.equal(integration.injectedRoutes.length, 3);
 
   integration.configDone({
     injectTypes: () => new URL("file:///noop"),
@@ -907,6 +944,7 @@ test("omitted rendering policy leaves existing route decisions untouched", async
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "build"),
+    logger: buildLogger,
   } as never);
   const dist = path.join(integration.root, "dist");
   await mkdir(path.join(dist, "_nimbus"), { recursive: true });
@@ -955,14 +993,22 @@ test("opaque version registrations still reach the request inventory", async (t)
   assert.ok(virtualConfig?.resolveId && virtualConfig.load);
   const resolved = virtualConfig.resolveId("virtual:nimbus/config");
   assert.ok(resolved);
-  assert.match(
-    virtualConfig.load(resolved) ?? "",
-    /requestRenderingCollections = \["docs-v1"\]/,
-  );
-  assert.match(
-    virtualConfig.load(resolved) ?? "",
-    /indexedCollections = \["docs","docs-v1"\]/,
-  );
+  // The page-collection list comes from the registry record, not from
+  // parsing content.config.ts, so the opaque registration is irrelevant.
+  const preparedRoot = preparedMarkdownRootKey(integration.root);
+  for (const collection of ["docs", "docs-v1"]) {
+    const epoch = beginPreparedMarkdownLoad(preparedRoot, collection, true);
+    commitPreparedMarkdownCollection(
+      preparedRoot,
+      collection,
+      epoch,
+      { generation: 1, base: "/" },
+      [],
+    );
+  }
+  const source = (await virtualConfig.load(resolved)) ?? "";
+  assert.match(source, /requestRenderingCollections = \["docs-v1"\]/);
+  assert.match(source, /indexedCollections = \["docs","docs-v1"\]/);
 });
 
 test("an explicitly empty rendering policy applies the build default", async (t) => {
@@ -977,10 +1023,13 @@ test("an explicitly empty rendering policy applies the build default", async (t)
   await routeSetup({ route: blog } as never);
 
   assert.equal(docs.prerender, true);
-  assert.equal(blog.prerender, true);
+  // An unnamed collection's route keeps its own prerender value; after
+  // content sync the build fails if `blog` is a page collection with a
+  // catch-all route that `rendering` doesn't cover.
+  assert.equal(blog.prerender, false);
 });
 
-test("production request rendering requires server output and an adapter", async (t) => {
+test("production request rendering requires an adapter", async (t) => {
   const staticBuild = await setupIntegration(
     t,
     { collections: { docs: "request" } },
@@ -993,7 +1042,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter.*output=static, adapter=none/,
+    /rendering mode "request" needs a server adapter.*add adapter-node/,
   );
 
   const adapterlessBuild = await setupIntegration(
@@ -1008,7 +1057,7 @@ test("production request rendering requires server output and an adapter", async
         config: { output: "server", adapter: null },
         buildOutput: "server",
       } as never),
-    /output=server, adapter=none/,
+    /rendering mode "request" needs a server adapter/,
   );
 
   const serverBuild = await setupIntegration(
@@ -1024,15 +1073,76 @@ test("production request rendering requires server output and an adapter", async
     } as never),
   );
 
-  assert.throws(
-    () =>
+  for (const name of ["node", "@astrojs/netlify", "@astrojs/vercel", "test:adapter"]) {
+    assert.doesNotThrow(() =>
       serverBuild.configDone({
         injectTypes: () => new URL("file:///noop"),
-        config: { output: "server", adapter: { name: "node" } },
+        config: { output: "server", adapter: { name } },
         buildOutput: "server",
       } as never),
-    /currently requires `@astrojs\/cloudflare`/,
+    );
+  }
+});
+
+test("generated API request rendering retains its adapter compatibility guard", async (t) => {
+  const api = [{ collection: "api", spec: { openapi: "3.1.0", info: { title: "Example", version: "1" }, paths: { "/ping": { get: { operationId: "ping", responses: { "200": { description: "OK" } } } } } } }];
+  for (const mode of ["build", "request"] as const) {
+    const integration = await setupIntegration(t, { collections: { docs: "request", api: mode } }, "build", 'export const collections = { docs: {}, "docs-v1": {}, api: {} };\n', api);
+    const configure = () => integration.configDone({
+      injectTypes: () => new URL("file:///noop"),
+      config: { output: "server", adapter: { name: "@astrojs/node" } },
+      buildOutput: "server",
+    } as never);
+    if (mode === "request") assert.throws(configure, /generated API rendering.*currently requires `@astrojs\/cloudflare`/);
+    else assert.doesNotThrow(configure);
+  }
+});
+
+test("unbundled API adapter errors recommend only supported adapters", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { api: "request" } },
+    "build",
+    "export const collections = { api: {} };\n",
+    [
+      {
+        collection: "api",
+        spec: {
+          openapi: "3.1.0",
+          info: { title: "API", version: "1" },
+          paths: {
+            "/ping": {
+              get: {
+                operationId: "ping",
+                responses: { "200": { description: "OK" } },
+              },
+            },
+          },
+        },
+        bundle: false,
+      },
+    ],
   );
+  for (const output of ["static", "server"] as const) {
+    assert.throws(
+      () =>
+        integration.configDone({
+          injectTypes: () => new URL("file:///noop"),
+          config: { output, adapter: null },
+          buildOutput: output,
+        } as never),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /api bundle: false/);
+        assert.match(
+          error.message,
+          /add adapter-node/,
+        );
+        assert.doesNotMatch(error.message, /vercel|netlify/);
+        return true;
+      },
+    );
+  }
 });
 
 test("required canonical routes retain rendering policy when their file is missing", async (t) => {
@@ -1065,7 +1175,7 @@ test("required canonical routes retain rendering policy when their file is missi
         config: { output: "static", adapter: null },
         buildOutput: "static",
       } as never),
-    /requires Astro `output: "server"` and a compatible adapter/,
+    /rendering mode "request" needs a server adapter/,
   );
 });
 
@@ -1105,7 +1215,7 @@ test("production API request rendering is accepted with model packaging", async 
 test("configured request routes are explained to the build invariant", async (t) => {
   const integration = await setupIntegration(
     t,
-    { collections: { docs: "request" } },
+    { collections: { docs: "request", blog: "build" } },
     "build",
   );
   const route = {
@@ -1120,6 +1230,7 @@ test("configured request routes are explained to the build invariant", async (t)
   } as never);
   integration.routesResolved({
     routes: resolvedNimbusRoutes(integration.injectedRoutes, "request"),
+    logger: buildLogger,
   } as never);
   const preparedRoot = preparedMarkdownRootKey(integration.root);
   for (const [collection, entries] of [
@@ -1145,7 +1256,7 @@ test("configured request routes are explained to the build invariant", async (t)
       entries,
     );
   }
-  await integration.buildStart({} as never);
+  await integration.buildStart({ logger: buildLogger } as never);
 
   const dist = path.join(integration.root, "dist");
   await mkdir(path.join(dist, "_nimbus"), { recursive: true });
@@ -1182,24 +1293,25 @@ test("configured request routes are explained to the build invariant", async (t)
   assert.ok(
     infos.some((message) => /docs prerendered=1\/2 \(1 moved\)/.test(message)),
   );
-  assert.deepEqual(
-    JSON.parse(
-      await readFile(
-        path.join(integration.root, ".nimbus/routes.json"),
-        "utf8",
-      ),
-    ),
-    {
-      version: 1,
-      base: "",
-      knownRoutes: [
-        "/built",
-        "/foo/_nimbus/request-route-inventory.json",
-        "/guide",
-      ],
-      opaqueNamespaces: [],
-    },
-  );
+  // Every build dates its route truth; the rest is exact.
+  const { builtAt, ...truth } = JSON.parse(
+    await readFile(path.join(integration.root, ".nimbus/routes.json"), "utf8"),
+  ) as { builtAt: string };
+  assert.ok(!Number.isNaN(Date.parse(builtAt)));
+  assert.deepEqual(truth, {
+    version: 3,
+    base: "",
+    knownRoutes: [
+      "/built",
+      "/foo/_nimbus/request-route-inventory.json",
+      "/guide",
+    ],
+    redirects: [],
+    redirectPages: [],
+    redirectRules: "cloudflare",
+    mounts: { docs: "", "docs-v1": "/v1", blog: "/blog" },
+    opaqueNamespaces: [],
+  });
   assert.equal(
     integration.injectedRoutes.some(
       (candidate) =>
@@ -1243,6 +1355,12 @@ test("collection parsing reports whether registrations are complete", async (t) 
     complete: true,
   });
 
+  await writeFile(file, 'export const collections = { docs: {}, "docs-v1.2": {} };\n');
+  assert.deepEqual(await parseContentCollections(file), {
+    names: ["docs", "docs-v1.2"],
+    complete: true,
+  });
+
   await writeFile(
     file,
     "export const collections = { docs: {}, ...extras, [name]: value };\n",
@@ -1269,6 +1387,39 @@ test("collection parsing reports whether registrations are complete", async (t) 
 
   await writeFile(
     file,
+    "export const collections = {}; const registered = collections; registered.docs = {};\n",
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(file, "export const collections = {}; register(collections);\n");
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(
+    file,
+    "function registerDocs() { collections.docs = {}; }\nexport const collections = {};\nregisterDocs();\n",
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: [],
+    complete: false,
+  });
+
+  await writeFile(
+    file,
+    'import { defineCollection } from "astro:content";\nimport { docsCollection } from "@cloudflare/nimbus-docs/content";\nexport const collections = { api: {} };\n',
+  );
+  assert.deepEqual(await parseContentCollections(file), {
+    names: ["api"],
+    complete: true,
+  });
+
+  await writeFile(
+    file,
     "export const collections = { docs: {} }; type Name = keyof typeof collections;\n",
   );
   assert.deepEqual(await parseContentCollections(file), {
@@ -1277,32 +1428,21 @@ test("collection parsing reports whether registrations are complete", async (t) 
   });
 });
 
-test("opaque registrations cannot silently absorb request policy", async (t) => {
+test("opaque registrations no longer gate the request policy", async (t) => {
   const contentConfig =
     'const extras = {}; export const collections = { docs: {}, "docs-v1": {}, ...extras };\n';
-  await assert.rejects(
-    () => setupIntegration(t, { default: "request" }, "build", contentConfig),
-    /cannot safely enumerate collections.*cannot identify statically/,
+  // Which collections are pages comes from the registry record, never from
+  // parsing content.config.ts, so opaque registrations can't block setup.
+  await assert.doesNotReject(() =>
+    setupIntegration(t, { default: "request" }, "build", contentConfig),
   );
-  await assert.rejects(
-    () =>
-      setupIntegration(
-        t,
-        { default: "request" },
-        "build",
-        "const all = {}; export { all as collections };\n",
-      ),
-    /cannot safely enumerate collections.*cannot identify statically/,
-  );
-  await assert.rejects(
-    () =>
-      setupIntegration(
-        t,
-        { collections: { blog: "request" } },
-        "build",
-        contentConfig,
-      ),
-    /cannot safely enumerate collections.*cannot identify statically/,
+  await assert.doesNotReject(() =>
+    setupIntegration(
+      t,
+      { default: "request" },
+      "build",
+      "const all = {}; export { all as collections };\n",
+    ),
   );
 
   const knownOverride = await setupIntegration(
@@ -1314,9 +1454,251 @@ test("opaque registrations cannot silently absorb request policy", async (t) => 
   const docs = { component: "src/pages/[...slug].astro", prerender: true };
   await knownOverride.routeSetup({ route: docs } as never);
   assert.equal(docs.prerender, false);
-  const injected = knownOverride.injectedRoutes[0] as {
+  const injected = knownOverride.injectedRoutes.find((route) =>
+    (route as { pattern: string }).pattern.includes("request-route-inventory"),
+  ) as {
     entrypoint: URL;
   };
   assert.equal(injected.entrypoint.protocol, "file:");
   assert.match(injected.entrypoint.pathname, /request-route-inventory\.ts$/);
+});
+
+// ---------------------------------------------------------------------------
+// Post-sync page checks: the record (not content.config.ts) decides which
+// collections are pages, and the build verifies the policy against it.
+// ---------------------------------------------------------------------------
+
+function commitPageCollections(
+  projectRoot: string,
+  collections: readonly string[],
+): void {
+  const preparedRoot = preparedMarkdownRootKey(projectRoot);
+  for (const collection of collections) {
+    const epoch = beginPreparedMarkdownLoad(preparedRoot, collection, true);
+    commitPreparedMarkdownCollection(
+      preparedRoot,
+      collection,
+      epoch,
+      { generation: 1, base: "/" },
+      [],
+    );
+  }
+}
+
+test("a rendering.collections key that isn't a page collection fails after sync", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build", blog: "request" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /rendering\.collections names a collection that is not a Nimbus page collection[\s\S]*"blog"/,
+  );
+});
+
+test("a page collection with an uncovered catch-all route fails after sync", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1", "blog"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /doesn't cover page collection.*"blog".*Add "blog" to rendering\.collections/s,
+  );
+});
+
+test("a versions.others entry without a page collection fails after sync", async (t) => {
+  const integration = await setupIntegration(t, undefined, "build");
+  commitPageCollections(integration.root, ["docs"]);
+  await assert.rejects(
+    integration.buildStart({ logger: buildLogger } as never),
+    /versions\.others.*docs-v1/s,
+  );
+});
+
+test("the build writes .nimbus/page-collections.json for nimbus-docs check", async (t) => {
+  const integration = await setupIntegration(
+    t,
+    { collections: { docs: "build", blog: "build" } },
+    "build",
+  );
+  commitPageCollections(integration.root, ["docs", "docs-v1", "blog"]);
+  await integration.buildStart({ logger: buildLogger } as never);
+  const file = path.join(integration.root, ".nimbus", "page-collections.json");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), {
+    version: 1,
+    collections: ["docs", "docs-v1", "blog"],
+    mdxFiles: [],
+  });
+});
+
+const resolvedRoutes = (...components: string[]) => components.map((entrypoint) => ({ entrypoint, type: "page", segments: [], params: [] }));
+
+test("route files that don't match rendering get one warning listing them", async (t) => {
+  const integration = await setupIntegration(t, {
+    default: "request",
+    collections: { docs: "request", blog: "build" },
+  });
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "request", collections: { docs: "request", blog: "build" } } })] };\n',
+    "utf8",
+  );
+  const built =
+    '---\nimport { getDocsStaticPaths } from "@cloudflare/nimbus-docs";\nexport const prerender = true;\nexport const getStaticPaths = getDocsStaticPaths;\n---\n';
+  const request = "---\nexport const prerender = false;\n---\n";
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), built, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/blog/[...slug].astro"), built, "utf8");
+  await writeFile(path.join(integration.root, "src/pages/v1/[...slug].astro"), request, "utf8");
+  for (const component of ["src/pages/[...slug].astro", "src/pages/blog/[...slug].astro", "src/pages/v1/[...slug].astro"])
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  const warnings: string[] = [];
+  const logger = { info() {}, warn: (message: string) => warnings.push(message), error() {}, debug() {} };
+  const routes = resolvedRoutes("src/pages/[...slug].astro", "src/pages/blog/[...slug].astro", "src/pages/v1/[...slug].astro");
+  integration.routesResolved({ routes, logger } as never);
+  integration.routesResolved({ routes, logger } as never);
+
+  assert.equal(warnings.length, 1);
+  assert.match(
+    warnings[0]!,
+    new RegExp(
+      "^1 route file doesn't match `rendering`, which wins at build:\n" +
+        "  src/pages/\\[\\.\\.\\.slug\\]\\.astro: file builds ahead of time, `rendering` renders \"docs\" on request\n" +
+        "Run `.*check --fix` to update it\\. Until then, Astro may warn that getStaticPaths is ignored",
+      "u",
+    ),
+  );
+});
+
+test("a route file removed in dev drops out of the warning", async (t) => {
+  const integration = await setupIntegration(t, { default: "request", collections: { docs: "request", blog: "request" } });
+  const built = "---\nexport const prerender = true;\n---\n";
+  const [docs, blog] = ["src/pages/[...slug].astro", "src/pages/blog/[...slug].astro"];
+  for (const component of [docs, blog]) {
+    await writeFile(path.join(integration.root, component), built, "utf8");
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  }
+  const warnings: string[] = [];
+  const logger = { info() {}, warn: (message: string) => warnings.push(message), error() {}, debug() {} };
+  integration.routesResolved({ routes: resolvedRoutes(docs, blog), logger } as never);
+  integration.routesResolved({ routes: resolvedRoutes(docs), logger } as never);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0]!, /^2 route files/);
+  assert.match(warnings[1]!, /^1 route file doesn't match/);
+  assert.doesNotMatch(warnings[1]!, /blog/);
+});
+
+test("a request-rendered route with getStaticPaths is reported, whatever its prerender line", async (t) => {
+  const integration = await setupIntegration(t, { default: "request" });
+  await writeFile(
+    path.join(integration.root, "src/pages/[...slug].astro"),
+    "---\nexport const getStaticPaths = paths;\n---\n",
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  const warnings: string[] = [];
+  integration.routesResolved({
+    routes: resolvedRoutes("src/pages/[...slug].astro"),
+    logger: { info() {}, warn: (m: string) => warnings.push(m), error() {}, debug() {} },
+  } as never);
+  assert.match(warnings[0] ?? "", /src\/pages\/\[\.\.\.slug\]\.astro: file builds ahead of time, `rendering` renders "docs" on request/);
+});
+
+test("a built dynamic route with no getStaticPaths fails the build, naming the fix", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
+  await writeFile(
+    path.join(integration.root, "src/pages/llms.txt.ts"),
+    'import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const { GET } = llmsRoute();\n',
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  await integration.routeSetup({ route: { component: "src/pages/llms.txt.ts", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", "src/pages/llms.txt.ts"), logger: buildLogger } as never),
+    /A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro\nRun .*check --fix.* to add getStaticPaths to it\..*reference\/rendering\//s,
+  );
+});
+
+test("when check --fix can't plan the edits, the advice says to edit by hand and why", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(path.join(integration.root, "astro.config.ts"), "export default makeConfig();\n", "utf8");
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /check --fix` can't edit route files here \(the Nimbus config can't be read statically\), so edit it by hand\./u);
+      assert.doesNotMatch(error.message, /Run `/u);
+      return true;
+    },
+  );
+});
+
+test("a built dynamic route only an author can fix gets its own step, not the fix command", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { output: "server", integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\nexport const prerender = import.meta.env.PROD;\n---\n", "utf8");
+  await integration.routeSetup({ route: { component: "src/pages/[...slug].astro", prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro"), logger: buildLogger } as never),
+    (error: Error) => {
+      assert.match(error.message, /^A dynamic route is built ahead of time with no getStaticPaths, so Astro can't build it:\n  src\/pages\/\[\.\.\.slug\]\.astro: Its `prerender` is an expression[^\n]*\nSee https:\/\/nimbus-docs\.com\//u);
+      return true;
+    },
+  );
+});
+
+test("a build error listing files --fix can and can't change says which the command covers", async (t) => {
+  const integration = await setupIntegration(t, { default: "build" }, "build");
+  await writeFile(
+    path.join(integration.root, "astro.config.ts"),
+    'import nimbus from "@cloudflare/nimbus-docs";\nexport default { output: "server", integrations: [nimbus({ site: "https://docs.example.com", title: "X", rendering: { default: "build" } })] };\n',
+    "utf8",
+  );
+  const markdown = "src/pages/[...slug]/index.md.ts";
+  await mkdir(path.join(integration.root, "src/pages/[...slug]"), { recursive: true });
+  await writeFile(path.join(integration.root, "src/pages/[...slug].astro"), "---\nexport const prerender = import.meta.env.PROD;\n---\n", "utf8");
+  await writeFile(
+    path.join(integration.root, markdown),
+    'import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = true;\nexport const { GET } = markdownRoute();\n',
+    "utf8",
+  );
+  for (const component of ["src/pages/[...slug].astro", markdown])
+    await integration.routeSetup({ route: { component, prerender: true } } as never);
+  assert.throws(
+    () => integration.routesResolved({ routes: resolvedRoutes("src/pages/[...slug].astro", markdown), logger: buildLogger } as never),
+    /Dynamic routes are built ahead of time with no getStaticPaths[\s\S]*\nRun .*check --fix.* to add getStaticPaths to the other\.\n/u,
+  );
+});
+
+test("the Astro hint about ignored getStaticPaths comes only with a file Astro warns about", async (t) => {
+  const integration = await setupIntegration(t, { default: "request", collections: { docs: "request", blog: "request" } });
+  const llmsFull = "src/pages/llms-full.txt.ts";
+  await writeFile(
+    path.join(integration.root, llmsFull),
+    'import { llmsFullRoute } from "@cloudflare/nimbus-docs/agent-endpoints";\nexport const prerender = true;\nexport const { GET } = llmsFullRoute();\n',
+    "utf8",
+  );
+  await integration.routeSetup({ route: { component: llmsFull, prerender: true } } as never);
+  const warnings: string[] = [];
+  integration.routesResolved({
+    routes: resolvedRoutes(llmsFull),
+    logger: { info() {}, warn: (m: string) => warnings.push(m), error() {}, debug() {} },
+  } as never);
+  assert.match(warnings[0] ?? "", /llms-full\.txt\.ts: file builds ahead of time/);
+  assert.doesNotMatch(warnings[0] ?? "", /Astro may warn/);
 });

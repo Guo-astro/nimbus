@@ -18,6 +18,8 @@ interface PreparedHeadingsModule {
   generation: unknown;
   base: unknown;
   records: unknown;
+  /** Present when the dev server renders one page's headings at a time. */
+  load?: (collection: string, id: string) => Promise<PreparedHeadingsModule>;
 }
 
 const indexes = new WeakMap<object, Map<string, unknown[]>>();
@@ -61,7 +63,7 @@ export async function getPreparedHeadings(
   const loaded =
     (await import("virtual:nimbus/headings")) as PreparedHeadingsModule;
   return validatePreparedHeadings(
-    loaded,
+    typeof loaded.load === "function" ? await loaded.load(collection, id) : loaded,
     collection,
     id,
     import.meta.env.BASE_URL,

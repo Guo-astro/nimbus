@@ -1,0 +1,161 @@
+---
+title: Code samples
+description: The request samples on each operation page, where their values come from, and how to replace them.
+aiGenerated: true
+sidebar:
+  order: 3
+---
+
+Each operation page shows the request in cURL, TypeScript, and Python, built from the specification.
+
+## Parameter values
+
+- A parameter's own `example`, or its first `examples` entry, comes first.
+- Otherwise the value is generated from the parameter's schema, as request bodies are. Without a declared value, it's a type guess, such as `string`, `0`, or a format's stock value.
+- A path parameter without a declared value shows its name in angle brackets, such as `<account_id>`: a guessed identifier would name no real resource.
+- Required query parameters and headers keep the generated value, guesses included. One with no schema, or whose generated value is an array or object, shows `<name>`.
+- Optional query parameters and headers are left out of samples, even with an `example`.
+
+## Servers and credentials
+
+- **Credentials** render as placeholders: `Bearer <token>`, `Basic <credentials>`, or the API key's name, such as `<X-API-Key>`. Placeholders are never URL-encoded; declared values are.
+- **Server.** Samples use the spec's first server, with each variable set to its `default`. A variable with no default shows as `<region>`.
+- **No server**, or a relative one such as `/v1`: samples start with `<base-url>` for the reader to fill in.
+
+## Request bodies
+
+A body uses the request example, or a value generated from the schema.
+
+A string example is sent exactly as written, unless the media type is JSON (`application/json` or a `+json` type), which sends it as a JSON string. So a string under `application/x-ndjson` arrives unchanged.
+
+An explicit JSON `null` is sent as `null`, which is different from no body.
+
+### Form bodies
+
+An `application/x-www-form-urlencoded` body is sent as form fields. Without an `encoding` entry, properties use the bracket convention most form APIs expect:
+
+| Value | Sent as |
+|---|---|
+| Nested object | `metadata[plan]=pro` |
+| Array of scalars | `tags=a&tags=b` |
+| Array of objects | `items[0][price]=p_1` |
+| `null` or `""` | `name=` |
+| Empty object or array | no field |
+
+A property with an `encoding` entry follows it. `style`, `explode` or `allowReserved` select query-style serialization, and `deepObject` indexes every array, such as `expand[0]=customer`. An entry with only a `contentType` sends the value as that type, so an object is sent as JSON.
+
+For example, this media type sends `tags` joined with commas and `metadata` in brackets:
+
+```yaml
+application/x-www-form-urlencoded:
+  schema:
+    type: object
+    properties:
+      tags: { type: array, items: { type: string } }
+      metadata: { type: object, additionalProperties: { type: string } }
+  encoding:
+    tags: { style: form, explode: false }
+  example:
+    tags: ["a,b", "c"]
+    metadata: { plan: pro }
+```
+
+```text
+tags=a%2Cb,c&metadata%5Bplan%5D=pro
+```
+
+- **`explode: false`** joins items with `,` (`form`), `|` (`pipeDelimited`) or `%20` (`spaceDelimited`). Each item is encoded first, so a separator inside an item stays distinct.
+- **`explode: true`** repeats the field once per item.
+- **`allowReserved: true`** sends a `,` inside an item unencoded, as OpenAPI specifies, so `["a,b", "c"]` and `["a", "b,c"]` send the same bytes. Form delimiters (`=`, `&`, `+`) and unsafe characters stay encoded.
+- **A JSON `contentType`** JSON-serializes each value first, so `abc` is sent as `%22abc%22`, and `null` as `null`.
+
+A string example is read as an already-encoded form.
+
+### Multipart bodies
+
+A `multipart/form-data` body is sent as one part per field:
+
+- **Files.** A string with `format: binary` is sent as a file named `<file>` (the field's name in brackets). An array of files sends one part per item, and a generated example has two. File parts default to `application/octet-stream`.
+- **Fields with an `encoding` entry.** In OpenAPI 3.1, `style`, `explode` and `allowReserved` serialize the field as a form field, so `deepObject` gives names such as `link_options[create]`. A `contentType` sends the part with that type. OpenAPI 3.0 ignores these for multipart.
+- **Other fields.** An object, or an array of objects, is one JSON part. An array of scalars repeats the field. Anything else is a text part, sent as written, even when it starts with `@`.
+
+Only `format: binary` makes a field a file; in OpenAPI 3.1, use `encoding.contentType` to set a part's type. Other multipart types, such as `multipart/mixed`, get no generated sample, and the page shows the request example instead.
+
+For example, a file upload with one text field:
+
+```sh
+curl --request POST \
+  --url https://api.example.com/v1/files \
+  --form 'file=@<file>;type=application/octet-stream' \
+  --form-string 'purpose=identity_document'
+```
+
+And a request with no body, a path parameter, and a bearer token:
+
+```sh
+curl --request GET \
+  --url 'https://api.example.com/accounts/<account_id>' \
+  --header 'Authorization: Bearer <token>'
+```
+
+## Authored samples
+
+An operation's `x-codeSamples` replace the generated samples, and Nimbus never changes their text. Each entry is `{ lang, label?, source }`. Every entry is shown, in order, including several in one language. Authored samples need neither generator package; a site that authors every sample can set `samples.generate: []` and build without them. Both packages are optional peers, so under pnpm a removal takes effect once the lockfile no longer lists them.
+
+Each entry's `label` names it in the code rail and the Markdown version. Without one, its `lang` is used, and repeats are numbered: `Python`, `Python (2)`.
+
+An authored sample is highlighted when its `lang`, in any case, is a language Shiki knows, such as `hcl`, `rust` or `kotlin`; any other `lang` renders as plain text. A `curl` sample is highlighted as `bash`, and its Markdown fence says `bash`; every other fence keeps the authored `lang`.
+
+The request body appears inside the code samples, and the Markdown version also lists it as an example request. An operation with no samples at all shows its request example on the page instead.
+
+## Choose languages
+
+Two settings on the `api` entry control generated samples, for every version of a family:
+
+- **`samples.generate`** picks the languages to generate. The default is all three, and `[]` generates none.
+- **`samples.keepGenerated`** keeps generated languages next to authored ones. Each must also be in `generate`.
+
+Valid values are `"curl"`, `"typescript"` and `"python"`. For example, to generate only cURL, and show it next to any authored SDK samples:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    samples: { generate: ["curl"], keepGenerated: ["curl"] },
+  },
+],
+```
+
+Kept samples follow the authored ones. An authored sample in the same language replaces the generated one: `curl`, `python` or `py`, `typescript` or `ts`, in any case. A `shell` or `bash` sample doesn't replace cURL.
+
+The code rail remembers the reader's language, not the exact sample. A `?lang=` link opens the sample with that id, such as `python-2`, or the first in that language, such as `python`.
+
+## Render prepared code in your own components
+
+`apiCollection()` highlights request samples, primary and named request examples, responses, and the examples of additional request body and response media types while it builds the content index. OpenAPI `requestBody.content.*.examples` entries are available as `ApiOperationPage.requestExamples`, preserving each key, summary, description, media type, and inline value. External-only examples are not fetched.
+
+User-owned renderers should render `highlightedHtml` with Astro's `set:html` rather than importing Shiki or Astro's `Code` component into a request-rendered route:
+
+```astro
+---
+import type { ApiOperationPage } from "@cloudflare/nimbus-docs/api";
+
+interface Props extends Pick<ApiOperationPage, "samples"> {}
+
+const { samples } = Astro.props;
+
+function preparedCode(value: { highlightedHtml?: string }): string {
+  if (!value.highlightedHtml) {
+    throw new Error("Nimbus API code was not prepared during content sync.");
+  }
+  return value.highlightedHtml;
+}
+---
+
+{samples.map((sample) => (
+  <Fragment set:html={preparedCode(sample)} />
+))}
+```
+
+Treat a missing prepared value as a stale or incorrectly built API index. Rebuild after changing the specification or API renderer types.

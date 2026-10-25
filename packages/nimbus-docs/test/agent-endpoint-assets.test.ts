@@ -37,6 +37,8 @@ import {
   removeAgentEndpointAssets,
   stageAgentEndpointAssets,
 } from "../src/_internal/agent-endpoint-assets.ts";
+import { collectionUrlsKey } from "../src/_internal/collection-mount.ts";
+import { renderApiPageMarkdown } from "../src/_internal/api/markdown.ts";
 
 const roots: string[] = [];
 const capability = { generation: 1, base: "/docs" };
@@ -70,9 +72,11 @@ function commit(
   entries: Array<{
     id: string;
     body?: string;
+    filePath?: string;
     data?: Record<string, unknown>;
     headings?: Array<{ depth: number; text: string; slug: string }>;
   }>,
+  urls?: string,
 ): void {
   const key = preparedMarkdownRootKey(root);
   const epoch = beginPreparedMarkdownLoad(key, collection, false);
@@ -81,13 +85,15 @@ function commit(
       key,
       collection,
       epoch,
-      capability,
+      urls === undefined ? capability : { ...capability, urls },
       entries.map((entry) => ({
         id: entry.id,
         body: entry.body,
+        filePath: entry.filePath,
         data: { ...entry.data },
       })) as never,
       new Map(entries.map((entry) => [entry.id, entry.headings ?? []])),
+      collection === "partials" ? "partials" : "page",
     ),
     true,
   );
@@ -115,6 +121,42 @@ const apiPage = (title: string) => ({
   },
 });
 
+test("bakes API discovery from thin entries through the projection callback", async () => {
+  const projectRoot = await root();
+  const entry = {
+    collection: "api",
+    id: "charges/create",
+    data: {
+      title: "Create charge",
+      description: "Creates a charge.",
+      coordinate: "createCharge",
+    },
+  };
+  const calls: string[] = [];
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    apiEntries: [entry],
+    renderApiEntryMarkdown: async (candidate: typeof entry, base: string) => {
+      calls.push(`${candidate.collection}:${candidate.id}:${base}`);
+      return "# Create charge\n\nCreates a charge.\n";
+    },
+  };
+
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+
+  assert.deepEqual(calls, ["api:charges/create:/docs"]);
+  const full = await readLlmsEndpointPayload(projectRoot, {
+    scope: "site",
+    surface: "full",
+  });
+  assert.match(full.body, /# Create charge/);
+  assert.match(full.body, /Creates a charge\./);
+});
+
 test("bakes compact headings with a revisioned partial resolver", async () => {
   const projectRoot = await root();
   commit(projectRoot, "docs", [
@@ -139,7 +181,6 @@ test("bakes compact headings with a revisioned partial resolver", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
     partialResolver: {
       revision: "product-v1",
       resolve: ({ file, product }: { file: string; product?: string }) =>
@@ -171,6 +212,35 @@ test("bakes compact headings with a revisioned partial resolver", async () => {
   );
 });
 
+test("does not expand literal Render elements in Markdown headings", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    {
+      id: "guide",
+      filePath: "src/content/docs/guide.md",
+      body: '# Guide\n\n<Render file="snippet" />',
+      headings: [{ depth: 1, text: "Guide", slug: "guide" }],
+    },
+  ]);
+  commit(projectRoot, "partials", [
+    {
+      id: "snippet",
+      body: "## Partial heading",
+      headings: [
+        { depth: 2, text: "Partial heading", slug: "partial-heading" },
+      ],
+    },
+  ]);
+
+  const records = await bakePreparedHeadings({
+    root: projectRoot,
+    base: "/docs",
+  });
+  assert.deepEqual(records[0]?.headings, [
+    { depth: 1, text: "Guide", slug: "guide" },
+  ]);
+});
+
 test("bakes expanded source and transformed Markdown endpoint assets deterministically", async () => {
   const projectRoot = await root();
   commit(projectRoot, "docs", [
@@ -199,7 +269,6 @@ test("bakes expanded source and transformed Markdown endpoint assets determinist
     site: "https://example.test",
     title: "Test",
     socialImage: "/og.png",
-    indexedCollections: ["docs"],
     citationIndex: new Map([["api:list", "/api/list"]]),
     componentMap: {
       Catalog: {
@@ -245,7 +314,7 @@ test("bakes expanded source and transformed Markdown endpoint assets determinist
   assert.equal(markdown.mediaType, "text/markdown; charset=utf-8");
   assert.match(markdown.body, /\[Nested\]\(\/nested\)/);
   assert.doesNotMatch(markdown.body, /wrong/);
-  assert.match(markdown.body, /\[API\]\(\/docs\/api\/list\)/);
+  assert.match(markdown.body, /\[API\]\(\/docs\/api\/list\/\)/);
   assert.match(
     markdown.body,
     /image: "https:\/\/example\.test\/docs\/og\.png"/,
@@ -263,6 +332,26 @@ test("bakes expanded source and transformed Markdown endpoint assets determinist
     "utf8",
   );
   assert.equal(manifest, `${JSON.stringify(first, null, 2)}\n`);
+});
+
+test("a section takes its index page's sidebar group label, then its title", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    {
+      id: "guide",
+      body: "Overview",
+      data: { title: "Guides overview", sidebar: { group: { label: "Guides" } } },
+    },
+    { id: "guide/a", body: "Guide A", data: { title: "Guide A" } },
+    { id: "ref", body: "Reference", data: { title: "Reference home" } },
+    { id: "ref/a", body: "Ref A", data: { title: "Ref A" } },
+  ]);
+  const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test" };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  const index = await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" });
+  assert.match(index.body, /\[Guides\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/);
+  assert.match(index.body, /\[Reference home\]\(https:\/\/example\.test\/docs\/ref\/llms\.txt\)/);
 });
 
 test("bakes site and section llms.txt endpoint assets from public discoverable prose and API pages", async () => {
@@ -293,8 +382,6 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
     site: "https://example.test",
     title: "Test",
     description: "Test docs",
-    indexedCollections: ["blog", "docs-v1", "docs", "api"],
-    apiCollections: ["api"],
     versions: { current: "current", others: ["v1"], hidden: ["v1"] },
     componentMap: {
       Card: {
@@ -357,11 +444,11 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
   );
   assert.match(
     index.body,
-    /\[guide\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/,
+    /\[Guide\]\(https:\/\/example\.test\/docs\/guide\/llms\.txt\)/,
   );
   assert.match(
     index.body,
-    /\[api\]\(https:\/\/example\.test\/docs\/api\/llms\.txt\)/,
+    /\[API\]\(https:\/\/example\.test\/docs\/api\/llms\.txt\)/,
   );
   assert.doesNotMatch(index.body, /v1|Hidden/);
 
@@ -370,6 +457,8 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
     surface: "index",
     section: "guide",
   });
+  // Sections are named for their index page, or their folder as the sidebar names it.
+  assert.match(guide.body, /^# Guide\n/);
   assert.match(guide.body, /Guide A/);
   assert.match(guide.body, /Guide B.*Second guide/);
   assert.doesNotMatch(guide.body, /Hidden/);
@@ -395,6 +484,27 @@ test("bakes site and section llms.txt endpoint assets from public discoverable p
   );
 });
 
+test("without an llms-full.txt route, the document is neither built nor linked", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "guide", body: "Guide body", data: { title: "Guide" } },
+  ]);
+  configure(projectRoot, {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    fullDocument: false,
+  });
+  const manifest = await ensureAgentEndpointAssets(projectRoot);
+  assert.ok(manifest.llmsAssets.every((asset) => asset.surface !== "full"));
+  const index = await readLlmsEndpointPayload(projectRoot, {
+    scope: "site",
+    surface: "index",
+  });
+  assert.doesNotMatch(index.body, /llms-full/);
+});
+
 test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets", async () => {
   const projectRoot = await root();
   commit(projectRoot, "docs", [
@@ -405,7 +515,6 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
 
@@ -419,7 +528,17 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
   assert.ok(source);
   assert.doesNotMatch(source, /Unique prepared body/);
   assert.match(source, /assets\//);
+  assert.doesNotMatch(source, /headings/);
   assert.equal(isAgentEndpointAssetRequested(projectRoot), true);
+  const server = agentEndpointAssetsRuntimePlugin(projectRoot, () => true);
+  assert.match(
+    (await server.load.call({ environment: { name: "ssr" } }, id)) ?? "",
+    /export const manifest = null;/,
+  );
+  assert.match(
+    (await server.load.call({ environment: { name: "prerender" } }, id)) ?? "",
+    /assets\//,
+  );
 
   const output = path.join(projectRoot, "dist", "client");
   const stale = path.join(
@@ -444,6 +563,16 @@ test("Markdown and llms.txt endpoints expose metadata and stage bodies as assets
   await assert.rejects(readFile(stale, "utf8"), { code: "ENOENT" });
   await assert.rejects(readFile(legacyStale, "utf8"), { code: "ENOENT" });
   const manifest = await ensureAgentEndpointAssets(projectRoot);
+  const { headings: _headings, ...staged } = manifest;
+  assert.deepEqual(
+    JSON.parse(
+      await readFile(
+        path.join(output, "_nimbus", "agent-endpoint-assets", "manifest.json"),
+        "utf8",
+      ),
+    ),
+    JSON.parse(JSON.stringify(staged)),
+  );
   for (const asset of [
     ...manifest.markdownAssets,
     ...manifest.llmsAssets,
@@ -507,7 +636,6 @@ test("staging rejects manifest paths outside asset roots before cleanup", async 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   });
   const manifest = await ensureAgentEndpointAssets(projectRoot);
   const asset = manifest.markdownAssets[0];
@@ -574,8 +702,6 @@ test("waits for API index transactions before caching llms.txt output", async ()
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs", "api"],
-    apiCollections: ["api"],
   };
   let firstRead = true;
   let update: Promise<void> | undefined;
@@ -620,7 +746,6 @@ test("rebakes when invalidated during API input loading", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let bakes = 0;
   let reads = 0;
@@ -663,7 +788,6 @@ test("rejects page collisions and unsafe section route parameters", async () => 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   await assert.rejects(
     bakeAgentEndpointAssets(options),
@@ -708,6 +832,24 @@ test("rejects page collisions and unsafe section route parameters", async () => 
   );
 });
 
+test("a page under another collection's moved URL fails with the ownership error, not a route collision", async () => {
+  const projectRoot = await root();
+  const routes = new Map([["sdk", { mount: "/products/sdk", file: "src/pages/products/sdk/[...slug].astro", aliases: [] }]]);
+  const urls = collectionUrlsKey({ versions: null, routes });
+  commit(projectRoot, "docs", [
+    { id: "index", body: "Home", data: { title: "Home" } },
+    { id: "products/sdk/stray", body: "Stray", filePath: "src/content/docs/products/sdk/stray.mdx", data: { title: "Stray" } },
+  ], urls);
+  commit(projectRoot, "sdk", [
+    { id: "index", body: "SDK", data: { title: "SDK" } },
+    { id: "install", body: "Install", data: { title: "Install" } },
+  ], urls);
+  await assert.rejects(
+    bakeAgentEndpointAssets({ root: projectRoot, base: "/docs", site: "https://example.test", title: "Test", routes }),
+    /docs page src\/content\/docs\/products\/sdk\/stray\.mdx is at \/products\/sdk\/stray, under \/products\/sdk, where collection "sdk" is served/,
+  );
+});
+
 test("uses locale-independent ordering in llms.txt indexes", async () => {
   const projectRoot = await root();
   const ids = ["zulu", "Alpha", "äther"];
@@ -721,7 +863,6 @@ test("uses locale-independent ordering in llms.txt indexes", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -747,7 +888,6 @@ test("preserves protocol-relative social images", async () => {
     site: "https://example.test",
     title: "Test",
     socialImage: "//cdn.example.test/og.png",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -775,7 +915,6 @@ test("resolves the complete audience before touching partials", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   });
   assert.deepEqual(
     manifest.markdownAssets.map(({ id, surface }) => [id, surface]),
@@ -803,7 +942,6 @@ test("fails closed for unknown audiences and invalid transitive partials", async
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   await assert.rejects(
     bakeAgentEndpointAssets(options),
@@ -823,19 +961,8 @@ test("fails closed for unknown audiences and invalid transitive partials", async
   );
 });
 
-test("rejects unprepared collections and stale collection capabilities", async () => {
+test("rejects stale collection capabilities", async () => {
   const projectRoot = await root();
-  await assert.rejects(
-    bakeAgentEndpointAssets({
-      root: projectRoot,
-      base: "/docs",
-      site: "https://example.test",
-      title: "Test",
-      indexedCollections: ["custom"],
-    }),
-    /withNimbusMarkdown/,
-  );
-
   commit(projectRoot, "docs", [
     { id: "guide", body: "Guide", data: { title: "Guide" } },
   ]);
@@ -854,7 +981,6 @@ test("rejects unprepared collections and stale collection capabilities", async (
       base: "/docs",
       site: "https://example.test",
       title: "Test",
-      indexedCollections: ["docs"],
     }),
     /collection "docs".*not prepared/s,
   );
@@ -881,7 +1007,6 @@ test("prepares headings without requiring every indexed collection to support pr
   const records = await bakePreparedHeadings({
     root: projectRoot,
     base: "/docs",
-    indexedCollections: ["docs", "bodyless", "unwrapped"],
   });
   assert.deepEqual(
     records.map(({ collection, id }) => `${collection}:${id}`),
@@ -900,7 +1025,6 @@ test("prepares headings without requiring every indexed collection to support pr
       bakePreparedHeadings({
         root: projectRoot,
         base: "/docs",
-        indexedCollections: ["docs", "bodyless", "unwrapped"],
       }),
     "/docs",
   );
@@ -936,7 +1060,6 @@ test("joins concurrent rebakes and rejects symlinked agent-endpoint asset roots"
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let calls = 0;
   configureAgentEndpointAssetRoot(projectRoot, "dev", async () => {
@@ -974,7 +1097,6 @@ test("queues a follow-up bake when invalidated during in-flight work", async () 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   let calls = 0;
   let entered: (() => void) | undefined;
@@ -1014,7 +1136,6 @@ test("removes assets made obsolete by edits and deletions", async () => {
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   await bakeAgentEndpointAssets(options);
@@ -1043,7 +1164,6 @@ test("scopes agent-endpoint asset demand to the current configuration session", 
     base: "/docs",
     site: "https://example.test",
     title: "Test",
-    indexedCollections: ["docs"],
   };
   configure(projectRoot, options);
   registerAgentEndpointAssetDemand(projectRoot);
@@ -1051,4 +1171,471 @@ test("scopes agent-endpoint asset demand to the current configuration session", 
 
   configure(projectRoot, options);
   assert.equal(isAgentEndpointAssetRequested(projectRoot), false);
+});
+
+test("bakes every Markdown asset at its public URL, API pages included, hidden API versions excluded", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "index", body: "Home", data: { title: "Home" } },
+    { id: "guide/index", body: "Guide", data: { title: "Guide" } },
+  ]);
+  commit(projectRoot, "docs-v1", [
+    { id: "old", body: "Old", data: { title: "Old" } },
+  ]);
+  const visible = apiPage("SmallCo API");
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    socialImage: "/og.png",
+    versions: { current: "v2", others: ["v1"] },
+    apiEntries: [
+      { ...visible, hidden: false },
+      {
+        ...apiPage("Unlisted"),
+        id: "unlisted",
+        hidden: false,
+        data: { ...apiPage("Unlisted").data, coordinate: "unlisted", noindex: true },
+      },
+      {
+        ...apiPage("Old API"),
+        id: "v0",
+        hidden: true,
+        data: { ...apiPage("Old API").data, coordinate: "v0", version: "v0" },
+      },
+    ],
+  };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+
+  assert.equal(manifest.version, 6);
+  assert.deepEqual(
+    manifest.markdownAssets.map((asset) => `${asset.surface} ${asset.url}`).sort(),
+    [
+      "markdown /api/index.md",
+      "markdown /api/unlisted/index.md",
+      "markdown /guide/index.md",
+      "markdown /index.md",
+      "markdown /v1/old/index.md",
+      "source /guide/index.mdx",
+      "source /index.mdx",
+      "source /v1/old/index.mdx",
+    ],
+  );
+
+  const api = await readMarkdownEndpointPayload(projectRoot, {
+    collection: "api",
+    id: "index",
+    surface: "markdown",
+  });
+  assert.equal(
+    api.body,
+    [
+      "---",
+      'title: "SmallCo API"',
+      'image: "https://example.test/docs/og.png"',
+      "---",
+      "",
+      "> Documentation Index",
+      "> Fetch the complete documentation index at: https://example.test/docs/llms.txt",
+      "> Use this file to discover all available pages before exploring further.",
+      "",
+      api.content,
+      "",
+      "Source: https://example.test/docs/api/index.md",
+      "",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(api.content, /^# /);
+  assert.equal(
+    api.content,
+    renderApiPageMarkdown(visible.data.prepared.page as never, { base: "/docs" }),
+  );
+});
+
+test("bakes the MCP page index only for a site that serves /mcp; API pages carry no docs version", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "guide", body: "Guide", data: { title: "Guide" } },
+    { id: "hidden", body: "Hidden", data: { title: "Hidden", noindex: true } },
+  ]);
+  commit(projectRoot, "docs-v1", [{ id: "old", body: "Old", data: { title: "Old" } }]);
+  const base = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    versions: { current: "v2", others: ["v1"], deprecated: ["v1"] },
+    apiEntries: [
+      {
+        ...apiPage("Pets API"),
+        hidden: false,
+        data: { ...apiPage("Pets API").data, version: "v1" },
+      },
+    ],
+  };
+  configure(projectRoot, base);
+  assert.equal((await bakeAgentEndpointAssets(base)).pageIndex, undefined);
+
+  const options = { ...base, mcpUrl: "https://example.test/docs/mcp" };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  assert.ok(manifest.pageIndex);
+  const index = JSON.parse(
+    await readFile(path.join(projectRoot, ".astro/nimbus/agent-endpoint-assets", manifest.pageIndex.path), "utf8"),
+  );
+  assert.deepEqual(index.versions, ["v2", "v1"]);
+  assert.deepEqual(
+    index.pages.map((page: { url: string; section: string; version?: string; deprecated?: true; searchable: boolean }) => [
+      page.url,
+      page.section,
+      page.version ?? null,
+      page.deprecated ?? false,
+      page.searchable,
+    ]),
+    [
+      ["https://example.test/docs/api/", "api", null, false, true],
+      ["https://example.test/docs/guide/", "guide", "v2", false, true],
+      ["https://example.test/docs/hidden/", "hidden", "v2", false, false],
+      ["https://example.test/docs/v1/old/", "v1", "v1", true, true],
+    ],
+  );
+});
+
+test("fails when a docs page and an API page share a public Markdown path", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "api", body: "A docs page at /api", data: { title: "Docs API" } },
+  ]);
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    apiEntries: [{ ...apiPage("SmallCo API"), hidden: false }],
+  };
+  configure(projectRoot, options);
+  await assert.rejects(
+    bakeAgentEndpointAssets(options),
+    /page "api:index" collides with page "docs:api" at generated Markdown route "\/api"/,
+  );
+});
+
+test("nested sections: each folder lists its own pages and links its sub-sections", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "intro", body: "Intro", data: { title: "Intro" } },
+    { id: "reference", body: "Ref home", data: { title: "Reference" } },
+    { id: "reference/overview", body: "Overview", data: { title: "Overview" } },
+    {
+      id: "reference/functions",
+      body: "Functions home",
+      data: { title: "Functions home", sidebar: { group: { label: "Functions" } } },
+    },
+    { id: "reference/functions/math", body: "Math", data: { title: "Math functions" } },
+    { id: "reference/functions/dates/parse", body: "Parse", data: { title: "Parse dates" } },
+    { id: "reference/functions/dates/format", body: "Format", data: { title: "Format dates" } },
+    { id: "reference/settings/a", body: "A", data: { title: "Setting A" } },
+  ]);
+  commit(projectRoot, "blog", [
+    { id: "index", body: "Blog", data: { title: "Blog" } },
+    { id: "2024/launch", body: "Launch", data: { title: "Launch" } },
+  ]);
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    nestedSections: true,
+  };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  assert.deepEqual(
+    manifest.llmsAssets.filter((asset) => asset.scope === "section").map((asset) => asset.section).sort(),
+    [
+      "blog",
+      "blog/2024",
+      "reference",
+      "reference/functions",
+      "reference/functions/dates",
+      "reference/settings",
+    ],
+  );
+  const section = async (name: string) =>
+    (await readLlmsEndpointPayload(projectRoot, { scope: "section", surface: "index", section: name })).body;
+
+  assert.equal(
+    await section("reference"),
+    [
+      "# Reference",
+      "",
+      "## Pages",
+      "",
+      "- [Reference](https://example.test/docs/reference/index.md)",
+      "- [Overview](https://example.test/docs/reference/overview/index.md)",
+      "",
+      "## Sections",
+      "",
+      "- [Functions](https://example.test/docs/reference/functions/llms.txt)",
+      "- [Settings](https://example.test/docs/reference/settings/llms.txt)",
+      "",
+    ].join("\n"),
+  );
+  assert.equal(
+    await section("reference/functions"),
+    [
+      "# Functions",
+      "",
+      "## Pages",
+      "",
+      "- [Functions home](https://example.test/docs/reference/functions/index.md)",
+      "- [Math functions](https://example.test/docs/reference/functions/math/index.md)",
+      "",
+      "## Sections",
+      "",
+      "- [Dates](https://example.test/docs/reference/functions/dates/llms.txt)",
+      "",
+    ].join("\n"),
+  );
+  // A section with only sub-folders has no empty "Pages" list; the deepest lists only pages.
+  assert.doesNotMatch(await section("reference/functions/dates"), /## Sections/);
+  assert.match(await section("reference/functions/dates"), /Format dates[\s\S]*Parse dates/);
+  assert.match(await section("blog"), /\[Blog\][\s\S]*## Sections\n\n- \[2024\]\(https:\/\/example\.test\/docs\/blog\/2024\/llms\.txt\)/);
+
+  // The site index is unchanged by nesting: top-level pages and sections only.
+  const site = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" })).body;
+  assert.match(site, /\[Reference\]\(https:\/\/example\.test\/docs\/reference\/llms\.txt\)/);
+  assert.doesNotMatch(site, /functions\/llms\.txt/);
+});
+
+test("nested sections leave a site without sub-folders byte-identical", async () => {
+  const bake = async (nestedSections: boolean) => {
+    const projectRoot = await root();
+    commit(projectRoot, "docs", [
+      { id: "leaf", body: "Leaf", data: { title: "Leaf" } },
+      { id: "guide", body: "Guide", data: { title: "Guide" } },
+      { id: "guide/a", body: "A", data: { title: "A", description: "First" } },
+      { id: "guide/b", body: "B", data: { title: "B" } },
+    ]);
+    commit(projectRoot, "blog", [{ id: "post", body: "Post", data: { title: "Post" } }]);
+    const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test", nestedSections };
+    configure(projectRoot, options);
+    const manifest = await bakeAgentEndpointAssets(options);
+    return Promise.all(
+      manifest.llmsAssets.map(async (asset) => [
+        asset.scope === "section" ? asset.section : asset.surface,
+        (await readLlmsEndpointPayload(projectRoot, asset)).body,
+      ]),
+    );
+  };
+  assert.deepEqual(await bake(true), await bake(false));
+});
+
+test("nested sections: a collection in another slice is linked from the section above it", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "reference/overview", body: "Overview", data: { title: "Overview" } },
+    { id: "guide", body: "Guide", data: { title: "Guide" } },
+  ]);
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    nestedSections: true,
+    absentSections: [
+      { slug: "reference/sdk", label: "SDK" },
+      { slug: "cli", label: "CLI" },
+    ],
+  };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  const body = (await readLlmsEndpointPayload(projectRoot, { scope: "section", surface: "index", section: "reference" })).body;
+  assert.match(body, /## Sections\n\n- \[SDK\]\(https:\/\/example\.test\/docs\/reference\/sdk\/llms\.txt\)\n$/);
+  assert.doesNotMatch(body, /cli/);
+});
+
+test("without nested sections, a top-level section lists every page under it", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "reference/overview", body: "Overview", data: { title: "Overview" } },
+    { id: "reference/functions/math", body: "Math", data: { title: "Math" } },
+  ]);
+  const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test" };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  assert.deepEqual(
+    manifest.llmsAssets.filter((asset) => asset.scope === "section").map((asset) => asset.section),
+    ["reference"],
+  );
+  const body = (await readLlmsEndpointPayload(projectRoot, { scope: "section", surface: "index", section: "reference" })).body;
+  assert.match(body, /Math[\s\S]*Overview|Overview[\s\S]*Math/);
+  assert.doesNotMatch(body, /## Sections/);
+});
+
+test("llms-full.txt over the limit splits by section, recursing where a section is still too big", async () => {
+  const projectRoot = await root();
+  const big = (label: string) => `${label} `.repeat(300);
+  commit(projectRoot, "docs", [
+    { id: "welcome", body: "Welcome", data: { title: "Welcome" } },
+    { id: "concepts/a", body: big("concepts"), data: { title: "Concept A" } },
+    { id: "reference", body: "Reference home", data: { title: "Reference" } },
+    { id: "reference/functions/math", body: big("math"), data: { title: "Math" } },
+    { id: "reference/functions/dates", body: big("dates"), data: { title: "Dates" } },
+    { id: "reference/settings/one", body: big("settings"), data: { title: "Setting one" } },
+    { id: "huge/only", body: big("huge").repeat(4), data: { title: "Huge" } },
+  ]);
+  commit(projectRoot, "docs-v1", [{ id: "old", body: big("old"), data: { title: "Old" } }]);
+  const warnings: string[] = [];
+  const infos: string[] = [];
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    llmsFullLimitBytes: 4000,
+    versions: { current: "v2", others: ["v1"] },
+    warn: (message: string) => warnings.push(message),
+    info: (message: string) => infos.push(message),
+  };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  const full = manifest.llmsAssets.filter((asset) => asset.surface === "full");
+  const bodies = new Map(
+    await Promise.all(
+      full.map(async (asset) => [
+        asset.scope === "section" ? asset.section : "",
+        (await readLlmsEndpointPayload(projectRoot, asset)).body,
+      ] as const),
+    ),
+  );
+  assert.deepEqual([...bodies.keys()].sort(), [
+    "",
+    "concepts",
+    "huge",
+    "reference",
+    "reference/functions",
+    "reference/settings",
+  ]);
+
+  const rootIndex = bodies.get("")!;
+  assert.match(rootIndex, /^# Test\n\n> The full documentation is over 4 KiB, so it's split by section\./);
+  assert.match(rootIndex, /Index: https:\/\/example\.test\/docs\/llms\.txt/);
+  // Sizes only for files served whole; an index just says it's split.
+  assert.match(rootIndex, /- \[Reference\]\(https:\/\/example\.test\/docs\/reference\/llms-full\.txt\) \(split further\)/);
+  assert.match(rootIndex, /- \[Concepts\]\(https:\/\/example\.test\/docs\/concepts\/llms-full\.txt\) \(\d+ KiB\)/);
+  assert.match(rootIndex, /## Pages\n\n- \[Welcome\]\(https:\/\/example\.test\/docs\/welcome\/index\.md\)/);
+  // An over-limit section is an index of its sub-sections and links to its own pages.
+  assert.match(bodies.get("reference")!, /## Sections[\s\S]*functions\/llms-full\.txt[\s\S]*settings\/llms-full\.txt[\s\S]*## Pages\n\n- \[Reference\]/);
+  assert.match(bodies.get("reference/functions")!, /^# Test — Functions\n[\s\S]*# Dates[\s\S]*# Math/);
+
+  // Every page appears in exactly one file, in full or as a link.
+  const titles = ["Welcome", "Concept A", "Reference", "Math", "Dates", "Setting one", "Huge"];
+  for (const title of titles) {
+    const holders = [...bodies.values()].filter(
+      (body) => body.includes(`\n# ${title}\n`) || new RegExp(`- \\[${title}\\]\\([^)]*/index\\.md\\)`).test(body),
+    );
+    assert.equal(holders.length, 1, title);
+  }
+  // Older docs versions stay out of the full document, as before the split.
+  assert.ok([...bodies.values()].every((body) => !body.includes("Old")));
+  // A folder over the limit with no sub-folders is a list of links, so no
+  // llms-full.txt is over the limit.
+  for (const [section, body] of bodies) {
+    assert.ok(Buffer.byteLength(body) <= 4000, section);
+  }
+  assert.match(bodies.get("huge")!, /has no sub-folders, so it links to each page's Markdown[\s\S]*## Pages\n\n- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/only\/index\.md\)/);
+  assert.match(rootIndex, /- \[Huge\]\(https:\/\/example\.test\/docs\/huge\/llms-full\.txt\) \(links to its pages\)/);
+  assert.match(infos[0]!, /split by section:[\s\S]*\/reference\/functions\/llms-full\.txt \d+ KiB/);
+  assert.match(infos[0]!, /\/llms-full\.txt \d+ KiB \(index\)/);
+  assert.match(infos[0]!, /\/huge\/llms-full\.txt \d+ KiB \(index; its pages total \d+ KiB with no sub-folders to split by\)/);
+  // Only that page's own Markdown files are over the limit, and the build says so.
+  assert.ok(warnings.length > 0);
+  for (const warning of warnings) {
+    assert.match(warning, /^\/huge\/only\/index\.mdx? is .* over Cloudflare's 25 MiB file limit, so the deploy will fail\.$/);
+  }
+
+  const site = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" })).body;
+  assert.match(site, /Full documentation \(discoverable current pages, split by section\)/);
+});
+
+test("llms-full.txt under the limit is one document, sized exactly as written", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "a", body: "Café ☕ body", data: { title: "A", description: "First" } },
+    { id: "b/c", body: "", data: { title: "C" } },
+  ]);
+  const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test", description: "Docs" };
+  configure(projectRoot, options);
+  const manifest = await bakeAgentEndpointAssets(options);
+  assert.deepEqual(
+    manifest.llmsAssets.filter((asset) => asset.surface === "full").map((asset) => asset.scope),
+    ["site"],
+  );
+  const { buildLlmsFullMarkdown, llmsFullBlockBytes, llmsFullHeaderBytes } = await import("../src/_internal/llms-full.ts");
+  const header = { title: "Test", description: "Docs", site: "https://example.test", base: "/docs" };
+  const blocks = [
+    { title: "A", description: "First", url: "/a/", markdownUrl: "/a/index.md", markdown: "Café ☕ body" },
+    { title: "C", url: "/b/c/", markdownUrl: "/b/c/index.md", markdown: "" },
+  ];
+  assert.equal(
+    llmsFullHeaderBytes(header) + blocks.reduce((sum, block) => sum + llmsFullBlockBytes(block, header), 0) - 1,
+    Buffer.byteLength(buildLlmsFullMarkdown(blocks, header)),
+  );
+});
+
+test("a split of top-level pages only still says llms-full.txt is split", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "a", body: "a ".repeat(500), data: { title: "A" } },
+    { id: "b", body: "b ".repeat(500), data: { title: "B" } },
+  ]);
+  const options = { root: projectRoot, base: "/docs", site: "https://example.test", title: "Test", llmsFullLimitBytes: 1200 };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  const site = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "index" })).body;
+  assert.match(site, /split by section/);
+  const full = (await readLlmsEndpointPayload(projectRoot, { scope: "site", surface: "full" })).body;
+  assert.match(full, /## Pages\n\n- \[A\][\s\S]*- \[B\]/);
+});
+
+test("an index listing too many entries warns that the deploy will fail", async () => {
+  const projectRoot = await root();
+  commit(
+    projectRoot,
+    "docs",
+    Array.from({ length: 40 }, (_, i) => ({ id: `page-${i}`, body: "x ".repeat(40), data: { title: `Page ${i}` } })),
+  );
+  const warnings: string[] = [];
+  const options = {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+    llmsFullLimitBytes: 1500,
+    warn: (message: string) => warnings.push(message),
+  };
+  configure(projectRoot, options);
+  await bakeAgentEndpointAssets(options);
+  assert.ok(warnings.some((warning) => /^\/llms-full\.txt is \d+ KiB, over Cloudflare's 25 MiB file limit, so the deploy will fail\.$/.test(warning)), warnings.join("\n"));
+});
+
+test("a manifest over the static file limit fails staging before any file is copied", async () => {
+  const projectRoot = await root();
+  commit(projectRoot, "docs", [
+    { id: "guide", body: "Unique prepared body", data: { title: "Guide" } },
+  ]);
+  configure(projectRoot, {
+    root: projectRoot,
+    base: "/docs",
+    site: "https://example.test",
+    title: "Test",
+  });
+  const output = path.join(projectRoot, "dist", "client");
+  await assert.rejects(
+    stageAgentEndpointAssets(projectRoot, output, 64),
+    /manifest\.json is \d+ KiB, over Cloudflare's 25 MiB static file limit/,
+  );
+  await assert.rejects(readdir(path.join(output, "_nimbus")), { code: "ENOENT" });
 });

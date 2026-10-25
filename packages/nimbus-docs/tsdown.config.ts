@@ -14,18 +14,31 @@ export default defineConfig({
     build: "src/build.ts",
     config: "src/config.ts",
     content: "src/content.ts",
+    live: "src/live.ts",
     schemas: "src/schemas.ts",
     types: "src/types.ts",
     server: "src/server.ts",
     adapters: "src/adapters.ts",
+    "site-parts": "src/site-parts.ts",
     client: "src/client/index.ts",
     markdown: "src/markdown/index.ts",
+    og: "src/og.ts",
     react: "src/react/index.ts",
     api: "src/api/index.ts",
     "lib/pkgm": "src/lib/pkgm.ts",
     "cli/index": "src/cli/index.ts",
+    "_internal/agent-discovery-route": "src/_internal/agent-discovery-route.ts",
+    "_internal/agent-api-catalog-route": "src/_internal/agent-api-catalog-route.ts",
+    "_internal/mounted-markdown-route": "src/_internal/mounted-markdown-route.ts",
+    "_internal/mounted-source-route": "src/_internal/mounted-source-route.ts",
+    "_internal/mounted-llms-route": "src/_internal/mounted-llms-route.ts",
+    "_internal/section-llms-full-route": "src/_internal/section-llms-full-route.ts",
+    "_internal/agent-discovery-middleware": "src/_internal/agent-discovery-middleware.ts",
     "_internal/request-route-inventory":
       "src/_internal/request-route-inventory.ts",
+    "_internal/version-switch-route": "src/_internal/version-switch-route.ts",
+    "_internal/mcp/route": "src/_internal/mcp/route.ts",
+    "_internal/mcp/card-route": "src/_internal/mcp/card-route.ts",
     "_internal/git-last-updated": "src/_internal/git-last-updated.ts",
     "_internal/agent-endpoint-assets":
       "src/_internal/agent-endpoint-assets.ts",
@@ -34,6 +47,12 @@ export default defineConfig({
   format: "esm",
   dts: true,
   clean: true,
+  copy: [
+    {
+      from: "../../apps/www/src/content/docs/ai/docs-for-agents.mdx",
+      rename: "docs-for-agents.md",
+    },
+  ],
   target: "node20",
   platform: "node",
   // Externals: virtual modules are resolved at runtime in the consumer's
@@ -42,6 +61,7 @@ export default defineConfig({
   external: [
     "astro:content",
     "astro:assets",
+    "astro:config/client",
     "react",
     "react-dom",
     /^react\//,
@@ -57,19 +77,26 @@ export default defineConfig({
     // never resolves or bundles them.
     "@scalar/openapi-parser",
     "@readme/httpsnippet",
+    // Share cards' renderer and rasterizer are optional peers, loaded by
+    // `./og` on first use.
+    "satori",
+    "@resvg/resvg-js",
+    // The MCP server SDK is an optional peer: only the injected /mcp route
+    // imports it, and only a site with agents.mcp injects that route.
+    /^@modelcontextprotocol\//,
   ],
-  // Bundle the remark-lint stack and github-slugger into dist so consuming
-  // projects don't gain new transitive deps. Their logic is inlined into
-  // the published artifacts via `noExternal`. `github-slugger` is used by
-  // the `nimbus/duplicate-slug` pre-build check to canonicalize entry IDs
-  // the same way Astro's content layer does.
+  // Bundle the remark-lint stack, the Markdown serializer, and github-slugger
+  // into dist so consuming projects don't gain new transitive deps. Their
+  // logic is inlined into the published artifacts via `noExternal`.
+  // `github-slugger` is used by the `nimbus/duplicate-slug` pre-build check
+  // to canonicalize entry IDs the same way Astro's content layer does; the
+  // `mdast-util-*` serializers write generated Markdown.
   noExternal: [
     "github-slugger",
-    "remark-mdx",
-    "remark-parse",
     "unified",
     "vfile",
     /^remark-lint-/,
+    /^mdast-util-/,
   ],
   // Transitive deps of the `noExternal` packages (e.g. `mdast-util-phrasing`,
   // `unist-util-*`) ride along into the bundle. tsdown surfaces this as a

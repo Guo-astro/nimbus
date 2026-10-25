@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+
 import ts from "typescript";
 
 /**
@@ -38,6 +42,8 @@ export interface AdapterRecipe {
   importStatement: string;
   adapterExpression: string;
   serverWrangler?: ServerWranglerRecipe;
+  /** Dependencies whose build scripts pnpm should skip; the site doesn't need them. */
+  declinedBuildScripts?: string[];
 }
 
 /**
@@ -95,17 +101,21 @@ export const ADAPTER_RECIPES: Record<AdapterId, AdapterRecipe> = {
   cloudflare: {
     id: "cloudflare",
     pkg: "@astrojs/cloudflare",
-    // Pin <14.2.0 (14.2.0 needs Astro 7.2.0's beginContentEntryCollection; we pin
-    // astro <7.1.0). Space in the spec → must be one argv element, never a shell string.
-    installSpec: "@astrojs/cloudflare@>=14.1.0 <14.2.0",
+    // 14.3.0 pre-bundles astro/app/manifest, so a cold `astro dev` no longer
+    // re-optimizes mid-startup and crashes the workerd runner. A tilde, not
+    // `>=14.3.0 <14.4.0`: pnpm saves that range as `^14.3.x`, which lets 14.4 in.
+    installSpec: "@astrojs/cloudflare@~14.3.0",
     extraDeps: [],
     importName: "cloudflare",
     importStatement: 'import cloudflare from "@astrojs/cloudflare";',
     // prerenderEnvironment:"node" avoids workerd's node:wasi during prerender and
     // lets Sätteri tree-shake out of a no-feature worker.
     adapterExpression: 'cloudflare({ prerenderEnvironment: "node" })',
+    // wrangler pulls workerd, whose build script only fetches a binary the
+    // package already ships for supported platforms.
+    declinedBuildScripts: ["workerd"],
     serverWrangler: {
-      // @astrojs/cloudflare 14.1.x → @cloudflare/vite-plugin 1.54.x peer floor.
+      // Above @astrojs/cloudflare 14.3's wrangler peer floor (^4.125.0).
       wranglerFloor: "wrangler@^4.127.1",
       compatibilityFlags: ["nodejs_compat"],
       notFoundHandling: "none",
@@ -618,8 +628,9 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
   return current;
 }
 
-function enableCloudflareRequestRendering(
+function enableRequestRendering(
   source: string,
+  policy: string,
 ): { source: string; status: RequestRenderingEdit } {
   const sourceFile = ts.createSourceFile(
     "astro.config.ts",
@@ -812,7 +823,7 @@ function enableCloudflareRequestRendering(
       return {
         source:
           source.slice(0, insertion) +
-          `${eol}${indent}rendering: { default: "request" },` +
+          `${eol}${indent}rendering: ${policy},` +
           source.slice(insertion),
         status: "inserted",
       };
@@ -820,7 +831,7 @@ function enableCloudflareRequestRendering(
     return {
       source:
         source.slice(0, propertyStart) +
-        `rendering: { default: "request" },${eol}${indent}` +
+        `rendering: ${policy},${eol}${indent}` +
         source.slice(propertyStart),
       status: "inserted",
     };
@@ -829,7 +840,7 @@ function enableCloudflareRequestRendering(
   return {
     source:
       source.slice(0, propertyStart) +
-      'rendering: { default: "request" }, ' +
+      `rendering: ${policy}, ` +
       source.slice(propertyStart),
     status: "inserted",
   };
@@ -864,8 +875,20 @@ function chooseImportBinding(preferred: string, masked: string): string {
 export function applyAdapterToConfig(
   source: string,
   adapterId: AdapterId,
+  options: {
+    /**
+     * Render content collections on request: `true` for every collection, or
+     * just the named ones. Defaults to Cloudflare only, for existing sites.
+     */
+    requestRendering?: boolean | { collections: readonly string[] };
+  } = {},
 ): ApplyAdapterResult {
   const recipe = ADAPTER_RECIPES[adapterId];
+  const requestRendering = options.requestRendering ?? adapterId === "cloudflare";
+  const policy =
+    typeof requestRendering === "object"
+      ? `{ collections: { ${requestRendering.collections.map((name) => `${JSON.stringify(name)}: "request"`).join(", ")} } }`
+      : '{ default: "request" }';
   if (isCommonJsConfig(source)) {
     return {
       status: "error",
@@ -976,8 +999,8 @@ export function applyAdapterToConfig(
   }
 
   if (isServer && adapterProperty && existingAdapter?.defaultName) {
-    if (adapterId !== "cloudflare") return { status: "noop", source };
-    const rendering = enableCloudflareRequestRendering(source);
+    if (!requestRendering) return { status: "noop", source };
+    const rendering = enableRequestRendering(source, policy);
     return rendering.source === source
       ? { status: "noop", source, requestRendering: rendering.status }
       : {
@@ -1020,8 +1043,8 @@ export function applyAdapterToConfig(
     next = insertImport(next, `import ${importName} from "${recipe.pkg}";`);
   }
 
-  if (adapterId === "cloudflare") {
-    const rendering = enableCloudflareRequestRendering(next);
+  if (requestRendering) {
+    const rendering = enableRequestRendering(next, policy);
     next = rendering.source;
     return {
       status: "applied",
@@ -1133,6 +1156,80 @@ export function sanitizeWorkerName(name: string): string {
       .slice(0, 63)
       .replace(/-+$/, "") || "my-docs"
   );
+}
+
+const WRANGLER_LATEST = "https://registry.npmjs.org/wrangler/latest";
+/** The wrangler major Nimbus installs, from the Cloudflare recipe's floor (`wrangler@^4.127.1`). */
+const WRANGLER_MAJOR = /@\D*(\d+)/.exec(ADAPTER_RECIPES.cloudflare.serverWrangler!.wranglerFloor)?.[1];
+const FALLBACK_DAYS = 30;
+let registryDate: Promise<string | null> | undefined;
+
+/**
+ * The compatibility date for a new `wrangler.jsonc`: one the Workers runtime
+ * the project runs supports. Today's date isn't: wrangler pins a workerd
+ * release from days earlier, and `wrangler dev` refuses a date its runtime
+ * doesn't know. A workerd version reads `1.YYYYMMDD.N` and supports that date
+ * (miniflare caps the date the same way), so it comes from the workerd pinned
+ * by the wrangler `cwd` resolves, or by wrangler's latest release of the major
+ * Nimbus installs, or, offline, from 30 days ago. Never after today.
+ */
+export async function workersCompatibilityDate(
+  cwd: string,
+  options: { fetch?: typeof fetch; now?: Date } = {},
+): Promise<string> {
+  const now = options.now ?? new Date();
+  const today = now.toISOString().slice(0, 10);
+  const pinned =
+    installedWorkerdDate(cwd) ??
+    (await (options.fetch
+      ? latestWorkerdDate(options.fetch)
+      : (registryDate ??= latestWorkerdDate(fetch))));
+  const date =
+    pinned ?? new Date(now.getTime() - FALLBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  return date < today ? date : today;
+}
+
+function installedWorkerdDate(cwd: string): string | null {
+  try {
+    // Node's lookup: finds a wrangler hoisted to a parent workspace too. The
+    // scaffolder runs before any install, so for it this is always a parent's.
+    const file = createRequire(join(cwd, "package.json")).resolve("wrangler/package.json");
+    return pinnedWorkerdDate(JSON.parse(readFileSync(file, "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+async function latestWorkerdDate(fetchImpl: typeof fetch): Promise<string | null> {
+  try {
+    const response = await fetchImpl(WRANGLER_LATEST, { signal: AbortSignal.timeout(2500) });
+    if (!response.ok) return null;
+    return pinnedWorkerdDate(await response.json());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The workerd date a wrangler manifest pins, for the wrangler major Nimbus
+ * installs only: another major's workerd (a parent workspace's, or the
+ * registry's latest) can be ahead of the one the project gets.
+ */
+function pinnedWorkerdDate(manifest: {
+  version?: string;
+  dependencies?: Record<string, string>;
+}): string | null {
+  if (!WRANGLER_MAJOR || manifest.version?.split(".")[0] !== WRANGLER_MAJOR) return null;
+  return workerdVersionDate(manifest.dependencies?.workerd);
+}
+
+/** `1.20261006.1` → `2026-10-06`; null for anything else, ranges included. */
+export function workerdVersionDate(version: unknown): string | null {
+  const match =
+    typeof version === "string" ? /^\d+\.(\d{4})(\d{2})(\d{2})\.\d+$/.exec(version) : null;
+  if (!match) return null;
+  const date = `${match[1]}-${match[2]}-${match[3]}`;
+  return isValidCompatibilityDate(date) ? date : null;
 }
 
 export function isValidCompatibilityDate(value: unknown): value is string {

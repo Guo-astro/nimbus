@@ -7,7 +7,14 @@
 import type { DocsModel } from "./model.js";
 import type { ApiModel } from "./view-model.js";
 
-const modelStore = new WeakMap<object, DocsModel>();
+// One store per process: a dev server can evaluate this module more than once
+// (a module graph reset while an import is in flight), and a handle from one
+// copy must still unwrap in another.
+const MODEL_STORE = Symbol.for("@cloudflare/nimbus-docs/api-model-handles/v1");
+const modelGlobals = globalThis as typeof globalThis & {
+  [MODEL_STORE]?: WeakMap<object, DocsModel>;
+};
+const modelStore = (modelGlobals[MODEL_STORE] ??= new WeakMap<object, DocsModel>());
 
 export function wrapModel(model: DocsModel): ApiModel {
   const handle = Object.freeze({}) as ApiModel;

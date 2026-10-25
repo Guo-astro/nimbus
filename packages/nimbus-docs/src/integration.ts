@@ -286,7 +286,7 @@ import {
   preparedMarkdownRootKey,
 } from "./_internal/prepared-markdown-registry.js";
 import { currentPageLoadScope } from "./_internal/page-load-scope.js";
-import { invalidateDevModules } from "./_internal/dev-invalidation.js";
+import { invalidateDevModules, isDevContentFile } from "./_internal/dev-invalidation.js";
 import type {
   GeneratedMarkdownComponentTransform,
   GeneratedMarkdownPartialResolver,
@@ -2821,6 +2821,7 @@ export function nimbus(
                 coordinates: Object.fromEntries(citationIndex),
                 manifest: coordinatesManifest,
               })),
+              agentEndpointAssets.agentEndpointHotUpdatePlugin(fileURLToPath(astroConfig.root)),
               agentEndpointAssets.preparedHeadingsPlugin(astroConfig.root),
               agentEndpointAssets.agentEndpointAssetsRuntimePlugin(
                 astroConfig.root,
@@ -3298,6 +3299,12 @@ export function nimbus(
         // only after this hook returns, so their lazy imports still resolve.
         if (restartedDevServer && refreshContent) {
           try {
+            // Astro 7.3.3 loads the content config in the background and
+            // `refreshContent` returns without syncing until it has loaded,
+            // so wait for Astro's dev setup (unset before 7.3.3).
+            await (server as unknown as Record<symbol, Promise<void> | undefined>)[
+              Symbol.for("astro.devServerAppReady")
+            ];
             await refreshContent({});
           } catch (error) {
             server.config.logger.error(
@@ -3381,13 +3388,8 @@ export function nimbus(
         // (order/label/new pages) still hot-update. Dev-only (this hook never
         // runs at build). Astro writes the content store about 500ms after the
         // edit, so clear again then: a request in between caches the old nav.
-        const dataStore = path.join(projectRootForBuild, ".astro", "data-store");
-        const isContentFile = (file: string) =>
-          /[\\/]src[\\/]content[\\/].*\.(?:mdx?|ya?ml|json)$/.test(file) ||
-          file === `${dataStore}.json` ||
-          file.startsWith(`${dataStore}${path.sep}`);
         const invalidate = async (file: string) => {
-          if (!isContentFile(file)) return;
+          if (!isDevContentFile(projectRootForBuild, file)) return;
           const { clearNavCaches } = await import("./index.js");
           clearNavCaches();
           (await loadAgentEndpointAssets()).invalidateAgentEndpointAssets(

@@ -221,7 +221,7 @@ function describeRebuilds(
     const subject = target.version ? ` ${target.version}` : "";
     const names = rebuilt.changed.map((name) => INPUT_NAMES[name] ?? name);
     const reason = rebuilt.first
-      ? "first build for this version"
+      ? "nothing cached yet"
       : names.length
         ? `${[names.slice(0, -1).join(", "), names.at(-1)].filter(Boolean).join(" and ")} changed`
         : "its cache entry was missing";

@@ -57,6 +57,31 @@ function nonStringRefs(node: unknown, pointer = "#", inMap = false, out: NonStri
   return out;
 }
 
+/** The parser prints a non-string `$ref` value as is ("[object Object]"); say
+ *  where each one is instead, and drop a complaint explained only by properties
+ *  named `$ref`, which is the parser's misreading, not a fault in the document. */
+export function explainReferenceErrors(
+  messages: string[],
+  document: unknown,
+  locate: (at: string) => string = (at) => at,
+): string[] {
+  const refs = nonStringRefs(document);
+  const explained = messages.flatMap((message) => {
+    const printed = message.startsWith(INVALID_REFERENCE)
+      ? message.slice(INVALID_REFERENCE.length)
+      : undefined;
+    const hits = refs.filter((ref) => ref.printed === printed);
+    if (!hits.length) return [message];
+    const places = hits.filter((ref) => !ref.named).map((ref) => locate(ref.at));
+    if (!places.length) return [];
+    const listed =
+      places.slice(0, 3).join(", ") +
+      (places.length > 3 ? ` and ${places.length - 3} more` : "");
+    return [`"$ref" isn't a reference string at ${listed}`];
+  });
+  return [...new Set(explained)];
+}
+
 export async function publishOpenApiSpec(
   source: string | Record<string, unknown>,
   rootDir: string,
@@ -105,30 +130,14 @@ export async function publishOpenApiSpec(
     const parsed: unknown = JSON.parse(contents);
     const { errors } = await dereference(parsed as never);
     if (errors?.length) {
-      // The parser prints a non-string `$ref` value as is ("[object Object]");
-      // name where each one is instead. An error explained only by properties
-      // named `$ref` is the parser's misreading, not a fault in the document.
-      const refs = nonStringRefs(parsed);
       const located = (at: string) => {
         const [, hash, rest = ""] = /^#\/x-ext\/([^/]+)(.*)$/.exec(at) ?? [];
         return hash && bundledFiles[hash]
           ? `${bundledFiles[hash]}#${rest}`
           : at;
       };
-      const messages = errors.flatMap(({ message }) => {
-        const printed = message.startsWith(INVALID_REFERENCE)
-          ? message.slice(INVALID_REFERENCE.length)
-          : undefined;
-        const hits = refs.filter((ref) => ref.printed === printed);
-        if (!hits.length) return [message];
-        const places = hits.filter((ref) => !ref.named).map((ref) => located(ref.at));
-        if (!places.length) return [];
-        const listed =
-          places.slice(0, 3).join(", ") +
-          (places.length > 3 ? ` and ${places.length - 3} more` : "");
-        return [`"$ref" isn't a reference string at ${listed}`];
-      });
-      if (messages.length) return { error: [...new Set(messages)].join("; ") };
+      const messages = explainReferenceErrors(errors.map(({ message }) => message), parsed, located);
+      if (messages.length) return { error: messages.join("; ") };
     }
   } catch (error) {
     return { error: (error as Error).message };

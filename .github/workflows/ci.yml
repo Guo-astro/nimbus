@@ -35,27 +35,36 @@ jobs:
       # Root script builds nimbus-docs, then runs `pnpm -r typecheck`.
       - run: pnpm typecheck
 
-  # The nimbus-docs suite runs in four shards per lane, each a slice of the
-  # file list from scripts/shard-files.mjs, with a report of the files it ran.
-  # `other` runs the upgrade tests and the remaining packages. Each lane's
-  # summary job below checks that every file ran on exactly one shard.
-  test-current:
-    name: Test (${{ matrix.label }})
+  # `next` applies pending changesets exactly as the release PR will (versions,
+  # CHANGELOGs, reviewed baselines, registry) before testing, so a test that
+  # depends on the version fails here instead of on the release PR. Nothing is
+  # committed.
+  #
+  # The nimbus-docs suite runs in four shards per lane with node's own
+  # --test-shard, which sorts the matched files and deals them round-robin, so
+  # every file lands on exactly one shard. `other` runs the upgrade tests and
+  # the remaining packages.
+  test:
+    name: ${{ matrix.next && 'Test at the next release version' || 'Test' }} (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        next: [false, true]
+        shard: [1/4, 2/4, 3/4, 4/4, other]
         include:
-          - { shard: 1, label: 1/4 }
-          - { shard: 2, label: 2/4 }
-          - { shard: 3, label: 3/4 }
-          - { shard: 4, label: 4/4 }
-          - { shard: other, label: other }
+          - next: false
+            fetch-depth: 1
+          - next: true
+            fetch-depth: 0 # changelog-github finds the commit that added each changeset
     permissions:
       contents: read
+      pull-requests: read # changelog-github reads the PR behind each changeset
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: ${{ matrix.fetch-depth }}
 
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
@@ -65,6 +74,11 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - if: matrix.next
+        run: pnpm changeset:version
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - run: pnpm --filter ./packages/nimbus-docs build
 
@@ -77,153 +91,27 @@ jobs:
       # The packed-migration test installs a published release from npm and
       # packs this one. A packed tarball can only regress at a release, so it
       # runs on main and the release PR, not on every feature PR.
+      #
+      # --test-timeout fails a hung test by name; --test-force-exit then exits
+      # the process instead of waiting on whatever handle hung it.
       - if: matrix.shard != 'other'
         working-directory: packages/nimbus-docs
-        run: |
-          files=$(node scripts/shard-files.mjs ${{ matrix.label }})
-          node --import tsx --test --test-concurrency=4 --test-timeout=600000 --test-force-exit \
-            --test-reporter=spec --test-reporter-destination=stdout \
-            --test-reporter=./scripts/test-file-summary-reporter.mjs --test-reporter-destination="$RUNNER_TEMP/report-${{ matrix.shard }}.ndjson" \
-            $files
+        run: node --import tsx --test --test-concurrency=4 --test-timeout=300000 --test-force-exit --test-shard=${{ matrix.shard }} "test/**/*.test.ts"
         env:
-          TEST_SHARD: ${{ matrix.label }}
           RUN_PACKED_MIGRATION: ${{ github.ref == 'refs/heads/main' || startsWith(github.head_ref, 'changeset-release/') }}
 
-      # A shard that hits timeout-minutes is cancelled and uploads nothing; the
-      # summary then reports it as a missing report.
-      - if: ${{ matrix.shard != 'other' && !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-report-current-${{ matrix.shard }}
-          path: ${{ runner.temp }}/report-${{ matrix.shard }}.ndjson
-          overwrite: true
-          retention-days: 7
-
-  # `next` applies pending changesets exactly as the release PR will (versions,
-  # CHANGELOGs, reviewed baselines, registry) before testing, so a test that
-  # depends on the version fails here instead of on the release PR. Nothing is
-  # committed.
-  test-next:
-    name: Test at the next release version (${{ matrix.label }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { shard: 1, label: 1/4 }
-          - { shard: 2, label: 2/4 }
-          - { shard: 3, label: 3/4 }
-          - { shard: 4, label: 4/4 }
-          - { shard: other, label: other }
-    permissions:
-      contents: read
-      pull-requests: read # changelog-github reads the PR behind each changeset
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0 # changelog-github finds the commit that added each changeset
-
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - run: pnpm changeset:version
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - run: pnpm --filter ./packages/nimbus-docs build
-
-      - if: matrix.shard == 'other'
-        run: pnpm test:upgrades
-
-      - if: matrix.shard == 'other'
-        run: pnpm -r --filter '!@cloudflare/nimbus-docs' test
-
-      - if: matrix.shard != 'other'
-        working-directory: packages/nimbus-docs
-        run: |
-          files=$(node scripts/shard-files.mjs ${{ matrix.label }})
-          node --import tsx --test --test-concurrency=4 --test-timeout=600000 --test-force-exit \
-            --test-reporter=spec --test-reporter-destination=stdout \
-            --test-reporter=./scripts/test-file-summary-reporter.mjs --test-reporter-destination="$RUNNER_TEMP/report-${{ matrix.shard }}.ndjson" \
-            $files
-        env:
-          TEST_SHARD: ${{ matrix.label }}
-          RUN_PACKED_MIGRATION: ${{ github.ref == 'refs/heads/main' || startsWith(github.head_ref, 'changeset-release/') }}
-
-      - if: ${{ matrix.shard != 'other' && !cancelled() }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-report-next-${{ matrix.shard }}
-          path: ${{ runner.temp }}/report-${{ matrix.shard }}.ndjson
-          overwrite: true
-          retention-days: 7
-
-  # One check per lane under its old name. It fails if any shard failed or was
-  # cancelled, or if the shard reports don't cover every test file exactly once.
-  test:
+  # One check under the old name. `always()` so a cancelled run gets a red
+  # summary rather than a skipped one, which a required check would count as
+  # passing.
+  test-summary:
     name: Test
-    needs: test-current
-    if: ${{ !cancelled() }}
+    needs: test
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: test-report-current-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/reports
-
-      - working-directory: packages/nimbus-docs
-        run: |
-          node scripts/check-test-reports.mjs --reports "$RUNNER_TEMP/reports" --shards 4 --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" || status=$?
-          test "$LANE_RESULT" = success || { echo "::error::test-current finished with result '$LANE_RESULT'"; exit 1; }
-          exit "${status:-0}"
+      - run: test "$RESULT" = success || { echo "::error::test finished with result '$RESULT'"; exit 1; }
         env:
-          LANE_RESULT: ${{ needs.test-current.result }}
-
-  test-next-summary:
-    name: Test at the next release version
-    needs: test-next
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: test-report-next-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/reports
-
-      - working-directory: packages/nimbus-docs
-        run: |
-          node scripts/check-test-reports.mjs --reports "$RUNNER_TEMP/reports" --shards 4 --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" || status=$?
-          test "$LANE_RESULT" = success || { echo "::error::test-next finished with result '$LANE_RESULT'"; exit 1; }
-          exit "${status:-0}"
-        env:
-          LANE_RESULT: ${{ needs.test-next.result }}
+          RESULT: ${{ needs.test.result }}
 
   # The docs site is otherwise built only when it's deployed, after a
   # release; build it on every PR so a broken page or a framework change that

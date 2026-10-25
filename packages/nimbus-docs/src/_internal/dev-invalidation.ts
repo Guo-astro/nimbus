@@ -6,6 +6,8 @@
  * old evaluation in the others.
  */
 
+import path from "node:path";
+
 export interface DevModuleGraph {
   getModuleById(id: string): unknown;
   invalidateModule(module: never): void;
@@ -33,4 +35,14 @@ export function invalidateDevModules(server: DevServerGraphs, ids?: Iterable<str
       if (module) graph.invalidateModule(module as never);
     }
   }
+}
+
+/** A content source, or the content store Astro writes after syncing one. */
+export function isDevContentFile(root: string, file: string): boolean {
+  const dataStore = path.join(root, ".astro", "data-store");
+  return (
+    /[\\/]src[\\/]content[\\/].*\.(?:mdx?|ya?ml|json)$/.test(file) ||
+    file === `${dataStore}.json` ||
+    file.startsWith(`${dataStore}${path.sep}`)
+  );
 }

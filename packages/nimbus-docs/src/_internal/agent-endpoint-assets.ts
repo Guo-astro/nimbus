@@ -1,4 +1,4 @@
-import { invalidateDevModules, type DevServerGraphs } from "./dev-invalidation.js";
+import { invalidateDevModules, isDevContentFile, type DevServerGraphs } from "./dev-invalidation.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   constants,
@@ -1490,6 +1490,46 @@ export function agentEndpointAssetsRuntimePlugin(
     },
     handleHotUpdate(context) {
       invalidateDevModules(context.server, [ARTIFACTS_RESOLVED_ID]);
+    },
+  };
+}
+
+interface HotUpdateGraph {
+  idToModuleMap: Map<string, unknown>;
+}
+
+export interface AgentEndpointHotUpdatePlugin {
+  name: string;
+  enforce: "pre";
+  hotUpdate(
+    this: { environment: { moduleGraph: HotUpdateGraph } },
+    context: { file: string; modules: unknown[] },
+  ): unknown[] | undefined;
+}
+
+/**
+ * A content edit can reach Vite as an update that touches no module, and
+ * Astro then leaves middleware and the modules it imports on the previous
+ * snapshot of prepared Markdown, headings and the asset manifest. Hand Vite
+ * those modules for such an update so it refreshes them and Astro reloads
+ * middleware. Only then: an update carrying server-only modules makes Astro
+ * reload the browser instead of hot-updating it.
+ */
+export function agentEndpointHotUpdatePlugin(root: string): AgentEndpointHotUpdatePlugin {
+  return {
+    name: "nimbus-docs:agent-endpoint-hot-update",
+    enforce: "pre",
+    hotUpdate(context) {
+      if (context.modules.length > 0 || !isDevContentFile(root, context.file)) return undefined;
+      const affected = [...this.environment.moduleGraph.idToModuleMap]
+        .filter(
+          ([id]) =>
+            id === ARTIFACTS_RESOLVED_ID ||
+            id === HEADINGS_RESOLVED_ID ||
+            id.startsWith(`\0${HEADINGS_ENTRY_PREFIX}`),
+        )
+        .map(([, module]) => module);
+      return affected.length ? affected : undefined;
     },
   };
 }

@@ -499,8 +499,14 @@ if (MCP) {
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
 // Keep the scaffold's workspace configuration active so dependency build
-// permissions are honored.
-run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "install", "--no-frozen-lockfile"], { cwd: site });
+// permissions are honored. Install into a store of its own, as a new user's
+// would be: CI's cached store holds the workspace's packages, and esbuild's
+// postinstall then found another version's binary for the one it installed.
+run(
+  SCAFFOLD_PM_BIN,
+  [...SCAFFOLD_PM_PREFIX, "install", "--no-frozen-lockfile", "--store-dir", join(work, "pnpm-store")],
+  { cwd: site },
+);
 assert.equal(
   readFileSync(join(site, "node_modules", NIMBUS_NAME, "dist/docs-for-agents.md"), "utf8"),
   readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),

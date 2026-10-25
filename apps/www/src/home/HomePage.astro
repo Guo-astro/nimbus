@@ -7,6 +7,7 @@ import "@fontsource-variable/bricolage-grotesque/opsz.css";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import WwwBody from "./www/WwwBody.astro";
+import WebMCP from "@/components/WebMCP.astro";
 
 const title = "Nimbus · The authoring tool for docs";
 const description = "The authoring tool for docs. Write with your team and your agents, held to your standard, on a site you can customise completely.";
@@ -14,6 +15,18 @@ const canonical = new URL("/", Astro.site).href;
 // The site card from `src/pages/og.png.ts`.
 const socialImage = new URL("/og.png", Astro.site).href;
 const socialImageAlt = "Nimbus: the authoring tool for docs.";
+// Who the site is, for agents and search engines.
+const jsonLd = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Nimbus",
+  description,
+  url: canonical,
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Any",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  sameAs: ["https://github.com/cloudflare/nimbus"],
+}).replace(/</g, "\\u003c");
 ---
 
 <!doctype html>
@@ -38,6 +51,8 @@ const socialImageAlt = "Nimbus: the authoring tool for docs.";
     <meta name="theme-color" content="#ffffff" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+    <script type="application/ld+json" set:html={jsonLd} />
+    <WebMCP />
   </head>
   <body class="min-h-dvh bg-background font-sans text-foreground antialiased">
     <WwwBody />

@@ -1,5 +1,93 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.8.0
+
+### Minor Changes
+
+- [#273](https://github.com/cloudflare/nimbus/pull/273) [`352a245`](https://github.com/cloudflare/nimbus/commit/352a24590670c2258478742ea1d77d14e8393706) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - A redesigned API reference:
+
+  - The API home lists every endpoint, grouped by `x-tagGroups`, with a filter; large specs load in parts as you scroll. The API route serves the later parts at `/api/index/2/` and on, `noindex` and left out of the sitemap and search; it takes the part size as `homeChunkSize` in both `getApiStaticPaths` and `getApiRoute` (without it, the home is one page), and `getApiRoute` returns the parts as `home`.
+  - Section pages list their endpoints name first, with the method and path beneath.
+  - The API version picker sits in the header, at every width.
+  - Code rail lines sit on whole pixels, with quieter line numbers; section titles are in full ink.
+  - The API sidebar's rows match the docs sidebar's.
+  - Section page operations gain `method`, `path`, `description` and `deprecated`, and the root page gains an `index` of every endpoint.
+  - `getApiRoot` reads an API version's root page from any route; `chunkApiIndex` and `apiIndexRows` split and flatten its index.
+
+  `nimbus-docs migrate` lists the optional steps to adopt it.
+
+- [#274](https://github.com/cloudflare/nimbus/pull/274) [`961e85d`](https://github.com/cloudflare/nimbus/commit/961e85d8b83528f06245e1d701a8a889ee892865) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - New sites' share cards show the site's logo, the page's section and its title, on white. A long title shrinks before it's cut and stays within three lines.
+  - The card's look lives in the site's `src/pages/og/_card.ts`; the logo is drawn once, in `src/components/logo.ts`, for the header and the cards.
+  - `@cloudflare/nimbus-docs/og` fits text by measuring it and renders cards to PNG. It needs `satori` and `@resvg/resvg-js`, optional peers.
+  - `getPageSection(page)` returns the label of a page's nearest parent, from the sidebar for docs pages and from the spec for API pages.
+
+- [#274](https://github.com/cloudflare/nimbus/pull/274) [`91eb2e9`](https://github.com/cloudflare/nimbus/commit/91eb2e9bce9b57495d9d8e11158b8b151ba5aefe) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `Card` takes `href`: the whole card becomes the link.
+  - Diagram buttons and controls keep their 32px height inside prose.
+  - PUT and PATCH method chips meet 4.5:1 contrast in light mode.
+  - The version picker and the API field toggle are named by their visible text.
+
+- [#272](https://github.com/cloudflare/nimbus/pull/272) [`9a65f9f`](https://github.com/cloudflare/nimbus/commit/9a65f9f2190deb1d9032d1df86b0fceb165fc88d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - New sites start on the redesigned starter:
+
+  - A fill-in Introduction as the home page, a Writing pages guide and a Components page replace the sample pages and the landing page.
+  - A new type scale, steel accent, code blocks, sidebar and header logo.
+  - One pagination bar for the previous and next pages; with focus in the bar, `[` and `]` move between them.
+  - Every component part has a `data-slot` to style it by, except sidebar rows, which stay bare so large sidebars stay light.
+  - Components wrap long words, URLs and labels instead of overflowing on phones.
+  - Text meets 4.5:1 contrast in light mode, Steps are a real list, manual Tabs render one tab list and pair each tab with its panel.
+  - Pages mirror correctly in right-to-left languages; code stays left to right.
+  - On phones, sites with several sections show them as tabs under the header.
+  - Thin, theme-coloured scrollbars.
+  - `PageActions` renders extra actions passed as children; the layout passes the Copy MCP URL action that way.
+
+  Existing sites keep their look. `nimbus-docs migrate` lists optional steps to adopt it, the lighter sidebar rows, and the new favicons and asset caching. The registry adds a `variants` lib that Badge and Button install with them.
+
+- [#278](https://github.com/cloudflare/nimbus/pull/278) [`b6d4837`](https://github.com/cloudflare/nimbus/commit/b6d4837d55103351e0e1b1a22599c07e3e877bdc) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - Route files say how they render. `nimbus-docs check` reports each route Nimbus manages whose file disagrees with `rendering`, and `check --fix` rewrites it: the `prerender` line, getStaticPaths on built routes only, and the collection name in a collection route's page helper. Without `rendering`, Nimbus builds every one of these routes ahead of time, a collection route such as `src/pages/sdk/[...slug].astro` included. `rendering` still wins at build, which now warns once and lists the files.
+  - A built dynamic route with no getStaticPaths fails the build, naming the file; Astro can't build it.
+  - The page helpers take the collection as a second argument, such as `getCollectionPage(Astro, "sdk")` or `getApiRoute(Astro, "api", { homeChunkSize })`, so a request-rendered route needs no getStaticPaths to say which collection it serves. A route whose getStaticPaths and helper name different collections fails with `nimbus/collection-route-mismatch`.
+  - `add adapter-*` updates route files after setting `rendering`, and its recipes run `check --fix`.
+  - `outdated` and `diff` compare starter route files in the site's own mode, so a route `check --fix` edited doesn't read as a local change.
+  - The starter's Markdown, `llms.txt` and docs page routes drop `export const prerender = true`; the site's `output` and `rendering` decide how they render. A scaffold with a server adapter writes its route files in the mode its `rendering` gives them.
+
+- [#284](https://github.com/cloudflare/nimbus/pull/284) [`f256109`](https://github.com/cloudflare/nimbus/commit/f256109df2365de6e371b045abd88320652f4924) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - A new site can include an API reference: `--api` adds one at `/api`, from your OpenAPI 3.x file (`--api ./openapi.yaml`) or a sample, and `--template api` makes it the whole site, at `/`. Without flags, the scaffolder asks what the site includes, and it refuses a spec that isn't OpenAPI 3.x before writing anything.
+  - `AGENT.md` in a site with an API reference says where its spec and route are; a site that is only the reference has no docs-writing sections.
+  - The starter's header shows Docs and API reference tabs when a site has an API reference beside its docs.
+
+### Patch Changes
+
+- [#282](https://github.com/cloudflare/nimbus/pull/282) [`e983040`](https://github.com/cloudflare/nimbus/commit/e9830401bc788f3cc5eccf1935cb82cb3bf78290) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - The package READMEs describe Nimbus as the authoring tool for docs, with the CLI by task and the scaffolder's options.
+
+- [#244](https://github.com/cloudflare/nimbus/pull/244) [`17bf1ce`](https://github.com/cloudflare/nimbus/commit/17bf1ce27555cb1cfde41384de5cf3baa0ee956d) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `NIMBUS_BUILD_ONLY=docs-es` builds one collection, or a comma-separated set, and leaves the others empty; `dev`, `sync` and `check` ignore it with one notice.
+  - A slice without the `docs` collection writes its sitemap, search bundle, stylesheet, assets and `llms-full.txt` under its prefix, and drops the root files the root slice serves.
+  - The root slice's `llms.txt` lists every collection's `llms.txt`, and search merges the other slices' indexes at runtime.
+  - `nimbus-docs lint` checks links into other slices against the previous build's routes, as warnings.
+  - A slice build fails on an unknown collection, and on docs version collections split across slices. Slices work under Astro's `base`: every URL a slice serves and advertises is under it.
+  - The route list `nimbus-docs lint` checks against reads `_redirects` where the Cloudflare adapter moves it when the site has a `base`, so redirects stay known to link checking.
+  - `searchIndex` in `virtual:nimbus/config` names the search bundles as served URLs, base included. The starter's search provider loads its slice's bundle and merges the others.
+  - A guide, "Build one locale or one part", with the Worker and zone routes per slice and a workflow that builds the slice a pull request touched.
+
+- [#285](https://github.com/cloudflare/nimbus/pull/285) [`d45764d`](https://github.com/cloudflare/nimbus/commit/d45764d1e415c7cf888938c93ac2e5feabfdbb22) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `migrate`'s redesigned-starter step lists `src/components/logo.ts`, which the new `Logo.astro` imports.
+  - Search results for API pages keep an operation's name, method and path apart, and no longer index the API home filter's Retry button.
+
+- [#287](https://github.com/cloudflare/nimbus/pull/287) [`8758eeb`](https://github.com/cloudflare/nimbus/commit/8758eebf6ede1ddd9b65935a874711ceb9dc9abd) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `lint` and `check` accept relative links between a content source's pages, which the build turns into page URLs.
+  - Search in a slice of several collections skips the other collections' bundles instead of failing. `@cloudflare/nimbus-docs/client` exports `mergeSearchIndexes`, which the starter's search provider uses.
+  - API operation pages keep field names, types and labels apart in search, and leave the expand controls out.
+  - The search button's accessible name starts with its visible label, and API pages name their sidebars.
+
+- [#243](https://github.com/cloudflare/nimbus/pull/243) [`5604125`](https://github.com/cloudflare/nimbus/commit/5604125caf0c1be174a63c5c25da79a6b1f52599) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `agents: { mcp: true }` serves a remote MCP server at `/mcp` with `list_pages` and `get_page` over the published Markdown, plus a Server Card at `/mcp/server-card`, a line in `llms.txt` and an entry in the AI catalog. It needs a server adapter and `@modelcontextprotocol/server`; `nimbus-docs check` reports a missing SDK.
+  - Docs pages in the starter show a "Copy MCP URL" page action that copies the server URL when the server is on. On an existing site, run `nimbus-docs diff src/components/ConnectMcp.astro --apply` and `nimbus-docs diff src/components/connect-mcp.client.ts --apply`, then pass `{capabilities.mcpUrl && <ConnectMcp />}` to `<PageActions>` in `src/layouts/DocsLayout.astro`, as the Remote MCP server guide shows.
+
+- [#287](https://github.com/cloudflare/nimbus/pull/287) [`8758eeb`](https://github.com/cloudflare/nimbus/commit/8758eebf6ede1ddd9b65935a874711ceb9dc9abd) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `add adapter-cloudflare` on a pnpm site declines workerd's build script first, so the install no longer fails.
+  - A slice's Markdown images are published under its prefix, and Markdown images load in `astro dev`.
+  - WebMCP search covers every slice, like the search dialog. On an existing site, pass `searchIndex` to it as the starter's `WebMCP.astro` does.
+  - Search excerpts for request-rendered pages read as text, not Markdown syntax.
+  - `add --overwrite` names the files that carry your edits.
+
+- [#260](https://github.com/cloudflare/nimbus/pull/260) [`0c31e84`](https://github.com/cloudflare/nimbus/commit/0c31e846a224f92eb66552b7e58183ca2e4cccb9) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - - `add --overwrite` without a terminal keeps components you've edited and exits 1; `--overwrite --yes` replaces them and says how many carried edits.
+  - `add a b` installs both; an unknown slug stops before anything is installed.
+  - `check` says an optional upgrade stays listed until `migrate` records the version as reviewed.
+  - New pnpm sites build pages with local images: `sharp` is a starter dependency.
+  - `astro build --root <site>` from another folder finds the social-card font.
+
 ## 0.7.13
 
 ### Patch Changes

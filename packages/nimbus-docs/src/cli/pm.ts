@@ -3,15 +3,18 @@
  *
  * Detection order, strongest signal first:
  *   1. a lockfile in the user's cwd (nearest, most explicit),
- *   2. `npm_config_user_agent` — how the user actually invoked the CLI
- *      (authoritative; never shadowed by a distant ancestor lockfile),
- *   3. a lockfile in an ancestor directory — a package inside a monorepo
+ *   2. the project's own declaration in cwd: `package.json` `packageManager`,
+ *      then a manager's config file (`pnpm-workspace.yaml`, `.yarnrc.yml`),
+ *      so a site not installed yet isn't read as npm because `npx` ran us,
+ *   3. `npm_config_user_agent` — how the user actually invoked the CLI
+ *      (never shadowed by a distant ancestor lockfile),
+ *   4. a lockfile in an ancestor directory — a package inside a monorepo
  *      whose lockfile lives at the workspace root, invoked without a PM
  *      user-agent (e.g. bare `node`/CI),
- *   4. `npm`.
+ *   5. `npm`.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { getCommand } from "../lib/pkgm.js";
@@ -21,8 +24,7 @@ export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 /**
  * The published package name. The bin is `nimbus-docs`, but the *package*
  * is scoped — and the unscoped `nimbus-docs` on npm is a different, legacy
- * package, so any command we print for a user to run must use the scoped
- * name via `dlx`/`npx`.
+ * package, so a printed download command must use the scoped name.
  */
 export const CLI_PACKAGE = "@cloudflare/nimbus-docs";
 
@@ -35,7 +37,7 @@ const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
 ];
 
 export function detectPackageManager(cwd: string): PackageManager {
-  const inCwd = lockfileManager(cwd);
+  const inCwd = lockfileManager(cwd) ?? declaredManager(cwd);
   if (inCwd) return inCwd;
 
   const ua = process.env.npm_config_user_agent ?? "";
@@ -56,6 +58,26 @@ export function detectPackageManager(cwd: string): PackageManager {
   return "npm";
 }
 
+const MANAGER_FILES: ReadonlyArray<readonly [string, PackageManager]> = [
+  ["pnpm-workspace.yaml", "pnpm"],
+  [".yarnrc.yml", "yarn"],
+];
+
+function declaredManager(dir: string): PackageManager | null {
+  try {
+    const field = (JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as { packageManager?: unknown })
+      .packageManager;
+    const name = typeof field === "string" ? field.split("@")[0] : "";
+    if (name === "npm" || name === "pnpm" || name === "yarn" || name === "bun") return name;
+  } catch {
+    // No readable package.json: fall through to config files.
+  }
+  for (const [file, pm] of MANAGER_FILES) {
+    if (existsSync(join(dir, file))) return pm;
+  }
+  return null;
+}
+
 function lockfileManager(dir: string): PackageManager | null {
   for (const [lockfile, pm] of LOCKFILES) {
     if (existsSync(join(dir, lockfile))) return pm;
@@ -64,23 +86,68 @@ function lockfileManager(dir: string): PackageManager | null {
 }
 
 /**
- * A runnable invocation of this CLI to print in user-facing hints, e.g.
- * `pnpm dlx @cloudflare/nimbus-docs list`. Uses the caller's package
- * manager (detected from `cwd`) and always the scoped package via
- * `dlx`/`npx`, so the hint runs whether or not the CLI is installed
- * locally — and never resolves the legacy *unscoped* `nimbus-docs`
- * package by accident.
+ * A runnable invocation of this CLI to print in user-facing hints, in the
+ * caller's package manager (detected from `cwd`). `pnpm dlx` and `yarn dlx`
+ * always download, so a project that declares the package gets its local bin
+ * there. `npx` and `bunx` already prefer a local install, and keep the scoped
+ * name so they never fetch the legacy *unscoped* `nimbus-docs` package.
  *
- *   invocation("list")            → "pnpm dlx @cloudflare/nimbus-docs list"
- *   invocation("add 404-page")    → "npx @cloudflare/nimbus-docs add 404-page"
+ *   invocation("list")  → "pnpm nimbus-docs list"                (installed)
+ *   invocation("list")  → "pnpm dlx @cloudflare/nimbus-docs list" (not installed)
+ *   invocation("list")  → "npx @cloudflare/nimbus-docs list"
  *
- * Yarn resolves to `yarn dlx`, which is Yarn Berry (v2+); Yarn Classic (v1)
- * has no `dlx`. That's the deliberate target — it matches the docs'
- * `<PackageManagers>` widget, and bare `nimbus-docs` was equally unrunnable
- * on v1 — so this is a lateral move there and a fix for Berry (the default).
+ * The download form for Yarn is `yarn dlx`, which is Yarn Berry (v2+); Yarn
+ * Classic (v1) has no `dlx`. That matches the docs' `<PackageManagers>` widget.
  */
 export function invocation(sub: string, cwd = process.cwd()): string {
-  return getCommand(detectPackageManager(cwd), "dlx", CLI_PACKAGE, { args: sub })!;
+  const pm = detectPackageManager(cwd);
+  return (pm === "pnpm" || pm === "yarn") && declaresCli(cwd)
+    ? getCommand(pm, "exec", "nimbus-docs", { args: sub })!
+    : getCommand(pm, "dlx", CLI_PACKAGE, { args: sub })!;
+}
+
+/** Download and run exactly `version`, e.g. for a project other than `cwd`. */
+export function pinnedInvocation(sub: string, version: string, cwd = process.cwd()): string {
+  return getCommand(detectPackageManager(cwd), "dlx", `${CLI_PACKAGE}@${version}`, { args: sub })!;
+}
+
+/** A command that reruns this CLI: executed as-is, displayed as `invocation()`. */
+export interface SelfCommand {
+  bin: string;
+  args: string[];
+  cwd: string;
+  display: string;
+}
+
+export function selfCommand(args: string[], cwd = process.cwd()): SelfCommand {
+  const entry = process.argv[1] ? realpathSync(process.argv[1]) : "nimbus-docs";
+  return { bin: process.execPath, args: [entry, ...args], cwd: ".", display: invocation(args.map(shellArg).join(" "), cwd) };
+}
+
+export function shellArg(value: string): string {
+  return /^[A-Za-z0-9@._/:+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+// pnpm and Yarn run a package's bin only for the workspace that declares it
+// (Yarn PnP has no node_modules at all), so check the nearest package.json.
+export function declaresCli(cwd: string): boolean {
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    const file = join(dir, "package.json");
+    if (existsSync(file)) {
+      try {
+        const pkg = JSON.parse(readFileSync(file, "utf8")) as Record<string, Record<string, unknown> | undefined>;
+        return Boolean(pkg.dependencies?.[CLI_PACKAGE] ?? pkg.devDependencies?.[CLI_PACKAGE]);
+      } catch {
+        return false;
+      }
+    }
+    if (dirname(dir) === dir) return false;
+  }
+}
+
+/** The project's plain install command, e.g. `pnpm install`. */
+export function installCommand(cwd = process.cwd()): string {
+  return getCommand(detectPackageManager(cwd), "install")!;
 }
 
 /**
@@ -103,9 +170,9 @@ export function updateCommand(cwd = process.cwd()): string {
  *   yarn add     <deps...>
  *   bun  add     <deps...>
  */
-// Quote a token for copy-paste into a POSIX shell. Adapter specs like
-// `@astrojs/cloudflare@>=14.1.0 <14.2.0` carry a space and `<`/`>` redirections;
-// a clean package spec is returned unchanged.
+// Quote a token for copy-paste into a POSIX shell. A range spec like
+// `pkg@>=1.2.0 <1.3.0` carries a space and `<`/`>` redirections; a clean
+// package spec is returned unchanged.
 export function quoteForDisplay(token: string): string {
   if (/^[A-Za-z0-9@._/:^~+-]+$/.test(token)) return token;
   return `'${token.replace(/'/g, `'\\''`)}'`;

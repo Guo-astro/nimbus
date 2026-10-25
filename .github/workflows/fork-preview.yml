@@ -1,0 +1,166 @@
+name: Fork preview
+
+# Deploys a fork PR's www, built by the Fork preview build workflow, to a Worker
+# Preview named `fork-<PR#>` at https://fork-<PR#>.nimbus-docs.com. The Preview
+# release workflow then publishes packages against it.
+#
+# `workflow_run` runs this file from main, so a fork can't change it. A fork
+# can change its build workflow, though, so nothing here trusts that run: the
+# PR is looked up from the fork's branch, and the deploy goes ahead only while
+# the PR's head is the built commit and still carries the `pr preview` label,
+# which only maintainers can add. The built files are treated as untrusted
+# data: no PR code runs here, and the SHA marker, `noindex` and redirects are
+# written by this workflow.
+on:
+  workflow_run:
+    workflows: [Fork preview build]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  check:
+    name: Find the labelled fork PR
+    if: >-
+      github.repository == 'cloudflare/nimbus' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      pr: ${{ steps.pr.outputs.number }}
+    steps:
+      - id: pr
+        run: |
+          number=$(gh api -X GET "repos/$REPO/pulls" -f state=open -f head="$HEAD_OWNER:$HEAD_BRANCH" \
+            --jq "[.[] | select(.head.sha == \"$SHA\" and .head.repo.full_name == \"$HEAD_REPO\")][0].number // empty")
+          if [ -z "$number" ]; then
+            echo "No open PR has $SHA from $HEAD_REPO as its head."
+            exit 0
+          fi
+          if ! gh api "repos/$REPO/issues/$number/labels" --jq '.[].name' | grep -qxF 'pr preview'; then
+            echo "PR #$number doesn't carry the pr preview label."
+            exit 0
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+
+  deploy:
+    name: Deploy fork www Preview
+    needs: check
+    if: needs.check.outputs.pr != '' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ${{ github.workflow }}-${{ needs.check.outputs.pr }}
+      cancel-in-progress: true
+    environment: cloudflare
+    permissions:
+      actions: read # download the build run's artifact
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Install Wrangler
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: fork-www-dist
+          path: ${{ runner.temp }}/fork-www-dist
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Stage the fork's files
+        run: |
+          if find "$SRC" -name '_worker.js' -print -quit | grep -q .; then
+            echo '::error::The fork build emitted _worker.js. Fork Previews serve static assets only.'
+            exit 1
+          fi
+          rm -rf apps/www/dist
+          cp -R "$SRC" apps/www/dist
+          # Redirects run before headers and assets, so a fork's rules could
+          # serve other content at the SHA marker; main's rules replace them.
+          rm -f apps/www/dist/_redirects
+          if [ -f apps/www/public/_redirects ]; then
+            cp apps/www/public/_redirects apps/www/dist/_redirects
+          fi
+          find apps/www/dist -name '.assetsignore' -delete
+          printf '%s\n' "$SHA" > apps/www/dist/_nimbus-preview-sha.txt
+          printf '/*\n  X-Robots-Tag: noindex\n' > apps/www/dist/_headers
+        env:
+          SRC: ${{ runner.temp }}/fork-www-dist
+          SHA: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Deploy the Preview
+        working-directory: apps/www
+        run: |
+          set -o pipefail
+          out=$(env -u GITHUB_SHA COMMIT_SHA="$SHA" pnpm exec wrangler preview \
+            --name "fork-$PR" --tag "${SHA:0:7}" --message "Fork PR #$PR at $SHA" \
+            --ignore-base-config --json)
+          url="https://fork-$PR.nimbus-docs.com"
+          if ! sed -n '/^{/,$p' <<< "$out" | jq -e --arg url "$url" '.preview.urls | index($url)' > /dev/null; then
+            echo "::error::Wrangler didn't report $url: $(sed -n '/^{/,$p' <<< "$out" | jq -c '.preview.urls')"
+            exit 1
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PR: ${{ needs.check.outputs.pr }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+
+      # One comment per PR, updated on each run. The Preview release workflow
+      # reads the URL from it.
+      - name: Comment the Preview URL
+        run: |
+          body=$(printf '%s\n\nPreview URL: %s\nCommit: %s\n\nThis Preview serves unreviewed contributor code from a fork. Its own _headers and _redirects files are not deployed.\n' \
+            "$MARKER" "https://fork-$PR.nimbus-docs.com" "$SHA")
+          id=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARKER\"))) | .id" | head -1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.check.outputs.pr }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          MARKER: "<!-- nimbus-fork-preview -->"
+
+  # The label is the deploy's guard, so it comes off after every labelled
+  # build, pass or fail: a later build of the fork can't deploy until a
+  # maintainer adds it again, and reapplying it starts a fresh preview.
+  unlabel:
+    name: Remove the trigger label
+    needs: [check, deploy]
+    if: always() && needs.check.outputs.pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - run: gh pr edit "$PR" --repo "$REPO" --remove-label 'pr preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.check.outputs.pr }}

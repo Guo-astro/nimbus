@@ -5,7 +5,8 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { checkAuthoring } from "../../src/check/authoring.js";
-import { _resetInternalLinkCacheForTests } from "../../src/lint/rules/internal-link.js";
+import { _resetLinkEnvCacheForTests as _resetInternalLinkCacheForTests } from "../../src/lint/link-env.js";
+import { ROUTE_TRUTH_VERSION } from "../../src/lint/site-model.js";
 
 interface ProjectOpts {
   body?: string;
@@ -33,7 +34,7 @@ function project(opts: ProjectOpts = {}): string {
   if (opts.routesJson) {
     fs.writeFileSync(
       path.join(dir, ".nimbus", "routes.json"),
-      JSON.stringify({ version: 1, ...opts.routesJson }),
+      JSON.stringify({ version: ROUTE_TRUTH_VERSION, ...opts.routesJson }),
     );
   }
   return dir;
@@ -94,7 +95,7 @@ test("lint.json + routes.json present → broken link is actually caught", () =>
   _resetInternalLinkCacheForTests();
   const dir = project({
     lintJson: INTERNAL_LINK_ON,
-    routesJson: { base: "/", knownRoutes: ["/"], opaqueNamespaces: [] },
+    routesJson: { base: "/", knownRoutes: ["/"], redirects: [], redirectPages: [], redirectRules: "cloudflare", opaqueNamespaces: [] },
   });
   try {
     const r = checkAuthoring(dir);
@@ -176,6 +177,43 @@ test("zero .mdx project → evaluated true, no notes (a config-only check still 
     assert.equal(r.evaluated, true);
     assert.deepEqual(r.findings, []);
     assert.deepEqual(r.notes, []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("lint rules edited since lint.json was written → one lint-config-stale warning", () => {
+  const dir = project({ body: "Fine.", lintJson: { rules: { "nimbus/single-h1": "warn" }, collections: {} } });
+  try {
+    fs.writeFileSync(
+      path.join(dir, "astro.config.ts"),
+      'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ title: "Docs" }, { rules: { "nimbus/single-h1": "off" } })] };\n',
+    );
+    const stale = checkAuthoring(dir).findings.filter((f) => f.code === "nimbus/lint-config-stale");
+    assert.equal(stale.length, 1);
+    assert.equal(stale[0]!.severity, "warn");
+    assert.match(stale[0]!.message, /astro sync/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a lint.json the build just wrote is not stale, site and Markdown features included", () => {
+  const dir = project({
+    body: "Fine.",
+    lintJson: {
+      rules: { "nimbus/single-h1": "error" },
+      collections: {},
+      site: "https://docs.example.com",
+      markdownFeatures: { gfm: true, smartPunctuation: true, headingAttributes: true },
+    },
+  });
+  try {
+    fs.writeFileSync(
+      path.join(dir, "astro.config.ts"),
+      'import nimbus from "@cloudflare/nimbus-docs";\nexport default { integrations: [nimbus({ title: "Docs" }, { rules: { "nimbus/single-h1": "error" }, markdown: { hastPlugins: [plugin()] } })] };\n',
+    );
+    assert.ok(!hasFinding(checkAuthoring(dir), "nimbus/lint-config-stale"));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

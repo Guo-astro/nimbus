@@ -1,11 +1,12 @@
 {
   "name": "@cloudflare/create-nimbus-docs",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "private": false,
   "publishConfig": {
     "access": "public"
   },
   "type": "module",
+  "preferUnplugged": true,
   "description": "Scaffold a new Nimbus docs site. Used via `npx @cloudflare/create-nimbus-docs@latest`.",
   "keywords": [
     "astro",
@@ -44,14 +45,15 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.8.0",
-    "@cloudflare/nimbus-docs": "workspace:*",
     "giget": "^3.3.0",
     "mri": "^1.2.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "yaml": "^2.7.1"
   },
   "devDependencies": {
+    "@cloudflare/nimbus-docs": "workspace:*",
     "@types/mri": "^1.1.4",
-    "@types/node": "^20.17.0",
+    "@types/node": "^22.20.5",
     "tsdown": "^0.20.3",
     "tsx": "^4.22.3"
   }

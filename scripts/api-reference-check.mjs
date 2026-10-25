@@ -9,6 +9,7 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
@@ -55,6 +56,10 @@ const API_REFERENCE_RECIPE = join(
   "api-reference.md",
 );
 const OVERLAY = join(ROOT, "scripts", "fixtures", "api-reference");
+// The recipe's previous shape: the Nimbus config in nimbus.config.ts, passed
+// explicitly to apiCollection(options).
+const LEGACY_OVERLAY = join(ROOT, "scripts", "fixtures", "api-reference-legacy");
+const LEGACY_FILES = ["nimbus.config.ts", "astro.config.ts", "src/content.config.ts"];
 const LOCK_TEMPLATE = join(OVERLAY, "pnpm-lock.yaml.template");
 const SPEC = join(
   ROOT,
@@ -82,6 +87,7 @@ const PINNED_REGISTRY_PEERS = Object.entries(PEERS).map(
   ([name, version]) => `${name}@${version}`,
 );
 const TARBALL_INTEGRITY_PLACEHOLDER = "{{NIMBUS_TARBALL_INTEGRITY}}";
+const NIMBUS_VERSION_PLACEHOLDER = "{{NIMBUS_VERSION}}";
 
 const managedChildren = new Set();
 const managedServers = new Set();
@@ -307,9 +313,14 @@ function packageMetadata(packageJson) {
 }
 
 function resolvedVersion(reference) {
-  return /^([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/.exec(
+  return /(?:^|@)([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/.exec(
     String(reference ?? ""),
   )?.[1];
+}
+
+function resolvedRange(range) {
+  const value = String(range);
+  return value.startsWith("npm:") ? value.slice(value.lastIndexOf("@") + 1) : value;
 }
 
 function assertFrozenNimbusMetadata(lockText, nimbusPackage, consumerPackage) {
@@ -391,7 +402,8 @@ function assertFrozenNimbusMetadata(lockText, nimbusPackage, consumerPackage) {
       const reference = snapshot[field]?.[name];
       const version = resolvedVersion(reference);
       assert(
-        version && satisfies(version, range, { includePrerelease: true }),
+        version &&
+          satisfies(version, resolvedRange(range), { includePrerelease: true }),
         `consumer lock resolves ${name} to ${reference}; expected ${range}`,
       );
     }
@@ -405,7 +417,8 @@ function assertFrozenNimbusMetadata(lockText, nimbusPackage, consumerPackage) {
     const reference = snapshot[field]?.[name];
     const version = resolvedVersion(reference);
     assert(
-      version && satisfies(version, range, { includePrerelease: true }),
+      version &&
+        satisfies(version, resolvedRange(range), { includePrerelease: true }),
       `consumer lock resolves peer ${name} to ${reference}; expected ${range}`,
     );
   }
@@ -636,7 +649,6 @@ async function assertRecipeFixtureParity() {
   const recipe = await readFile(API_REFERENCE_RECIPE, "utf8");
   for (const [path, language] of [
     ["src/pages/api/[...slug].astro", "astro"],
-    ["src/pages/api/[...slug]/index.md.ts", "ts"],
   ]) {
     const fixtureSource = await readFile(join(OVERLAY, path), "utf8");
     const fixture = fixtureSource.endsWith("\n")
@@ -647,6 +659,12 @@ async function assertRecipeFixtureParity() {
       `${path} drifted from its marked block in apps/www/registry/features/api-reference.md`,
     );
   }
+  // The scaffolder writes the same route for \`--api\` and \`--template api\`.
+  const scaffolded = join(ROOT, "packages", "nimbus-starter-source", "parts", "api", "src", "pages", "api", "[...slug].astro");
+  assert(
+    (await readFile(scaffolded, "utf8")) === (await readFile(join(OVERLAY, "src/pages/api/[...slug].astro"), "utf8")),
+    "the starter's API part route drifted from the api-reference recipe's route",
+  );
 }
 
 async function applyOverlay() {
@@ -657,18 +675,56 @@ async function applyOverlay() {
     "API overlay astro.config.ts drifted from the generated starter config",
   );
   const files = [
-    "nimbus.config.ts",
     "astro.config.ts",
     "src/content.config.ts",
     "src/pages/api/[...slug].astro",
-    "src/pages/api/[...slug]/index.md.ts",
   ];
   for (const file of files) {
     const target = join(site, file);
     await mkdir(dirname(target), { recursive: true });
     await cp(join(OVERLAY, file), target);
   }
-  const astroConfigPath = join(site, "astro.config.ts");
+  await forceTrailingSlash(join(site, "astro.config.ts"));
+  // Two endpoints a part, so the small spec builds the home's later parts.
+  const homeSize = join(site, "src", "components", "ui", "api-layout", "home.ts");
+  const homeSource = await readFile(homeSize, "utf8");
+  assert(homeSource.includes("API_HOME_CHUNK_SIZE = 150"), "api-layout/home.ts no longer sets API_HOME_CHUNK_SIZE = 150");
+  await writeFile(homeSize, homeSource.replace("API_HOME_CHUNK_SIZE = 150", "API_HOME_CHUNK_SIZE = 2"));
+  await mkdir(join(site, "src", "api"), { recursive: true });
+  await cp(SPEC, join(site, "src", "api", "smallco.yaml"));
+  await writeFile(
+    join(site, "src", "content", "docs", "guide.mdx"),
+    "---\ntitle: Guide\n---\n\n# Guide\n\n[Create a charge](api.ref:api:create)\n",
+  );
+  await writeFile(
+    join(site, "src", "content", "docs", "reference.md"),
+    "---\ntitle: Reference\n---\n\n# Reference\n\n[List charges](<api.ref:api:list>)\n",
+  );
+}
+
+// The recipe keeps the Nimbus config inline, so `nimbus-docs check` evaluates
+// it statically and pairs the `api` entry with its `apiCollection()` key.
+async function assertStaticCheck() {
+  const { stdout } = await run(
+    "pnpm",
+    ["exec", "nimbus-docs", "check", "--env", "--structure", "--json"],
+    { cwd: site },
+  );
+  const report = JSON.parse(stdout);
+  const notes = report.scopes.flatMap((scope) => scope.notes.map((note) => note.code));
+  for (const code of ["nimbus/config-not-evaluated", "nimbus/config-unresolved"]) {
+    assert(!notes.includes(code), `nimbus-docs check reported ${code} on the recipe's config`);
+  }
+  const apiFindings = report.findings.filter((finding) =>
+    finding.code.startsWith("nimbus/api-collection-"),
+  );
+  assert(
+    apiFindings.length === 0,
+    `nimbus-docs check reported API collection mismatches: ${apiFindings.map((finding) => finding.message).join("; ")}`,
+  );
+}
+
+async function forceTrailingSlash(astroConfigPath) {
   const astroConfig = await readFile(astroConfigPath, "utf8");
   const configMarker = "export default defineConfig({";
   assert(
@@ -686,12 +742,80 @@ async function applyOverlay() {
       'export default defineConfig({\n  trailingSlash: "always",',
     ),
   );
-  await mkdir(join(site, "src", "api"), { recursive: true });
-  await cp(SPEC, join(site, "src", "api", "smallco.yaml"));
-  await writeFile(
-    join(site, "src", "content", "docs", "guide.mdx"),
-    "---\ntitle: Guide\n---\n\n# Guide\n",
+}
+
+// Sites set up by the previous recipe keep building unchanged: swap in the
+// legacy overlay, typecheck, rebuild, and compare byte for byte with the
+// current recipe's output, then restore the current shape.
+//
+// The legacy build runs in a tree without earlier outputs, like the first
+// build: Tailwind scans every file that isn't gitignored for class names, and
+// only `dist/` is, so `dist-base*` HTML would otherwise change the CSS.
+async function assertLegacyShapeOutput() {
+  phase("typechecking and building the previous nimbus.config.ts shape");
+  const legacyAstroConfig = await readFile(join(LEGACY_OVERLAY, "astro.config.ts"), "utf8");
+  const overlayAstroConfig = await readFile(join(OVERLAY, "astro.config.ts"), "utf8");
+  assert(
+    configExport(legacyAstroConfig) === configExport(overlayAstroConfig),
+    "legacy API overlay astro.config.ts drifted from the current overlay's Astro config",
   );
+  const current = new Map();
+  for (const file of ["astro.config.ts", "src/content.config.ts"]) {
+    current.set(file, await readFile(join(site, file), "utf8"));
+  }
+  const held = join(workRoot, "held-outputs");
+  const outputDirs = (await readdir(site, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("dist"))
+    .map((entry) => entry.name);
+  await mkdir(held, { recursive: true });
+  for (const dir of outputDirs) await rename(join(site, dir), join(held, dir));
+  const legacyDist = join(workRoot, "dist-legacy");
+  for (const file of LEGACY_FILES) await cp(join(LEGACY_OVERLAY, file), join(site, file));
+  await forceTrailingSlash(join(site, "astro.config.ts"));
+  try {
+    await run("pnpm", ["typecheck"], { cwd: site, timeoutMs: 15 * 60_000 });
+    await run("pnpm", ["build"], { cwd: site, timeoutMs: 15 * 60_000 });
+    await rename(join(site, "dist"), legacyDist);
+  } finally {
+    for (const [file, source] of current) await writeFile(join(site, file), source);
+    await rm(join(site, "nimbus.config.ts"), { force: true });
+    await rm(join(site, "dist"), { recursive: true, force: true });
+    for (const dir of outputDirs) await rename(join(held, dir), join(site, dir));
+  }
+
+  // Pagefind names some index files by content hash in a way that isn't stable
+  // across rebuilds, so its directory is compared by file count; its API routes
+  // are asserted on the current build.
+  const outputs = async (dir) =>
+    new Map(
+      await Promise.all(
+        (await walk(dir)).map(async (file) => [
+          relative(dir, file).split(sep).join("/"),
+          await readFile(file),
+        ]),
+      ),
+    );
+  const [currentFiles, legacyFiles] = await Promise.all([
+    outputs(join(site, "dist")),
+    outputs(legacyDist),
+  ]);
+  const pagefind = (files) => [...files.keys()].filter((file) => file.startsWith("pagefind/"));
+  assert(
+    pagefind(currentFiles).length === pagefind(legacyFiles).length,
+    "legacy shape produced a different number of Pagefind files",
+  );
+  const compared = [...currentFiles.keys()].filter((file) => !file.startsWith("pagefind/"));
+  const legacyCompared = [...legacyFiles.keys()].filter((file) => !file.startsWith("pagefind/"));
+  const missing = compared.filter((file) => !legacyFiles.has(file));
+  const extra = legacyCompared.filter((file) => !currentFiles.has(file));
+  const differing = compared.filter(
+    (file) => legacyFiles.has(file) && !currentFiles.get(file).equals(legacyFiles.get(file)),
+  );
+  assert(
+    missing.length === 0 && extra.length === 0 && differing.length === 0,
+    `legacy shape output differs from the current recipe: missing ${missing.slice(0, 5).join(", ") || "none"}; extra ${extra.slice(0, 5).join(", ") || "none"}; differing ${differing.slice(0, 5).join(", ") || "none"}`,
+  );
+  ok(`previous nimbus.config.ts shape builds ${compared.length} identical files`);
 }
 
 async function assertProvenance(registryItems, registryUrl, initialNimbus) {
@@ -707,7 +831,7 @@ async function assertProvenance(registryItems, registryUrl, initialNimbus) {
     const conflicts = await Promise.all(
       item.files.map((file) => exists(join(site, "src", file.path))),
     );
-    // This runs after add, so use the initial scaffold inventory captured on each item.
+    // This runs after add, so use the scaffold's conflicts captured on each item before it.
     if (!item.hadConflict) expectedAdded.push(item);
     assert(
       conflicts.every(Boolean),
@@ -803,12 +927,14 @@ async function startStaticServer(dist) {
 async function assertArtifactsAndSmoke(dist) {
   const expectedRoutes = EXPECTED.pages.map((page) => page.route).sort();
   const apiFiles = await walk(join(dist, "api"));
-  const htmlRoutes = apiFiles
+  const isHomePart = (route) => /^\/api\/index\/\d+$/.test(route);
+  const allHtmlRoutes = apiFiles
     .filter((file) => file.endsWith(`${sep}index.html`))
     .map((file) =>
       normalizeRoute(`/${relative(dist, dirname(file)).split(sep).join("/")}`),
     )
     .sort();
+  const htmlRoutes = allHtmlRoutes.filter((route) => !isHomePart(route));
   const markdownRoutes = apiFiles
     .filter((file) => file.endsWith(`${sep}index.md`))
     .map((file) =>
@@ -846,6 +972,60 @@ async function assertArtifactsAndSmoke(dist) {
     join(dist, "api", "charges", "create", "index.html"),
     "utf8",
   );
+  const titleOf = (html) => /<title>([^<]*)<\/title>/.exec(html)?.[1];
+  const overviewTitle = titleOf(
+    await readFile(join(dist, "api", "index.html"), "utf8"),
+  );
+  assert(
+    overviewTitle && !overviewTitle.includes(" · API |"),
+    "the API overview title must not append \" · API\"",
+  );
+  assert(
+    titleOf(operationHtml)?.includes(" · API |"),
+    "API leaf page titles must end with \" · API\"",
+  );
+  // The home's later parts: pages of their own under the API route, linked in
+  // order from the home, kept out of search and the sitemap.
+  const homeParts = allHtmlRoutes.filter(isHomePart);
+  assert(homeParts.includes("/api/index/2"), "the API home built no later parts");
+  const homeHtml = await readFile(join(dist, "api", "index.html"), "utf8");
+  assert(homeHtml.includes('href="/api/index/2/"'), "the API home doesn't link its second part");
+  for (const route of homeParts) {
+    const html = await readFile(join(dist, route.slice(1), "index.html"), "utf8");
+    assert(html.includes('<meta name="robots" content="noindex"'), `${route} is not noindex`);
+    assert(html.includes("data-api-home-chunk"), `${route} has no list for the home to fetch`);
+    assert(!html.includes("data-pagefind-body"), `${route} is in the search index`);
+    const next = `/api/index/${Number(route.split("/").at(-1)) + 1}`;
+    assert(
+      html.includes(`href="${next}/"`) === homeParts.includes(next),
+      `${route} doesn't link the next part, or links one that doesn't exist`,
+    );
+  }
+  const sitemaps = (await walk(dist)).filter((file) => /sitemap-\d+\.xml$/.test(file));
+  for (const file of sitemaps)
+    assert(!(await readFile(file, "utf8")).includes("/api/index/"), "a later part of the API home is in the sitemap");
+
+  // The API home lists every endpoint, name first, and its filter reads the
+  // version's page list. An unversioned API shows no version picker.
+  const overviewHtml = homeHtml;
+  const listed = [overviewHtml, ...(await Promise.all(homeParts.map((route) => readFile(join(dist, route.slice(1), "index.html"), "utf8"))))];
+  assert(
+    overviewHtml.includes("data-api-home-chunk") &&
+      listed.some((html) => html.includes('href="/api/charges/create/"')),
+    "the API home does not list its endpoints",
+  );
+  const filterSrc = /data-filter-src="([^"]+)"/.exec(overviewHtml)?.[1];
+  assert(filterSrc?.startsWith("/_nimbus/pages/"), "the API home's filter has no page list");
+  const homeRows = JSON.parse(await readFile(join(dist, filterSrc.slice(1)), "utf8"));
+  assert(
+    Array.isArray(homeRows) &&
+      homeRows.some((row) => row.method === "POST" && row.url === "/api/charges/create/"),
+    "the API home's filter list is missing an endpoint",
+  );
+  assert(
+    !operationHtml.includes('data-slot="version-switcher"'),
+    "an unversioned API must not show a version picker",
+  );
   const apiNav = /<nav[^>]*data-nb-api-nav[^>]*>([\s\S]*?)<\/nav>/.exec(
     operationHtml,
   )?.[1];
@@ -881,7 +1061,24 @@ async function assertArtifactsAndSmoke(dist) {
     occurrences(rootIndex, apiLlmsUrl) === 1,
     "root llms.txt must link /api/llms.txt exactly once",
   );
-  const apiIndex = await readFile(join(dist, "api", "llms.txt"), "utf8");
+  // The API's section index nests: /api/llms.txt links each sub-folder's
+  // own llms.txt. Every page appears once across them, every nested index is
+  // linked once from its parent.
+  const apiIndexFiles = (await readdir(join(dist, "api"), { recursive: true }))
+    .filter((file) => file === "llms.txt" || file.endsWith(`${sep}llms.txt`))
+    .sort();
+  const apiIndexTexts = await Promise.all(
+    apiIndexFiles.map((file) => readFile(join(dist, "api", file), "utf8")),
+  );
+  const apiIndex = apiIndexTexts.join("\n");
+  assert(apiIndexFiles.includes("llms.txt"), "api/llms.txt is missing");
+  for (const file of apiIndexFiles.filter((file) => file !== "llms.txt")) {
+    const nestedUrl = absoluteUrl(`/api/${file.split(sep).join("/")}`);
+    assert(
+      occurrences(apiIndex, nestedUrl) === 1,
+      `the API's section indexes must link ${nestedUrl} exactly once`,
+    );
+  }
   const llmsFull = await readFile(join(dist, "llms-full.txt"), "utf8");
   const expectedMarkdownUrls = expectedRoutes
     .map((route) => absoluteUrl(`${route}/index.md`))
@@ -890,7 +1087,7 @@ async function assertArtifactsAndSmoke(dist) {
     const markdownUrl = absoluteUrl(`${route}/index.md`);
     assert(
       occurrences(apiIndex, markdownUrl) === 1,
-      `api/llms.txt must contain ${markdownUrl} exactly once`,
+      `the API's section indexes must contain ${markdownUrl} exactly once`,
     );
     assert(
       occurrences(llmsFull, markdownUrl) === 1,
@@ -900,7 +1097,7 @@ async function assertArtifactsAndSmoke(dist) {
   assert(
     JSON.stringify(extractApiMarkdownUrls(apiIndex)) ===
       JSON.stringify(expectedMarkdownUrls),
-    "api/llms.txt API Markdown URL set differs from expected.json",
+    "the API's section indexes' Markdown URL set differs from expected.json",
   );
   assert(
     JSON.stringify(extractApiMarkdownUrls(llmsFull)) ===
@@ -911,8 +1108,14 @@ async function assertArtifactsAndSmoke(dist) {
   const manifest = JSON.parse(
     await readFile(join(dist, "nimbus-api", "coordinates.json"), "utf8"),
   );
-  assert(manifest.version === 1, "coordinate manifest version is not 1");
-  const entries = manifest.collections?.api?.entries;
+  assert(manifest.version === 2, "coordinate manifest version is not 2");
+  const pages = manifest.collections?.api?.pages;
+  assert(Array.isArray(pages), "coordinate manifest has no api page groups");
+  const entries = Object.fromEntries(pages.flatMap(page =>
+    Object.entries(page.entries).map(([coordinate, fragment]) => [coordinate, {
+      url: page.url + (fragment === null ? "" : "#" + (fragment === 0 ? coordinate : fragment)),
+    }]),
+  ));
   assert(
     entries && typeof entries === "object",
     "coordinate manifest has no api collection",
@@ -1031,7 +1234,9 @@ async function assertArtifactsAndSmoke(dist) {
         JSON.stringify({
           main: 1,
           codeRail: 1,
-          apiNav: 2,
+          // One nav tree since the sidebar rework: the drawer borrows the
+          // rail's tree instead of rendering its own copy.
+          apiNav: 1,
           searchTrigger: 1,
           searchDialog: 1,
           themeControl: 1,
@@ -1131,6 +1336,43 @@ async function assertArtifactsAndSmoke(dist) {
       resultLinks.some((href) => href?.includes("/api/charges/create")),
       "Pagefind cannot find the representative operation",
     );
+
+    // Scrolling the home loads every later part, even ones too short to move
+    // its link out of range.
+    await page.goto(`${staticSite.origin}/api/`, { waitUntil: "networkidle" });
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const parts = homeParts.length + 1;
+    await page
+      .waitForFunction((n) => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length === n, parts, { timeout: 10_000 })
+      .catch(() => {});
+    const shown = await page.locator("[data-nb-ix-feed] [data-api-home-chunk]").count();
+    assert(shown === parts, `scrolling the API home showed ${shown} of its ${parts} parts`);
+
+    // A part that arrives while a filter hides the list doesn't pull in the
+    // rest; clearing the filter resumes loading.
+    assert(parts >= 3, "the API home needs three parts to check loading under a filter");
+    let release;
+    const held = new Promise((resolve) => (release = resolve));
+    const requested = [];
+    await page.route("**/api/index/*/", async (route) => {
+      requested.push(new URL(route.request().url()).pathname);
+      if (requested.length === 1) await held;
+      await route.continue();
+    });
+    await page.goto(`${staticSite.origin}/api/`);
+    await page.waitForFunction(() => document.querySelector("[data-nb-ix-more-label]")?.textContent?.startsWith("Loading"));
+    await page.locator("[data-nb-ix-input]").fill("charge");
+    release();
+    await page.waitForFunction(() => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length >= 2);
+    await page.waitForTimeout(500);
+    assert(requested.length === 1, `filtering the API home still loaded ${requested.join(", ")}`);
+    await page.locator("[data-nb-ix-input]").fill("");
+    await page
+      .waitForFunction((n) => document.querySelectorAll("[data-nb-ix-feed] [data-api-home-chunk]").length === n, parts, { timeout: 10_000 })
+      .catch(() => {});
+    const resumed = await page.locator("[data-nb-ix-feed] [data-api-home-chunk]").count();
+    assert(resumed === parts, `clearing the API home's filter showed ${resumed} of its ${parts} parts`);
+    await page.unroute("**/api/index/*/");
     assert(
       browserErrors.length === 0,
       `Chromium reported errors: ${browserErrors.join("; ")}`,
@@ -1255,11 +1497,25 @@ async function assertBasePathMetadata() {
     ordinaryDirective?.includes(`href="${ordinaryMarkdownUrl}"`),
     "non-root ordinary agent directive uses an unbased Markdown URL",
   );
+  const referenceHtml = await readFile(
+    join(site, "dist-base", "reference", "index.html"),
+    "utf8",
+  );
+  for (const [surface, html, href] of [
+    ["MDX", ordinaryHtml, "/docs/api/charges/create/"],
+    ["Markdown", referenceHtml, "/docs/api/charges/list/"],
+  ]) {
+    assert(
+      html.includes(`href="${href}"`),
+      `non-root ${surface} prose citation does not resolve to ${href}`,
+    );
+  }
   const homeHtml = await readFile(join(site, "dist-base", "index.html"), "utf8");
   const notFoundHtml = await readFile(join(site, "dist-base", "404.html"), "utf8");
   for (const [surface, html] of Object.entries({
     operation: operationHtml,
     ordinary: ordinaryHtml,
+    reference: referenceHtml,
     home: homeHtml,
     "not found": notFoundHtml,
   })) {
@@ -1275,7 +1531,7 @@ async function assertBasePathMetadata() {
     "non-root homepage is not classified as a website",
   );
   assert(
-    ordinaryHtml.includes('href="/docs/favicon.ico"'),
+    ordinaryHtml.includes('href="/docs/favicon.svg"'),
     "non-root favicon URL is malformed",
   );
   assert(
@@ -1289,6 +1545,10 @@ async function assertBasePathMetadata() {
     ],
     "API agent index": [
       await readFile(join(site, "dist-base", "api", "llms.txt"), "utf8"),
+      [absoluteUrl("/docs/api/charges/llms.txt")],
+    ],
+    "nested API agent index": [
+      await readFile(join(site, "dist-base", "api", "charges", "llms.txt"), "utf8"),
       [absoluteUrl("/docs/api/charges/create/index.md")],
     ],
     "full documentation": [
@@ -1484,10 +1744,15 @@ async function execute() {
   const initialNimbus = JSON.parse(
     await readFile(join(site, "nimbus.json"), "utf8"),
   );
+  // `add` keeps a component, unrecorded, only when a file it would write
+  // already exists with different content; identical files are up to date.
   for (const item of registryItems) {
     item.hadConflict = (
       await Promise.all(
-        item.files.map((file) => exists(join(site, "src", file.path))),
+        item.files.map(async (file) => {
+          const target = join(site, "src", file.path);
+          return (await exists(target)) && (await readFile(target, "utf8")) !== file.content;
+        }),
       )
     ).some(Boolean);
   }
@@ -1509,11 +1774,21 @@ async function execute() {
     occurrences(lockTemplate, TARBALL_INTEGRITY_PLACEHOLDER) === 1,
     "consumer lock template must contain exactly one tarball integrity placeholder",
   );
-  const frozenLock = lockTemplate.replace(
-    TARBALL_INTEGRITY_PLACEHOLDER,
-    tarballIntegrity,
+  assert(
+    occurrences(lockTemplate, NIMBUS_VERSION_PLACEHOLDER) === 1,
+    "consumer lock template must contain exactly one Nimbus version placeholder",
   );
   const nimbusPackage = JSON.parse(await readFile(NIMBUS_PACKAGE, "utf8"));
+  assert(
+    typeof nimbusPackage.version === "string" &&
+      satisfies(nimbusPackage.version, "*", { includePrerelease: true }),
+    "Nimbus package version must be valid semver",
+  );
+  // Only the local artifact's version and integrity vary with a release.
+  // Dependency resolutions and the remaining package metadata stay reviewed.
+  const frozenLock = lockTemplate
+    .replace(TARBALL_INTEGRITY_PLACEHOLDER, tarballIntegrity)
+    .replace(NIMBUS_VERSION_PLACEHOLDER, nimbusPackage.version);
   assertFrozenNimbusMetadata(frozenLock, nimbusPackage, consumerPackage);
   const lockPath = join(site, "pnpm-lock.yaml");
   await writeFile(lockPath, frozenLock);
@@ -1645,8 +1920,10 @@ async function execute() {
   }
   ok("registry UI, exact optional peers, and provenance are installed");
 
-  phase("applying thin API overlay and SmallCo fixture");
+  phase("applying API fixture and thin route overlay");
   await applyOverlay();
+  phase("statically checking generated consumer");
+  await assertStaticCheck();
   phase("typechecking generated consumer");
   await run("pnpm", ["typecheck"], { cwd: site, timeoutMs: 15 * 60_000 });
   phase("building generated consumer");
@@ -1671,10 +1948,11 @@ async function execute() {
   );
   await assertArtifactsAndSmoke(join(site, "dist"));
   await assertBasePathMetadata();
+  await assertLegacyShapeOutput();
   assert(
     sha256(normalizeLockForComparison(await readFile(lockPath, "utf8"))) ===
       lockHash,
-    "non-root-base build changed the frozen consumer lock",
+    "non-root-base or legacy-shape builds changed the frozen consumer lock",
   );
   ok(
     `complete acceptance contract passed in ${((Date.now() - started) / 1000).toFixed(1)}s`,

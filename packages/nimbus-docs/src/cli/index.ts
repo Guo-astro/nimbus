@@ -9,8 +9,8 @@
  *   nimbus-docs list                   → list
  *   nimbus-docs list --type ui|lib|feature
  *   nimbus-docs add                    → list
- *   nimbus-docs add <slug>             → install (component path or feature path)
- *   nimbus-docs add <slug> --yes       → component: skip overwrite prompts
+ *   nimbus-docs add <slug...>          → install (component path or feature path)
+ *   nimbus-docs add <slug...> --yes    → component: no prompts, keeps differing files
  *   nimbus-docs add <feature> --print  → print an agent-handoff recipe
  *
  * Feature behavior: print markdown to stdout iff `--print` OR an agent is
@@ -22,22 +22,33 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import mri from "mri";
 import * as p from "@clack/prompts";
 
 import { ADAPTER_IDS, type AdapterId } from "../_internal/adapters.js";
+import { DEFAULT_RENDERING_NOTE } from "../_internal/route-modes.js";
 import {
   cloudflareRequestRenderingAgentRecipe,
   installAdapter,
+  type AdapterInstallErrorCode,
 } from "./adapter.js";
-import { BUNDLED_INDEX } from "./_registry.generated.js";
+import { BUNDLED_INDEX, type RegistryEntryType } from "./_registry.generated.js";
 import { checkCommand } from "./check.js";
-import { installComponents } from "./component.js";
+import { installComponents, keptLines, registerHint, starterBaseline } from "./component.js";
 import { loadDotenv } from "./dotenv.js";
-import { installFeature, shouldUseAgentHandoff } from "./feature.js";
+import { humanInstructions, installFeature, shouldUseAgentHandoff } from "./feature.js";
+import {
+  formatSources,
+  isSourceUrl,
+  resolveSource,
+  sourceGuide,
+  unknownSourceMessage,
+} from "./source.js";
 import { initCommand } from "./init.js";
-import { lintCommand } from "./lint.js";
+import { lintCommand, lintHelp } from "./lint.js";
 import { migrateCommand } from "./migrate.js";
 import {
   readNimbusJson,
@@ -56,27 +67,15 @@ import {
   getIndexEntry,
   listEntries,
   registrySource,
+  registryVersionWarning,
   resolveComponentTree,
-  type ComponentItem,
+  fetchSourceMarkdown,
 } from "./resolver.js";
+import { unknownFlagError } from "./flags.js";
+import { progress } from "./progress.js";
 import { diffCommand, outdatedCommand } from "./upgrade.js";
-
-// Named exports of a component's barrel (`components/ui/<slug>/index.ts`), for
-// the "register in components.ts" hint after install.
-function barrelExports(item: ComponentItem): string[] {
-  const index = item.files.find((f) => f.path.endsWith(`/${item.name}/index.ts`));
-  if (!index) return [];
-  const names: string[] = [];
-  for (const block of index.content.matchAll(/export\s*\{([^}]*)\}/g)) {
-    for (const part of (block[1] ?? "").split(",")) {
-      const seg = part.trim();
-      if (!seg) continue;
-      const name = seg.includes(" as ") ? seg.split(" as ").pop()!.trim() : seg;
-      if (/^[A-Za-z_]\w*$/.test(name)) names.push(name);
-    }
-  }
-  return names;
-}
+import { installedNimbusVersion, runningNimbusVersion } from "../_internal/upgrades.js";
+import { getCommand } from "../lib/pkgm.js";
 
 // Load the CLI-only registry override without importing feature/build variables
 // into process.env before the Vite-parity preflight runs.
@@ -119,9 +118,12 @@ interface CliArgs {
 
 const HELP = `
   Commands:
-    list [--type ui|lib|feature]   List available registry items
+    list [--type ui|lib|feature|source]
+                                   List available registry items
     add                            Same as \`list\`
-    add <slug>                     Install a component or hand off a feature
+    add <slug...>                  Install components or hand off a feature
+    add source <name|url>          Add a content source: git (github, gitlab, bitbucket), notion,
+                                   or a provider's docs URL; \`add source\` alone lists them
     add server-output --adapter <vercel|node|netlify|cloudflare>
                                    Opt into server output: flip \`output\` to "server" + wire the adapter
     add adapter-<vercel|node|netlify|cloudflare>
@@ -134,20 +136,20 @@ const HELP = `
     lint                           Lint .mdx content for authoring-quality issues
 
   Flags:
-    --yes, -y                      Assume yes for prompts (command-specific writes still apply)
-    --overwrite                    \`add\`: replace existing files with registry versions (upgrade)
+    --yes, -y                      Assume yes for prompts; with --overwrite, replaces edited files too
+    --overwrite                    \`add\`: replace files you haven't edited; asks about edited ones in a terminal, else keeps them and exits 1
     --apply                        \`diff <file>\`: write the upstream change (clean files only)
     --dry-run                      \`migrate\`: plan without prompting or writing
     --diff                         \`migrate\`: print proposed edits without prompting or writing
     --all                          \`outdated\`/\`diff\`: include content files (hidden by default)
     --to <templates-vX.Y.Z>        \`outdated\`/\`diff\`: compare against a specific tag (default latest)
-    --template-dir <path>          \`outdated\`/\`diff\`: compare against a local checkout (offline)
+    --template-dir <path>          \`outdated\`/\`diff\`/\`add\`: compare against a local checkout (offline)
     --print                        \`add\`/\`migrate\`: print an agent task without writing
     --force                        \`init\`: rebuild an existing nimbus.json
     --root <dir>                   \`init\`: src dir to scan (monorepo; default src)
     --env, --structure, --lint, --types, --migrations
                                    \`check\`: run only the named categories (default: all)
-    --type <ui|lib|feature>        \`list\`: filter by type
+    --type <ui|lib|feature|source> \`list\`: filter by type
     --format <json>                \`lint\`/\`check\`: machine-readable output
     --json                         \`check\`/\`migrate\`/\`outdated\`: machine-readable output
     --cwd <dir>                    \`migrate\`: target a nested Astro project
@@ -159,9 +161,12 @@ const HELP = `
     --help, -h
     --version, -v
 
+  Environment:
+    GIGET_AUTH=<token>             \`outdated\`/\`diff\`/\`add --overwrite\`: GitHub token for the template lookup (anonymous: 60 requests/hour)
+
   Examples (run with your package manager — see Usage above):
     nimbus-docs add dialog                              # component: resolve + install
-    nimbus-docs add card --overwrite                    # re-install over your copy (review with git)
+    nimbus-docs add card --overwrite                    # update card; keeps your edits unless you say so
     nimbus-docs check                                   # build-free preflight (env + structure + authoring + types + migrations)
     nimbus-docs check --json                            # agent-readable findings + fixes
     nimbus-docs check --fix                             # apply safe fixes, prompt for the rest
@@ -171,6 +176,7 @@ const HELP = `
     nimbus-docs init                                    # adopt an existing repo — writes nimbus.json
     nimbus-docs add 404-page --print | claude           # explicit pipe to claude
     nimbus-docs add adapter-cloudflare --print | claude # finish project-specific rendering config
+    nimbus-docs add source github --print | claude      # pages from another GitHub repository
     nimbus-docs lint                                    # pretty output, exit non-zero on error
     nimbus-docs lint --format=json                      # agent-readable diagnostics
 
@@ -180,10 +186,37 @@ const HELP = `
     Exit is 1 only when \`status\` is "failed" — \`partial\` and \`readiness\` never
     move it. A scope that can't be evaluated yet (pre-build) is a note under
     \`scopes[].notes[]\` — never a finding, never carrying a fix — so an agent's
-    fix loop terminates on:  status !== "failed" && summary.fixable === 0
+    fix loop stops when \`status\` isn't "failed" and no finding has a \`fix\`
+    without \`fix.requiresInput\` (\`summary.fixable\` also counts fixes that
+    need a value, such as a placeholder \`site\`, which only a person can give).
+    An error with no \`fix\` also ends the loop: do what its message says.
     Build-free readiness gate:   nimbus-docs check
     Full coverage (types+links): <your build> && nimbus-docs check
 `;
+
+function checkHelp(usage: string): string {
+  return `
+  Usage:  ${usage}
+
+  Build-free preflight. Exits 1 only when an error-severity finding remains.
+  Run it after a build for full coverage (page collections and links).
+
+  Categories (default: all):
+    --env                  dependencies, adapter and environment
+    --structure            config, routes and content layout
+    --lint                 the authoring rules \`nimbus-docs lint\` runs
+    --types                type-check .ts and .tsx files (for .astro files, run \`astro check\`)
+    --migrations           package API migrations since nimbus.json's version
+
+  Flags:
+    --fix                  apply safe fixes, prompt for the rest
+    --yes, -y              let fixes install packages
+    --json                 machine-readable output (same as --format json)
+    --quiet                errors only, suppress warnings
+    --src-dir <dir>        source dir for the migration scan when the Astro config is computed
+    --color, --no-color    force color on or off (default: auto)
+`;
+}
 
 async function main(): Promise<void> {
   const args = mri(process.argv.slice(2), {
@@ -193,10 +226,18 @@ async function main(): Promise<void> {
     alias: { y: "yes", h: "help", v: "version" },
   }) as unknown as CliArgs;
 
+  if (args.help && args._[0] === "check") {
+    process.stdout.write(checkHelp(invocation("check [--fix] [--json]")));
+    return;
+  }
+  if (args.help && args._[0] === "lint") {
+    process.stdout.write(lintHelp(invocation("lint [--fix] [--rule <code>] [--format json]")));
+    return;
+  }
   if (args.help) {
     process.stdout.write(
       `\n  Usage:  ${invocation("<command> [args]")}\n` +
-        `          Once \`${CLI_PACKAGE}\` is a project dependency, call \`nimbus-docs <command>\` directly (e.g. \`pnpm exec nimbus-docs\` or an npm script).\n` +
+        `          Once \`${CLI_PACKAGE}\` is a project dependency, call \`nimbus-docs <command>\` directly (e.g. \`${getCommand(detectPackageManager(process.cwd()), "exec", "nimbus-docs")}\` or an npm script).\n` +
         HELP,
     );
     return;
@@ -206,7 +247,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const [command, slug] = args._;
+  const [command, slug, ...rest] = args._;
+
+  const flagError = unknownFlagError(command, process.argv.slice(2));
+  if (flagError) {
+    p.log.error(`${flagError} See \`${invocation("--help")}\`.`);
+    process.exit(1);
+  }
 
   if (command === "check") {
     await checkCommand({
@@ -280,13 +327,51 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "add") {
-    await addCommand(slug!, {
-      yes: args.yes,
+  if (command === "add" && slug === "source") {
+    await addSourceCommand(rest, {
       print: args.print,
       overwrite: args.overwrite,
       adapter: args.adapter,
+      templateDir: args["template-dir"],
     });
+    return;
+  }
+
+  if (command === "add") {
+    const slugs = [slug!, ...rest];
+    // A source reached without its kind: the grammar is `add source <name>`.
+    const source = slugs.find((s) => resolveSource(s));
+    if (source) {
+      p.log.error(
+        `\`${source}\` is a content source. Did you mean \`${invocation(`add source ${source}`)}\`? Nothing was installed.`,
+      );
+      process.exit(1);
+    }
+    // Every slug is checked before anything is installed, so `add a typo`
+    // installs nothing rather than `a` and then stopping.
+    const unknown = slugs.filter(
+      (s) => s !== "server-output" && !ADAPTER_SLUGS[s] && !getIndexEntry(s),
+    );
+    if (unknown.length > 0) {
+      p.log.error(
+        `Unknown registry item${unknown.length === 1 ? "" : "s"}: ${unknown.map((s) => `\`${s}\``).join(", ")}. ` +
+          `Nothing was installed. Try \`${invocation("list")}\` to see what's available.`,
+      );
+      process.exit(1);
+    }
+    if (args.print && slugs.length > 1) {
+      p.log.error("`--print` takes one slug. Nothing was installed.");
+      process.exit(1);
+    }
+    for (const current of slugs) {
+      await addCommand(current, {
+        yes: args.yes,
+        print: args.print,
+        overwrite: args.overwrite,
+        adapter: args.adapter,
+        templateDir: args["template-dir"],
+      });
+    }
     return;
   }
 
@@ -299,10 +384,11 @@ async function main(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 function listCommand(typeFilter: string | undefined): void {
-  const typeMap: Record<string, "registry:ui" | "registry:lib" | "registry:feature"> = {
+  const typeMap: Record<string, RegistryEntryType> = {
     ui: "registry:ui",
     lib: "registry:lib",
     feature: "registry:feature",
+    source: "registry:source",
   };
 
   const filter =
@@ -312,7 +398,7 @@ function listCommand(typeFilter: string | undefined): void {
 
   if (typeFilter && !(typeFilter in typeMap)) {
     p.log.error(
-      `Unknown --type "${typeFilter}". Valid: ui, lib, feature.`,
+      `Unknown --type "${typeFilter}". Valid: ui, lib, feature, source.`,
     );
     process.exit(1);
   }
@@ -328,6 +414,7 @@ function listCommand(typeFilter: string | undefined): void {
     "registry:ui": [],
     "registry:lib": [],
     "registry:feature": [],
+    "registry:source": [],
   };
   for (const item of items) grouped[item.type]!.push(item);
 
@@ -335,6 +422,7 @@ function listCommand(typeFilter: string | undefined): void {
     "registry:ui": "Components",
     "registry:lib": "Utilities",
     "registry:feature": "Features",
+    "registry:source": "Sources",
   };
   const widths = items.reduce(
     (m, i) => Math.max(m, i.name.length),
@@ -346,6 +434,11 @@ function listCommand(typeFilter: string | undefined): void {
     const group = grouped[type];
     if (!group || group.length === 0) continue;
     process.stdout.write(`  ${label}\n`);
+    if (type === "registry:source") {
+      for (const line of formatSources(widths)) process.stdout.write(`${line}\n`);
+      process.stdout.write("\n");
+      continue;
+    }
     for (const item of group) {
       process.stdout.write(
         `    ${item.name.padEnd(widths + 2)}${item.description}\n`,
@@ -353,10 +446,17 @@ function listCommand(typeFilter: string | undefined): void {
     }
     process.stdout.write("\n");
   }
-  process.stdout.write(
-    `  Install:  ${invocation("add <name>")}     ·  ${items.length} item${items.length === 1 ? "" : "s"}` +
-      `  ·  registry ${BUNDLED_INDEX.registryVersion}\n\n`,
-  );
+  const onlySources = items.every((item) => item.type === "registry:source");
+  if (!onlySources) {
+    process.stdout.write(
+      `  Install:  ${invocation("add <name>")}     ·  ${items.length} item${items.length === 1 ? "" : "s"}` +
+        `  ·  registry ${BUNDLED_INDEX.registryVersion}\n`,
+    );
+  }
+  if (grouped["registry:source"]!.length > 0) {
+    process.stdout.write(`  Sources:  ${invocation("add source <name|url>")}\n`);
+  }
+  process.stdout.write("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +472,7 @@ const ADAPTER_SLUGS: Record<string, AdapterId> = Object.fromEntries(
 
 async function addCommand(
   slug: string,
-  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string },
+  flags: { yes: boolean; print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
 ): Promise<void> {
   if (slug === "server-output") {
     const adapterId = parseAdapterFlag(flags.adapter);
@@ -426,7 +526,7 @@ async function addCommand(
   p.intro(`nimbus-docs add ${slug}`);
   p.log.info(`${entry.title} — ${entry.description}`);
 
-  const spinner = p.spinner();
+  const spinner = progress();
   spinner.start("Resolving dependencies");
   let items;
   try {
@@ -446,19 +546,53 @@ async function addCommand(
     );
   }
 
+  let projectVersion: string | null = null;
+  try {
+    projectVersion = installedNimbusVersion(cwd) ?? runningNimbusVersion();
+  } catch {}
+  const skew = registryVersionWarning(items.find((i) => i.name === slug)?.version, projectVersion);
+  if (skew) p.log.warn(skew);
+
+  const starter = starterBaseline(nimbus, srcRoot, flags.templateDir);
+  const cleanup = () => starter?.cleanup();
+  process.once("exit", cleanup);
   const report = await installComponents(items, {
     cwd,
     yes: flags.yes,
     overwrite: flags.overwrite,
     srcRoot,
+    recorded: new Map((nimbus?.components ?? []).map((component) => [component.slug, component])),
+    starter,
   });
+  cleanup();
+  process.off("exit", cleanup);
 
   const lines: string[] = [];
-  if (report.written.length > 0) {
-    lines.push(`✓ Wrote ${report.written.length} file${report.written.length === 1 ? "" : "s"}`);
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const added = report.written.filter((file) => !report.replaced.includes(file));
+  if (report.upToDate.length > 0) lines.push(`✓ Up to date: ${report.upToDate.join(", ")}`);
+  if (added.length > 0) lines.push(`✓ Added ${plural(added.length, "file")}:`, ...added.map((file) => `    ${file}`));
+  if (report.replaced.length > 0) {
+    const notes: string[] = [];
+    if (report.replacedEdited.length > 0) notes.push(`${report.replacedEdited.join(", ")} had local edits`);
+    if (report.replacedEditedUnplaced.length > 0) {
+      notes.push(`${report.replacedEditedUnplaced.join(", ")} had local edits its install record can't place`);
+    }
+    if (report.replacedUncompared > 0) notes.push(`${report.replacedUncompared} could not be compared`);
+    const note = notes.length > 0 ? ` (${notes.join(", ")}; restore with git if unintended)` : "";
+    lines.push(`↻ Replaced ${plural(report.replaced.length, "file")}${note}:`, ...report.replaced.map((file) => `    ${file}`));
   }
-  if (report.skipped.length > 0) {
-    lines.push(`↷ Kept existing: ${report.skipped.join(", ")} — pass --overwrite to replace`);
+  lines.push(...keptLines(report, slug, starter));
+  // `--overwrite` didn't finish: tell a script, without stopping the other slugs.
+  if (report.keptUnasked.length > 0) process.exitCode = 1;
+  const keptPlain = report.kept.filter(
+    (file) => ![...report.keptUnasked, ...report.keptDeclined].some((k) => k.files.includes(file)),
+  );
+  if (keptPlain.length > 0) {
+    lines.push(
+      `↷ Kept ${plural(keptPlain.length, "file")} that ${keptPlain.length === 1 ? "differs" : "differ"} from the registry (pass --overwrite to replace; it checks for your edits first):`,
+      ...keptPlain.map((file) => `    ${file}`),
+    );
   }
   if (report.npmDepsInstalled.length > 0) {
     lines.push(
@@ -494,25 +628,66 @@ async function addCommand(
     );
   }
 
-  const uiInstalled = installed.filter((i) => i.type === "registry:ui");
-  if (uiInstalled.length > 0) {
-    const snippets = uiInstalled.map((i) => {
-      const names = barrelExports(i);
-      return names.length > 0
-        ? `  import { ${names.join(", ")} } from "./components/ui/${i.name}";  // then add ${names.join(", ")} to the map`
-        : `  // ${i.name} — see ${srcRoot}/components/ui/${i.name}`;
-    });
-    p.log.info(
-      `To use in .mdx, register in ${srcRoot}/components.ts — import and add to the \`components\` map:\n` +
-        snippets.join("\n"),
-    );
-  }
+  const componentsFile = join(cwd, srcRoot, "components.ts");
+  const hint = registerHint(installed, slug, srcRoot, existsSync(componentsFile) ? readFileSync(componentsFile, "utf8") : "");
+  if (hint) p.log.info(hint);
 
   if (lines.length === 0) {
     p.outro("Nothing to do.");
   } else {
     p.outro(lines.join("\n"));
   }
+}
+
+// ---------------------------------------------------------------------------
+// `nimbus-docs add source <name|url>`
+// ---------------------------------------------------------------------------
+
+async function addSourceCommand(
+  positionals: string[],
+  flags: { print: boolean; overwrite: boolean; adapter?: string; templateDir?: string },
+): Promise<void> {
+  const [target, ...extra] = positionals.map(String);
+  if (!target) {
+    listCommand("source");
+    return;
+  }
+  if (extra.length > 0) {
+    p.log.error(`\`add source\` takes one name or URL; got ${positionals.map((name) => `\`${name}\``).join(", ")}.`);
+    process.exit(1);
+  }
+  const fileFlags = [
+    ["--adapter", flags.adapter !== undefined],
+    ["--overwrite", flags.overwrite],
+    ["--template-dir", flags.templateDir !== undefined],
+  ] as const;
+  for (const [flag, set] of fileFlags) {
+    if (set) {
+      p.log.error(`\`${flag}\` doesn't apply to \`add source\`: it prints a guide and writes no files.`);
+      process.exit(1);
+    }
+  }
+
+  let guide: string;
+  const label = `source ${target}`;
+  if (isSourceUrl(target)) {
+    // The URL is the agent's research starting point. It is never part of a
+    // registry request: the generic guide is a fixed file.
+    guide = sourceGuide(await fetchSourceMarkdown("from-url"), `Research start: ${target}`);
+  } else {
+    const source = resolveSource(target);
+    if (!source) {
+      p.log.error(unknownSourceMessage(target));
+      process.exit(1);
+    }
+    guide = sourceGuide(await fetchSourceMarkdown(source.entry.name), source.host ? `Host: ${source.host}` : undefined);
+  }
+
+  if (await shouldUseAgentHandoff(flags.print)) {
+    process.stdout.write(guide);
+    return;
+  }
+  process.stderr.write(humanInstructions(invocation(`add ${label}`)));
 }
 
 function parseAdapterFlag(value: string | undefined): AdapterId | null {
@@ -528,10 +703,13 @@ async function runAdapterInstall(
   label: string,
   printRecipe: boolean,
 ): Promise<void> {
-  if (adapter === "cloudflare" && (await shouldUseAgentHandoff(printRecipe))) {
+  if (adapter === "cloudflare" && printRecipe) {
     process.stdout.write(cloudflareRequestRenderingAgentRecipe());
     return;
   }
+  // A coding agent gets the same edits as a shell, and the recipe only where
+  // the installer can't edit safely but the agent can.
+  const agentSession = adapter === "cloudflare" && (await shouldUseAgentHandoff(false));
   if (printRecipe) {
     p.log.error("`--print` is only available for the Cloudflare adapter.");
     process.exit(1);
@@ -540,12 +718,12 @@ async function runAdapterInstall(
   const cwd = process.cwd();
   p.intro(`nimbus-docs add ${label}`);
 
-  const spinner = p.spinner();
+  const spinner = progress();
   const outcome = await installAdapter(adapter, {
     cwd,
     installDeps: async (deps, at) => {
       const pm = detectPackageManager(at);
-      const { bin, args } = pmAddCommand(pm, deps, { exact: true });
+      const { bin, args } = pmAddCommand(pm, deps);
       const display = `${bin} ${args.map(quoteForDisplay).join(" ")}`;
       spinner.start(display);
       try {
@@ -563,45 +741,68 @@ async function runAdapterInstall(
   });
 
   if (outcome.status === "error") {
+    if (agentSession && AGENT_FINISHES.has(outcome.code)) {
+      p.log.warn(outcome.message);
+      process.stdout.write(cloudflareRequestRenderingAgentRecipe());
+      return;
+    }
     p.log.error(outcome.message);
     process.exit(1);
   }
 
   for (const warning of outcome.warnings) p.log.warn(warning);
+  for (const { file, todo } of outcome.routeFiles.manual)
+    p.log.warn(`${file} doesn't match how Nimbus renders it and isn't in the starter's shape. ${todo}`);
 
-  if (outcome.status === "noop") {
-    const lines = [`✓ ${adapter} is already wired in ${outcome.configPath}`];
-    if (outcome.depsInstalled.length > 0) {
-      lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
-    }
-    appendWranglerWriteLine(lines, outcome.wrangler);
-    appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
-    p.outro(lines.join("\n"));
-    return;
-  }
-
-  const lines = [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
+  const lines =
+    outcome.status === "noop"
+      ? [`✓ ${adapter} is already wired in ${outcome.configPath}`]
+      : [`✓ Wired ${adapter} in ${outcome.configPath} (output: server)`];
   if (outcome.depsInstalled.length > 0) {
     lines.push(`+ Installed ${outcome.depsInstalled.join(", ")}`);
   }
+  if (outcome.declinedBuildScripts) {
+    const { file, names } = outcome.declinedBuildScripts;
+    const scripts = names.map((name) => `${name}'s`).join(", ");
+    lines.push(`✓ Declined ${scripts} build script${names.length === 1 ? "" : "s"} in ${relative(cwd, file)}`);
+  }
   appendWranglerWriteLine(lines, outcome.wrangler);
-  appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering);
-  lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
+  const handOff = agentSession && outcome.requestRendering === "unresolved";
+  if (!handOff) appendRequestRenderingStatus(lines, adapter, label, outcome.requestRendering, outcome.routeFiles.configured);
+  if (outcome.routeFiles.updated.length > 0) {
+    lines.push(`✓ Updated ${outcome.routeFiles.updated.join(", ")} to match how Nimbus renders them`);
+  }
+  if (handOff) lines.push("Next: finish the request-rendering configuration with the recipe below.");
+  if (outcome.status === "applied") lines.push(`Verify with a build, then \`${invocation("check")}\`.`);
   p.outro(lines.join("\n"));
+  if (handOff) process.stdout.write(cloudflareRequestRenderingAgentRecipe());
 }
+
+/** Refusals a coding agent can finish with the recipe; the rest stay errors. */
+const AGENT_FINISHES = new Set<AdapterInstallErrorCode>([
+  "missing-marker",
+  "no-output",
+  "dirty-output",
+  "cjs-config",
+  "symlink-config",
+  "write-failed",
+]);
 
 function appendRequestRenderingStatus(
   lines: string[],
   adapter: AdapterId,
   label: string,
   status: "inserted" | "explicit" | "unresolved" | undefined,
+  configured: boolean | undefined,
 ): void {
   if (adapter !== "cloudflare") {
-    lines.push("Rendering behavior follows the policy in your Nimbus config.");
+    lines.push(configured === false ? DEFAULT_RENDERING_NOTE : "Rendering follows the `rendering` policy in your Nimbus config.");
     return;
   }
   if (status === "inserted") {
-    lines.push('+ Enabled request rendering in the active Nimbus config.');
+    lines.push(
+      '+ Set rendering: { default: "request" } in the Nimbus config: every collection renders on request.',
+    );
     return;
   }
   if (status === "explicit") {

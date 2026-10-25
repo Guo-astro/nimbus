@@ -1,0 +1,60 @@
+---
+/* Experiment: a compact card about writing rules. An agent's draft meets `nimbus-docs lint`; each finding is a real, auto-fixable rule (heading punctuation, emphasis style, list markers, a redirected link), and `--fix` applies them. */
+import { Icon } from "@/home/icon";
+import { buttonVariants } from "../../ui/button/variants";
+
+// [text, replacement, finding] triples; plain strings stay as written. Each finding names its lint rule's fix.
+const { bare = false } = Astro.props;
+const draft: (string | [string, string, string])[] = [
+  ["## Get a forecast:", "## Get a forecast", "no trailing colon"], "\n\n",
+  "Returns ", ["_hourly_", "*hourly*", "* for italics"], " weather for a city.\n\n",
+  ["* ", "- ", "- for lists"], "Pass a city, or a lat and lon\n",
+  "- See ", ["[quotas](/docs/quota)", "[quotas](/docs/quotas)", "link the destination"], " for limits",
+];
+---
+<div class:list={["story-stage chrome-bg chrome-2 relative overflow-hidden rounded-2xl border border-border", bare ? "p-3 sm:p-6" : "h-[440px]"]} data-exp-voice data-phase="idle">
+  {!bare && <p class="absolute top-6 left-6 text-[13px] leading-none text-muted-foreground">Rules</p>}
+  {!bare && <p class="absolute top-11 left-6 max-w-[300px] text-[20px] leading-7 tracking-tight">Every author follows the same rules.</p>}
+
+  <div class:list={["flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-(--www-shadow-float)", bare ? "relative min-h-[246px]" : "absolute inset-x-6 top-[124px] bottom-6"]}>
+    <div class="flex h-[37px] items-center gap-2 border-b border-border px-4 text-[11px] leading-4 text-muted-foreground">
+      <span class="grid size-4 place-items-center rounded-full bg-info text-white"><Icon name="ph:sparkle-fill" class="size-2.5" /></span>Drafted by an agent
+      <span class="ml-auto font-mono" data-voice-meta>forecast.mdx</span>
+    </div>
+    <p class="flex-1 overflow-x-auto px-4 py-5 font-mono text-[12px] leading-6 whitespace-pre text-foreground/90 sm:px-6 sm:py-6 sm:text-[15px] sm:leading-7">{draft.map((part) => typeof part === "string" ? part : (
+        <span class="group/s relative" data-slip data-note={part[2]}><span class="rounded-sm transition-colors duration-300 group-data-[state=flag]/s:bg-warning-muted group-data-[state=flag]/s:underline group-data-[state=flag]/s:decoration-warning group-data-[state=flag]/s:decoration-wavy group-data-[state=fixed]/s:hidden" data-old>{part[0]}</span><span class="hidden rounded-sm bg-success-muted text-foreground group-data-[state=fixed]/s:inline" data-new>{part[1]}</span></span>
+      ))}</p>
+    <div class="flex h-[49px] items-center gap-3 border-t border-border px-4 text-[12px] leading-4">
+      <span class="shrink-0 font-mono text-[11px] whitespace-nowrap text-muted-foreground">nimbus-docs lint</span>
+      <span class="hidden truncate text-muted-foreground sm:block" data-voice-note>Same rules, every author</span>
+      <button type="button" data-voice-act class={`${buttonVariants({ variant: "primary", size: "demo" })} ml-auto`}>Lint</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>("[data-exp-voice]");
+  if (root) {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : ms));
+    const btn = root.querySelector<HTMLButtonElement>("[data-voice-act]")!, note = root.querySelector<HTMLElement>("[data-voice-note]")!;
+    const slips = Array.from(root.querySelectorAll<HTMLElement>("[data-slip]"));
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      const phase = root.dataset.phase;
+      if (phase === "idle") {
+        for (const s of slips) { s.dataset.state = "flag"; await wait(220); }
+        note.textContent = `${slips.length} findings: ${slips.map((s) => s.dataset.note).join(", ")}`;
+        btn.textContent = "Fix"; root.dataset.phase = "flagged";
+      } else if (phase === "flagged") {
+        for (const s of slips) { s.dataset.state = "fixed"; await wait(260); }
+        note.textContent = "Fixed with --fix. Same rules for people and agents.";
+        btn.textContent = "Reset"; root.dataset.phase = "fixed";
+      } else {
+        slips.forEach((s) => { delete s.dataset.state; });
+        note.textContent = "Same rules, every author"; btn.textContent = "Lint"; root.dataset.phase = "idle";
+      }
+      btn.disabled = false;
+    });
+  }
+</script>

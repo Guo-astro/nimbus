@@ -36,6 +36,9 @@ export interface ComponentManifestEntry {
   registryDependencies?: string[];
   /** npm packages required by this entry. */
   dependencies?: string[];
+  /** Next step shown after `add`, in place of the `components.ts` hint, for a
+   *  component that isn't used from `.mdx`. */
+  docs?: string;
 }
 
 export interface LibManifestEntry {
@@ -67,6 +70,14 @@ export const MANIFESTS = {
     dependencies: ["clsx", "tailwind-merge"],
   },
 
+  variants: {
+    type: "registry:lib",
+    title: "variants",
+    description: "Turns a component's variant tables into one class function; Badge and Button pick their look with it.",
+    paths: ["lib/variants.ts"],
+    registryDependencies: ["cn"],
+  },
+
   // Behavior primitives (mount, disclosure, tabs-controller, scroll-lock,
   // dom, ids) and the pkgm command translator ship as named exports from
   // the framework (`nimbus-docs/client`, `nimbus-docs/lib/pkgm`), not as
@@ -95,7 +106,7 @@ export const MANIFESTS = {
     type: "registry:ui",
     title: "Badge",
     description: "Small status / category pill.",
-    registryDependencies: ["cn"],
+    registryDependencies: ["cn", "variants"],
   },
 
   banner: {
@@ -117,7 +128,7 @@ export const MANIFESTS = {
     title: "Button",
     description:
       "Action trigger with variant/size/shape options. Owns the shared button/variants styling that LinkButton reuses.",
-    registryDependencies: ["cn"],
+    registryDependencies: ["cn", "variants"],
   },
 
   card: {
@@ -153,6 +164,13 @@ export const MANIFESTS = {
     title: "Collapsible",
     description: "Headless show/hide primitive — building block for Accordion and Sidebar groups.",
     registryDependencies: ["cn"],
+  },
+
+  "copy-prompt": {
+    type: "registry:ui",
+    title: "CopyPrompt",
+    description: "One-line prompt with a Copy prompt button, for pasting into an AI coding agent.",
+    registryDependencies: ["button", "cn"],
   },
 
   dialog: {
@@ -268,6 +286,14 @@ export const MANIFESTS = {
     registryDependencies: ["cn"],
   },
 
+  "image-zoom": {
+    type: "registry:ui",
+    title: "ImageZoom",
+    description: "Opens content images at full size in one native dialog. Render it once in the docs layout.",
+    registryDependencies: [],
+    docs: "Render <ImageZoom /> once in src/layouts/DocsLayout.astro, next to the other dialogs.",
+  },
+
   toc: {
     type: "registry:ui",
     title: "TOC",
@@ -279,7 +305,7 @@ export const MANIFESTS = {
     type: "registry:ui",
     title: "VersionSwitcher",
     description:
-      "Header dropdown for switching between docs versions. Reads `versions` from nimbus.config.ts, uses the build-time alternates table to land readers on the same logical page in the target version. Includes deprecation badge and hidden-version exclusion. Renders nothing when versioning is off or only one version is configured.",
+      "Header dropdown for switching between docs versions. Reads `versions` from the Nimbus config, uses the build-time alternates table to land readers on the same logical page in the target version. Includes deprecation badge and hidden-version exclusion. Renders nothing when versioning is off or only one version is configured.",
     registryDependencies: ["popover", "cn"],
   },
 
@@ -291,7 +317,7 @@ export const MANIFESTS = {
     type: "registry:ui",
     title: "ApiFieldRow",
     description:
-      "One `ApiFieldView` rendered recursively, plus a titled `ApiFieldList` group. Type links, required/nullable/deprecated flags, constraints/enum/default/example, nested children with omitted-count. Anchored by the field's coordinate id. Reads the view-model only.",
+      "One `ApiFieldView` rendered recursively, plus a titled `ApiFieldList` group. Type links, required/nullable/deprecated flags, constraints/enum/default, nested children with omitted-count. Anchored by the field's coordinate id. Reads the view-model only.",
     registryDependencies: [],
   },
 
@@ -316,7 +342,8 @@ export const MANIFESTS = {
     title: "ApiLayout",
     description:
       "Three-column reference shell (nav · content · code rail) composing ApiSidebar + ApiFieldRow + ApiCodeRail. Renders any `ApiPageProps` by kind; widths inherit the site's layout tokens.",
-    registryDependencies: ["api-sidebar", "api-field-row", "api-code-rail", "badge", "banner", "breadcrumbs", "page-actions", "layer-card", "version-switcher", "cn"],
+    registryDependencies: ["api-sidebar", "api-field-row", "api-code-rail", "badge", "banner", "breadcrumbs", "page-actions", "pagination", "layer-card", "toc", "version-switcher", "cn"],
+    docs: "API pages are served by a route such as src/pages/<collection>/[...slug].astro. See https://nimbus-docs.com/api-reference/",
     // Optional peers of nimbus-docs's API engine, installed only when a site opts
     // into the reference
     dependencies: [

@@ -1,6 +1,6 @@
 {
 	"name": "@cloudflare/nimbus-docs",
-	"version": "0.13.1",
+	"version": "0.19.0",
 	"private": false,
 	"publishConfig": {
 		"access": "public"
@@ -53,6 +53,10 @@
 			"types": "./dist/config.d.ts",
 			"import": "./dist/config.js"
 		},
+		"./live": {
+			"types": "./dist/live.d.ts",
+			"import": "./dist/live.js"
+		},
 		"./content": {
 			"types": "./dist/content.d.ts",
 			"import": "./dist/content.js"
@@ -73,6 +77,10 @@
 			"types": "./dist/adapters.d.ts",
 			"import": "./dist/adapters.js"
 		},
+		"./site-parts": {
+			"types": "./dist/site-parts.d.ts",
+			"import": "./dist/site-parts.js"
+		},
 		"./client": {
 			"types": "./dist/client.d.ts",
 			"import": "./dist/client.js"
@@ -80,6 +88,10 @@
 		"./markdown": {
 			"types": "./dist/markdown.d.ts",
 			"import": "./dist/markdown.js"
+		},
+		"./og": {
+			"types": "./dist/og.d.ts",
+			"import": "./dist/og.js"
 		},
 		"./react": {
 			"types": "./dist/react.d.ts",
@@ -94,11 +106,14 @@
 			"import": "./dist/lib/pkgm.js"
 		},
 		"./components/NimbusHead.astro": "./src/components/NimbusHead.astro",
-		"./components/Icon.astro": "./src/components/Icon.astro"
+		"./components/Icon.astro": "./src/components/Icon.astro",
+		"./components/NestedContent.astro": "./src/components/NestedContent.astro",
+		"./styles/math.css": "./src/styles/math.css"
 	},
 	"files": [
 		"dist",
-		"src/components"
+		"src/components",
+		"src/styles"
 	],
 	"engines": {
 		"node": ">=22.12.0"
@@ -107,19 +122,25 @@
 		"build": "tsdown",
 		"dev": "tsdown --watch",
 		"typecheck": "tsc --noEmit",
-		"test": "node --import tsx --test --test-concurrency=1 \"test/**/*.test.ts\"",
+		"test": "node --import tsx --test --test-concurrency=4 \"test/**/*.test.ts\"",
 		"pull:api-fixtures": "node scripts/pull-api-fixtures.mjs",
 		"prepack": "tsdown"
 	},
 	"peerDependencies": {
+		"@modelcontextprotocol/server": ">=2.3.0 <3.0.0",
 		"@readme/httpsnippet": ">=10.0.0",
+		"@resvg/resvg-js": ">=2.6.2 <3.0.0",
 		"@scalar/openapi-parser": ">=0.10.0 <1.0.0",
-		"astro": ">=7.0.0 <7.1.0 || >=7.2.0 <8.0.0",
+		"astro": ">=7.2.6 <8.0.0",
 		"openapi-sampler": ">=1.5.0",
 		"react": ">=19.0.0",
-		"react-dom": ">=19.0.0"
+		"react-dom": ">=19.0.0",
+		"satori": ">=0.26.0 <0.27.0"
 	},
 	"peerDependenciesMeta": {
+		"@modelcontextprotocol/server": {
+			"optional": true
+		},
 		"react": {
 			"optional": true
 		},
@@ -134,26 +155,39 @@
 		},
 		"openapi-sampler": {
 			"optional": true
+		},
+		"satori": {
+			"optional": true
+		},
+		"@resvg/resvg-js": {
+			"optional": true
 		}
 	},
 	"dependencies": {
-		"@astrojs/markdown-satteri": "^0.3.4",
-		"@astrojs/mdx": "~7.0.3",
+		"@astrojs/markdown-satteri": "^0.4.3",
+		"@astrojs/mdx": "~8.0.0",
 		"@astrojs/sitemap": "3.7.2",
 		"@clack/prompts": "^1.8.0",
+		"@fontsource/stix-two-math": "^5.3.0",
 		"@iconify/tools": "^5.0.12",
 		"@iconify/types": "^2.0.0",
 		"@iconify/utils": "^3.1.4",
+		"@scalar/json-magic": "0.12.20",
 		"@shikijs/transformers": "^4.4.1",
 		"@shikijs/types": "^4.4.1",
 		"@vercel/detect-agent": "1.2.3",
 		"clsx": "^2.1.1",
+		"cross-spawn": "7.0.6",
 		"giget": "^3.3.0",
 		"github-slugger": "^2.0.0",
 		"hast-util-from-html": "^2.0.3",
 		"hast-util-sanitize": "^5.0.2",
 		"hast-util-to-html": "^9.0.5",
 		"jsonc-parser": "^3.3.1",
+		"mdast-util-gfm": "^3.1.0",
+		"mdast-util-math": "^3.0.0",
+		"mdast-util-mdx": "^3.0.0",
+		"mdast-util-to-markdown": "^2.1.2",
 		"mri": "^1.2.0",
 		"picomatch": "^4.0.5",
 		"remark-lint-emphasis-marker": "^4.0.1",
@@ -164,30 +198,34 @@
 		"remark-lint-no-literal-urls": "^4.0.1",
 		"remark-lint-no-multiple-toplevel-headings": "^4.0.1",
 		"remark-lint-unordered-list-marker-style": "^4.0.1",
-		"satteri": "^0.9.1",
+		"satteri": "^0.10.5",
 		"semver": "^7.8.5",
 		"shiki": "^4.4.1",
 		"tailwind-merge": "^3.5.0",
+		"temml": "^0.14.0",
 		"typescript": "^5.8.3",
 		"unified": "^11.0.5",
 		"vfile": "^6.0.3",
-		"vite": "^8.0.0",
+		"vite": "^8.1.6",
 		"yaml": "^2.7.1"
 	},
 	"devDependencies": {
-		"@astrojs/markdown-remark": "7.2.4",
+		"@astrojs/markdown-remark": "7.3.0",
 		"@mdx-js/mdx": "^3.1.1",
+		"@modelcontextprotocol/server": "2.3.0",
 		"@readme/httpsnippet": "^11.4.0",
+		"@resvg/resvg-js": "^2.6.2",
 		"@scalar/openapi-parser": "^0.28.12",
 		"@types/picomatch": "^4.0.3",
 		"@types/react": "^19.2.6",
 		"@types/react-dom": "^19.2.3",
 		"@types/semver": "^7.7.1",
-		"astro": "7.2.8",
+		"ajv": "8.20.0",
+		"ajv-formats": "3.0.1",
+		"astro": "7.3.3",
 		"jsdom": "^29.1.1",
 		"openapi-sampler": "^1.7.4",
-		"remark-mdx": "^3.1.1",
-		"remark-parse": "^11.0.0",
+		"satori": "^0.26.0",
 		"tsdown": "^0.20.3",
 		"tsx": "^4.22.3"
 	}

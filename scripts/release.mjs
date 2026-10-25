@@ -4,19 +4,17 @@
  *
  * Verifies the generated templates against the exact nimbus-docs bits being
  * published, syncs and tags the orphan `templates` branch, then publishes
- * nimbus-docs before the CLI that pins it. Whether the CLI is in the release is
- * decided by querying the npm registry for the locally-bumped version (404 →
- * in release; found → publish-only; unreadable → sync then abort, safe to
- * re-run since every stage is idempotent).
+ * nimbus-docs before the CLI that pins it, using the exact pnpm-packed artifacts
+ * verified by this run. Existing npm versions must already have git tags;
+ * missing versions are published in dependency order.
  *
- * Commands: `publish` (normal path) and `publish-only` (forced recovery for a
- * half-failed release). Flags: `--dry-run` and `--halt-after <verify|sync>`
- * exist for testing; `--halt-after sync` performs a real commit+tag+push.
+ * Command: `publish`. Flags: `--dry-run` and `--halt-after verify` exist for
+ * local, non-publishing verification.
  */
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
-  cpSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -27,19 +25,26 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compare } from "semver";
 import {
   generateTemplates,
   variantNames,
 } from "../packages/create-nimbus-docs/scripts/copy-template.mjs";
 import { syncTemplatesRepo } from "./sync-templates-repo.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const THIS_FILE = fileURLToPath(import.meta.url);
+const __dirname = dirname(THIS_FILE);
 const ROOT = resolve(__dirname, "..");
-const CLI_PKG = resolve(ROOT, "packages", "create-nimbus-docs", "package.json");
+const CLI_DIR = resolve(ROOT, "packages", "create-nimbus-docs");
+const CLI_PKG = resolve(CLI_DIR, "package.json");
+const SCAFFOLDER_BIN = resolve(CLI_DIR, "dist", "index.js");
 const NIMBUS_DIR = resolve(ROOT, "packages", "nimbus-docs");
 const NIMBUS_PKG = resolve(NIMBUS_DIR, "package.json");
 const NIMBUS_NAME = JSON.parse(readFileSync(NIMBUS_PKG, "utf8")).name;
 const REGISTRY = "https://registry.npmjs.org";
+const REGISTRY_VISIBILITY_TIMEOUT_MS = 300_000;
+const REGISTRY_VISIBILITY_INTERVAL_MS = 2_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 const cleanup = [];
 process.on("exit", () => {
@@ -66,20 +71,184 @@ function readPkg(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-/**
- * Query the npm registry for a specific version.
- * @returns {"published" | "absent" | "unknown"}
- */
-async function registryState(name, version) {
+/** Query the npm registry for a specific version. */
+async function registryVersion(name, version, signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)) {
   try {
     const res = await fetch(`${REGISTRY}/${name}/${version}`, {
-      headers: { accept: "application/json" },
+      cache: "no-store",
+      headers: { accept: "application/json", "cache-control": "no-cache" },
+      signal,
     });
-    if (res.status === 200) return "published";
-    if (res.status === 404) return "absent";
-    return "unknown"; // 5xx, 429, anything non-definitive
+    if (res.status === 200) {
+      const metadata = await res.json();
+      return {
+        state: "published",
+        version: metadata.version,
+        integrity: metadata.dist?.integrity,
+      };
+    }
+    if (res.status === 404) return { state: "absent" };
+    return { state: "unknown" };
   } catch {
-    return "unknown"; // network error
+    return { state: "unknown" };
+  }
+}
+
+/** Query the package document so a missing latest tag is not mistaken for a missing package. */
+async function registryLatest(name, signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS)) {
+  try {
+    const res = await fetch(`${REGISTRY}/${name}`, {
+      cache: "no-store",
+      headers: { accept: "application/json", "cache-control": "no-cache" },
+      signal,
+    });
+    if (res.status === 200) {
+      const version = (await res.json())["dist-tags"]?.latest;
+      return typeof version === "string" ? { state: "published", version } : { state: "unknown" };
+    }
+    if (res.status === 404) return { state: "absent" };
+    return { state: "unknown" };
+  } catch {
+    return { state: "unknown" };
+  }
+}
+
+export async function waitForPublished(
+  name,
+  version,
+  {
+    getRegistryVersion = registryVersion,
+    expectedIntegrity,
+    timeoutMs = REGISTRY_VISIBILITY_TIMEOUT_MS,
+    intervalMs = REGISTRY_VISIBILITY_INTERVAL_MS,
+  } = {},
+) {
+  const deadline = Date.now() + timeoutMs;
+  let result;
+  do {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const requestTimeoutMs = Math.min(REQUEST_TIMEOUT_MS, remainingMs);
+    result = await getRegistryVersion(name, version, AbortSignal.timeout(requestTimeoutMs));
+    if (result.state === "published") {
+      if (expectedIntegrity && result.integrity !== expectedIntegrity) {
+        throw new Error(
+          `${name}@${version} is on npm with integrity ${result.integrity ?? "none"}, expected ${expectedIntegrity}`,
+        );
+      }
+      log(`publish: ${name}@${version} is visible on npm.`);
+      return;
+    }
+    if (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  } while (Date.now() < deadline);
+
+  throw new Error(
+    `${name}@${version} did not become visible on npm within ${timeoutMs}ms (last state: ${result?.state ?? "unknown"})`,
+  );
+}
+
+function tarballIntegrity(tarball) {
+  const digest = createHash("sha512").update(readFileSync(tarball)).digest("base64");
+  return `sha512-${digest}`;
+}
+
+export async function publishTarball(
+  packageDir,
+  pkg,
+  tarball,
+  { spawn = spawnSync, integrity = tarballIntegrity, wait = waitForPublished } = {},
+) {
+  const expectedIntegrity = integrity(tarball);
+  const res = spawn("npm", ["publish", tarball], { stdio: "inherit", cwd: packageDir });
+  if (res.error) throw res.error;
+  if (res.status !== 0) {
+    log(`publish: npm exited ${res.status ?? res.signal}; reconciling registry state…`);
+  }
+  await wait(pkg.name, pkg.version, {
+    expectedIntegrity: res.status === 0 ? expectedIntegrity : undefined,
+  });
+  return res.status === 0;
+}
+
+export function publicationAction({ pkg, latest, exact, hasTag }) {
+  if (latest.state !== "published") {
+    if (latest.state === "unknown") throw new Error(`could not determine npm latest for ${pkg.name}`);
+  } else if (typeof latest.version !== "string") {
+    throw new Error(`could not determine npm latest for ${pkg.name}`);
+  } else if (compare(pkg.version, latest.version) < 0) {
+    throw new Error(`refusing to publish stale ${pkg.name}@${pkg.version}; npm latest is ${latest.version}`);
+  }
+
+  if (exact.state === "unknown") throw new Error(`could not determine whether ${pkg.name}@${pkg.version} is on npm`);
+  if (exact.state === "absent") return "publish";
+  if (!hasTag) {
+    throw new Error(`${pkg.name}@${pkg.version} is already on npm but its git tag is missing; recover it manually`);
+  }
+  return "skip";
+}
+
+export async function publishInOrder({ publishNimbus, publishCli }) {
+  if (publishNimbus) await publishNimbus();
+  if (publishCli) await publishCli();
+}
+
+export function publishedByThisRun(pkg, published, hasTag) {
+  if (!published && !hasTag) {
+    throw new Error(
+      `${pkg.name}@${pkg.version} became visible after npm publish failed; recover its git tag manually`,
+    );
+  }
+  return published;
+}
+
+function tagExists(tag) {
+  const result = spawnSync("git", ["rev-parse", "--quiet", "--verify", `refs/tags/${tag}`], {
+    cwd: ROOT,
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+function packPackage(packageDir, label) {
+  const packDest = mkdtempSync(join(tmpdir(), `${label}-pack-`));
+  cleanup.push(packDest);
+  run("pnpm", ["pack", "--pack-destination", packDest], { cwd: packageDir });
+  const tgz = readdirSync(packDest).find((file) => file.endsWith(".tgz"));
+  if (!tgz) throw new Error(`no ${label} tarball produced in ${packDest}`);
+  return join(packDest, tgz);
+}
+
+function readPackedPackage(tarball) {
+  const res = spawnSync("tar", ["-xOf", tarball, "package/package.json"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  if (res.status !== 0) {
+    throw new Error(`could not read package.json from ${tarball}`);
+  }
+  return JSON.parse(res.stdout);
+}
+
+function verifyCliArtifact(tarball, cli, nimbus) {
+  const packed = readPackedPackage(tarball);
+  if (packed.name !== cli.name || packed.version !== cli.version) {
+    throw new Error(`CLI tarball contains ${packed.name}@${packed.version}, expected ${cli.name}@${cli.version}`);
+  }
+  // The CLI bundles the framework code it uses, so a scaffold run never
+  // installs the framework and its build tools.
+  if (packed.dependencies?.[nimbus.name]) {
+    throw new Error(`CLI tarball depends on ${nimbus.name}; it should bundle it`);
+  }
+  const listing = spawnSync("tar", ["-tf", tarball], { cwd: ROOT, encoding: "utf8" });
+  const scripts = listing.stdout.split("\n").filter((file) => /^package\/dist\/.*\.m?js$/.test(file));
+  if (listing.status !== 0 || scripts.length === 0) throw new Error(`could not list the CLI tarball's dist`);
+  const imports = new RegExp(`(?:\\bfrom\\s*|\\bimport\\s*\\(?\\s*)["']${nimbus.name}`);
+  for (const file of scripts) {
+    const body = spawnSync("tar", ["-xOf", tarball, file], { cwd: ROOT, encoding: "utf8" });
+    if (body.status !== 0 || imports.test(body.stdout)) {
+      throw new Error(`CLI tarball's ${file.slice("package/".length)} imports ${nimbus.name} at runtime`);
+    }
   }
 }
 
@@ -90,36 +259,32 @@ async function registryState(name, version) {
 /** Verify every generated variant against the exact nimbus-docs bits shipping
  *  in this run: pack nimbus-docs, install each variant against that tarball,
  *  build it, and assert the resolved version. Throws on the first failure. */
-function verifyVariants(generatedDir, nimbusVersion) {
-  log("verify: packing nimbus-docs for the pre-publish check…");
-  const packDest = mkdtempSync(join(tmpdir(), "nimbus-docs-pack-"));
-  cleanup.push(packDest);
-  // A tarball dropped into the package dir would dirty the tree and trip
-  // pnpm publish's git checks later in the run — pack to a temp dir.
-  run("pnpm", [
-    "--filter",
-    "./packages/nimbus-docs",
-    "exec",
-    "pnpm",
-    "pack",
-    "--pack-destination",
-    packDest,
-  ]);
-  const tgz = readdirSync(packDest).find((f) => f.endsWith(".tgz"));
-  if (!tgz) throw new Error(`no nimbus-docs tarball produced in ${packDest}`);
-  const tarball = join(packDest, tgz);
-  log(`verify: packed ${tgz}`);
-
+function verifyVariants(generatedDir, nimbusVersion, tarball) {
   for (const variant of variantNames()) {
     const work = mkdtempSync(join(tmpdir(), `nimbus-verify-${variant}-`));
     cleanup.push(work);
-    cpSync(join(generatedDir, variant), work, { recursive: true });
+    const siteName = "site";
+    const site = join(work, siteName);
+    run("node", [
+      SCAFFOLDER_BIN,
+      siteName,
+      "--yes",
+      "--skip-install",
+      "--no-git",
+      "--content",
+      variant === "template-empty" ? "empty" : "starter",
+      "--template-dir",
+      generatedDir,
+    ], { cwd: work });
 
-    // Rewrite the nimbus-docs dep to the packed tarball. `local.mjs` edits dep
-    // specs the same way (to workspace:*); here the target is the tarball so
-    // the variant is exercised against the exact bits being released. Avoid
-    // pnpm.overrides file-mappings — they are pnpm-version-fragile.
-    const pkgPath = join(work, "package.json");
+    const nimbus = readPkg(join(site, "nimbus.json"));
+    if (nimbus.lastReviewedNimbusVersion !== nimbusVersion) {
+      throw new Error(
+        `variant ${variant} recorded upgrade baseline ${nimbus.lastReviewedNimbusVersion ?? "none"}, expected ${nimbusVersion}`,
+      );
+    }
+
+    const pkgPath = join(site, "package.json");
     const pkg = readPkg(pkgPath);
     let rewired = false;
     for (const field of ["dependencies", "devDependencies"]) {
@@ -134,10 +299,10 @@ function verifyVariants(generatedDir, nimbusVersion) {
     log(`verify: install + build ${variant} against the packed tarball…`);
     // Keep the variant's workspace configuration active so dependency build
     // permissions are honored.
-    run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: work });
-    run("pnpm", ["build"], { cwd: work });
+    run("pnpm", ["install", "--no-frozen-lockfile"], { cwd: site });
+    run("pnpm", ["build"], { cwd: site });
 
-    const installed = readPkg(join(work, "node_modules", NIMBUS_NAME, "package.json"));
+    const installed = readPkg(join(site, "node_modules", NIMBUS_NAME, "package.json"));
     if (installed.version !== nimbusVersion) {
       throw new Error(
         `variant ${variant} resolved ${NIMBUS_NAME}@${installed.version}, expected ${nimbusVersion}`,
@@ -177,6 +342,7 @@ async function dispatchSmoke(tag) {
           authorization: `Bearer ${token}`,
           "x-github-api-version": "2022-11-28",
         },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         body: JSON.stringify({ ref: "main", inputs: { tag } }),
       },
     );
@@ -198,27 +364,16 @@ async function publish({ dryRun, haltAfter }) {
   const cli = readPkg(CLI_PKG);
   const nimbus = readPkg(NIMBUS_PKG);
 
-  const cliState = await registryState(cli.name, cli.version);
-  const nimbusState = await registryState(nimbus.name, nimbus.version);
-  const nimbusInRelease = nimbusState === "absent";
-  log(`detection: ${cli.name}@${cli.version} → ${cliState}; ${nimbus.name}@${nimbus.version} → ${nimbusState}`);
-
-  // Testing modes (--dry-run / --halt-after) must always exercise the
-  // generate→verify(→sync) pipeline, so they can't defer to detection (which
-  // would skip them on an unbumped branch where the CLI version is already
-  // published). The publish-only short-circuit applies only to a real run.
-  const testing = dryRun || haltAfter !== undefined;
-
-  // version-found on a real run → nothing to sync for the CLI → publish-only.
-  if (cliState === "published" && !testing) {
-    log("detection: CLI version already on npm — publish-only path (no sync).");
-    return publishOnly({ pushTags: false, nimbusState, nimbus });
+  if (cli.version.includes("-") || nimbus.version.includes("-")) {
+    die("prerelease versions are not supported by this release command.");
   }
 
-  // Otherwise (404 / unknown real run, or any testing run): generate + verify +
-  // sync are all safe by idempotency, so we run them.
   const generatedDir = generateInto();
-  verifyVariants(generatedDir, nimbus.version);
+  log("verify: packing release artifacts…");
+  const nimbusTarball = packPackage(NIMBUS_DIR, "nimbus-docs");
+  const cliTarball = packPackage(CLI_DIR, "create-nimbus-docs");
+  verifyCliArtifact(cliTarball, cli, nimbus);
+  verifyVariants(generatedDir, nimbus.version, nimbusTarball);
   log("verify: all variants green.");
   if (haltAfter === "verify") return log("halt-after=verify: stopping before sync.");
 
@@ -228,65 +383,66 @@ async function publish({ dryRun, haltAfter }) {
     return log("[dry-run] stopping before publish.");
   }
 
-  const syncResult = await syncTemplatesRepo({ version: cli.version, generatedDir });
-  log(`sync: ${syncResult.reason}`);
-  if (haltAfter === "sync") return log("halt-after=sync: stopping before publish (orphan-tag recovery point).");
+  const releasePackages = [
+    { pkg: nimbus, tarball: nimbusTarball },
+    { pkg: cli, tarball: cliTarball },
+  ];
+  const registry = await Promise.all(releasePackages.flatMap(({ pkg }) => [
+    registryLatest(pkg.name),
+    registryVersion(pkg.name, pkg.version),
+  ]));
+  const actions = releasePackages.map(({ pkg, tarball }, index) => {
+    const latest = registry[index * 2];
+    const exact = registry[index * 2 + 1];
+    const tag = `${pkg.name}@${pkg.version}`;
+    const action = publicationAction({
+      pkg,
+      latest,
+      exact,
+      hasTag: tagExists(tag),
+    });
+    log(`detection: ${tag} → ${action}`);
+    return action;
+  });
 
-  // Fail-safe: a registry read was unreadable at detection time. We've
-  // synced+tagged (idempotent, harmless); abort before publish so we never
-  // publish on a dependency state we couldn't confirm. Guard on either state
-  // being unknown so a flaky nimbus-docs read can't let the CLI publish first.
-  if (cliState === "unknown" || nimbusState === "unknown") {
-    die(`detection was non-definitive (registry unreadable: ${cli.name}→${cliState}, ${nimbus.name}→${nimbusState}); synced+tagged, aborting before publish. Re-run when the registry is readable.`);
+  if (actions.every((action) => action === "skip")) {
+    return log("publish: exact artifacts and tags already exist; nothing to publish.");
   }
 
-  // nimbus-docs must be live before the CLI that pins it.
-  if (nimbusInRelease) {
-    log(`publish: ${nimbus.name}@${nimbus.version} (before the CLI)…`);
-    // Direct npm publish so OIDC runs through npm >= 11.5.1, not pnpm.
-    run("npm", ["publish"], { cwd: NIMBUS_DIR });
+  let syncResult;
+  if (actions[1] === "publish") {
+    syncResult = await syncTemplatesRepo({ version: cli.version, generatedDir });
+    log(`sync: ${syncResult.reason}`);
   }
 
-  log("publish: changeset publish (CLI + any remaining public packages)…");
-  run("pnpm", ["changeset", "publish"]);
+  let publishedSomething = false;
+  const publishPackage = async (packageDir, pkg, tarball) => {
+    const published = await publishTarball(packageDir, pkg, tarball);
+    const publishedThisPackage = publishedByThisRun(
+      pkg,
+      published,
+      tagExists(`${pkg.name}@${pkg.version}`),
+    );
+    publishedSomething = publishedSomething || publishedThisPackage;
+  };
 
-  // changesets only tags its own successful publishes; backfill the git tag for
-  // the out-of-band nimbus-docs publish (so every publish still gets a git tag).
-  log("publish: changeset tag (backfill tags)…");
+  await publishInOrder({
+    publishNimbus: actions[0] === "publish"
+      ? () => publishPackage(NIMBUS_DIR, nimbus, nimbusTarball)
+      : undefined,
+    publishCli: actions[1] === "publish"
+      ? () => publishPackage(CLI_DIR, cli, cliTarball)
+      : undefined,
+  });
+
+  if (!publishedSomething) return log("publish: exact artifacts and tags already exist; nothing to tag.");
+
+  log("publish: changeset tag…");
   run("pnpm", ["exec", "changeset", "tag"]);
 
-  await dispatchSmoke(syncResult.tag);
+  if (syncResult) await dispatchSmoke(syncResult.tag);
   log("publish: done.");
-}
-
-/**
- * Forced publish for a half-failed release (workflow_dispatch). No generate,
- * no sync — but nimbus-docs must still be live before the CLI: if it isn't,
- * publish it out-of-band first so a manual recovery can't strand a live CLI on
- * an unpublished dependency.
- */
-async function publishOnly({ pushTags, nimbusState, nimbus }) {
-  // Callers from the auto path pass detection through; the forced-dispatch path
-  // does not, so detect here when needed.
-  const pkg = nimbus ?? readPkg(NIMBUS_PKG);
-  const state = nimbusState ?? (await registryState(pkg.name, pkg.version));
-  if (state === "absent") {
-    log(`publish-only: ${pkg.name}@${pkg.version} is not on npm — publishing it before the CLI (ordering #3)…`);
-    run("npm", ["publish"], { cwd: NIMBUS_DIR });
-  } else if (state === "unknown") {
-    die("publish-only: could not confirm nimbus-docs is published (registry unreadable). Refusing to publish the CLI and risk stranding it. Re-run when the registry is readable.");
-  }
-
-  log("publish-only: changeset publish…");
-  run("pnpm", ["changeset", "publish"]);
-  log("publish-only: changeset tag (backfill tags)…");
-  run("pnpm", ["exec", "changeset", "tag"]);
-  if (pushTags) {
-    // This path bypasses changesets/action's own tag push, so push tags here.
-    log("publish-only: git push --tags…");
-    run("git", ["push", "--follow-tags", "origin", "HEAD"]);
-    run("git", ["push", "--tags", "origin"]);
-  }
+  log("The release workflow deploys www after publication; if it fails, run the Release workflow manually from main.");
 }
 
 // ---------------------------------------------------------------------------
@@ -300,25 +456,20 @@ function parse(argv) {
     if (argv[i] === "--dry-run") flags.dryRun = true;
     else if (argv[i] === "--halt-after") {
       flags.haltAfter = argv[++i];
-      if (!["verify", "sync"].includes(flags.haltAfter)) {
-        die(`--halt-after must be "verify" or "sync" (got: ${flags.haltAfter})`);
+      if (flags.haltAfter !== "verify") {
+        die(`--halt-after must be "verify" (got: ${flags.haltAfter})`);
       }
     } else die(`unknown argument: ${argv[i]}`);
   }
   return { cmd, flags };
 }
 
-const { cmd, flags } = parse(process.argv.slice(2));
-
-const main = async () => {
+const main = async (argv) => {
+  const { cmd, flags } = parse(argv);
   if (cmd === "publish") return publish(flags);
-  if (cmd === "publish-only") {
-    if (flags.dryRun || flags.haltAfter !== undefined) {
-      die("publish-only does not support --dry-run or --halt-after.");
-    }
-    return publishOnly({ pushTags: true });
-  }
-  die(`unknown command "${cmd ?? ""}". Use "publish" or "publish-only".`);
+  die(`unknown command "${cmd ?? ""}". Use "publish".`);
 };
 
-main().catch((err) => die(err instanceof Error ? err.message : String(err)));
+if (process.argv[1] && resolve(process.argv[1]) === THIS_FILE) {
+  main(process.argv.slice(2)).catch((err) => die(err instanceof Error ? err.message : String(err)));
+}

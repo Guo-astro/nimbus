@@ -1,0 +1,53 @@
+---
+title: Quickstart
+description: Run a Nimbus docs site on your machine in five minutes.
+audience: human
+aiGenerated: true
+sidebar:
+  order: 0.1
+  badge:
+    text: Start here
+    variant: tip
+---
+
+By the end you'll have a docs site running locally, with a page you've edited.
+
+## Prerequisites
+
+- Node 22.12 or later (`node --version`)
+
+## Steps
+
+<Steps>
+  <Step title="Create the site">
+    <PackageManagers type="create" pkg="@cloudflare/nimbus-docs@latest" args="my-docs --yes" />
+  </Step>
+  <Step title="Start the dev server">
+    ```sh
+    cd my-docs
+    ```
+
+    <PackageManagers pkg="dev" type="run" />
+  </Step>
+  <Step title="Edit the home page">
+    Open `src/content/docs/index.mdx`, change the title, and save.
+  </Step>
+</Steps>
+
+## You should see
+
+```text
+ astro  v<version> ready in <n> ms
+┃ Local    http://localhost:4321/
+┃ Network  use --host to expose
+```
+
+Open `http://localhost:4321/`: your site, with your new title and a sidebar. The scaffolder wrote the layouts, components and styles into `my-docs/`, and they're yours to change.
+
+[Search](/navigation/search) reads an index the build writes, so it answers once you run `npm run build`, then `npm run preview`.
+
+## Next step
+
+[Pages and routing](/writing/pages-and-routing): add your first real page.
+
+Also: [Deploy to Cloudflare](/deploy/cloudflare) · [Project structure](/project-structure)

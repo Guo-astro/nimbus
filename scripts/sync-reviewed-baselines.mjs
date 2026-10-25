@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RECORDS = [
+  "apps/demo/nimbus.json",
   "apps/www/nimbus.json",
   "packages/nimbus-starter-source/nimbus.json",
 ];

@@ -17,7 +17,7 @@ The full, browsable version of this recipe, with the complete rationale, lives a
 
 Inspect the repo before writing — do not assume:
 
-- `package.json` — confirm this is a Nimbus project (depends on `nimbus-docs`).
+- `package.json` — confirm this is a Nimbus project (depends on `@cloudflare/nimbus-docs`).
 - `src/components.ts` — the registered MDX components. Overviews lean on `CardGrid`/`Card` (the signature routing components) and `LinkCard` for link lists at volume. Use only registered components; install a missing one with `nimbus-docs add <slug>` and register it.
 - `src/content.config.ts` — the docs collection's frontmatter schema, so you only emit fields the site accepts.
 - `src/content/docs/` — where the page belongs; it's the file its sidebar section opens on, so match sibling folder and sidebar-order conventions.
@@ -86,7 +86,7 @@ Create `src/content/docs/<section>/<slug>.mdx` following the skeleton, adapted t
 ## 7. Verify
 
 - Run the build, matching the user's package manager (`pnpm build`, `npm run build`, …); confirm it completes clean.
-- If the site has lint configured, run `pnpm exec nimbus-docs lint`.
+- If the site has lint configured, run `npx @cloudflare/nimbus-docs lint`.
 - Confirm every link resolves and new pages in this area are represented (or deliberately not).
 - Self-review against the checklist below.
 

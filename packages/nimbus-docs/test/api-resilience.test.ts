@@ -13,10 +13,13 @@
 
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseOpenApi } from "../src/_internal/api/parse.js";
+import { resolveSpecSource } from "../src/_internal/api/resolve-spec.js";
 import {
   ApiBuildError,
   buildApiModel,
@@ -223,6 +226,27 @@ describe("api resilience — two pages that collide on a route slug are fatal", 
       },
     },
     components: { schemas: { User: { type: "object", properties: { id: { type: "string" } } } } },
+  });
+
+  test("text that is neither JSON nor YAML fails with a pointed could-not-be-parsed error", async () => {
+    await assert.rejects(
+      () => parseOpenApi({ collection: "bad", spec: "{ not a document", label: "garbage.json" }),
+      (err: unknown) =>
+        err instanceof ApiBuildError &&
+        err.diagnostics.some((d) => d.level === "error" && /could not be parsed/.test(d.message)),
+    );
+  });
+
+  test("a JSON spec and its YAML twin parse to the same model, union links included", async () => {
+    const yaml = fixtureText("smallco.yaml");
+    const fromYaml = await parseOpenApi({ collection: "twin", label: "smallco.yaml", spec: yaml });
+    const { parse } = await import("yaml");
+    const fromJson = await parseOpenApi({
+      collection: "twin",
+      label: "smallco.json",
+      spec: JSON.stringify(parse(yaml)),
+    });
+    assert.deepEqual(fromJson.model, fromYaml.model);
   });
 
   test("colliding slugs fail at buildApiModel with a pointed error", async () => {
@@ -514,5 +538,144 @@ describe("api resilience — broken is fatal", () => {
         return true;
       },
     );
+  });
+});
+
+describe("api resilience — Swagger 2.0 is fatal, with a pointer to conversion", () => {
+  const swagger = [
+    'swagger: "2.0"',
+    "info: { title: Pets, version: 1.0.0 }",
+    "host: api.example.com",
+    "basePath: /v1",
+    "paths:",
+    "  /pets/{petId}:",
+    "    get:",
+    "      operationId: getPet",
+    "      parameters: [{ name: petId, in: path, required: true, type: string }]",
+    "      responses:",
+    "        '200': { description: ok, schema: { type: object, properties: { name: { type: string } } } }",
+    "",
+  ].join("\n");
+  const message = "Swagger 2.0 isn't supported. Convert it to OpenAPI 3.x first.";
+
+  test("a Swagger 2.0 file fails the build and names its path", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nimbus-swagger-"));
+    try {
+      mkdirSync(path.join(root, "src/api"), { recursive: true });
+      writeFileSync(path.join(root, "src/api/swagger.yaml"), swagger);
+      const source = await resolveSpecSource({ collection: "pets", spec: "./src/api/swagger.yaml" }, root);
+      await assert.rejects(
+        () => buildApiModel(source),
+        (err: unknown) => {
+          assert.ok(err instanceof ApiBuildError);
+          assert.deepEqual(err.diagnostics, [{ level: "error", message, source: "./src/api/swagger.yaml" }]);
+          assert.match(err.message, /Swagger 2\.0 isn't supported[^\n]*\(at \.\/src\/api\/swagger\.yaml\)/);
+          // Astro appends a browser-API hint to any build error that mentions these words.
+          assert.doesNotMatch(err.message, /document|window/);
+          return true;
+        },
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("byte-identical Swagger files built together each name their own path", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "nimbus-swagger-"));
+    try {
+      const specs = ["./a/swagger.yaml", "./b/swagger.yaml"];
+      for (const spec of specs) {
+        mkdirSync(path.join(root, path.dirname(spec)), { recursive: true });
+        writeFileSync(path.join(root, spec), swagger);
+      }
+      const sources = await Promise.all(specs.map((spec) => resolveSpecSource({ collection: "pets", spec }, root)));
+      const results = await Promise.allSettled(sources.map((source) => buildApiModel(source)));
+      assert.deepEqual(
+        results.map((result) => (result.status === "rejected" ? (result.reason as ApiBuildError).diagnostics[0]?.source : "built")),
+        specs,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a label or path containing the cache key's separator still names its own source", async () => {
+    const spec = { swagger: "2.0", info: { title: "P", version: "1" }, paths: {} };
+    const sources = [
+      { label: "one::two", path: "three" },
+      { label: "one", path: "two::three" },
+    ];
+    const results = await Promise.allSettled(sources.map((source) => buildApiModel({ collection: "pets", spec, ...source })));
+    assert.deepEqual(
+      results.map((result) => (result.status === "rejected" ? (result.reason as ApiBuildError).diagnostics[0]?.source : "built")),
+      ["three", "two::three"],
+    );
+  });
+
+  test("an inline Swagger 2.0 document names its label", async () => {
+    await assert.rejects(
+      () => buildApiModel({ collection: "pets", spec: { swagger: "2.0", info: { title: "P", version: "1" }, paths: {} } }),
+      (err: unknown) => err instanceof ApiBuildError && err.diagnostics[0]?.source === "pets" && err.diagnostics[0].message === message,
+    );
+  });
+
+  test("OpenAPI 3.0 and 3.1 documents are unaffected", async () => {
+    for (const openapi of ["3.0.3", "3.1.0"]) {
+      const model = await buildApiModel({
+        collection: `v${openapi.replaceAll(".", "")}`,
+        spec: {
+          openapi,
+          info: { title: "Pets", version: "1" },
+          paths: { "/pets": { get: { operationId: "listPets", responses: { "200": { description: "ok" } } } } },
+        },
+      });
+      assert.equal(getApiPageProps(model, "listPets").kind, "operation", openapi);
+    }
+  });
+});
+
+describe("api resilience — a property named $ref", () => {
+  const spec = (thing: string) => `
+openapi: 3.1.0
+info: { title: Refs, version: "1" }
+paths:
+  /things:
+    get:
+      operationId: listThings
+      tags: [things]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+components:
+  schemas:
+    Thing:
+      type: object
+      properties:
+${thing}
+`;
+
+  test("a schema property named $ref is a name and draws no reference warning", async () => {
+    const { diagnostics } = await parseOpenApi({
+      collection: "refs",
+      spec: spec(`        $ref: { type: string }\n        properties: { type: object, properties: { $ref: { type: string } } }`),
+      label: "refs.yaml",
+    });
+    const references = diagnostics.filter((d) => /reference/i.test(d.message));
+    assert.deepEqual(references, []);
+    assert.ok(!warnings.some((w) => w.includes("[object Object]")), warnings.join("\n"));
+  });
+
+  test("a $ref whose value is not a string is reported by location, not by its printed value", async () => {
+    const { diagnostics } = await parseOpenApi({
+      collection: "refs",
+      spec: spec(`        ends_at: { $ref: 7 }`),
+      label: "refs.yaml",
+    });
+    const located = diagnostics.filter((d) => d.message.includes("#/components/schemas/Thing/properties/ends_at/$ref"));
+    assert.ok(located.length >= 1, diagnostics.map((d) => d.message).join("\n"));
+    assert.ok(!diagnostics.some((d) => d.message.includes("Can't resolve reference: 7")), diagnostics.map((d) => d.message).join("\n"));
   });
 });

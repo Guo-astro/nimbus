@@ -5,12 +5,15 @@ import {
   bodyMediaFieldCoordinate,
   fallbackOperationCoordinate,
   isShadowingBodyProperty,
-  mediaTypeToken,
+  leadingSegments,
+  mediaTypeTokens,
   operationCoordinate,
   parameterCoordinate,
   RESERVED_ROUTE_SEGMENTS,
   responseCoordinate,
   responseFieldCoordinate,
+  responseMediaCoordinate,
+  responseMediaFieldCoordinate,
   routeIdentityFault,
   sectionCoordinate,
   tagRouteSegment,
@@ -32,13 +35,19 @@ import type {
   ParameterLocation,
   RequestBodyFacts,
   ResponseFacts,
+  ResponseMediaFacts,
 } from "./model.js";
-import { dedupeParameters, mediaExample, picksNonPrimaryMedia, resolveAuth } from "./facts.js";
-import { buildOperationSamples, resolveExampleValue } from "./samples.js";
-import { addField, walkFields } from "./field-walk.js";
+import { dedupeParameters, mediaExample, resolveAuth } from "./facts.js";
+import {
+  buildOperationSamples,
+  resolveExampleValue,
+  resolveNamedExampleValues,
+} from "./samples.js";
+import { addField, extensionValues, walkFields, type FieldRole } from "./field-walk.js";
 import {
   asString,
   constraintsOf,
+  foldAllOf,
   isPlainObject,
   itemsOf,
   orderedMediaEntries,
@@ -135,7 +144,7 @@ function addOperation(
 }
 
 /**
- * Record the operation's page slug. Under a `resource-action-v1` policy the slug is
+ * Record the operation's page slug. Under a route policy the slug is
  * resolved by `override → derivation → normalized coordinate fallback`, then
  * route-safety and reserved-route checks run on that final slug (the
  * `operationId` faced neither). Legacy (no policy) keeps the exact
@@ -161,6 +170,7 @@ function resolveSlug(
   }
 
   const label = `${method.toUpperCase()} ${path}`;
+  const convention = ctx.routePolicy.convention;
   const outcome = resolveOperationRoute(ctx.routePolicy, {
     method,
     path,
@@ -173,7 +183,7 @@ function resolveSlug(
     // skip page registration (the build fails on this error, so the partial
     // model is discarded before any consumer reads it).
     ctx.registry.addError(
-      `Operation ${label} (coordinate "${opCoord}") has no unambiguous resource-action-v1 route and its ` +
+      `Operation ${label} (coordinate "${opCoord}") has no unambiguous ${convention} route and its ` +
         `coordinate normalizes to an empty slug. Add an explicit route in \`routes.operations\` ` +
         `keyed by its operationId.`,
       opCoord,
@@ -188,7 +198,7 @@ function resolveSlug(
     ctx.noteOverrideConsumed(operationId!);
   } else if (outcome.kind === "fallback") {
     ctx.registry.addWarning(
-      `Operation ${label} (coordinate "${opCoord}") has no unambiguous resource-action-v1 route; falling back ` +
+      `Operation ${label} (coordinate "${opCoord}") has no unambiguous ${convention} route; falling back ` +
         `to the normalized coordinate slug "${slug}". Add an explicit route in \`routes.operations\` ` +
         `to pin a stable URL.`,
       opCoord,
@@ -253,6 +263,9 @@ export interface OperationSite {
  */
 export function assembleOperation(ctx: ParseContext, site: OperationSite): OperationFacts {
   const { coord, op, sourceBase, rawOp, sharedParams } = site;
+  // A webhook's body is sent by the API, so it reads like a response: its
+  // readOnly fields show and its writeOnly ones don't.
+  const bodyRole: FieldRole = site.sampleTarget ? "request" : "response";
   const request: Coordinate[] = [];
   const responses: Coordinate[] = [];
 
@@ -274,31 +287,38 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
   const bodyUnion = bodySchema
     ? ctx.resolver.unionPreferRaw(rawBodySchema, bodySchema, itemsOf(bodySchema))
     : undefined;
+  const bodyFieldPaths: string[] = [];
   if (bodySchema) {
-    for (const c of addBodyFields(ctx, coord, bodySchema, sourceBase, rawBodySchema)) {
+    for (const c of addBodyFields(ctx, coord, bodySchema, sourceBase, bodyRole, rawBodySchema)) {
       request.push(c);
+      bodyFieldPaths.push(c.slice(coord.length + 1));
     }
   }
-  for (const entry of mediaEntries.slice(1)) {
-    addMediaBody(ctx, coord, entry, sourceBase, rawOp?.requestBody);
-  }
+  // An additional media token sits beside the primary body's fields, so it must
+  // not reuse one of their names (a body property literally named `text-csv`).
+  const bodyEntries = mediaEntries.slice(1);
+  const bodyTokens = mediaTypeTokens(
+    bodyEntries.map((e) => e.mediaType),
+    leadingSegments(bodyFieldPaths),
+  );
+  bodyEntries.forEach((entry, i) => {
+    addMediaBody(ctx, coord, entry, bodyTokens[i]!, sourceBase, bodyRole, rawOp?.requestBody);
+  });
 
   for (const [status, response] of Object.entries(op.responses ?? {})) {
     const respCoord = responseCoordinate(coord, status);
     const respSource = `${sourceBase}/responses/${status}`;
     ctx.registry.register(respCoord, "response", { source: respSource });
-    const respEntry = primaryMediaEntry(response.content);
+    // Every declared media type renders, as on the request side: the primary
+    // (same deterministic precedence) keeps the response's own coordinates, and
+    // each additional media type is a child node under a token segment.
+    const respEntries = orderedMediaEntries(response.content);
+    const respEntry = respEntries[0];
     const respSchema = respEntry?.media.schema;
-    const rawRespSchema = ctx.resolver.rawContentSchema(
-      isPlainObject(rawOp?.responses) ? (rawOp.responses as Record<string, unknown>)[status] : undefined,
-    );
-    if (picksNonPrimaryMedia(response.content)) {
-      ctx.registry.addWarning(
-        `Response "${respCoord}" has multiple media types and no application/json; rendering the first declared type only.`,
-        respCoord,
-        respSource,
-      );
-    }
+    const rawResponse = isPlainObject(rawOp?.responses)
+      ? (rawOp.responses as Record<string, unknown>)[status]
+      : undefined;
+    const rawRespSchema = ctx.resolver.rawContentSchema(rawResponse);
     const facts: ResponseFacts = {
       kind: "response",
       status,
@@ -320,10 +340,13 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
       ? ctx.resolver.unionPreferRaw(rawRespSchema, respSchema, itemsOf(respSchema))
       : undefined;
     if (respUnion) facts.union = respUnion;
+    if (respEntry) facts.mediaType = respEntry.mediaType;
     ctx.node(respCoord, "response", coord, facts);
     responses.push(respCoord);
+    const respFieldPaths: string[] = [];
     if (respSchema) {
       walkFields(ctx.resolver, respSchema, SCHEMA_FIELD_DEPTH, new Set(), (fieldPath, fieldSchema, required, _topLevelName, parentPath, rawField) => {
+        respFieldPaths.push(fieldPath);
         const fieldCoord = responseFieldCoordinate(coord, status, fieldPath);
         // A nested response field parents to its container field; a top-level
         // one parents to the response node, not the operation.
@@ -331,8 +354,16 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
           ? responseFieldCoordinate(coord, status, parentPath)
           : respCoord;
         addField(ctx, fieldCoord, parent, fieldSchema, required, "field", respSource, rawField);
-      }, rawRespSchema);
+      }, rawRespSchema, "response");
     }
+    const extraMedia = respEntries.slice(1);
+    const extraTokens = mediaTypeTokens(
+      extraMedia.map((e) => e.mediaType),
+      leadingSegments(respFieldPaths),
+    );
+    extraMedia.forEach((entry, i) => {
+      addResponseMedia(ctx, { opCoord: coord, status, respCoord, respSource }, entry, extraTokens[i]!, rawResponse);
+    });
     // The first-class error catalogue (`errors.<code>`) is deliberately NOT
     // minted yet. Its identity is semantic (an error code from the spec's
     // error schema, e.g. `errors.card_declined`), not the HTTP status — and
@@ -340,7 +371,9 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
     // schema in a later pass.
   }
 
-  const auth = resolveAuth(op.security ?? ctx.doc.security);
+  // A webhook is a request the API sends you, so the API's own top-level
+  // security isn't what the receiver checks; only the webhook's own applies.
+  const auth = resolveAuth(site.sampleTarget ? (op.security ?? ctx.doc.security) : op.security);
   const facts: OperationFacts = {
     kind: "operation",
     summary: asString(op.summary),
@@ -354,6 +387,13 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
   };
   if (bodyUnion) facts.bodyUnion = bodyUnion;
   if (primaryEntry) facts.bodyMediaType = primaryEntry.mediaType;
+  // `required` and `description` belong to the Request Body Object itself, so
+  // every media type shares them. Only what the spec states is carried.
+  if (isPlainObject(op.requestBody)) {
+    if (typeof op.requestBody.required === "boolean") facts.bodyRequired = op.requestBody.required;
+    const bodyDescription = asString(op.requestBody.description);
+    if (bodyDescription) facts.bodyDescription = bodyDescription;
+  }
   if (site.sampleTarget && ctx.firstServer) facts.server = ctx.firstServer;
 
   // Resolve the request example ONCE (authored `example`/`examples` win, else
@@ -364,26 +404,42 @@ export function assembleOperation(ctx: ParseContext, site: OperationSite): Opera
   const requestEntry = primaryMediaEntry(op.requestBody?.content);
   const requestExample = resolveExampleValue(
     mediaExample(requestEntry),
-    "request",
+    bodyRole,
     ctx.sampleTools,
   );
   if (requestEntry && requestExample !== undefined) {
     facts.example = { mediaType: requestEntry.mediaType, value: requestExample };
   }
-  if (site.sampleTarget && ctx.sampleTools) {
+  if (requestEntry) {
+    const requestExamples = resolveNamedExampleValues(
+      mediaExample(requestEntry)?.examples,
+    ).map((example) => ({ ...example, mediaType: requestEntry.mediaType }));
+    if (requestExamples.length > 0) facts.requestExamples = requestExamples;
+  }
+  if (site.sampleTarget) {
     facts.samples = buildOperationSamples(ctx.sampleTools, {
       method: site.sampleTarget.method,
       path: site.sampleTarget.path,
-      server: ctx.firstServer,
+      openapiVersion: ctx.doc.openapi,
+      server: ctx.sampleServer,
       params: allParams,
       body: facts.example
-        ? { mediaType: facts.example.mediaType, value: facts.example.value }
+        ? {
+          mediaType: facts.example.mediaType,
+          value: facts.example.value,
+          ...(requestEntry?.media.schema ? { schema: requestEntry.media.schema } : {}),
+          ...(requestEntry?.media.encoding ? { encoding: requestEntry.media.encoding } : {}),
+        }
         : undefined,
       securitySchemes: ctx.doc.components?.securitySchemes,
       auth,
       xCodeSamples: op["x-codeSamples"] ?? op["x-code-samples"],
+      generate: ctx.samples.generate,
+      keepGenerated: ctx.samples.keepGenerated,
     });
   }
+  const extensions = extensionValues(ctx.extensions, op);
+  if (extensions) facts.extensions = extensions;
   return facts;
 }
 
@@ -420,6 +476,9 @@ function addParameter(
       )
     : undefined;
   if (union) facts.union = union;
+  // The parameter object's own value wins over its schema's.
+  const extensions = extensionValues(ctx.extensions, param, param.schema && foldAllOf(param.schema));
+  if (extensions) facts.extensions = extensions;
   ctx.node(coord, "parameter", opCoord, facts);
   return coord;
 }
@@ -429,6 +488,7 @@ function addBodyFields(
   opCoord: Coordinate,
   schema: OpenApiSchema,
   sourceBase: string,
+  role: FieldRole,
   rawSchema?: OpenApiSchema,
 ): Coordinate[] {
   const coords: Coordinate[] = [];
@@ -445,7 +505,7 @@ function addBodyFields(
     }
     addField(ctx, coord, parent, fieldSchema, required, "field", `${sourceBase}/requestBody`, rawField);
     coords.push(coord);
-  }, rawSchema);
+  }, rawSchema, role);
   return coords;
 }
 
@@ -453,10 +513,11 @@ function addMediaBody(
   ctx: ParseContext,
   opCoord: Coordinate,
   entry: { mediaType: string; media: OpenApiMediaType },
+  token: string,
   sourceBase: string,
+  role: FieldRole,
   rawRequestBody: unknown,
 ): void {
-  const token = mediaTypeToken(entry.mediaType);
   const mediaCoord = bodyMediaCoordinate(opCoord, token);
   const source = `${sourceBase}/requestBody/content/${entry.mediaType}`;
   ctx.registry.register(mediaCoord, "requestBody", { source });
@@ -468,7 +529,7 @@ function addMediaBody(
     ? ctx.resolver.unionPreferRaw(rawSchema, schema, itemsOf(schema))
     : undefined;
   if (union) facts.union = union;
-  const example = resolveExampleValue(mediaExample(entry), "request", ctx.sampleTools);
+  const example = resolveExampleValue(mediaExample(entry), role, ctx.sampleTools);
   if (example !== undefined) facts.example = { mediaType: entry.mediaType, value: example };
   ctx.node(mediaCoord, "requestBody", opCoord, facts, source);
 
@@ -477,6 +538,40 @@ function addMediaBody(
       const coord = bodyMediaFieldCoordinate(opCoord, token, fieldPath);
       const parent = parentPath ? bodyMediaFieldCoordinate(opCoord, token, parentPath) : mediaCoord;
       addField(ctx, coord, parent, fieldSchema, required, "field", source, rawField);
-    }, rawSchema);
+    }, rawSchema, role);
+  }
+}
+
+function addResponseMedia(
+  ctx: ParseContext,
+  response: { opCoord: Coordinate; status: string; respCoord: Coordinate; respSource: string },
+  entry: { mediaType: string; media: OpenApiMediaType },
+  token: string,
+  rawResponse: unknown,
+): void {
+  const { opCoord, status, respCoord, respSource } = response;
+  const mediaCoord = responseMediaCoordinate(opCoord, status, token);
+  const source = `${respSource}/content/${entry.mediaType}`;
+  ctx.registry.register(mediaCoord, "responseMedia", { source });
+
+  const schema = entry.media.schema;
+  const rawSchema = ctx.resolver.rawMediaSchema(rawResponse, entry.mediaType);
+  const facts: ResponseMediaFacts = { kind: "responseMedia", mediaType: entry.mediaType };
+  const union = schema
+    ? ctx.resolver.unionPreferRaw(rawSchema, schema, itemsOf(schema))
+    : undefined;
+  if (union) facts.union = union;
+  const example = resolveExampleValue(mediaExample(entry), "response", ctx.sampleTools);
+  if (example !== undefined) facts.example = { mediaType: entry.mediaType, value: example };
+  ctx.node(mediaCoord, "responseMedia", respCoord, facts, source);
+
+  if (schema) {
+    walkFields(ctx.resolver, schema, SCHEMA_FIELD_DEPTH, new Set(), (fieldPath, fieldSchema, required, _topLevelName, parentPath, rawField) => {
+      const coord = responseMediaFieldCoordinate(opCoord, status, token, fieldPath);
+      const parent = parentPath
+        ? responseMediaFieldCoordinate(opCoord, status, token, parentPath)
+        : mediaCoord;
+      addField(ctx, coord, parent, fieldSchema, required, "field", source, rawField);
+    }, rawSchema, "response");
   }
 }

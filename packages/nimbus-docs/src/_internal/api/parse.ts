@@ -18,9 +18,13 @@ import {
   CoordinateRegistry,
   apiCoordinate,
   sectionCoordinate,
+  hierarchicalTagRouteSegment,
+  policyTagRouteSegment,
   tagRouteSegment,
+  RESERVED_ROUTE_SEGMENTS,
   type Diagnostic,
 } from "./coordinates.js";
+import { openApiParserMissing } from "./parser-missing.js";
 import {
   HTTP_METHODS,
   type OpenApiDocument,
@@ -34,9 +38,12 @@ import type {
   RouteProvenance,
 } from "./model.js";
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiSamples } from "../../types.js";
 import { collectSecuritySchemes } from "./facts.js";
-import { loadSampleTools } from "./samples.js";
+import { GENERATED_SAMPLE_LANGS, loadSampleTools } from "./samples.js";
 import type { SampleTools } from "./samples.js";
+import { explainReferenceErrors } from "./publish-spec.js";
+import { refProbe, refProbeIntact } from "./ref-probe.js";
 import { SchemaResolver, docNeedsRawDoc } from "./schema-resolver.js";
 import { asString, isPlainObject } from "./schema-algebra.js";
 import { parseOperations } from "./operations.js";
@@ -51,12 +58,28 @@ export interface SpecSource {
   spec: string | Record<string, unknown>;
   /** Human label for diagnostics (e.g. the file path). */
   label?: string;
+  /** The project-relative file the spec was read from, for diagnostics. */
+  path?: string;
   /** Base URL for this model's pages. Defaults to `/<collection>` when absent. */
   mountPath?: string;
+  /**
+   * Public URL base, when it differs from `mountPath`: a query-mode version
+   * mounts its store at `mountPath` but its pages live at the version-free
+   * family base.
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
+  /** Publish a page per `components/schemas` entry. Default false. */
+  schemaPages?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
+  samples?: ApiSamples;
+  /** `x-*` extension names whose values are copied onto pages. */
+  extensions?: readonly string[];
 }
 
 export interface ParseResult {
@@ -73,13 +96,16 @@ interface ScalarParserModule {
   validate: (input: string | Record<string, unknown>) => Promise<{
     valid?: boolean;
     errors?: ScalarValidationError[];
+    /** The detected specification version: `"2.0"`, `"3.0"`, or `"3.1"`. */
+    version?: string;
   }>;
-  dereference: (input: string | Record<string, unknown>) => Promise<{
+  dereference: (input: string | Record<string, unknown> | OpenApiDocument) => Promise<{
     schema?: OpenApiDocument;
     errors?: ScalarValidationError[];
   }>;
-  /** Ref-preserving normalization — same source, `$ref`s intact. Synchronous. */
-  normalize: (input: string | Record<string, unknown>) => OpenApiDocument;
+  /** Ref-preserving normalization — same source, `$ref`s intact. Synchronous;
+   * `undefined` for text that is neither JSON nor YAML. */
+  normalize: (input: string | Record<string, unknown>) => OpenApiDocument | undefined;
 }
 
 /**
@@ -93,15 +119,26 @@ async function loadParser(): Promise<ScalarParserModule> {
   try {
     return (await import(/* @vite-ignore */ specifier)) as unknown as ScalarParserModule;
   } catch {
-    throw new Error(
-      `The API reference needs the OpenAPI parser. Install it in your project:\n\n  npm install @scalar/openapi-parser\n\n` +
-        `For code samples, also install the optional generators:\n\n  npm install openapi-sampler @readme/httpsnippet\n\n` +
-        `(Installing the api-layout registry recipe pulls all three automatically.)\n`,
-    );
+    throw new Error(await openApiParserMissing());
   }
 }
 
-export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
+// A build parses each spec in two module graphs (config setup, then content
+// sync), so the once-only record lives on globalThis.
+const surfaced: Set<string> = ((globalThis as Record<symbol, unknown>)[Symbol.for("nimbus.api.surfaced")] ??= new Set<string>()) as Set<string>;
+
+/**
+ * `onceKey` names an identical parse (same spec, collection and options);
+ * its warnings print only the first time it's parsed in this process.
+ */
+export async function parseOpenApi(source: SpecSource, onceKey?: string): Promise<ParseResult> {
+  const surface = (collection: string, diagnostics: readonly Diagnostic[]) => {
+    if (onceKey !== undefined) {
+      if (surfaced.has(onceKey)) return;
+      surfaced.add(onceKey);
+    }
+    surfaceWarnings(collection, diagnostics);
+  };
   const parser = await loadParser();
   const label = source.label ?? source.collection;
 
@@ -121,23 +158,47 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
   try {
     // `validate` is advisory. `dereference` alone does not check structure — the
     // walkability gate below does that — so validation issues become warnings,
-    // never a build-abort.
+    // never a build-abort. For text it parses its own copy: Scalar's validator
+    // rewrites a non-string `info.version` on the object it is handed, so it
+    // must not share the document the walk reads.
     const validation = await parser.validate(source.spec);
-    for (const e of validation.errors ?? []) {
+    // One parse serves the walk and the ref-preserving copy below: Scalar's
+    // `dereference` structured-clones before resolving, so the document it is
+    // handed keeps its `$ref`s. The probe notices a parser that resolves in
+    // place instead; the copy is then parsed again rather than losing links.
+    let parsed = parser.normalize(source.spec);
+    if (parsed === undefined) throw new Error("the document is empty, or neither JSON nor YAML");
+    const probe = refProbe(parsed);
+    // The walker reads OpenAPI 3.x only; a Swagger 2.0 document would render
+    // without servers, parameter types, or response schemas.
+    if (validation.version === "2.0") {
+      throw new ApiBuildError([
+        {
+          level: "error",
+          message: "Swagger 2.0 isn't supported. Convert it to OpenAPI 3.x first.",
+          source: source.path ?? label,
+        },
+      ]);
+    }
+    // A tag's `parent` is OpenAPI 3.2, and Nimbus nests tags by it whatever
+    // version a spec declares, so it isn't a deviation worth a warning.
+    const deviations = (validation.errors ?? []).filter((e) => !isTagParent(e)).map((e) => e.message);
+    for (const message of explainReferenceErrors(deviations, parsed)) {
       preDiagnostics.push({
         level: "warning",
-        message: `Spec deviates from OpenAPI: ${e.message}`,
+        message: `Spec deviates from OpenAPI: ${message}`,
         source: label,
       });
     }
 
     // Unresolved references degrade gracefully — the affected field renders as
     // an unknown type rather than aborting a 3,000-operation build.
-    const { schema: document, errors } = await parser.dereference(source.spec);
-    for (const e of errors ?? []) {
+    const { schema: document, errors } = await parser.dereference(parsed);
+    if (!refProbeIntact(probe)) parsed = parser.normalize(source.spec) ?? parsed;
+    for (const message of explainReferenceErrors((errors ?? []).map((e) => e.message), parsed)) {
       preDiagnostics.push({
         level: "warning",
-        message: `Unresolved reference: ${e.message}`,
+        message: `Unresolved reference: ${message}`,
         source: label,
       });
     }
@@ -146,29 +207,22 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
     // absent or a structural slot that must be an object is not one.
     assertWalkable(document, label);
 
-    // Ref-preserving copy, for recovering the names that dereference clones away
-    // — union variant branches and named-schema map values (`map<Name>`). Only
-    // worth a second parse when the spec actually carries one; and best-effort —
-    // a normalize failure (or its absence) must never abort an otherwise walkable
-    // build. The walk still finds these in the dereferenced doc and renders them
-    // unlinked, so the only thing lost without a raw doc is the link, never the page.
-    let rawDoc: OpenApiDocument | undefined;
-    if (docNeedsRawDoc(document)) {
-      try {
-        rawDoc = parser.normalize(source.spec);
-      } catch {
-        rawDoc = undefined;
-      }
-    }
+    // The ref-preserving document, for recovering the names that dereference
+    // clones away — union variant branches and named-schema map values
+    // (`map<Name>`). Only handed on when the spec carries one; the walk still
+    // finds these in the dereferenced doc and renders them unlinked otherwise,
+    // so the only thing lost without a raw doc is the link, never the page.
+    const rawDoc = docNeedsRawDoc(document) ? parsed : undefined;
 
-    // Code samples are best-effort: derived when the optional tooling is
-    // present, silently absent (never fatal) when it is not.
+    // Generated samples are best-effort: derived when the optional tooling is
+    // present, absent (never fatal) when it is not.
     const sampleTools = await loadSampleTools();
-    if (!sampleTools && hasCallableOperations(document)) {
+    const generate = source.samples?.generate ?? GENERATED_SAMPLE_LANGS;
+    if (!sampleTools && generate.length > 0 && hasCallableOperations(document)) {
       preDiagnostics.push({
         level: "warning",
         message:
-          "Code samples omitted — install openapi-sampler and @readme/httpsnippet to derive curl/TypeScript/Python examples (the api-layout registry recipe pulls both).",
+          `Generated code samples omitted — install openapi-sampler and @readme/httpsnippet to derive ${generate.join(", ")} examples, or set \`samples.generate: []\` to publish authored samples only.`,
         source: label,
       });
     }
@@ -180,19 +234,24 @@ export async function parseOpenApi(source: SpecSource): Promise<ParseResult> {
       sampleTools,
       source.requireOperationId ?? false,
       source.routes,
+      source.schemaPages ?? false,
+      source.samples,
+      source.extensions,
     );
     const model = walker.walk();
     if (source.mountPath !== undefined) model.mountPath = source.mountPath;
+    if (source.urlBasePath !== undefined) model.urlBasePath = source.urlBasePath;
+    if (source.urlQuery !== undefined) model.urlQuery = source.urlQuery;
     walker.registry.throwIfErrors();
 
     const diagnostics: Diagnostic[] = [...preDiagnostics, ...walker.registry.getDiagnostics()];
-    surfaceWarnings(source.collection, diagnostics);
+    surface(source.collection, diagnostics);
     return { model, diagnostics };
   } catch (err) {
     // Warnings gathered before the abort explain *why* it aborted — a lowercase
     // `4xx` key, an unresolved `$ref`. Never swallow them just because a later
     // stage threw; surface them alongside the failure.
-    surfaceWarnings(source.collection, [
+    surface(source.collection, [
       ...preDiagnostics,
       ...(walker?.registry.getDiagnostics() ?? []),
     ]);
@@ -278,14 +337,36 @@ function describeType(value: unknown): string {
  * Surface warnings to the build log — loud, but capped so a single deviant spec
  * cannot flood the console with thousands of lines.
  */
-function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
-  const warnings = diagnostics.filter((d) => d.level === "warning");
-  const CAP = 20;
-  for (const d of warnings.slice(0, CAP)) {
-    console.warn(`[nimbus:api:${collection}] ${d.message}${d.source ? ` (${d.source})` : ""}`);
+export function surfaceWarnings(collection: string, diagnostics: readonly Diagnostic[]): void {
+  // Fallback routes get one summary line below, so they can't push the
+  // warnings that need attention past the cap.
+  const fallbacks = diagnostics.filter((d) => d.level === "warning" && d.code === "route-fallback");
+  const warnings = diagnostics.filter((d) => d.level === "warning" && d.code !== "route-fallback");
+  // The same message from many sources is one line: the first source and a count.
+  const groups = new Map<string, { first: Diagnostic; count: number }>();
+  for (const d of warnings) {
+    const group = groups.get(d.message);
+    if (group) group.count++;
+    else groups.set(d.message, { first: d, count: 1 });
   }
-  if (warnings.length > CAP) {
-    console.warn(`[nimbus:api:${collection}] …and ${warnings.length - CAP} more warning(s).`);
+  const CAP = 20;
+  const lines = [...groups.values()];
+  for (const { first, count } of lines.slice(0, CAP)) {
+    const where = [first.source, count > 1 ? `×${count.toLocaleString("en-US")}` : ""]
+      .filter(Boolean)
+      .join(", ");
+    console.warn(`[nimbus:api:${collection}] ${first.message}${where ? ` (${where})` : ""}`);
+  }
+  if (lines.length > CAP) {
+    console.warn(`[nimbus:api:${collection}] …and ${lines.length - CAP} more warning(s).`);
+  }
+  if (fallbacks.length > 0) {
+    const shown = fallbacks.slice(0, 5).map((d) => d.coordinate ?? d.source ?? "?");
+    console.warn(
+      `[nimbus:api:${collection}] ${fallbacks.length} operation(s) have no unambiguous route and use their ` +
+        `coordinate as the URL slug (${shown.join(", ")}${fallbacks.length > shown.length ? ", …" : ""}). ` +
+        `Name them in \`routes.operations\` to pin stable URLs.`,
+    );
   }
   // Per-op fallback warnings can be hidden entirely by the CAP on a large spec;
   // emit a guaranteed aggregate last so the author always sees the count and fix.
@@ -312,6 +393,30 @@ function asArray(value: unknown): unknown[] {
  * `servers` is advisory now (validation no longer gates it), so it may be any
  * shape. Extract only well-formed `{ url: string }` entries; skip the rest.
  */
+function isTagParent(error: { message?: string; path?: unknown }): boolean {
+  return (
+    error.message === "Property parent is not expected to be here" &&
+    typeof error.path === "string" &&
+    /^\/tags\/\d+$/.test(error.path)
+  );
+}
+
+// The first server's URL with each variable's `default` filled in; a variable
+// without one stays `{name}`.
+function sampleServerUrl(servers: unknown): string | undefined {
+  const server = asArray(servers).find((s) => isPlainObject(s) && typeof s.url === "string") as
+    | { url: string; variables?: unknown }
+    | undefined;
+  if (!server) return undefined;
+  const variables = isPlainObject(server.variables) ? server.variables : {};
+  return server.url.replace(/\{([^{}]+)\}/g, (whole, name: string) => {
+    const variable = variables[name];
+    const value = isPlainObject(variable) ? variable.default : undefined;
+    // YAML reads `default: 8443` as a number; it's still the value to send.
+    return typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value) : whole;
+  });
+}
+
 function extractServerUrls(servers: unknown): string[] {
   const out: string[] = [];
   for (const s of asArray(servers)) {
@@ -347,12 +452,16 @@ class Walker implements ParseContext {
   private readonly navRoots: NavNode[] = [];
   private readonly tagParent = new Map<string, string>();
   private readonly tagGroupNames = new Set<string>();
+  private readonly pagelessCategories = new Set<string>();
+  private readonly sectionRoutes = new Map<string, string>();
+  private readonly consumedTagSegments = new Set<string>();
   readonly resolver: SchemaResolver;
 
   /** Optional sample generators; null when the peer deps are not installed. */
   readonly sampleTools: SampleTools | null;
   /** First declared server URL — derived once, prefixed onto every sample. */
   readonly firstServer?: string;
+  readonly sampleServer?: string;
 
   constructor(
     readonly collection: string,
@@ -361,6 +470,9 @@ class Walker implements ParseContext {
     sampleTools?: SampleTools | null,
     readonly requireOperationId: boolean = false,
     readonly routePolicy?: RoutePolicy,
+    readonly schemaPages: boolean = false,
+    readonly samples: ApiSamples = {},
+    readonly extensions: readonly string[] = [],
   ) {
     this.registry = new CoordinateRegistry(collection);
     // Schema tables are captured once here — the walk never reassigns them on `doc`.
@@ -371,6 +483,7 @@ class Walker implements ParseContext {
     );
     this.sampleTools = sampleTools ?? null;
     this.firstServer = extractServerUrls(doc.servers)[0];
+    this.sampleServer = sampleServerUrl(doc.servers);
   }
 
   walk(): DocsModel {
@@ -379,6 +492,7 @@ class Walker implements ParseContext {
     parseOperations(this);
     parseWebhooks(this);
     parseSchemas(this);
+    this.warnIfOnlySchemas();
     // After every operationId is known (path operations AND webhooks), so a key
     // that names a real webhook is reported accurately, not as a typo.
     this.checkUnusedOverrides();
@@ -392,10 +506,39 @@ class Walker implements ParseContext {
     };
   }
 
+  /** With `schemaPages: false`, a spec that defines schemas but no operations or
+   *  webhooks shows its schemas on no page at all (types render only inline, on
+   *  operations). Legal, but almost certainly not what the author meant, so say
+   *  so once. Tag pages may still exist, so make no claim about the page count. */
+  private warnIfOnlySchemas(): void {
+    if (this.schemaPages) return;
+    if (Object.keys(this.doc.components?.schemas ?? {}).length === 0) return;
+    for (const node of this.nodes.values()) {
+      if (node.kind === "operation") return;
+    }
+    this.registry.addWarning(
+      `This spec defines schemas but no operations or webhooks, and \`schemaPages\` is false, ` +
+        `so its schemas appear on no page. Set \`schemaPages: true\` to publish a page per schema.`,
+      undefined,
+      undefined,
+      "schema-pages-only-root",
+    );
+  }
+
   /** Every configured `operations` override key must exist as an operationId in
    *  this concrete spec version; a key that never matched is a typo — fail the
    *  build naming it, rather than silently letting the operation derive. */
   private checkUnusedOverrides(): void {
+    for (const tag of Object.keys(this.routePolicy?.tagSegments ?? {})) {
+      if (this.consumedTagSegments.has(tag)) continue;
+      this.registry.addError(
+        `Tag segment for "${tag}" does not match any tag with a page in this spec — ` +
+          `remove it or correct the tag name. Segments are keyed by the exact tag name.`,
+        undefined,
+        undefined,
+        "unused-route-override",
+      );
+    }
     const overrides = this.routePolicy?.operations;
     if (!overrides) return;
     for (const key of Object.keys(overrides)) {
@@ -460,7 +603,7 @@ class Walker implements ParseContext {
     this.collectHierarchy();
     for (const tag of asArray(this.doc.tags)) {
       if (!isPlainObject(tag) || typeof tag.name !== "string") continue;
-      this.ensureSection(tag.name, asString(tag.description));
+      this.ensureSection(tag.name, asString(tag.description), true, asString(tag["x-displayName"]));
     }
     // x-tagGroups categories are nav-only grouping nodes:
     // they get a section node so member ancestry (breadcrumbs, auto-expand)
@@ -468,6 +611,14 @@ class Walker implements ParseContext {
     // that is ALSO a declared tag was already made a page by the loop above
     // (ensureSection is idempotent), so this never downgrades a real tag.
     for (const name of this.tagGroupNames) this.ensureSection(name, undefined, false);
+    // Sections are created declared tags first, so record each group's place in
+    // x-tagGroups for lists that follow the spec's group order.
+    let group = 0;
+    for (const name of this.tagGroupNames) {
+      const facts = this.nodes.get(sectionCoordinate(name))?.facts;
+      if (facts?.kind === "section") facts.group = group;
+      group++;
+    }
   }
 
   /**
@@ -491,7 +642,9 @@ class Walker implements ParseContext {
       if (isPlainObject(tag) && typeof tag.name === "string") sections.add(tag.name);
     }
     for (const group of asArray(this.doc["x-tagGroups"])) {
-      if (isPlainObject(group) && typeof group.name === "string") sections.add(group.name);
+      if (!isPlainObject(group) || typeof group.name !== "string") continue;
+      if (!sections.has(group.name)) this.pagelessCategories.add(group.name);
+      sections.add(group.name);
     }
     for (const item of Object.values(this.doc.paths ?? {})) {
       if (item === null || typeof item !== "object") continue;
@@ -566,7 +719,7 @@ class Walker implements ParseContext {
    * `addSections`; tags first seen on an operation are synthesized here so an
    * operation never dangles under a parent coordinate that has no node.
    */
-  ensureSection(tag: string, description?: string, page = true): void {
+  ensureSection(tag: string, description?: string, page = true, displayName?: string): void {
     if (this.navByTag.has(tag)) return;
     const coord = sectionCoordinate(tag);
     const parentTag = this.tagParent.get(tag);
@@ -578,15 +731,68 @@ class Walker implements ParseContext {
     // slugified projection (`tagRouteSegment`) rather than a verbatim,
     // route-faulted segment — a spaced tag like "User Management" routes cleanly
     // while its coordinate stays opaque and citeable.
+    // `x-displayName` (a widely used vendor extension) labels the section for
+    // readers; the tag name stays the identity: coordinate, route, hierarchy.
+    const label = displayName && displayName !== tag ? displayName : undefined;
     this.node(coord, "section", parent, {
       kind: "section",
       name: tag,
+      ...(label ? { displayName: label } : {}),
       description,
     });
     // A nav-only category (page === false) is a grouping node with a model node
     // for ancestry but no page — so it is never routed and carries no href.
-    if (page) this.page(coord, `tags/${tagRouteSegment(tag)}`);
-    this.navByTag.set(tag, { coordinate: coord, label: tag, kind: "section", children: [] });
+    if (page) {
+      const route = this.sectionRoute(tag);
+      const top = route.split("/")[0]!;
+      if (this.routePolicy?.sections === "hierarchical" && RESERVED_ROUTE_SEGMENTS.has(top)) {
+        this.registry.addError(
+          `Tag "${tag}" resolves to route "${route}", whose top-level segment "${top}" is held for Nimbus ` +
+            `([${[...RESERVED_ROUTE_SEGMENTS].join(", ")}] and the API root). ` +
+            `Give it another segment in \`routes.tagSegments\`.`,
+          coord,
+          `#/tags/${tag}`,
+          "route-reserved-collision",
+        );
+      }
+      this.page(coord, route);
+    }
+    this.navByTag.set(tag, { coordinate: coord, label: label ?? tag, kind: "section", children: [] });
+  }
+
+  /**
+   * A tag page's route. `resource-action-v2` projects the tag to lowercase
+   * kebab; v1 and legacy keep the case-preserving segment, byte for byte. Under
+   * `sections: "hierarchical"` the route is the path of every ancestor that has
+   * a page, then the tag's own segment; a page-less `x-tagGroups` category is
+   * transparent. Memoized: an ancestor's route is reused by every descendant.
+   */
+  private sectionRoute(tag: string): string {
+    const memo = this.sectionRoutes.get(tag);
+    if (memo !== undefined) return memo;
+    const policy = this.routePolicy;
+    let route: string;
+    if (!policy || policy.convention === "resource-action-v1") {
+      route = `tags/${tagRouteSegment(tag)}`;
+    } else {
+      const override = policy.tagSegments?.[tag];
+      if (override !== undefined) this.consumedTagSegments.add(tag);
+      if (policy.sections !== "hierarchical") {
+        route = `tags/${override ?? policyTagRouteSegment(tag)}`;
+      } else {
+        const parent = this.pagedAncestor(tag);
+        const own = override ?? hierarchicalTagRouteSegment(tag, parent);
+        route = parent === undefined ? own : `${this.sectionRoute(parent)}/${own}`;
+      }
+    }
+    this.sectionRoutes.set(tag, route);
+    return route;
+  }
+
+  private pagedAncestor(tag: string): string | undefined {
+    let parent = this.tagParent.get(tag);
+    while (parent !== undefined && this.pagelessCategories.has(parent)) parent = this.tagParent.get(parent);
+    return parent;
   }
 
   /**

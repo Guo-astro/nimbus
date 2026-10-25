@@ -9,6 +9,14 @@ import { z } from "astro/zod";
 import type { NimbusConfig } from "../types.js";
 import { withStrictKeys, reportUnknownKeys } from "./strict-keys.js";
 import { prefixEntryFault, routeSlugFault } from "./api/route-policy.js";
+import { GENERATED_SAMPLE_LANGS } from "./api/samples.js";
+import {
+  isCommitRef,
+  isSpecFromSource,
+  normalizeSourcePath,
+  redactRepo,
+  repoCredentialFault,
+} from "./source-repo.js";
 
 // `new URL("https:example.com")` does NOT throw (protocol `https:`, host
 // `example.com`), so a bare `.url()`/`new URL()` check waves through a missing
@@ -196,9 +204,166 @@ const specSourceSchema = z.union(
   [z.string().min(1), z.record(z.string(), z.unknown())],
   {
     error:
-      '"api[].spec" must be a local file path (string) or an inline OpenAPI object — remote URLs are not supported in v1',
+      '"api[].spec" must be a local file path (string), { source, path } naming a content source, or an inline OpenAPI object — remote URLs are not supported in v1',
   },
 );
+
+// Content sources: `sources: { <name>: { repo, ref, path, editPattern } }`.
+// The name is a cache folder; `ref` is a full commit (reproducible) or a
+// branch or tag name; `path` is a folder inside the repository. `repo` never
+// carries a credential, and no message echoes one.
+const SOURCE_NAME = /^[a-z0-9-]+$/;
+const ABBREVIATED_COMMIT = /^[0-9a-f]{7,39}$/i;
+const contentSourceShape = {
+  repo: z
+    .string({ error: '"sources.<name>.repo" must be a string: an https or ssh URL, or a local path, that `git clone` accepts' })
+    .min(1, '"sources.<name>.repo" must not be empty')
+    .superRefine((repo, ctx) => {
+      if (repo.startsWith("-")) {
+        ctx.addIssue({ code: "custom", message: '"sources.<name>.repo" must not start with "-" (git would read it as an option)' });
+        return;
+      }
+      const fault = repoCredentialFault(repo);
+      if (fault) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `"sources.<name>.repo" ${fault} (${redactRepo(repo)}). Nimbus never takes a credential in repo: give it to git instead, ` +
+            "through a credential helper, an SSH key, or http.<url>.extraHeader set with GIT_CONFIG_COUNT/GIT_CONFIG_KEY_0/GIT_CONFIG_VALUE_0 in CI",
+        });
+      }
+    }),
+  ref: z
+    .string({ error: '"sources.<name>.ref" must be a string: a 40-character commit, or a branch or tag name' })
+    .superRefine((ref, ctx) => {
+      const fault = !ref
+        ? "must not be empty"
+        : isCommitRef(ref)
+          ? undefined
+          : ABBREVIATED_COMMIT.test(ref)
+            ? `looks like an abbreviated commit. Use the full 40-character commit (\`git rev-parse ${ref}\`) so the build is reproducible`
+            : /^[0-9A-F]{40}$/.test(ref)
+              ? "must be a lowercase 40-character commit"
+              : /^-|[\s~^:?*[\\]|\.\.|@\{|\.lock$|\/$|^\/|\/\//.test(ref)
+                ? "must be a 40-character commit or a branch or tag name git accepts"
+                : undefined;
+      if (fault) ctx.addIssue({ code: "custom", message: `"sources.<name>.ref" ${fault}` });
+    }),
+  path: z
+    .string({ error: '"sources.<name>.path" must be a string: a folder inside the repository, or "" for the whole repository' })
+    .default("")
+    .superRefine((value, ctx) => {
+      const fault = /^[A-Za-z]:|^[\\/]/.test(value)
+        ? "must be relative to the repository root"
+        : value.split(/[\\/]/).includes("..")
+          ? 'must not contain a ".." segment'
+          : undefined;
+      if (fault) ctx.addIssue({ code: "custom", message: `"sources.<name>.path" ${fault}` });
+    })
+    .transform((value) => normalizeSourcePath(value)),
+  // The same rule as the site's `editPattern`: without `{path}` every page of
+  // the source would link to the same place.
+  editPattern: z
+    .string({ error: '"sources.<name>.editPattern" must be a string with the "{path}" placeholder, e.g. "https://github.com/acme/sdk/edit/{ref}/{path}"' })
+    .optional()
+    .refine((value) => value === undefined || value.includes("{path}"), {
+      message:
+        '"sources.<name>.editPattern" must contain the "{path}" placeholder, which is replaced with the file\'s path inside the repository ' +
+        '("{ref}" is replaced with the configured ref). Example: "https://github.com/acme/sdk/edit/{ref}/{path}"',
+    }),
+};
+const contentSourceKeys = new Set(Object.keys(contentSourceShape));
+const contentSourceSchema = z
+  .object(contentSourceShape)
+  .passthrough()
+  .superRefine((source, ctx) => {
+    reportUnknownKeys(source, ctx, contentSourceKeys, {
+      removedKeys: {},
+      contextLabel: "sources field",
+      unknownHint: () => 'Valid keys are "repo", "ref", "path", and "editPattern".',
+    });
+  });
+const sourcesSchema = z
+  .record(z.string(), contentSourceSchema, {
+    error: '"sources" must be an object of { repo, ref, path } entries keyed by source name',
+  })
+  .optional()
+  .superRefine((sources, ctx) => {
+    for (const name of Object.keys(sources ?? {})) {
+      if (!SOURCE_NAME.test(name)) {
+        ctx.addIssue({
+          code: "custom",
+          path: [name],
+          message: `source name "${name}" must be lowercase letters, digits, and dashes only (it becomes the cache folder .nimbus/sources/${name}/)`,
+        });
+      }
+    }
+  });
+
+interface ConfigIssue {
+  path: (string | number)[];
+  message: string;
+}
+
+/**
+ * A spec read through a source names a declared source and a file inside
+ * the source's `path` (the sparse checkout holds nothing else). Separate
+ * from the schema so `check` can defer it when `sources` is computed.
+ */
+function sourceSpecIssues(data: unknown): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  const shaped = data as {
+    api?: { collection?: string; spec?: unknown; versions?: { spec?: unknown }[] }[];
+    sources?: Record<string, { path?: string }>;
+  };
+  if (!Array.isArray(shaped?.api)) return issues;
+  shaped.api.forEach((entry, i) => {
+    if (!entry || typeof entry !== "object") return;
+    const holders: { spec?: unknown; path: (string | number)[] }[] = Array.isArray(entry.versions)
+      ? entry.versions.map((version, vi) => ({ spec: version?.spec, path: ["api", i, "versions", vi, "spec"] }))
+      : [{ spec: entry.spec, path: ["api", i, "spec"] }];
+    for (const holder of holders) {
+      if (!isSpecFromSource(holder.spec)) continue;
+      const { source, path: specPath } = holder.spec as { source: string; path?: unknown };
+      const declared = shaped.sources?.[source];
+      const names = Object.keys(shaped.sources ?? {});
+      if (!declared) {
+        issues.push({
+          path: [...holder.path, "source"],
+          message:
+            `api collection "${entry.collection}" reads its spec from source "${source}", which "sources" doesn't declare` +
+            (names.length
+              ? `. Declared: ${names.map((name) => `"${name}"`).join(", ")}`
+              : `. Add sources: { "${source}": { repo, ref, path } } to the config`),
+        });
+        continue;
+      }
+      if (typeof specPath !== "string" || !normalizeSourcePath(specPath)) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message: `api collection "${entry.collection}" reads its spec from source "${source}" but names no file. Set path to the spec's path inside the repository, e.g. "openapi.json"`,
+        });
+        continue;
+      }
+      const normalized = normalizeSourcePath(specPath);
+      const folder = normalizeSourcePath(declared.path);
+      if (normalized.split("/").includes("..")) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message: `api collection "${entry.collection}": spec path "${specPath}" must not contain a ".." segment`,
+        });
+      } else if (folder && normalized !== folder && !normalized.startsWith(`${folder}/`)) {
+        issues.push({
+          path: [...holder.path, "path"],
+          message:
+            `api collection "${entry.collection}" reads "${normalized}" from source "${source}", but that source checks out only "${folder}/". ` +
+            `Widen sources.${source}.path to a folder that contains the spec, or set it to "" for the whole repository`,
+        });
+      }
+    }
+  });
+  return issues;
+}
 
 /**
  * Version ids that would shadow a top-level page slug within a family
@@ -217,17 +382,23 @@ const RESERVED_VERSION_IDS = new Set([
   "index",
 ]);
 
-// Route convention policy. `convention` is the only enumerated value in v1;
+// Route convention policy. `convention` names a frozen rule set;
 // `stripPathPrefixes` entries and `operations` override targets are validated
 // against the same syntactic grammars the engine enforces at mint time
 // (single source of truth in `api/route-policy.ts`), so config-time and
 // build-time can never disagree.
 const routePolicyShape = {
-  convention: z.enum(["resource-action-v1"], {
-    error: '"api[].routes.convention" must be "resource-action-v1"',
+  convention: z.enum(["resource-action-v1", "resource-action-v2"], {
+    error: '"api[].routes.convention" must be "resource-action-v1" or "resource-action-v2"',
   }),
   stripPathPrefixes: z.array(z.string()).optional(),
   operations: z.record(z.string(), z.string()).optional(),
+  sections: z
+    .enum(["flat", "hierarchical"], {
+      error: '"api[].routes.sections" must be "flat" or "hierarchical"',
+    })
+    .optional(),
+  tagSegments: z.record(z.string(), z.string()).optional(),
 };
 const routePolicyKeys = new Set(Object.keys(routePolicyShape));
 const routePolicySchema = z
@@ -237,8 +408,29 @@ const routePolicySchema = z
     reportUnknownKeys(policy, ctx, routePolicyKeys, {
       removedKeys: {},
       contextLabel: "api routes field",
-      unknownHint: () => 'Valid keys are "convention", "stripPathPrefixes", and "operations".',
+      unknownHint: () =>
+        'Valid keys are "convention", "stripPathPrefixes", "operations", "sections", and "tagSegments".',
     });
+    if (policy.convention === "resource-action-v1") {
+      for (const field of ["sections", "tagSegments"] as const) {
+        if (policy[field] === undefined || policy[field] === "flat") continue;
+        ctx.addIssue({
+          code: "custom",
+          path: [field],
+          message: `"${field}" needs "resource-action-v2"; "resource-action-v1" keeps its tags/ URLs.`,
+        });
+      }
+    }
+    for (const [tag, segment] of Object.entries(policy.tagSegments ?? {})) {
+      const fault = segment.includes("/") ? "has a '/', but a tag segment is one path segment" : routeSlugFault(segment);
+      if (fault) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["tagSegments", tag],
+          message: `tag segment for "${tag}" → "${segment}" ${fault}`,
+        });
+      }
+    }
     (policy.stripPathPrefixes ?? []).forEach((entry, i) => {
       const fault = prefixEntryFault(entry);
       if (fault) {
@@ -261,19 +453,82 @@ const routePolicySchema = z
     }
   });
 
+const sampleLangList = GENERATED_SAMPLE_LANGS.map((l) => `"${l}"`).join(", ");
+const samplesShape = {
+  generate: z
+    .array(
+      z.enum(GENERATED_SAMPLE_LANGS, {
+        error: `"api[].samples.generate" entries must be one of ${sampleLangList}`,
+      }),
+    )
+    .optional(),
+  keepGenerated: z
+    .array(
+      z.enum(GENERATED_SAMPLE_LANGS, {
+        error: `"api[].samples.keepGenerated" entries must be one of ${sampleLangList}`,
+      }),
+    )
+    .optional(),
+};
+const samplesKeys = new Set(Object.keys(samplesShape));
+const samplesSchema = z
+  .object(samplesShape)
+  .passthrough()
+  .superRefine((samples, ctx) => {
+    reportUnknownKeys(samples, ctx, samplesKeys, {
+      removedKeys: {},
+      contextLabel: "api samples field",
+      unknownHint: () => 'Valid keys are "generate" and "keepGenerated".',
+    });
+    const { generate, keepGenerated } = samples;
+    for (const lang of generate ? (keepGenerated ?? []) : []) {
+      if (!generate!.includes(lang)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["keepGenerated"],
+          message: `"api[].samples.keepGenerated" lists "${lang}", which "api[].samples.generate" doesn't include`,
+        });
+      }
+    }
+  });
+
+// An `x-*` specification extension name, as OpenAPI defines them; `x-nimbus-*`
+// is Nimbus's own.
+const extensionsSchema = (path: string) =>
+  z
+    .array(z.string({ error: `"${path}" entries must be strings` }))
+    .superRefine((names, ctx) => {
+      const seen = new Set<string>();
+      names.forEach((name, i) => {
+        const fault = !/^x-[A-Za-z0-9._-]+$/.test(name)
+          ? "must start with \"x-\" followed by letters, digits, \".\", \"_\", or \"-\""
+          : /^x-nimbus-/i.test(name)
+            ? "is reserved: x-nimbus-* fields are Nimbus's own"
+            : seen.has(name)
+              ? "is listed twice"
+              : undefined;
+        seen.add(name);
+        if (fault) ctx.addIssue({ code: "custom", path: [i], message: `"${path}" entry "${name}" ${fault}` });
+      });
+    });
+
 const apiVersionSpecShape = {
   version: z
     .string({ error: '"api[].versions[].version" must be a non-empty string' })
     .min(1, '"api[].versions[].version" must be a non-empty string')
     .regex(
-      /^[a-z0-9-]+$/,
-      '"api[].versions[].version" must be lowercase letters, digits, and dashes only (it becomes a URL segment)',
+      /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/,
+      '"api[].versions[].version" must use lowercase letters, digits, dots, and dashes, and start and end with a letter or digit (it becomes a URL segment, a directory name, and a version query value)',
     ),
   spec: specSourceSchema,
   default: z.boolean().optional(),
   status: z.enum(["ga", "beta", "deprecated"]).optional(),
   hidden: z.boolean().optional(),
   label: z.string().optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].versions[].publishSpec" must be a boolean' })
+    .optional(),
+  extensions: extensionsSchema("api[].versions[].extensions").optional(),
   routes: routePolicySchema.optional(),
 };
 const apiVersionSpecKeys = new Set(Object.keys(apiVersionSpecShape));
@@ -304,10 +559,60 @@ const apiSpecShape = {
   spec: specSourceSchema.optional(),
   label: z.string().optional(),
   versions: z.array(apiVersionSpecSchema).optional(),
+  versionUrl: z
+    .discriminatedUnion(
+      "in",
+      [
+        z
+          .object({
+            in: z.literal("path"),
+            param: z
+              .never({
+                error:
+                  '"api[].versionUrl.param" names a query parameter, so it needs versionUrl: { in: "query" }',
+              })
+              .optional(),
+          })
+          .strict(),
+        z
+          .object({
+            in: z.literal("query"),
+            param: z
+              .string({ error: '"api[].versionUrl.param" must be a string' })
+              .regex(/^[a-z][a-z0-9_-]*$/, {
+                error:
+                  '"api[].versionUrl.param" must start with a lowercase letter and use only lowercase letters, digits, "-", and "_" (it becomes a query parameter name)',
+              })
+              .optional(),
+          })
+          .strict(),
+      ],
+      {
+        error:
+          '"api[].versionUrl" must be { in: "path" } or { in: "query", param?: string }',
+      },
+    )
+    .optional(),
+  // 0.17's spelling; kept in the schema only to name its replacement.
+  versionMode: z.unknown().optional(),
   requireOperationId: z
     .boolean({ error: '"api[].requireOperationId" must be a boolean' })
     .optional(),
+  schemaPages: z
+    .boolean({ error: '"api[].schemaPages" must be a boolean' })
+    .optional(),
+  publishSpec: z
+    .boolean({ error: '"api[].publishSpec" must be a boolean' })
+    .optional(),
+  bundle: z.boolean({ error: '"api[].bundle" must be a boolean' }).optional(),
+  samples: samplesSchema.optional(),
+  extensions: extensionsSchema("api[].extensions").optional(),
   routes: routePolicySchema.optional(),
+  sidebar: z
+    .enum(["full", "on-demand"], {
+      error: '"api[].sidebar" must be "full" or "on-demand"',
+    })
+    .optional(),
 };
 const apiSpecKeys = new Set(Object.keys(apiSpecShape));
 const apiSpecSchema = z
@@ -338,7 +643,23 @@ const apiSpecSchema = z
         message: `api collection "${entry.collection}" sets "routes" at the family level, but a version family carries no shared route policy — move "routes" onto each version entry.`,
       });
     }
-    if (!hasVersions) return;
+    if (entry.versionMode !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["versionMode"],
+        message: `api collection "${entry.collection}" sets versionMode, which is now versionUrl. Replace versionMode: "query" with versionUrl: { in: "query" }, and versionMode: "path" with versionUrl: { in: "path" } or nothing`,
+      });
+    }
+    if (!hasVersions) {
+      if (entry.versionUrl?.in === "query") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["versionUrl"],
+          message: `api collection "${entry.collection}" sets versionUrl: { in: "query" } without "versions" — the query carries a version id, so a single-spec collection has nothing to select`,
+        });
+      }
+      return;
+    }
 
     const versions = entry.versions!;
     if (versions.length === 0) {
@@ -459,6 +780,25 @@ const apiReferencesSchema = z
     });
   });
 
+const agentsSchema = withStrictKeys(
+  z.object({
+    mcp: z
+      .boolean({ error: '"agents.mcp" must be true or false' })
+      .optional(),
+    discovery: z
+      .boolean({ error: '"agents.discovery" must be true or false' })
+      .optional(),
+  }),
+  {
+    removedKeys: {},
+    contextLabel: "agents sub-key",
+    unknownHint: (key) => {
+      const known = ["mcp", "discovery"].find((name) => name === key.toLowerCase());
+      return known ? `Did you mean \`${known}\`?` : "";
+    },
+  },
+).optional();
+
 const nimbusConfigSchema = withStrictKeys(
   z.object({
     site: z
@@ -496,14 +836,56 @@ const nimbusConfigSchema = withStrictKeys(
     search: searchSchema,
     versions: versionsSchema,
     api: apiSchema,
+    sources: sourcesSchema,
     apiReferences: apiReferencesSchema,
     rendering: renderingSchema,
+    agents: agentsSchema,
   }),
   {
     removedKeys: REMOVED_CONFIG_KEYS,
     contextLabel: "Config field",
   },
 ).superRefine((data, ctx) => {
+  // Query-mode versions need request rendering: a static site serves the
+  // same file whatever the query says. The effective mode uses the same
+  // precedence `compileRenderingPolicy` does — the collection override,
+  // else the default.
+  const shaped = data as {
+    api?: { collection?: string; versionUrl?: { in?: string } }[];
+    rendering?: { default?: string; collections?: Record<string, string> };
+  };
+  (shaped.api ?? []).forEach((entry, i) => {
+    if (entry.versionUrl?.in !== "query" || !entry.collection) return;
+    const effective =
+      shaped.rendering?.collections?.[entry.collection] ??
+      shaped.rendering?.default ??
+      "build";
+    if (effective !== "request") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["api", i, "versionUrl"],
+        message: `api collection "${entry.collection}" sets versionUrl: { in: "query" }, but its effective rendering mode is "${effective}" — query versions need request rendering: a static site serves the same file whatever the query says`,
+      });
+    }
+  });
+  // `bundle: false` serves page data that only a request-rendered page reads.
+  (
+    (shaped.api as { collection?: string; bundle?: boolean }[] | undefined) ??
+    []
+  ).forEach((entry, i) => {
+    if (entry.bundle !== false || !entry.collection) return;
+    const explicit = shaped.rendering?.collections?.[entry.collection];
+    const effective = explicit ?? shaped.rendering?.default ?? "build";
+    if (effective !== "request") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["api", i, "bundle"],
+        message: explicit
+          ? `api collection "${entry.collection}" sets bundle: false, but rendering.collections.${entry.collection} is "${explicit}". Set it to "request", or remove bundle: false`
+          : `api collection "${entry.collection}" sets bundle: false, which needs it rendered on request. Add rendering: { collections: { ${JSON.stringify(entry.collection)}: "request" } }, or remove bundle: false`,
+      });
+    }
+  });
   // A remote reference must not shadow a locally-built collection.
   const cfg = data as { api?: { collection?: string }[]; apiReferences?: { collection?: string }[] };
   const local = new Set((cfg.api ?? []).map((e) => e.collection));
@@ -518,9 +900,21 @@ const nimbusConfigSchema = withStrictKeys(
   });
 });
 
-export function validateNimbusConfig(input: unknown): NimbusConfig {
+export interface ValidateNimbusConfigOptions {
+  /**
+   * `sources` couldn't be read (a computed map in `check`): skip the checks
+   * that need it (a spec's source and path) and run everything else.
+   */
+  deferSources?: boolean;
+}
+
+export function validateNimbusConfig(
+  input: unknown,
+  options: ValidateNimbusConfigOptions = {},
+): NimbusConfig {
   const result = nimbusConfigSchema.safeParse(input);
-  if (result.success) {
+  const sourceIssues = options.deferSources ? [] : sourceSpecIssues(input);
+  if (result.success && sourceIssues.length === 0) {
     // Zod safeParse upstream validated the shape against nimbusConfigSchema;
     // double-cast restores the type info tsc lost through the schema's
     // generic `Record<string, unknown>` representation.
@@ -531,7 +925,11 @@ export function validateNimbusConfig(input: unknown): NimbusConfig {
   //   - the dotted config path (so it's greppable in nimbus.config.ts)
   //   - the validator message
   //   - the offending value (truncated) when one was supplied
-  const issues = result.error.issues
+  const allIssues: Array<{ path: PropertyKey[]; message: string }> = [
+    ...(result.success ? [] : result.error.issues),
+    ...sourceIssues,
+  ];
+  const issues = allIssues
     .map((issue) => {
       // Zod v4 widens path entries to PropertyKey. Symbols never appear in
       // our schema (no symbol keys), so it's safe to coerce to string|number
@@ -547,7 +945,7 @@ export function validateNimbusConfig(input: unknown): NimbusConfig {
 
   throw new Error(
     `Invalid nimbus.config — fix these issues:\n${issues}\n\n` +
-      `See https://nimbus-docs.com/config for the full config schema.`,
+      `See https://nimbus-docs.com/reference/configuration/ for the full config schema.`,
   );
 }
 
@@ -565,6 +963,9 @@ function formatReceived(input: unknown, path: ReadonlyArray<string | number>): s
     if (cursor === undefined) return null;
   }
   if (cursor === undefined) return null;
+  // A source's `repo` could carry a credential: never echo it, nor the
+  // objects around it (the message shows it redacted).
+  if (path[0] === "sources" && (path.length < 3 || path[2] === "repo")) return null;
   try {
     const json = JSON.stringify(cursor);
     if (json === undefined) return String(cursor);

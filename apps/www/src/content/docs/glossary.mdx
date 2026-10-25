@@ -1,0 +1,81 @@
+---
+title: Glossary
+description: The terms these docs use, in alphabetical order.
+aiGenerated: true
+next: false
+sidebar:
+  order: 6
+  hidden: true
+---
+
+### Collection
+
+A set of pages of one kind, defined in `src/content.config.ts`: the docs, a changelog, an older version, or an API reference. Each has its own folder, schema and route.
+
+### Component
+
+A piece of the page's interface, such as tabs or a card. Starter components ship with your site; others install from the [registry](#registry). See the [component catalog](/components).
+
+### Content source
+
+Somewhere outside `src/content` that a collection reads its pages from, such as another git repository or a Notion database. See [Content from other sources](/content-sources/git).
+
+### Coordinate
+
+The stable name of an API page, such as an operation's `operationId`. Links to API pages use coordinates, so they survive URL changes. See [Cite API pages](/api-reference/citations).
+
+### Feature
+
+A registry item that changes your site in several places, such as adding a changelog. `nimbus-docs add` hands it to your coding agent as a [recipe](#recipe) instead of copying files.
+
+### llms.txt
+
+A plain-text index of a site's pages at `/llms.txt`, for AI tools. See [Markdown and llms.txt](/ai/publish-markdown).
+
+### Markdown version
+
+The Markdown copy of a page that Nimbus publishes beside its HTML, at `<page>/index.md`.
+
+### nimbus.json
+
+The committed record of where your site's files came from and what you've installed. See [`nimbus.json`](/project-structure#nimbusjson--the-provenance-record).
+
+### Partial
+
+A passage written once in `src/content/partials/` and included on several pages with `<Render>`. See [Reusable snippets](/writing/reusable-snippets).
+
+### Prepared page
+
+An API page's data, worked out from the spec at build time, so serving it on request doesn't parse the spec again.
+
+### Recipe
+
+Markdown instructions a coding agent follows to add a [feature](#feature) to your site, in your site's own style. Also the content-type guides in the [Content style guide](/style-guide).
+
+### Registry
+
+The catalog that `nimbus-docs add` installs from. Its items are components, libraries, features and content sources. See [Registry](/registry).
+
+### Rendering on request
+
+Building a page when a reader asks for it, on a server, instead of once at build time. See [Choose build or request rendering](/reference/rendering).
+
+### Sätteri
+
+The Markdown parser Nimbus uses. It's fast, and it means remark plugins passed to `mdx()` have no effect; see [Markdown and MDX](/writing/markdown-and-mdx).
+
+### Slice
+
+Part of a site built and deployed on its own, such as one product's guides. See [Partial builds](/publish/partial-builds).
+
+### Starter
+
+The files the scaffolder writes into a new site: layouts, components, styles, routes and example content. They're yours from then on. See [Ownership](/styling/how-customization-works).
+
+### Templates tag
+
+A tag such as `templates-v0.7.0` in the Nimbus repository, marking the starter files of one scaffolder release. `outdated --to <tag>` compares your files with a given release.
+
+### Upgrade entry
+
+A step `nimbus-docs migrate` lists when you move to a newer release: required, or optional for improvements you can adopt later. See [Upgrading](/publish/upgrading).

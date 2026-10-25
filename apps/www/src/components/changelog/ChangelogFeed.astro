@@ -1,0 +1,15 @@
+---
+import ChangelogEntry from "./ChangelogEntry.astro";
+import type { ChangelogPageData } from "./changelog";
+
+interface Props {
+  years: ChangelogPageData["years"];
+}
+---
+
+{Astro.props.years.map((group) => (
+  <>
+    {group.year !== undefined && <h2 id={group.anchor}>{group.year}</h2>}
+    {group.releases.map(({ entry, anchor }) => <ChangelogEntry entry={entry} anchor={anchor} />)}
+  </>
+))}

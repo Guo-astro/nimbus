@@ -1,0 +1,156 @@
+---
+title: Large APIs
+description: Keep API pages small and builds fast for big specs and many versions.
+aiGenerated: true
+sidebar:
+  order: 3
+---
+
+By default, every API page includes the whole navigation tree. For a large API, that tree can be most of each page's size. Set `sidebar` on the `api` entry to include less:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    spec: "./src/api/openapi.yaml",
+    sidebar: "on-demand",
+  },
+],
+```
+
+| Value | What each page includes | A collapsed group |
+| --- | --- | --- |
+| `"full"` (default) | The whole tree. | Opens in place. |
+| `"on-demand"` | Top-level items, plus the current page's branch. | Opens in place, loading its rows the first time. |
+
+With `"on-demand"`, the current page's ancestors are open and show all their children, so its neighbors are one click away. Schema pages show top-level items only. A webhook page opens the Webhooks group at the end of the sidebar. The setting applies to every version of a family.
+
+When a reader opens a collapsed group, the sidebar fetches the group's page and copies its rows from there. A group without a page, such as an `x-tagGroups` category, uses the API overview.
+
+Fetching starts on hover or focus, so rows usually appear as the group opens. If they can't load, the group link goes to its page instead.
+
+Without JavaScript, a collapsed group's label still links to its page. Categories from `x-tagGroups` have no page to link to, so they open only on pages inside them; the API overview's body links every section.
+
+Every page still carries every top-level item, so an API with hundreds of flat tags stays heavy. Group its tags under a tag's `parent` or with `x-tagGroups`, which Nimbus reads in any OpenAPI version. A tag's `x-displayName` sets the label readers see, while its `name` keeps deciding its coordinate and route:
+
+```yaml title="openapi.yaml"
+tags:
+  - name: workers
+    x-displayName: Workers
+  - name: workers.scripts
+    x-displayName: Scripts
+    parent: workers
+```
+
+In every mode, the sidebar keeps the reader's open groups and scroll position from page to page for the session, on desktop and mobile. Loaded rows show on the next page before it paints. A new deployment starts fresh, so old rows never show after it.
+
+The API rail renders the same markup as the docs sidebar: groups are native `<details>`/`<summary>` rows styled by position (`[data-nb-api-nav] li > a`, `details > summary`, `details > ul`) in `src/styles/globals.css`, a group's page lists as its first "Overview" child, and each page renders one tree that the mobile drawer borrows while open. See [Restyle sidebar rows](/navigation/sidebar#restyle-sidebar-rows).
+
+Set `sidebar` on the `api` entry in the Nimbus config. A site that passes its entry to `apiCollection({ … })` still takes the mode from the config, and the build warns if the two disagree.
+
+Every group page lists its operations and its subsections, and the [API home](#the-api-home) lists every operation, so all pages stay reachable in every mode.
+
+`"on-demand"` needs the `api-layout` and `api-sidebar` components from your installed release; the build names outdated files. These components use the 0.19 starter's styles, so a site scaffolded before 0.19.0 adopts the redesigned starter first; `nimbus-docs migrate` lists its steps.
+
+## The API home
+
+The API home lists every operation and webhook of the version, the way a section page lists its pages. Each `x-tagGroups` group is a heading, in the spec's order. Each section shows its title and description, then its operations: name first, method and path beneath.
+
+Sections in no group come next, then untagged operations, then webhooks. The filter at the top searches every endpoint: Enter opens the first match, Escape clears it.
+
+A large spec loads in parts. The page holds the first `API_HOME_CHUNK_SIZE` endpoints, 150 by default, set in `src/components/ui/api-layout/home.ts`. Sections stay whole where they fit.
+
+Each later part is its own page, fetched as the reader nears the end; without JavaScript, the list ends in a link to the next part. The filter loads the version's page list on first focus, so it finds unloaded ones too, and shows up to 200 matches. Find-in-page only searches loaded parts.
+
+The API route serves the later parts at `/api/index/2/`, `/api/index/3/` and so on, under the version's URL for a versioned API. They render like the API's other pages, built or on request, and are `noindex` and left out of the sitemap and search. The route passes `API_HOME_CHUNK_SIZE` as `homeChunkSize` to both `getApiStaticPaths`, which makes one page per part, and `getApiRoute`, which reads it on a route rendered on request; a built route fails the build if the two differ. Without it, the home lists every endpoint on one page. `getApiRoute` returns the result as `home`: the part a page shows, and the link to every part.
+
+To build your own page from the whole reference, read a version's root page with `getApiRoot` from `@cloudflare/nimbus-docs/runtime`; leave out `version` for the default. Its `index` holds every operation and webhook exactly once, each with its `method`, `path` and link. `apiIndexRows(index)` flattens it, and `chunkApiIndex(index, { size })` splits it the way the home does.
+
+```astro title="src/pages/endpoints.astro"
+---
+import { apiIndexRows, getApiRoot, withBase } from "@cloudflare/nimbus-docs/runtime";
+
+const root = await getApiRoot(Astro, { collection: "api" });
+const rows = root ? apiIndexRows(root.index) : [];
+---
+
+<ul>
+  {rows.map(([method, path, label, href]) => (
+    <li><a href={withBase(href, import.meta.env.BASE_URL)}>{label}</a> <code>{method} {path}</code></li>
+  ))}
+</ul>
+```
+
+## Render on request
+
+API HTML is prerendered by default. To render only the API collection on request, add this policy to the Nimbus config:
+
+```ts title="astro.config.ts"
+rendering: {
+  default: "build",
+  collections: {
+    api: "request",
+  },
+},
+```
+
+Then run the Cloudflare adapter installer. It keeps an existing rendering policy. Without one, it sets `rendering: { default: "request" }`, which renders every collection on request.
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+
+The installer also updates the API route file to render on request, dropping the `getStaticPaths` Astro would ignore. After changing `rendering` yourself, run `nimbus-docs check --fix`; see [Choose build or request rendering](/reference/rendering).
+
+The recipe's API catch-all uses Nimbus runtime helpers to resolve either mode. Alternate Markdown versions and `llms.txt` indexes follow the rendering policy too, serving content prepared at build time. Coordinate data, search records, and sitemaps stay build output, and requests read prepared content entries rather than parsing the OpenAPI document.
+
+## Many versions
+
+A request-rendered API bundles its page data into the server. That suits most APIs. For a very large spec, or one that keeps many versions, set `bundle: false` on its entry so the server bundle stays small however many versions you add:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    versions: [/* … */],
+    bundle: false,
+  },
+],
+rendering: {
+  collections: { api: "request" },
+},
+```
+
+Nimbus then writes each page's data as static assets beside the site, and shares unchanged pages between versions. Each request reads one version's index and the requested page. The build suggests `bundle: false` when an API's bundled page data passes 16 MiB.
+
+Each build also ships the previous build's page files, so a server still on the old release during a rollout keeps working. On Cloudflare, each Worker version already keeps its own files.
+
+Pages are read through an Astro live collection, which Astro only accepts from your own `src/live.config.ts`. Add it once; the build shows this snippet if it's missing:
+
+```ts title="src/live.config.ts"
+import { defineLiveCollection } from "astro:content";
+import { apiPagesLoader } from "@cloudflare/nimbus-docs/live";
+
+export const collections = {
+  apiPages: defineLiveCollection({ loader: apiPagesLoader() }),
+};
+```
+
+When Astro's route cache is enabled, each page is cached with the tags `nimbus-api:<collection>` and `nimbus-api:<collection>@<version>`.
+
+`bundle: false` needs the collection rendered on request, with the Cloudflare or Node adapter; otherwise the build says what to change.
+
+It also narrows discovery for that API. Search, `llms.txt`, `llms-full.txt`, the sitemap and Markdown versions cover only the default version. Older versions stay readable as HTML with `noindex`, still publish their spec, and stay in the API catalog.
+
+With `bundle: false`, Nimbus reuses the versions you didn't change. In CI:
+
+- Restore the whole `.nimbus/cache/page-assets/` directory before the build.
+- Save it after a successful production deploy, not after previews, so "previous" means the live release.
+- Key the cache by project, with a fallback key so adding a version keeps earlier entries.
+
+Nimbus checks the cache and rebuilds anything missing or damaged, so keep your specs in the repository. Upgrading Nimbus can rebuild every version once. When a version is rebuilt, the "Prepared API pages" line says why: the spec, the routes, the samples, Nimbus or an installed package changed, or nothing was cached yet. `astro build --verbose` adds the preparation, bake and staging timings.
+
+API pages show the sidebar filter; press `/` to focus it.
+
+- **`sidebar: "full"`** filters the sidebar in place, by title and HTTP method.
+- **`sidebar: "on-demand"`** loads a small list of the version's pages on first use, then matches titles, methods and paths.
+
+Results stay in the version you're reading. A tab left open across a deploy keeps filtering, as long as CI restores `.nimbus/cache/page-assets/` as above, for bundled APIs too.

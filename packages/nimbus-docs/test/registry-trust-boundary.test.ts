@@ -9,6 +9,7 @@ import {
   fetchComponent,
   fetchFeatureMarkdown,
   registryOverrideWarning,
+  registryVersionWarning,
 } from "../src/cli/resolver.js";
 import { REGISTRY_BASE_URL } from "../src/cli/_registry.generated.js";
 
@@ -217,4 +218,26 @@ test("registryOverrideWarning is silent for the default host", () => {
 test("registryOverrideWarning is silent when unset", () => {
   delete process.env.NIMBUS_REGISTRY_URL;
   assert.equal(registryOverrideWarning(), null);
+});
+
+// ---- Registry/package version skew (pure) ------------------------------------
+
+test("registryVersionWarning: a registry behind the project says it awaits a docs deploy", () => {
+  delete process.env.NIMBUS_REGISTRY_URL;
+  const msg = registryVersionWarning("0.15.2", "0.16.0");
+  assert.match(msg ?? "", /still serves components from nimbus-docs 0\.15\.2, older than this project's 0\.16\.0/);
+  assert.match(msg ?? "", /docs site is deployed/);
+  // A preview package counts as its release.
+  assert.match(registryVersionWarning("0.15.2", "0.16.0-pr.181.shaabc") ?? "", /older than this project's 0\.16\.0/);
+});
+
+test("registryVersionWarning: a registry ahead of the project says to update the package", () => {
+  assert.match(registryVersionWarning("0.16.0", "0.15.2") ?? "", /newer than this project's 0\.15\.2.*update @cloudflare\/nimbus-docs first/);
+});
+
+test("registryVersionWarning is silent on a match, a preview of the same release, or missing versions", () => {
+  assert.equal(registryVersionWarning("0.16.0", "0.16.0"), null);
+  assert.equal(registryVersionWarning("0.16.0", "0.16.0-pr.181.shaabc"), null);
+  assert.equal(registryVersionWarning(undefined, "0.16.0"), null);
+  assert.equal(registryVersionWarning("0.16.0", null), null);
 });

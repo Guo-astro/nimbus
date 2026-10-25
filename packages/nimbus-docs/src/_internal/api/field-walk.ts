@@ -13,6 +13,8 @@ import {
 export interface FieldSink {
   readonly resolver: SchemaResolver;
   readonly registry: CoordinateRegistry;
+  /** `x-*` extension names whose values are copied onto fields. */
+  readonly extensions: readonly string[];
   node(
     id: Coordinate,
     kind: Node["kind"],
@@ -23,6 +25,23 @@ export interface FieldSink {
 }
 
 // --- shared helpers ---------------------------------------------------------
+
+/**
+ * The listed `x-*` fields a node declares, values unchanged. The first source
+ * that declares a name wins, so pass the most specific node first.
+ * `undefined` when none of the names occur.
+ */
+export function extensionValues(
+  names: readonly string[],
+  ...sources: (object | undefined)[]
+): Record<string, unknown> | undefined {
+  let out: Record<string, unknown> | undefined;
+  for (const name of names) {
+    const source = sources.find((s) => s !== undefined && Object.hasOwn(s, name));
+    if (source) (out ??= {})[name] = (source as Record<string, unknown>)[name];
+  }
+  return out;
+}
 
 /**
  * Walk an object schema's properties, invoking `visit` per field. Depth-bounded
@@ -49,9 +68,14 @@ export function walkFields(
     rawSchema: OpenApiSchema | undefined,
   ) => void,
   rawSchema?: OpenApiSchema,
+  role?: FieldRole,
 ): void {
-  walkFieldsInner(resolver, schema, rawSchema, "", depth, seen, visit, true);
+  walkFieldsInner(resolver, schema, rawSchema, "", depth, seen, visit, true, role);
 }
+
+/** Which side of the exchange a field list describes. A request leaves out
+ *  `readOnly` properties and a response `writeOnly` ones, as their examples do. */
+export type FieldRole = "request" | "response";
 
 function walkFieldsInner(
   resolver: SchemaResolver,
@@ -69,6 +93,7 @@ function walkFieldsInner(
     rawSchema: OpenApiSchema | undefined,
   ) => void,
   topLevel: boolean,
+  role: FieldRole | undefined,
 ): void {
   if (depth <= 0 || seen.has(schema)) return;
   seen.add(schema);
@@ -86,17 +111,36 @@ function walkFieldsInner(
   const rawProps = resolver.rawObjectShape(resolver.rawEffective(rawSchema));
 
   for (const [name, propSchema] of Object.entries(properties)) {
+    if (role && hiddenFor(role, propSchema)) continue;
     const fieldPath = prefix ? `${prefix}.${name}` : name;
     const rawProp = rawProps[name];
     visit(fieldPath, propSchema, required.has(name), topLevel ? name : undefined, prefix || undefined, rawProp);
     const child = propSchema.type === "array" && propSchema.items ? propSchema.items : propSchema;
     const childShape = collectObjectShape(child);
     if (Object.keys(childShape.properties).length > 0) {
-      walkFieldsInner(resolver, propSchema, rawProp, fieldPath, depth - 1, seen, visit, false);
+      walkFieldsInner(resolver, propSchema, rawProp, fieldPath, depth - 1, seen, visit, false, role);
     }
   }
 
   seen.delete(schema);
+}
+
+function hiddenFor(role: FieldRole, schema: OpenApiSchema): boolean {
+  const seen = new Set<OpenApiSchema>();
+  const hidden = (candidate: OpenApiSchema): boolean => {
+    if (seen.has(candidate)) return false;
+    seen.add(candidate);
+    const folded = foldAllOf(candidate);
+    if (role === "request" ? folded.readOnly === true : folded.writeOnly === true) {
+      seen.delete(candidate);
+      return true;
+    }
+    const branches = folded.oneOf ?? folded.anyOf;
+    const result = Boolean(branches?.length) && branches!.every(hidden);
+    seen.delete(candidate);
+    return result;
+  };
+  return hidden(schema);
 }
 
 export function addField(
@@ -143,5 +187,8 @@ export function addField(
   };
   if (union) facts.union = union;
   if (mapRef) facts.typeRef = mapRef;
+  // The folded schema puts a property's own value over its `$ref` target's.
+  const extensions = extensionValues(sink.extensions, folded);
+  if (extensions) facts.extensions = extensions;
   sink.node(coord, "field", parent, facts, source ?? null);
 }

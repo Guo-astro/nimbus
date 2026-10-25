@@ -10,7 +10,8 @@
  *      scaffold resolves the in-repo code, not whatever is on npm).
  */
 
-import { spawn, spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import assert from "node:assert/strict";
 import {
   existsSync,
   mkdtempSync,
@@ -21,10 +22,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateTemplates } from "../packages/create-nimbus-docs/scripts/copy-template.mjs";
+import { spawnCommand, spawnCommandSync } from "./child-process.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -43,6 +46,8 @@ const LANE = process.env.TEMPLATES_CHECK_LANE ?? "static";
 if (!LANES.includes(LANE)) {
   fail(`TEMPLATES_CHECK_LANE must be one of ${LANES.join(", ")}; received ${LANE}`);
 }
+// The lanes that serve the site turn on the remote MCP server too.
+const MCP = LANE === "node" || LANE === "cloudflare";
 
 // Package manager for the scaffold install/build. Default is the ambient pnpm
 // (pinned pnpm 9); set SCAFFOLD_PNPM to a corepack spec (e.g. `pnpm@latest`) to
@@ -58,8 +63,11 @@ process.on("exit", () => {
 });
 
 function run(bin, args, opts = {}) {
-  const res = spawnSync(bin, args, { stdio: "inherit", cwd: ROOT, ...opts });
-  if (res.status !== 0) fail(`\`${bin} ${args.join(" ")}\` failed (exit ${res.status ?? res.signal})`);
+  const res = spawnCommandSync(bin, args, { stdio: "inherit", cwd: ROOT, ...opts });
+  if (res.status !== 0) {
+    const reason = res.error?.message ?? `exit ${res.status ?? res.signal}`;
+    fail(`\`${bin} ${args.join(" ")}\` failed (${reason})`);
+  }
   return res;
 }
 
@@ -88,9 +96,10 @@ async function availablePort() {
   });
 }
 
-async function verifyRuntime(site, lane) {
-  const port = await availablePort();
+async function verifyRuntime(site, lane, port, expectedHomepageMarkdown, base = "") {
+  port ??= await availablePort();
   const origin = `http://127.0.0.1:${port}`;
+  const siteUrl = `${origin}${base}`;
   const command =
     lane === "node"
       ? {
@@ -114,9 +123,10 @@ async function verifyRuntime(site, lane) {
           ],
           env: {},
         };
-  const child = spawn(command.bin, command.args, {
+  const child = spawnCommand(command.bin, command.args, {
     cwd: site,
     env: { ...process.env, ...command.env },
+    detached: process.platform !== "win32",
     stdio: "inherit",
   });
   const routes = [
@@ -128,7 +138,7 @@ async function verifyRuntime(site, lane) {
     ["/robots.txt", "User-agent: *"],
     ["/llms.txt", "Renamed route", 200, "Hidden runtime page"],
     ["/llms-full.txt", "Renamed route", 200, "Hidden runtime page"],
-    ["/nimbus-api/coordinates.json", '"version":1'],
+    ["/nimbus-api/coordinates.json", '"version":2'],
     ["/owned-by-slug/index.md", "This text lives in"],
     ["/owned-by-slug/index.mdx", "This text lives in"],
     ["/runtime-section/llms.txt", "Runtime section one", 200, "Hidden runtime page"],
@@ -141,7 +151,7 @@ async function verifyRuntime(site, lane) {
         throw new Error(`runtime exited with status ${child.exitCode}`);
       }
       try {
-        const response = await fetch(`${origin}${routes[0][0]}`, {
+        const response = await fetch(`${siteUrl}${routes[0][0]}`, {
           signal: AbortSignal.timeout(1_000),
         });
         if (response.ok) break;
@@ -149,7 +159,7 @@ async function verifyRuntime(site, lane) {
       await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
     for (const [route, expected, expectedStatus = 200, unexpected] of routes) {
-      const response = await fetch(`${origin}${route}`, {
+      const response = await fetch(`${siteUrl}${route}`, {
         signal: AbortSignal.timeout(5_000),
       });
       const body = await response.text();
@@ -163,6 +173,81 @@ async function verifyRuntime(site, lane) {
         );
       }
     }
+    if (MCP) {
+      const card = await fetch(`${siteUrl}/mcp/server-card`, { signal: AbortSignal.timeout(5_000) });
+      assert.equal(card.status, 200, `${base}/mcp/server-card`);
+      assert.equal(card.headers.get("Content-Type"), "application/mcp-server-card+json");
+      assert.equal(card.headers.get("Access-Control-Allow-Origin"), "*");
+      assert.match((await card.json()).remotes?.[0]?.url ?? "", new RegExp(`${base}/mcp/?$`));
+      const rpc = (id, method, params) =>
+        fetch(`${siteUrl}/mcp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+          body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+          signal: AbortSignal.timeout(5_000),
+        });
+      const initialize = await rpc(1, "initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "templates-check", version: "0" },
+      });
+      assert.equal(initialize.status, 200, `${base}/mcp initialize`);
+      assert.match(await initialize.text(), /"serverInfo"/);
+      const call = await rpc(2, "tools/call", { name: "get_page", arguments: { url: `${base}/owned-by-slug/` } });
+      assert.equal(call.status, 200, `${base}/mcp get_page`);
+      assert.match(call.headers.get("Content-Type") ?? "", /^application\/json/, `${base}/mcp answers with JSON`);
+      const message = await call.json();
+      const page = JSON.parse(message.result?.content?.[0]?.text ?? "{}");
+      assert.ok(page.content?.includes("This text lives in"), `get_page reads the deployed Markdown: ${JSON.stringify(message).slice(0, 300)}`);
+      assert.equal(page.truncated, undefined);
+    }
+    for (const route of ["/", "/owned-by-slug/"]) {
+      const markdown = await fetch(`${siteUrl}${route}`, {
+        headers: { Accept: "text/markdown, text/html;q=0.9" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.equal(markdown.status, 200);
+      assert.match(markdown.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route}`);
+      assert.match(markdown.headers.get("Vary") ?? "", /Accept/);
+      const alternate = await fetch(`${siteUrl}${route}index.md`);
+      assert.equal(alternate.status, 200, `${route}index.md`);
+      assert.match(alternate.headers.get("Content-Type") ?? "", /text\/markdown/, `${route}index.md`);
+      const expected = await alternate.text();
+      if (route === "/" && expectedHomepageMarkdown !== undefined) assert.equal(expected, expectedHomepageMarkdown);
+      assert.equal(await markdown.text(), expected);
+      if (lane === "node") {
+        const spoofed = await new Promise((resolveResponse, reject) => {
+          const request = httpRequest(`${siteUrl}${route}`, {
+            headers: { Host: "untrusted.invalid", Accept: "text/markdown" },
+          }, (response) => {
+            const chunks = [];
+            response.on("data", (chunk) => chunks.push(chunk));
+            response.on("error", reject);
+            response.on("end", () => resolveResponse(new Response(Buffer.concat(chunks), {
+              status: response.statusCode,
+              headers: { "Content-Type": response.headers["content-type"] ?? "" },
+            })));
+          });
+          request.on("error", reject);
+          request.setTimeout(5_000, () => request.destroy(new Error("spoofed Host request timed out")));
+          request.end();
+        });
+        assert.equal(spoofed.status, 200);
+        assert.match(spoofed.headers.get("Content-Type") ?? "", /text\/markdown/);
+        assert.equal(await spoofed.text(), expected, "Node request Host changed the asset origin");
+      }
+      const head = await fetch(`${siteUrl}${route}`, {
+        method: "HEAD",
+        headers: { Accept: "text/markdown" },
+        signal: AbortSignal.timeout(5_000),
+      });
+      assert.equal(head.status, 200);
+      assert.match(head.headers.get("Content-Type") ?? "", /text\/markdown/, `${base}${route} HEAD`);
+      assert.match(head.headers.get("Vary") ?? "", /Accept/);
+      assert.equal(await head.text(), "");
+      const html = await fetch(`${siteUrl}${route}`);
+      assert.match(html.headers.get("Content-Type") ?? "", /text\/html/);
+    }
     if (lane === "cloudflare") {
       const manifest = JSON.parse(
         readFileSync(
@@ -170,24 +255,25 @@ async function verifyRuntime(site, lane) {
           "utf8",
         ),
       );
-      const asset = manifest.markdownAssets.find(
+      const asset = manifest.llmsAssets.find(
         (entry) =>
-          entry.collection === "docs" &&
-          entry.id === "owned-by-slug" &&
-          entry.surface === "markdown",
+          entry.scope === "section" &&
+          entry.section === "runtime-section" &&
+          entry.surface === "index",
       );
-      if (!asset) throw new Error("runtime fixture has no known Markdown asset");
+      if (!asset) throw new Error("runtime fixture has no known llms.txt asset");
       rmSync(
         join(
           site,
           "dist",
           "client",
+          base,
           "_nimbus",
           "agent-endpoint-assets",
           asset.path,
         ),
       );
-      const missingAsset = await fetch(`${origin}/owned-by-slug/index.md`, {
+      const missingAsset = await fetch(`${siteUrl}/runtime-section/llms.txt`, {
         signal: AbortSignal.timeout(5_000),
       });
       const missingAssetBody = await missingAsset.text();
@@ -200,7 +286,7 @@ async function verifyRuntime(site, lane) {
           `known missing asset returned ${missingAsset.status}: ${JSON.stringify(missingAssetBody.slice(0, 300))}`,
         );
       }
-      const unknown = await fetch(`${origin}/missing/index.md`, {
+      const unknown = await fetch(`${siteUrl}/missing/index.md`, {
         signal: AbortSignal.timeout(5_000),
       });
       if (unknown.status !== 404) {
@@ -208,7 +294,12 @@ async function verifyRuntime(site, lane) {
       }
     }
   } finally {
-    child.kill("SIGTERM");
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+      else child.kill("SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
     await Promise.race([
       new Promise((resolveClose) => child.once("close", resolveClose)),
       new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
@@ -242,6 +333,8 @@ const scaffoldArgs = [
   "--yes",
   "--skip-install",
   "--no-git",
+  "--package-manager",
+  "pnpm",
   "--content",
   VARIANT_CONTENT,
   "--template-dir",
@@ -250,6 +343,13 @@ const scaffoldArgs = [
 if (LANE !== "static") scaffoldArgs.push("--adapter", LANE);
 run("node", scaffoldArgs, { cwd: work });
 const site = join(work, "ci-site");
+// Keep a small mixed-format consumer fixture in the existing packed-package
+// gate: unit-level compilation does not exercise content sync or starter renderers.
+const integrityDir = join(site, "src", "content", "docs", "integrity");
+mkdirSync(integrityDir, { recursive: true });
+for (const name of ["plain.md", "composed.mdx"]) {
+  writeFileSync(join(integrityDir, name), readFileSync(join(ROOT, "scripts", "fixtures", "content-integrity", name)));
+}
 mkdirSync(join(site, "src", "pages", "api"), { recursive: true });
 writeFileSync(
   join(site, "src", "pages", "custom-static.astro"),
@@ -294,9 +394,7 @@ if (LANE !== "static") {
     join(site, "src", "pages", "nimbus-api", "coordinates.json.ts"),
     join(site, "src", "pages", "og.png.ts"),
     join(site, "src", "pages", "og", "[...slug].ts"),
-    join(site, "src", "pages", "[...slug]", "index.md.ts"),
-    join(site, "src", "pages", "[...slug]", "index.mdx.ts"),
-    join(site, "src", "pages", "[section]", "llms.txt.ts"),
+    join(site, "src", "pages", "[...section]", "llms.txt.ts"),
   ]) {
     writeFileSync(
       route,
@@ -357,11 +455,32 @@ const expectedOutput = LANE === "static" ? "static" : "server";
 if (!new RegExp(`output:\\s*["']${expectedOutput}["']`).test(astroConfig)) {
   fail(`astro.config.ts does not select output: "${expectedOutput}"`);
 }
-const requestRendering = /rendering:\s*\{\s*default:\s*["']request["'],?\s*\}/.test(astroConfig);
-if (requestRendering !== (LANE === "cloudflare")) {
+const requestRendering =
+  LANE === "cloudflare"
+    ? /rendering:\s*\{\s*default:\s*["']request["'],?\s*\}/.test(astroConfig)
+    : /rendering:\s*\{\s*collections:\s*\{\s*"docs":\s*"request"\s*\}\s*\}/.test(astroConfig);
+if (requestRendering !== (LANE !== "static")) {
   fail(`${LANE} scaffold has an unexpected request-rendering default`);
 }
 ok(`scaffolded the ${LANE} lane via --template-dir`);
+if (MCP) {
+  const configPath = join(site, "astro.config.ts");
+  const source = readFileSync(configPath, "utf8");
+  const configured = source.replace("defineNimbusConfig({", "defineNimbusConfig({\n  agents: { mcp: true },");
+  assert.notEqual(configured, source, "missing Nimbus config fixture seam");
+  writeFileSync(configPath, configured);
+}
+const nodeRuntimePort = LANE === "node" ? await availablePort() : undefined;
+if (nodeRuntimePort !== undefined) {
+  const configPath = join(site, "astro.config.ts");
+  const source = readFileSync(configPath, "utf8");
+  const configured = source.replace(
+    'site: "https://example.com"',
+    `site: "http://127.0.0.1:${nodeRuntimePort}"`,
+  );
+  assert.notEqual(configured, source, "missing trusted site-origin fixture seam");
+  writeFileSync(configPath, configured);
+}
 
 // 4. Point nimbus-docs at the packed workspace bits, install + build.
 const pkgPath = join(site, "package.json");
@@ -374,13 +493,64 @@ for (const field of ["dependencies", "devDependencies"]) {
   }
 }
 if (!rewired) fail(`scaffolded project declares no ${NIMBUS_NAME} dependency`);
+if (MCP) {
+  pkg.dependencies["@modelcontextprotocol/server"] = NIMBUS_PKG.peerDependencies["@modelcontextprotocol/server"];
+}
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 
 // Keep the scaffold's workspace configuration active so dependency build
 // permissions are honored.
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "install", "--no-frozen-lockfile"], { cwd: site });
+assert.equal(
+  readFileSync(join(site, "node_modules", NIMBUS_NAME, "dist/docs-for-agents.md"), "utf8"),
+  readFileSync(join(ROOT, "apps/www/src/content/docs/ai/docs-for-agents.mdx"), "utf8"),
+);
+assert.match(readFileSync(join(site, "AGENT.md"), "utf8"), /dist\/docs-for-agents\.md/);
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "typecheck"], { cwd: site });
 run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+
+if (LANE === "static") {
+  const { JSDOM } = createRequire(join(ROOT, "packages", "nimbus-docs", "package.json"))("jsdom");
+  const readPage = (slug) => new JSDOM(readFileSync(join(site, "dist", "integrity", slug, "index.html"), "utf8")).window.document;
+  const plain = readPage("plain");
+  const composed = readPage("composed");
+  const readGenerated = () =>
+    ["plain", "composed"].flatMap(slug =>
+      ["md", "mdx"].map(extension =>
+        readFileSync(join(site, "dist", "integrity", slug, `index.${extension}`), "utf8"),
+      ),
+    );
+  const generated = readGenerated();
+  assert.deepEqual([...composed.querySelectorAll("aside[role=note]")].map(node => node.getAttribute("aria-label")), ["Wrapper"]);
+  assert.equal([...plain.querySelectorAll("a")].find(node => node.textContent === "HTML link")?.getAttribute("href"), "/integrity/composed/");
+  assert.equal([...plain.querySelectorAll("a")].find(node => node.textContent === "MDX guide")?.getAttribute("href"), "/integrity/composed/");
+  assert.ok(composed.querySelector('a[href="/integrity/plain/"]'));
+  assert.ok(composed.body.textContent.includes("This text lives in"), "partial renders through the starter");
+  for (const document of [plain, composed]) {
+    assert.ok([...document.querySelectorAll("pre")].some(node => node.textContent.includes('<a href="/untouched">{notAnExpression}</a>')), "fenced examples retain their literal content");
+    assert.equal(document.querySelector('a[href="/untouched"]'), null);
+    assert.ok([...document.querySelectorAll("pre")].some(node => node.textContent.includes("[literal citation](api.ref:api:untouched)")), "fenced citation examples stay literal");
+  }
+  assert.ok(generated.some(source => source.includes("<!-- Generated Markdown can contain HTML comments and literal {braces}. -->")));
+  assert.ok(generated.some(source => source.includes('<a href="/untouched">{notAnExpression}</a>')));
+  assert.ok(generated.every(source => source.includes("[literal citation](api.ref:api:untouched)")), "generated sources keep fenced citation examples literal");
+  const composedMarkdown = readFileSync(join(site, "dist", "integrity", "composed", "index.md"), "utf8");
+  assert.ok(composedMarkdown.includes("> ```yaml\n> paths:\n>   /events:\n>     get:\n>       summary: Indented\n> ```"), "generated Markdown keeps code indentation and quotes every line inside <Aside>");
+  assert.match(composedMarkdown, /^npx @cloudflare\/nimbus-docs list$/m, "generated Markdown keeps the <PackageManagers> package");
+  // Reuse the content cache: prepared links and content must not change on a
+  // second build of the same installed consumer.
+  const snapshot = (document) => ({
+    components: [...document.querySelectorAll("aside[role=note]")].map(node => [node.getAttribute("aria-label"), node.textContent]),
+    code: [...document.querySelectorAll("pre")].map(node => node.textContent),
+    links: [...document.querySelectorAll('a[href^="/integrity/"]')].map(node => node.getAttribute("href")),
+  });
+  const before = [snapshot(plain), snapshot(composed)];
+  const generatedBefore = generated;
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  assert.deepEqual([snapshot(readPage("plain")), snapshot(readPage("composed"))], before);
+  assert.deepEqual(readGenerated(), generatedBefore);
+  ok("mixed Markdown/MDX content, partials, literal examples and warm builds preserve their output");
+}
 
 const staticRouteCandidates = [
   join(site, "dist", "custom-static", "index.html"),
@@ -408,15 +578,32 @@ if (LANE === "node" || LANE === "cloudflare") {
     });
   }
   try {
-    await verifyRuntime(site, LANE);
+    await verifyRuntime(site, LANE, nodeRuntimePort);
   } catch (error) {
     fail(`${LANE} runtime verification failed: ${error.message}`);
   }
   ok(`${LANE} serves custom, scaffolded, and dynamic request routes`);
 }
 if (LANE === "cloudflare") {
+  const ownerMarkdown = "Owner homepage Markdown.";
+  writeFileSync(
+    join(site, "src", "pages", "index.md.ts"),
+    `export const prerender = false;\nexport function GET() { return new Response(${JSON.stringify(ownerMarkdown)}, { headers: { "Content-Type": "text/markdown" } }); }\n`,
+  );
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown);
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner");
+  const configPath = join(site, "astro.config.ts");
+  const config = readFileSync(configPath, "utf8");
+  const based = config.replace('output: "server",', 'output: "server",\n  base: "/docs",');
+  assert.notEqual(based, config, "missing base-path fixture seam");
+  writeFileSync(configPath, based);
+  run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  await verifyRuntime(site, LANE, undefined, ownerMarkdown, "/docs");
+  ok("Cloudflare negotiation preserves an on-demand homepage Markdown owner under /docs");
+  writeFileSync(configPath, config);
   rmSync(join(site, "src", "pages", "[...slug].astro"));
-  const missingCanonical = spawnSync(
+  const missingCanonical = spawnCommandSync(
     SCAFFOLD_PM_BIN,
     [...SCAFFOLD_PM_PREFIX, "build"],
     { cwd: site, encoding: "utf8" },
@@ -436,7 +623,7 @@ if (LANE === "node") {
     join(site, "src", "pages", "owned-by-slug.astro"),
     "---\nexport const prerender = true;\n---\n<h1>collision</h1>\n",
   );
-  const collision = spawnSync(
+  const collision = spawnCommandSync(
     SCAFFOLD_PM_BIN,
     [...SCAFFOLD_PM_PREFIX, "build"],
     { cwd: site, encoding: "utf8" },
@@ -450,6 +637,53 @@ if (LANE === "node") {
     fail("final Astro content IDs did not block a custom static route collision");
   }
   ok("final Astro content IDs block custom route collisions");
+}
+
+if (LANE === "static") {
+  // Non-default URL shapes, last because they change dist/'s layout. With a
+  // base and `build.format: "file"` (no trailing slashes), Astro's pathnames
+  // end in `.html` but no link or canonical may; with `trailingSlash:
+  // "always"`, every page link needs the slash.
+  const { JSDOM } = createRequire(join(ROOT, "packages", "nimbus-docs", "package.json"))("jsdom");
+  const configPath = join(site, "astro.config.ts");
+  const config = readFileSync(configPath, "utf8");
+  const buildWith = (options) => {
+    writeFileSync(configPath, config.replace('output: "static",', `output: "static",\n  ${options}`));
+    run(SCAFFOLD_PM_BIN, [...SCAFFOLD_PM_PREFIX, "build"], { cwd: site });
+  };
+  const read = (file) => new JSDOM(readFileSync(join(site, "dist", file), "utf8")).window.document;
+  const hrefs = (document, selector) => [...document.querySelectorAll(selector)].map((node) => node.getAttribute("href"));
+
+  buildWith(`base: "/docs", trailingSlash: "never", build: { format: "file" },`);
+  const home = read("index.html");
+  assert.deepEqual(hrefs(home, 'link[rel="canonical"]'), ["https://example.com/docs"]);
+  assert.equal(home.querySelector('meta[property="og:type"]')?.getAttribute("content"), "website");
+  const page = read("writing-pages.html");
+  assert.deepEqual(hrefs(page, 'link[rel="canonical"]'), ["https://example.com/docs/writing-pages"]);
+  assert.equal(page.querySelector('meta[property="og:url"]')?.getAttribute("content"), "https://example.com/docs/writing-pages");
+  assert.ok(hrefs(page, 'a[aria-current="page"]').includes("/docs/writing-pages"), "the sidebar marks the current page");
+  assert.deepEqual(hrefs(page, 'nav[aria-label="Pagination"] a'), ["/docs", "/docs/components"]);
+  const breadcrumb = page.querySelector('nav[aria-label="Breadcrumb"]');
+  assert.ok(breadcrumb, "the page has breadcrumbs");
+  assert.doesNotMatch(breadcrumb.textContent, /\.html/i);
+  assert.equal(hrefs(breadcrumb, "a")[0], "/docs", "the Home crumb matches the home canonical");
+  assert.equal(hrefs(page, "header a")[0], "/docs", "the header Home link matches the home canonical");
+
+  buildWith(`base: "/docs", trailingSlash: "always",`);
+  const slashedHome = read("index.html");
+  const sidebarLinks = hrefs(slashedHome, "[data-nb-sidebar] a");
+  assert.ok(sidebarLinks.includes("/docs/") && sidebarLinks.includes("/docs/components/"), `sidebar links: ${sidebarLinks}`);
+  assert.ok(sidebarLinks.every((href) => href.endsWith("/")), "every sidebar link has the slash");
+  assert.equal(hrefs(slashedHome, "header a")[0], "/docs/");
+
+  // Both at once: `.html` pathnames, but every URL keeps the slash.
+  buildWith(`base: "/docs", trailingSlash: "always", build: { format: "file" },`);
+  assert.deepEqual(hrefs(read("index.html"), 'link[rel="canonical"]'), ["https://example.com/docs/"]);
+  const slashedPage = read("components.html");
+  assert.deepEqual(hrefs(slashedPage, 'link[rel="canonical"]'), ["https://example.com/docs/components/"]);
+  assert.equal(slashedPage.querySelector('meta[property="og:url"]')?.getAttribute("content"), "https://example.com/docs/components/");
+  assert.ok(hrefs(slashedPage, 'a[aria-current="page"]').includes("/docs/components/"), "the canonical matches the sidebar link");
+  ok("a base with build.format: \"file\", trailingSlash: \"always\", or both keeps links, nav, and canonicals on real routes");
 }
 
 const installed = JSON.parse(

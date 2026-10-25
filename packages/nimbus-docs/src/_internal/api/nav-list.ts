@@ -1,0 +1,103 @@
+/**
+ * The list of one API version's pages, for the API home's filter and for the
+ * sidebar filter under `sidebar: "on-demand"`, whose pages carry only part of
+ * the tree. Written at build time beside the page assets and named by its
+ * hash, so an unchanged version keeps its file.
+ */
+import { access } from "node:fs/promises";
+import path from "node:path";
+import { pageAssetDigest, writeAtomic } from "../page-assets-build.js";
+import { preparedMarkdownRootKey } from "../prepared-markdown-registry.js";
+import type { NavListRow } from "../../client/nav-list.js";
+import type { ApiNav, ApiNavItem } from "./api-view-types.js";
+
+/** Every page in the version's navigation, in sidebar order. */
+export function apiNavList(
+  nav: ApiNav,
+  operationPaths: Record<string, string>,
+): { filename: string; body: string } {
+  const rows: NavListRow[] = [];
+  const visit = (item: ApiNavItem) => {
+    const path = operationPaths[item.coordinate];
+    if (item.href)
+      rows.push({
+        title: item.label,
+        ...(item.method ? { method: item.method } : {}),
+        ...(path ? { path } : {}),
+        url: item.href,
+      });
+    item.children.forEach(visit);
+  };
+  nav.items.forEach(visit);
+  const body = JSON.stringify(rows);
+  return { filename: `nav-${pageAssetDigest(body)}.json`, body };
+}
+
+// collection → version ("" when unversioned) → filename. On globalThis: the
+// integration and the content loader can load separate copies of this module.
+type ApiNavListManifest = Record<string, Record<string, string>>;
+interface ApiNavListRegistry {
+  all: ApiNavListManifest;
+  /** The versions whose sidebar is `on-demand`. */
+  sidebar: ApiNavListManifest;
+}
+const REGISTRY = Symbol.for("@cloudflare/nimbus-docs/api-nav-lists/v2");
+const globals = globalThis as typeof globalThis & {
+  [REGISTRY]?: Map<string, ApiNavListRegistry>;
+};
+const manifests = (globals[REGISTRY] ??= new Map());
+
+export function recordApiNavList(
+  root: URL | string,
+  collection: string,
+  version: string | null,
+  filename: string,
+  onDemandSidebar: boolean,
+): void {
+  const key = preparedMarkdownRootKey(root);
+  const registry = manifests.get(key) ?? { all: {}, sidebar: {} };
+  (registry.all[collection] ??= {})[version ?? ""] = filename;
+  if (onDemandSidebar) (registry.sidebar[collection] ??= {})[version ?? ""] = filename;
+  else delete registry.sidebar[collection]?.[version ?? ""];
+  manifests.set(key, registry);
+}
+
+/** Every version's list. */
+export function getApiNavListManifest(root: URL | string): ApiNavListManifest {
+  return manifests.get(preparedMarkdownRootKey(root))?.all ?? {};
+}
+
+/** The lists of versions whose sidebar is `on-demand`. */
+export function getApiSidebarListManifest(root: URL | string): ApiNavListManifest {
+  return manifests.get(preparedMarkdownRootKey(root))?.sidebar ?? {};
+}
+
+export function apiNavListFiles(root: URL | string): string[] {
+  return Object.values(getApiNavListManifest(root)).flatMap((versions) =>
+    Object.values(versions),
+  );
+}
+
+export function clearApiNavLists(root: URL | string): void {
+  manifests.delete(preparedMarkdownRootKey(root));
+}
+
+/** Write a list into the page-asset staging folder, where the build deploys
+ * it from and the dev server serves it, and into the build cache, where the
+ * next build finds it to ship as the previous release's file. */
+export async function stageApiNavList(
+  root: string,
+  list: { filename: string; body: string },
+): Promise<void> {
+  for (const directory of [
+    ".astro/nimbus/pages",
+    ".nimbus/cache/page-assets/assets",
+  ]) {
+    const file = path.join(root, directory, list.filename);
+    try {
+      await access(file);
+    } catch {
+      await writeAtomic(file, list.body);
+    }
+  }
+}

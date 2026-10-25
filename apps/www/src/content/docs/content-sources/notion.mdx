@@ -1,0 +1,77 @@
+---
+title: Content from Notion
+description: Build a collection from a Notion database, with drafts, slugs and ordering from its properties.
+sidebar:
+  label: Notion
+  order: 2
+---
+
+A Notion database can be a page collection: each row is a page, its blocks the page body. Notion pages are Markdown: they get routes, the sidebar, search, Markdown versions, `llms.txt`, citations and links like any page, but no MDX components, no callouts, no edit link and no last-updated date.
+
+## Add it
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add source notion --print | claude" />
+
+The guide has your agent install `@notionhq/client` and `notion-to-md`, and write `src/loaders/notion.ts`: a loader that reads the database with the Notion SDK and turns each page into Markdown with notion-to-md. Nimbus holds no Notion code; the loader is yours to edit. The rest is wired like any collection:
+
+```ts title="src/content.config.ts"
+import { defineCollection } from "astro:content";
+import { docsCollection, withNimbusMarkdown } from "@cloudflare/nimbus-docs/content";
+import { notionLoader } from "./loaders/notion";
+
+export const collections = {
+  docs: defineCollection(docsCollection()),
+  handbook: defineCollection({
+    loader: withNimbusMarkdown(notionLoader({ database: "8f2c1e0a9b3d4e5f6a7b8c9d0e1f2a3b" })),
+    schema: docsCollection().schema,
+  }),
+};
+```
+
+plus a route file and a sidebar entry, as for any collection (`nimbus-docs add new-collection` writes both).
+
+## Token and database
+
+Create an internal connection at [notion.so/profile/integrations](https://www.notion.so/profile/integrations) with read access, share the database with it from the database's "Connections" menu, and put the token in `NOTION_TOKEN`: `.env` locally, the build's environment in CI. A build without it fails naming the variable.
+
+The database id is the 32-character hex string in the database's URL. A database holds one or more data sources; the loader uses the only one, and a database with several fails listing them, so pick one with `notionLoader({ dataSource: "<id>" })`.
+
+## Properties
+
+| Property (default name) | Type | Becomes |
+| --- | --- | --- |
+| the title | title | `title` |
+| `Description` | rich text | `description` |
+| `Slug` | rich text | the page's URL; without it, the slugified title |
+| `Order` | number | `sidebar.order` |
+| `Status` | status, select or checkbox | whether the row publishes |
+
+Rename them with `notionLoader({ database, properties: { slug: "URL", status: "State" } })`. A property you named that is missing or of the wrong type fails the build, listing the data source's properties.
+
+**Publishing fails closed.** A row publishes only when its `Status` is `Published`, or its checkbox is checked. Every other row is a draft: shown in `astro dev` with the Draft badge, left out of `astro build`.
+
+- Notion's own status options are Not started, In progress and Done. If Done means published, set `publishedValue: "Done"`.
+- With no status property at all, every row publishes, and the log says so. A status property under another name fails the build instead, so a rename never publishes drafts.
+- When no row publishes, the build warns and lists the values it found.
+
+Two rows with one slug fail the build naming both Notion page ids, drafts included, before anything is written. A row with no slug and an empty title fails naming its page id. Without a `Slug`, renaming a page changes its URL.
+
+## What renders
+
+Most blocks become their Markdown equivalent. A few differ:
+
+- A heading 1 becomes `##`, since the page title is the `#`.
+- A callout becomes a quote, and a toggle a `<details>` block.
+- Audio, tables of contents, breadcrumbs and sub-pages are left out, with a warning. To render one, give notion-to-md a custom transformer in the loader.
+
+Text is escaped, so `{`, `<`, `*` and `$` render as typed.
+
+Equations become math when the site turns it on ([Markdown and MDX](/writing/markdown-and-mdx#heading-ids-and-math)); otherwise they show as TeX source. Images keep Notion's URL. Files uploaded to Notion get URLs that expire after an hour, so images that must last belong on a host of their own.
+
+## Syncing
+
+Each build reads the whole database and writes nothing until it has every row and block: a failed request after retries fails the build, and a dev server keeps its last good content. The loader retries rate limits, and server errors while reading page content; a build that still fails can be rerun.
+
+The site doesn't change when Notion does. Rebuild on a schedule, or point a Notion webhook, through an automation, at your deploy hook.
+
+`nimbus-docs lint` and `check` read files on disk, so they name a Notion collection as not inspected.

@@ -1,0 +1,10 @@
+---
+import ChangelogPage from "@/components/changelog/ChangelogPage.astro";
+import { changelogPage, getReleaseIndex } from "@/components/changelog/changelog";
+
+export const prerender = true;
+
+const data = changelogPage(await getReleaseIndex(), 1);
+---
+
+<ChangelogPage data={data} />

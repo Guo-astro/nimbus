@@ -4,7 +4,7 @@ description: What the scaffolder writes into your repo, the line between your fi
 audience: human
 aiGenerated: true
 sidebar:
-  order: 2
+  order: 0.3
 ---
 import { FileTree } from "@/components/ui/file-tree";
 
@@ -14,19 +14,27 @@ A scaffolded Nimbus project is a regular Astro project. Everything visible lives
 
 <FileTree>
 - my-docs/
+  - public/
   - src/
     - components/
       - ui/
     - content/
       - docs/
     - layouts/
+    - lib/
     - pages/
     - styles/
       - globals.css
     - components.ts
+    - content.config.ts
+  - AGENT.md
+  - CLAUDE.md
   - astro.config.ts
   - nimbus.json
   - package.json
+  - tsconfig.json
+  - pnpm-workspace.yaml
+  - wrangler.jsonc
 </FileTree>
 
 - **`src/components/`** — UI components, yours to edit or replace.
@@ -35,13 +43,27 @@ A scaffolded Nimbus project is a regular Astro project. Everything visible lives
 - **`src/pages/`** — routes, including the docs catch-all, alternate Markdown/MDX versions, and `llms.txt` indexes.
 - **`src/styles/globals.css`** — design tokens and Tailwind layers.
 - **`src/components.ts`** — the [MDX globals registry](/writing/markdown-and-mdx).
+- **`src/content.config.ts`** — your content collections.
+- **`AGENT.md`** — the guide for coding agents working in the project. `CLAUDE.md` points to it.
 - **`nimbus.json`** — a committed record of what your project is made of (see below).
+- **`pnpm-workspace.yaml`** — pnpm only, for its dependency build-script settings. Yarn sites get `.yarnrc.yml` instead.
+- **`wrangler.jsonc`** — only when you deploy to Cloudflare.
+
+A site with an API reference also has its spec at `src/api/`, its route at `src/pages/api/[...slug].astro`, and the reference components in `src/components/ui/`, recorded in `nimbus.json` like components from `nimbus-docs add`. A site that is only the reference has no `src/content/docs/`, and its route is `src/pages/[...slug].astro`. See [API reference](/api-reference/) to configure it.
 
 ## `nimbus.json` — the provenance record
 
-Alongside your files the scaffolder writes a small, CLI-managed **`nimbus.json`**. It records the `create-nimbus-docs` version and the `templates-v*` tag your starter came from, where components install (`install.root`), and one entry per component you [`add`](/cli) — each with its source registry, the registry release it shipped in, and a content hash.
+Alongside your files the scaffolder writes a small, CLI-managed **`nimbus.json`**. It records:
 
-It is the machine half of a pair: your **behavior** config (versions, features, sidebar) is human-authored in `astro.config.ts` via `nimbus(...)`; **`nimbus.json`** is the surface the CLI reads and rewrites. [`nimbus-docs add`](/cli) appends to it; [`nimbus-docs init`](/cli) rebuilds it for a project that predates it or is adopting Nimbus. **Commit it** — it is how upgrades know what you own (it is not `.nimbus/`, which is gitignored build scratch).
+- `version` and `templatesTag`: the `create-nimbus-docs` version and the `templates-v*` tag your starter came from.
+- `lastReviewedNimbusVersion`: the last Nimbus version whose upgrade steps the site has reviewed with [`nimbus-docs migrate`](/cli).
+- `templatesTagByFile`: the tag each file taken with `nimbus-docs diff --apply` came from.
+- `install.root`: where components install.
+- `components`: one entry per component you [`add`](/cli), with its source registry, the registry release it shipped in, and a content hash.
+
+You write your site's behavior, such as versions and the sidebar, in `astro.config.ts`. **`nimbus.json`** is the CLI's half: [`nimbus-docs add`](/cli) writes to it, and [`nimbus-docs init`](/cli) creates it for a project without one.
+
+**Commit it**: it's how upgrades know what you own. (`.nimbus/` is different: gitignored build scratch.)
 
 ## The framework boundary
 

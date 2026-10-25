@@ -1,0 +1,139 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Multi-file API",
+    "version": "2.0.0"
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Local": {
+        "$ref": "#/x-ext/933e3aa/components/schemas/Pet"
+      }
+    }
+  },
+  "paths": {
+    "/pets": {
+      "get": {
+        "operationId": "listPets",
+        "summary": "List pets",
+        "responses": {
+          "200": {
+            "description": "Pets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/x-ext/933e3aa/components/schemas/Pet"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/owners/{id}": {
+      "$ref": "#/x-ext/32bbe9e"
+    }
+  },
+  "x-ext": {
+    "933e3aa": {
+      "components": {
+        "schemas": {
+          "Pet": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "owner": {
+                "$ref": "#/x-ext/933e3aa/components/schemas/Owner"
+              },
+              "friends": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/x-ext/933e3aa/components/schemas/Pet"
+                }
+              }
+            }
+          },
+          "Owner": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "pets": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/x-ext/933e3aa/components/schemas/Pet"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "32bbe9e": {
+      "get": {
+        "operationId": "getOwner",
+        "summary": "Get an owner",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-ext/933e3aa/components/schemas/Owner"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-ext/4b96100/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "4b96100": {
+      "components": {
+        "schemas": {
+          "Error": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

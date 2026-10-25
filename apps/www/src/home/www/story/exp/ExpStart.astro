@@ -1,0 +1,49 @@
+---
+/* Getting started CTA, for above the footer. Two big keycaps: press ⌘C (or click them) and the one command you need is on your clipboard. */
+import { Code } from "@/components/ui/code";
+
+const cmd = "npx @cloudflare/create-nimbus-docs@latest";
+---
+<div class="relative flex flex-col items-center py-10 text-center" data-exp-start data-cmd={cmd}>
+  <p class="text-[13px] leading-none text-muted-foreground">Get started</p>
+  <h3 class="mt-4 text-[26px] leading-8 md:text-[32px] md:leading-10">Your docs, five minutes from now.</h3>
+  <p class="mt-3 text-[15px] leading-7 text-foreground/70" data-hint>Press <span class="font-mono text-foreground" data-combo>⌘C</span> to copy the one command you need. Or click the keys.</p>
+
+  <button type="button" class="mt-10 flex gap-4 outline-none" aria-label="Copy the install command" data-caps>
+    <span class="keycap" data-cap><span class="keycap-top" data-meta-label>⌘</span></span>
+    <span class="keycap" data-cap><span class="keycap-top">C</span></span>
+  </button>
+
+  <div class="mt-10 w-full max-w-xl text-left [&_.nb-code-figure]:my-0!"><Code code={cmd} lang="sh" /></div>
+  <p class="mt-4 text-[13px] leading-5 text-muted-foreground transition-colors data-[copied]:text-success" data-after>Paste it in your terminal. A few questions later, the site is in your repo.</p>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>("[data-exp-start]");
+  if (root) {
+    const caps = Array.from(root.querySelectorAll<HTMLElement>("[data-cap]"));
+    const after = root.querySelector<HTMLElement>("[data-after]")!, idle = after.textContent;
+    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+    if (!mac) { root.querySelector<HTMLElement>("[data-meta-label]")!.textContent = "Ctrl"; caps[0].querySelector<HTMLElement>(".keycap-top")!.style.fontSize = "18px"; root.querySelector<HTMLElement>("[data-combo]")!.textContent = "Ctrl C"; }
+    // No keyboard on touch screens: invite a tap instead.
+    if (matchMedia("(hover: none)").matches) root.querySelector<HTMLElement>("[data-hint]")!.textContent = "Tap the keys to copy the one command you need.";
+    const press = (on: boolean) => caps.forEach((c) => c.toggleAttribute("data-down", on));
+    let reset = 0;
+    const copy = () => {
+      try { navigator.clipboard?.writeText(root.dataset.cmd!).catch(() => {}); } catch {}
+      after.dataset.copied = ""; after.textContent = "Copied. Paste it in your terminal, and a few questions later the site is in your repo.";
+      window.clearTimeout(reset);
+      reset = window.setTimeout(() => { delete after.dataset.copied; after.textContent = idle; }, 2400);
+    };
+    root.querySelector<HTMLElement>("[data-caps]")!.addEventListener("click", () => { press(true); setTimeout(() => press(false), 140); copy(); });
+    // The real shortcut works while the keys are on screen, unless the reader has text selected.
+    let inView = false;
+    new IntersectionObserver(([e]) => { inView = e.isIntersecting; }, { threshold: 0.4 }).observe(root);
+    addEventListener("keydown", (e) => {
+      if (!inView || !(mac ? e.metaKey : e.ctrlKey) || e.key.toLowerCase() !== "c") return;
+      if (String(getSelection() ?? "").length > 0) return;
+      e.preventDefault(); press(true); copy();
+    });
+    addEventListener("keyup", () => press(false));
+  }
+</script>

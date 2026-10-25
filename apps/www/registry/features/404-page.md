@@ -17,7 +17,7 @@ Read this entire file before making any changes.
 
 Inspect the user's repo to learn the site's conventions:
 
-- `package.json` — confirm this is a Nimbus project (it should depend on `nimbus-docs`).
+- `package.json` — confirm this is a Nimbus project (it should depend on `@cloudflare/nimbus-docs`).
 - `astro.config.ts` — read the Nimbus config (`defineNimbusConfig(...)`) to learn the site `title`, `logo`, `description`.
 - `src/layouts/` — note which layouts exist (`BaseLayout.astro`, `DocsLayout.astro`, or similar). Pick the one that wraps marketing-style pages (`BaseLayout`) over `DocsLayout` for the 404.
 - `src/pages/index.astro` — model the JSX/HTML structure on the existing landing page so the 404 inherits the same wrapping pattern (imports, frontmatter, layout usage).
@@ -54,7 +54,7 @@ import { withBase } from "@cloudflare/nimbus-docs/runtime";
 const homeHref = withBase("/", import.meta.env.BASE_URL);
 ---
 
-<BaseLayout title="404 — Page not found">
+<BaseLayout title="Page not found" noindex>
   <section class="mx-auto flex max-w-2xl flex-col items-start gap-6 py-24">
     <p class="text-sm font-mono text-muted-foreground">404</p>
     <h1 class="text-3xl font-semibold tracking-tight">Page not found</h1>
@@ -66,7 +66,7 @@ const homeHref = withBase("/", import.meta.env.BASE_URL);
 </BaseLayout>
 ```
 
-Adapt this to whatever the actual layout's props look like. If `BaseLayout` does not accept a `title` prop, drop it. If the project's pages use a different content wrapper, match that.
+Adapt this to whatever the actual layout's props look like. If `BaseLayout` does not accept a `title` prop, drop it; if it has no `noindex` prop, add `<meta name="robots" content="noindex">` to the page's head instead. Keep the title plain: the layout appends the site name, so `"Page not found"` renders as `Page not found | <site>`. If the project's pages use a different content wrapper, match that.
 
 ## 4. Verification
 

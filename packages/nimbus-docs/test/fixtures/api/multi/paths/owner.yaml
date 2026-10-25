@@ -1,0 +1,22 @@
+get:
+  operationId: getOwner
+  summary: Get an owner
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    "200":
+      description: Owner
+      content:
+        application/json:
+          schema:
+            $ref: "../schemas.yaml#/components/schemas/Owner"
+    "404":
+      description: Missing
+      content:
+        application/json:
+          schema:
+            $ref: "../openapi.yaml#/components/schemas/Error"

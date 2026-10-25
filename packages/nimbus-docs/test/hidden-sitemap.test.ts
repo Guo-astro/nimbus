@@ -11,6 +11,9 @@ import {
   makeHiddenSitemapFilter,
 } from "../src/_internal/hidden-sitemap.js";
 import type { NimbusConfig } from "../src/types.js";
+import { NO_ROUTES } from "../src/_internal/collection-mount.js";
+
+const DEFAULT_URLS = { versions: null, routes: NO_ROUTES };
 
 function config(partial: Partial<NimbusConfig>): NimbusConfig {
   return { title: "t", ...partial } as NimbusConfig;
@@ -18,13 +21,15 @@ function config(partial: Partial<NimbusConfig>): NimbusConfig {
 
 describe("hiddenVersionPrefixes", () => {
   test("empty when nothing is hidden", () => {
-    assert.deepEqual(hiddenVersionPrefixes(config({})), []);
+    assert.deepEqual(hiddenVersionPrefixes(config({}), "/", DEFAULT_URLS), []);
     assert.deepEqual(
       hiddenVersionPrefixes(
         config({
           versions: { current: "v2", others: ["v1"] },
           api: [{ collection: "core", versions: [{ version: "v1", spec: "a.yaml" }] }],
         }),
+        "/",
+        DEFAULT_URLS,
       ),
       [],
     );
@@ -45,6 +50,8 @@ describe("hiddenVersionPrefixes", () => {
           },
         ],
       }),
+      "/",
+      DEFAULT_URLS,
     );
     assert.deepEqual(prefixes.sort(), ["/core/v2", "/v1"]);
   });
@@ -62,6 +69,8 @@ describe("hiddenVersionPrefixes", () => {
           },
         ],
       }),
+      "/",
+      DEFAULT_URLS,
     );
     assert.ok(!prefixes.includes("/core"));
     assert.deepEqual(prefixes, ["/core/v1"]);
@@ -72,6 +81,7 @@ describe("hiddenVersionPrefixes", () => {
       hiddenVersionPrefixes(
         config({ versions: { current: "v2", others: ["v1"], hidden: ["v1"] } }),
         "/docs/",
+        DEFAULT_URLS,
       ),
       ["/docs/v1"],
     );
@@ -91,7 +101,7 @@ describe("makeHiddenSitemapFilter", () => {
       },
     ],
   });
-  const keep = makeHiddenSitemapFilter(cfg);
+  const keep = makeHiddenSitemapFilter(cfg, "/", DEFAULT_URLS);
 
   test("drops the hidden prefix page and everything nested", () => {
     assert.equal(keep("https://x.dev/v1"), false);
@@ -112,8 +122,35 @@ describe("makeHiddenSitemapFilter", () => {
   });
 
   test("passthrough filter keeps everything when nothing is hidden", () => {
-    const all = makeHiddenSitemapFilter(config({}));
+    const all = makeHiddenSitemapFilter(config({}), "/", DEFAULT_URLS);
     assert.equal(all("https://x.dev/v1/"), true);
     assert.equal(all("https://x.dev/core/v1/"), true);
+  });
+});
+
+describe("the API home's later parts", () => {
+  const cfg = config({
+    api: [
+      {
+        collection: "core",
+        versions: [
+          { version: "v2", spec: "v2.yaml", default: true },
+          { version: "v1", spec: "v1.yaml" },
+        ],
+      },
+    ],
+  });
+
+  test("are left out, under every version and the site base", () => {
+    const keep = makeHiddenSitemapFilter(cfg, "/docs/", DEFAULT_URLS);
+    assert.equal(keep("https://x.dev/docs/core/index/2/"), false);
+    assert.equal(keep("https://x.dev/docs/core/v1/index/3/"), false);
+  });
+
+  test("leave the home and every other page in", () => {
+    const keep = makeHiddenSitemapFilter(cfg, "/", DEFAULT_URLS);
+    assert.equal(keep("https://x.dev/core/"), true);
+    assert.equal(keep("https://x.dev/core/charges/index/2/"), true);
+    assert.equal(keep("https://x.dev/guide/index/2/"), true);
   });
 });

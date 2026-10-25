@@ -54,15 +54,19 @@ export async function installFeature(
  * (claude/codex/cursor-agent) and the rest (opencode/pi).
  */
 function printHumanInstructions(slug: string): void {
-  const cmd = invocation(`add ${slug}`);
-  const stream = process.stderr;
-  stream.write(`${cmd}\n\n`);
-  stream.write("To install this feature, pipe it to your coding agent:\n\n");
-  stream.write(`  ${cmd} --print | claude\n`);
-  stream.write(`  ${cmd} --print | codex\n`);
-  stream.write(`  ${cmd} --print | cursor-agent\n\n`);
-  stream.write(`  ${cmd} --print | opencode\n`);
-  stream.write(`  ${cmd} --print | pi\n`);
-  stream.write("Or paste this prompt into any agent:\n\n");
-  stream.write(`  Run "${cmd} --print" and follow the instructions.\n`);
+  process.stderr.write(humanInstructions(invocation(`add ${slug}`)));
+}
+
+export function humanInstructions(cmd: string): string {
+  return [
+    `${cmd}\n\n`,
+    "To install this feature, pipe it to your coding agent:\n\n",
+    `  ${cmd} --print | claude\n`,
+    `  ${cmd} --print | codex\n`,
+    `  ${cmd} --print | cursor-agent\n\n`,
+    `  ${cmd} --print | opencode\n`,
+    `  ${cmd} --print | pi\n\n`,
+    "Or paste this prompt into any agent:\n\n",
+    `  Run "${cmd} --print" and follow the instructions.\n`,
+  ].join("");
 }

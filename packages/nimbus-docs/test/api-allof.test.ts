@@ -22,6 +22,7 @@ let model: ApiModel;
 
 before(async () => {
   model = await buildApiModel({
+    schemaPages: true,
     collection: "allof",
     label: "allof",
     // `Composed.allOf`: branch 1 declares a REQUIRED `kind` whose `oneOf`
@@ -84,8 +85,8 @@ describe("allOf folding accumulates properties and unions required", () => {
     assert.deepEqual(
       kind.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["Foo", "/allof/schemas/Foo"],
-        ["Bar", "/allof/schemas/Bar"],
+        ["Foo", "/allof/schemas/Foo/"],
+        ["Bar", "/allof/schemas/Bar/"],
       ],
     );
   });
@@ -98,6 +99,7 @@ describe("allOf folding accumulates properties and unions required", () => {
 
   test("projection is deterministic across independent builds", async () => {
     const again = await buildApiModel({
+      schemaPages: true,
       collection: "allof",
       label: "allof",
       spec: `

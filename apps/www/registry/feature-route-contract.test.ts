@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,12 +10,13 @@ async function feature(name: string): Promise<string> {
   return readFile(join(FEATURES, `${name}.md`), "utf8");
 }
 
-test("collection recipes canonicalize nested index routes", async () => {
+test("collection recipes take page URLs from the page helper", async () => {
   for (const name of ["new-collection", "new-version", "changelog"]) {
     const source = await feature(name);
-    assert.match(source, /entryRouteKey/);
+    assert.match(source, /markdownUrl, ogImageUrl \} = page;/);
+    assert.match(source, /const socialImage = entry\.data\.socialImage \?\? ogImageUrl;/);
     assert.doesNotMatch(source, /withBaseRoute/);
-    assert.doesNotMatch(source, /\$\{entry\.id\}\/index\.md/);
+    assert.doesNotMatch(source, /\$\{routeKey\}\/index\.md`|`\/og\/[^`]*\$\{/);
   }
 });
 
@@ -47,31 +48,54 @@ test("collection recipes guard disabled table-of-contents configuration", async 
   }
 });
 
-test("changelog serves and links its expanded source version", async () => {
+test("collection recipes rely on the shared Markdown routes", async () => {
+  for (const name of ["new-collection", "new-version", "api-reference", "ai-native", "changelog"]) {
+    const source = await feature(name);
+    assert.doesNotMatch(source, /getMarkdownStaticPaths|getMarkdownPayload/);
+    assert.doesNotMatch(source, /src\/pages\/[^`\s]+\/\[\.\.\.slug\]\/index\.mdx?\.ts/);
+  }
+});
+
+test("recipes that rely on the shared routes stop on an older docs-only starter", async () => {
+  for (const name of ["new-collection", "new-version", "api-reference", "changelog"]) {
+    const source = await feature(name);
+    assert.match(source, /calls?\s+`markdown(Source)?Route\(\)`/);
+    assert.match(source, /instead passes `collection: "docs"` \(an older starter\),?\s+stop/);
+  }
+});
+
+test("changelog relies on the shared OG route", async () => {
   const source = await feature("changelog");
-  assert.match(source, /surface: "source"/);
-  assert.match(source, /sourcePath[\s\S]*index\.mdx/);
-  assert.match(source, /Source:.*absoluteUrl\(sourcePath\)/);
+  assert.doesNotMatch(source, /src\/pages\/og\/changelog\//);
+  assert.doesNotMatch(source, /OGImageRoute\(/);
+  assert.match(source, /`src\/pages\/og\/\[\.\.\.slug\]\.ts`: confirm it enumerates entries with\s+`getOgImagePages\(\)`/);
+});
+
+test("changelog gives its feed root its own OG card", async () => {
+  const source = await feature("changelog");
+  // The starter's card renderer first, then the older astro-og-canvas setup.
+  assert.match(source, /### 5i\. `src\/pages\/og\/changelog\.png\.ts`[\s\S]*?renderPageCard\([\s\S]*?generateOpenGraphImage\(/);
+  assert.equal(source.match(/socialImage="\/og\/changelog\.png"/g)?.length, 1);
 });
 
 test("changelog reserves its index entry for the feed route", async () => {
   const source = await feature("changelog");
   assert.match(
     source,
-    /### 5h\.[\s\S]*?```astro\n---\nimport type \{ GetStaticPaths \} from "astro";/,
+    /### 5g\.[\s\S]*?```astro\n---\nimport type \{ GetStaticPaths \} from "astro";/,
   );
-  assert.match(source, /getChangelogStaticPaths[\s\S]*filter\(\(path\) => path\.params\.slug\)/);
-  assert.equal(
-    source.match(/paths\.filter\(\(path\) => path\.params\.slug !== undefined\)/g)?.length,
-    2,
+  assert.doesNotMatch(source, /getChangelogStaticPaths/);
+  assert.match(
+    source,
+    /export const getStaticPaths: GetStaticPaths = async \(options\) =>\n  \(await getCollectionStaticPaths\("changelog"\)\(options\)\)\.filter\(\n    \(path\) => path\.params\.slug,\n  \);/,
   );
 });
 
 test("feature recipes base dynamic terminal links", async () => {
   const changelog = await feature("changelog");
   assert.doesNotMatch(changelog, /href="\/changelog/);
-  assert.match(changelog, /new URL\(withBase\("\/changelog\/rss\.xml"/);
-  assert.match(changelog, /withBase\(`\/changelog\/\$\{entry\.id\}\/`/);
+  assert.match(changelog, /new URL\(withBase\(path, import\.meta\.env\.BASE_URL\), config\.site\)/);
+  assert.match(changelog, /withBase\(releaseHref\(entry\), import\.meta\.env\.BASE_URL\)/);
 
   assert.match(
     await feature("404-page"),
@@ -81,4 +105,16 @@ test("feature recipes base dynamic terminal links", async () => {
     await feature("component-showcase"),
     /### `src\/pages\/components\.astro`[\s\S]*import \{ getSidebar, withBase \}[\s\S]*href=\{withBase\(`\/components\/\$\{entry\.id\}`/,
   );
+});
+
+test("new-version's copy fallback includes every file the version switcher needs", async () => {
+  const source = await feature("new-version");
+  const ui = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/nimbus-starter-source/src/components/ui");
+  for (const component of ["popover", "version-switcher"]) {
+    const files = await readdir(join(ui, component));
+    const loop = source.match(new RegExp(`for f in ([^;]+); do\\n\\s+curl -fsSL "\\$base/${component}/`));
+    assert.ok(loop, `missing copy loop for ${component}`);
+    assert.deepEqual(loop[1].trim().split(/\s+/).sort(), files.sort(), component);
+    assert.match(source, new RegExp(`packages/nimbus-starter-source/src/components/ui/${component}/\\n`));
+  }
 });

@@ -12,6 +12,11 @@ interface Props {
   badge?: string;
   collapsible?: boolean;
   truncated?: { total: number };
+  /** The section's own required-ness (e.g. a request body), beside the title.
+   *  Omit it to show neither "required" nor "optional". */
+  required?: boolean;
+  /** The section's own description, as HTML, under the heading. */
+  descriptionHtml?: string;
   class?: string;
 }
 
@@ -24,6 +29,8 @@ const {
   collapsible,
   class: className,
   truncated,
+  required,
+  descriptionHtml,
 }: Props = Astro.props;
 
 const hasFields = fields !== undefined;
@@ -32,6 +39,7 @@ if (hasFields && fields.length === 0) return;
 const showControls = collapsible ?? (hasFields && fields.some(isExpandable));
 const omitted = truncated ? truncated.total - (fields?.length ?? 0) : 0;
 const TitleTag = title ? HeadTag : "span";
+const flag = required === true ? "required" : required === false ? "optional" : undefined;
 ---
 
 <section
@@ -39,19 +47,22 @@ const TitleTag = title ? HeadTag : "span";
   class:list={["fl-root scroll-mt-24", className]}
   data-api-section
 >
-  {(title || badge || showControls) && (
+  {(title || badge || showControls || required !== undefined) && (
     <div class="fl-head">
       <TitleTag class="fl-title">
+        {/* Each label starts with a space so search reads "Request body JSON required";
+            the title is flex, so the space takes no room. */}
         {title}
-        {badge && <span class="fl-badge">{badge}</span>}
+        {badge && <span class="fl-badge"> {badge}</span>}
+        {flag && <span class={`fl-${flag}`}> {flag}</span>}
       </TitleTag>
       {showControls && (
         <button
           type="button"
           class="fl-toggle group/toggle"
           data-api-toggle-all
+          data-pagefind-ignore
           data-nb-expanded="true"
-          aria-label="Toggle all fields"
         >
           <span class="group-data-[nb-expanded=true]/toggle:hidden">Expand all</span>
           <span class="hidden group-data-[nb-expanded=true]/toggle:inline">Collapse all</span>
@@ -61,6 +72,8 @@ const TitleTag = title ? HeadTag : "span";
       )}
     </div>
   )}
+
+  {descriptionHtml && <div class="fl-desc mb-3" set:html={descriptionHtml} />}
 
   {hasFields ? (
     <ul class="fl-list">

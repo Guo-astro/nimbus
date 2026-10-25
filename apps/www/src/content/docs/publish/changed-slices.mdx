@@ -1,0 +1,149 @@
+---
+title: Build only changed slices
+description: Build and preview only the slices a pull request touched, and deploy every slice from main.
+aiGenerated: true
+sidebar:
+  order: 3.5
+  label: Changed slices
+---
+
+On a large site split into [partial builds](/publish/partial-builds), a pull request that changes one slice doesn't need to rebuild the rest. A script maps changed paths to slices, and a workflow builds each one.
+
+## Prerequisites
+
+- A site already split into slices, deployed under one hostname: see [Partial builds](/publish/partial-builds)
+- GitHub Actions
+
+## Map changed paths to slices
+
+Keep the map of slices in one place:
+
+```js title="scripts/pick-slice.mjs"
+// Reads changed paths on stdin (git diff --name-only --no-renames, so a
+// page moved between collections names both) and prints the slices to
+// build as JSON. A path outside a collection's content folder (a component,
+// the config, a partial, an API spec, public/) touches every slice; `--all`
+// picks every slice.
+import { readFileSync } from "node:fs";
+
+// `preview` and `deploy` are your host's commands; these are Cloudflare's.
+const SLICES = [
+  {
+    name: "docs-site",
+    only: "docs,api",
+    preview: "npx wrangler versions upload --config wrangler.jsonc",
+    deploy: "npx wrangler deploy --config wrangler.jsonc",
+  },
+  {
+    name: "docs-site-es",
+    only: "sdk",
+    preview: "npx wrangler versions upload --config wrangler.sdk.jsonc",
+    deploy: "npx wrangler deploy --config wrangler.sdk.jsonc",
+  },
+];
+
+const paths = process.argv.includes("--all")
+  ? ["astro.config.ts"]
+  : readFileSync(0, "utf8").split("\n").filter(Boolean);
+const picked = new Set();
+for (const path of paths) {
+  const collection = /^src\/content\/([^/]+)\//.exec(path)?.[1];
+  const slice =
+    collection && collection !== "partials"
+      ? SLICES.find((candidate) => candidate.only.split(",").includes(collection))
+      : undefined;
+  if (slice) picked.add(slice);
+  else for (const candidate of SLICES) picked.add(candidate);
+}
+console.log(JSON.stringify([...picked]));
+```
+
+```yaml title=".github/workflows/slices.yml"
+name: Slices
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    outputs:
+      slices: ${{ steps.pick.outputs.slices }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only --no-renames "origin/${{ github.base_ref }}...HEAD" | node scripts/pick-slice.mjs
+          else
+            node scripts/pick-slice.mjs --all
+          fi | sed 's/^/slices=/' >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: pick
+    if: needs.pick.outputs.slices != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        slice: ${{ fromJSON(needs.pick.outputs.slices) }}
+    name: ${{ matrix.slice.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # The previous whole-site build's routes, for links into other slices.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .nimbus/routes.json
+          key: routes-${{ github.event.pull_request.base.sha || github.sha }}
+          restore-keys: routes-
+
+      - run: pnpm build
+        env:
+          NIMBUS_BUILD_ONLY: ${{ matrix.slice.only }}
+      - run: pnpm nimbus-docs lint
+
+      - if: github.event_name == 'pull_request'
+        run: ${{ matrix.slice.preview }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - if: github.event_name == 'push'
+        run: ${{ matrix.slice.deploy }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  # The whole site, once per push: the route truth every slice build borrows.
+  routes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - uses: actions/cache/save@v4
+        with:
+          path: .nimbus/routes.json
+          key: routes-${{ github.sha }}
+```
+
+A pull request that touches only `src/content/sdk/` builds and previews the `sdk` slice; one that touches a component builds every slice. A push to `main` deploys every slice and saves the whole site's routes for the next pull request.
+
+## Next steps
+
+- [Partial builds](/publish/partial-builds): what a slice writes, and searching and linking across slices.
+- [Metadata and SEO](/publish/metadata-and-seo): one sitemap for the whole site.

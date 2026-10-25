@@ -1,64 +1,85 @@
 /**
- * Wires the code rail's language <select>. The samples are all server-rendered
+ * Wires the code rail's sample <select>. The samples are all server-rendered
  * (no-JS shows the first, the rest ship hidden-but-crawlable); this only swaps
- * which panel is visible on change and keeps every rail on the page — and other
- * tabs — in sync on the chosen language via localStorage. A ?lang= query param
- * deep-links a language: it seeds the initial choice and each change writes it
- * back to the URL, so a shared link opens on that sample.
+ * which panel is visible on change.
+ *
+ * Two kinds of choice. Picking a sample is local to this page: options and
+ * panels are keyed by the sample's id (`python`, `python-2`). The choice that
+ * follows the reader to other operations, and to other tabs via localStorage,
+ * is the sample's language: picking `python-2` saves `python`, and another
+ * operation opens its first Python sample. A ?lang= query param deep-links a
+ * sample: an exact id wins, otherwise the language's first sample; each change
+ * writes the chosen id back, so a shared link opens that exact sample.
  */
 import { initTabs, mount, readUrlParam, writeUrlParam } from "@cloudflare/nimbus-docs/client";
 
 // Distinct from the initTabs `ui-tab-sync` mechanism — this stores the chosen
-// option *value* and syncs via the `storage` event, so it uses its own key.
+// language and syncs via the `storage` event, so it uses its own key.
 const SYNC_KEY = "nb-api-code-rail__lang";
 const LANG_PARAM = "lang";
-const rails = new Set<(value: string) => void>();
+const rails = new Set<(lang: string) => void>();
 
 function initCodeRail(container: HTMLElement): () => void {
   const select = container.querySelector<HTMLSelectElement>("[data-nb-lang-select]");
   const panels = Array.from(container.querySelectorAll<HTMLElement>("[data-nb-lang-panel]"));
   if (!select || panels.length === 0) return () => {};
 
-  const has = (value: string) => panels.some((p) => p.dataset.nbLangValue === value);
+  const panelFor = (id: string) => panels.find((p) => p.dataset.nbLangValue === id);
+  // A rail without per-panel languages (older markup) treats the id as the language.
+  const langOf = (panel: HTMLElement) =>
+    (panel.dataset.nbSampleLang ?? panel.dataset.nbLangValue ?? "").toLowerCase();
+  const firstFor = (lang: string) => panels.find((p) => langOf(p) === lang.toLowerCase());
 
-  const show = (value: string) => {
-    if (!has(value)) return;
-    for (const panel of panels) panel.hidden = panel.dataset.nbLangValue !== value;
-    if (select.value !== value) select.value = value;
+  const show = (panel: HTMLElement | undefined) => {
+    if (!panel) return;
+    for (const p of panels) p.hidden = p !== panel;
+    const id = panel.dataset.nbLangValue ?? "";
+    if (select.value !== id) select.value = id;
   };
-  rails.add(show);
+  // Another rail or tab chose a language: keep the current sample if it's in
+  // that language, else open the language's first sample.
+  const showLanguage = (lang: string) => {
+    const current = panelFor(select.value);
+    if (current && langOf(current) === lang.toLowerCase()) return;
+    show(firstFor(lang));
+  };
+  rails.add(showLanguage);
 
   const onChange = () => {
-    const { value } = select;
-    for (const apply of rails) apply(value);
+    const panel = panelFor(select.value);
+    if (!panel) return;
+    show(panel);
+    const lang = langOf(panel);
+    for (const apply of rails) if (apply !== showLanguage) apply(lang);
     try {
-      localStorage.setItem(SYNC_KEY, value);
+      localStorage.setItem(SYNC_KEY, lang);
     } catch {}
-    writeUrlParam(LANG_PARAM, value);
+    writeUrlParam(LANG_PARAM, select.value);
   };
   select.addEventListener("change", onChange);
 
   const onStorage = (e: StorageEvent) => {
-    if (e.key === SYNC_KEY && e.newValue) show(e.newValue);
+    if (e.key === SYNC_KEY && e.newValue) showLanguage(e.newValue);
   };
   window.addEventListener("storage", onStorage);
 
   // SSR renders the first sample; restore a different choice post-hydration (a
-  // brief flash of the default is acceptable). A valid ?lang= deep-link wins;
-  // otherwise (absent or unknown) fall back to the saved preference, else the
+  // brief flash of the default is acceptable). A ?lang= deep link that matches
+  // a sample id or language wins; otherwise the saved language, else the
   // server default.
   const param = readUrlParam(LANG_PARAM);
-  if (param && has(param)) {
-    show(param);
+  const linked = param ? (panelFor(param) ?? firstFor(param)) : undefined;
+  if (linked) {
+    show(linked);
   } else {
     try {
       const saved = localStorage.getItem(SYNC_KEY);
-      if (saved) show(saved);
+      if (saved) showLanguage(saved);
     } catch {}
   }
 
   return () => {
-    rails.delete(show);
+    rails.delete(showLanguage);
     select.removeEventListener("change", onChange);
     window.removeEventListener("storage", onStorage);
   };

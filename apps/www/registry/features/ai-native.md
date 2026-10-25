@@ -12,7 +12,7 @@
 
 You are helping the user add alternate Markdown/MDX versions and `llms.txt` indexes to an existing Nimbus docs site. Their generated content is deterministic on every deployment provider.
 
-Read this entire file before making changes. The target project should already depend on `nimbus-docs` and use the starter-style routes/layouts.
+Read this entire file before making changes. The target project should already depend on `@cloudflare/nimbus-docs` and use the starter-style routes/layouts.
 
 ## What to add
 
@@ -22,7 +22,7 @@ Add the same user-owned files the canonical starter ships:
 - `src/pages/[...slug]/index.mdx.ts`
 - `src/pages/llms.txt.ts`
 - `src/pages/llms-full.txt.ts`
-- `src/pages/[section]/llms.txt.ts`
+- `src/pages/[...section]/llms.txt.ts`
 - `src/pages/robots.txt.ts`
 - `src/components/AgentDirective.astro`
 
@@ -30,120 +30,47 @@ Then wire the layout/page props:
 
 - `src/layouts/BaseLayout.astro` imports `AgentDirective`, accepts `markdownUrl`, emits `<link rel="alternate" type="text/markdown">`, and renders `<AgentDirective />` when `markdownUrl` exists.
 - `src/layouts/DocsLayout.astro` accepts `markdownUrl` and forwards it to `BaseLayout`.
-- `src/pages/[...slug].astro` computes `markdownUrl` for docs entries and passes it to `DocsLayout`.
+- `src/pages/[...slug].astro` passes the page's `markdownUrl` from `getDocsPage(Astro)` to `DocsLayout`.
 
-Do not add an `ai` config block or an MCP server. Nimbus prepares the endpoint payloads at build time, while each endpoint may be prerendered or rendered on request.
+Do not add an `ai` config block or an MCP server. Nimbus prepares the endpoint payloads at build time. The agent routes render the way `rendering` renders the pages they describe.
 
 ## Reference implementation
 
-Keep all five endpoints prerendered and use the route helpers from `@cloudflare/nimbus-docs/agent-endpoints`.
+Use the route helpers from `@cloudflare/nimbus-docs/agent-endpoints`. The files below are for a site built ahead of time on `output: "static"`; after writing them, run `nimbus-docs check --fix` so they match the site's `rendering` and `output`.
 
 ```ts title="src/pages/[...slug]/index.md.ts"
-import {
-  getMarkdownPayload,
-  getMarkdownStaticPaths,
-  type MarkdownEndpointReference,
-} from "@cloudflare/nimbus-docs/agent-endpoints";
+import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
-interface SlugProps {
-  reference: MarkdownEndpointReference;
-}
-
-interface SlugContext {
-  params: { slug?: string };
-  props: Partial<SlugProps>;
-  request: Request;
-}
-
-export const getStaticPaths = async () =>
-  getMarkdownStaticPaths({
-    collection: "docs",
-    surface: "markdown",
-  });
-
-export async function GET({ params, props, request }: SlugContext) {
-  const payload = await getMarkdownPayload({
-    collection: "docs",
-    surface: "markdown",
-    slug: params.slug,
-    reference: props.reference,
-    context: { request },
-  });
-  if (!payload) return new Response("Not found", { status: 404 });
-  return new Response(payload.body, {
-    headers: { "Content-Type": payload.mediaType },
-  });
-}
+export const { GET, getStaticPaths } = markdownRoute();
 ```
 
-Create `src/pages/[...slug]/index.mdx.ts` from the same code, changing `surface: "markdown"` to `surface: "source"`.
+```ts title="src/pages/[...slug]/index.mdx.ts"
+import { markdownSourceRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
+
+export const { GET, getStaticPaths } = markdownSourceRoute();
+```
+
+These two files serve every collection, including collections added later. Do not add per-collection Markdown routes.
 
 ```ts title="src/pages/llms.txt.ts"
-import { getLlmsPayload } from "@cloudflare/nimbus-docs/agent-endpoints";
+import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-export const prerender = true;
-
-export async function GET(context: { request: Request }) {
-  const payload = await getLlmsPayload(
-    {
-      scope: "site",
-      surface: "index",
-    },
-    context,
-  );
-  if (!payload) return new Response("Not found", { status: 404 });
-  return new Response(payload.body, {
-    headers: { "Content-Type": payload.mediaType },
-  });
-}
+export const { GET } = llmsRoute();
 ```
 
-Create `src/pages/llms-full.txt.ts` from the same code, changing `surface: "index"` to `surface: "full"`.
+```ts title="src/pages/llms-full.txt.ts"
+import { llmsFullRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
 
-```ts title="src/pages/[section]/llms.txt.ts"
-import {
-  getLlmsPayload,
-  getLlmsStaticPaths,
-  type LlmsEndpointReference,
-} from "@cloudflare/nimbus-docs/agent-endpoints";
-
-export const prerender = true;
-
-interface SectionProps {
-  reference: LlmsEndpointReference;
-}
-
-interface SectionContext {
-  params: { section?: string };
-  props: Partial<SectionProps>;
-  request: Request;
-}
-
-export const getStaticPaths = async () =>
-  getLlmsStaticPaths();
-
-export async function GET({ params, props, request }: SectionContext) {
-  const reference =
-    props.reference ??
-    (params.section
-      ? ({
-          scope: "section",
-          surface: "index",
-          section: params.section,
-        } satisfies LlmsEndpointReference)
-      : null);
-  if (!reference) return new Response("Not found", { status: 404 });
-  const payload = await getLlmsPayload(reference, {
-    request,
-  });
-  if (!payload) return new Response("Not found", { status: 404 });
-  return new Response(payload.body, {
-    headers: { "Content-Type": payload.mediaType },
-  });
-}
+export const { GET } = llmsFullRoute();
 ```
+
+```ts title="src/pages/[...section]/llms.txt.ts"
+import { llmsSectionRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
+
+export const { GET, getStaticPaths } = llmsSectionRoute();
+```
+
+Each `GET` returns 404 for a missing index and, on request, a 500 without details when the index can't be read.
 
 Use the target project's existing sitemap URL pattern for `robots.txt`. Keep `AgentDirective.astro` visually hidden and link it to the current page's Markdown version and the top-level `llms.txt` index. Adapt layout import paths and props to the project instead of replacing unrelated layout behavior.
 
@@ -154,9 +81,10 @@ Run the user's package manager build command (`pnpm build`, `npm run build`, etc
 - `dist/llms.txt` exists.
 - `dist/llms-full.txt` exists and contains discoverable current documentation.
 - `dist/robots.txt` exists and includes a `Sitemap:` line.
-- `dist/<slug>/index.md` exists for docs entries.
-- `dist/<slug>/index.mdx` exists for authored docs entries.
+- `dist/<slug>/index.md` exists for every indexed page, in every collection.
+- `dist/<slug>/index.mdx` exists for every authored page. API pages have no `.mdx`.
 - Section indexes such as `dist/<section>/llms.txt` list their alternate Markdown versions.
+- `nimbus-docs check` reports no route file that doesn't match `rendering`, and the build log has no `getStaticPaths() ignored` warning.
 - HTML pages include `<link rel="alternate" type="text/markdown" ...>` for docs entries.
 - HTML pages include the hidden `[data-ai-agent-directive]` block for docs entries.
 

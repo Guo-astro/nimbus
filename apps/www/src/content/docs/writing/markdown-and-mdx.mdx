@@ -8,22 +8,6 @@ sidebar:
 
 Content is Markdown (`.md`) or MDX (`.mdx`). MDX lets you drop components straight into prose — cards, tabs, steps, asides, and anything you build.
 
-## Links under a deployment base
-
-Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Installation](/installation)`, not `[Installation](/docs/installation)`. Nimbus adds `/docs` during the build.
-
-This applies to Markdown links, reference definitions, native `<a href>` attributes, and static component `href` strings. Relative links, external URLs, fragments, query strings, code, and dynamic JSX expressions are left unchanged.
-
-For a link computed in component or route code, import `withBase` from `@cloudflare/nimbus-docs/runtime` and apply it once:
-
-```ts
-import { withBase } from "@cloudflare/nimbus-docs/runtime";
-
-const href = withBase("/installation", import.meta.env.BASE_URL);
-```
-
-Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/installation", "/docs")` intentionally produces `/docs/docs/installation`.
-
 ## The components registry
 
 Components listed in `src/components.ts` are available in every MDX file **without an import**:
@@ -62,32 +46,161 @@ A pre-build content pass checks every PascalCase tag in `src/content/**/*.mdx` a
 
 ## Admonitions
 
-Fenced `:::` directives rewrite to `<Aside>` before the compiler runs:
+In `.mdx` files, Sätteri parses fenced `:::` directives and Nimbus renders them with `<Aside>`:
 
-```md
+```mdx
 :::tip
 This becomes an Aside.
 :::
 ```
 
+### Rendered examples
+
+These callouts are authored with directive syntax and rendered through Sätteri.
+
+:::note
+A default note with **bold text**, a [link](#admonitions), and `inline code`.
+:::
+
+:::tip[Worth knowing]
+Use a title to describe the guidance in your callout.
+:::
+
+:::warning[Say "hello"]
+Quoted titles stay plain strings. The `warning` alias uses the caution variant.
+:::
+
+:::danger[`Cache-Control` header]
+Formatting in the title stays literal; body formatting such as **this** still works.
+:::
+
+::::note[Nested guidance]
+The outer note contains a tip and a source example.
+
+:::tip
+Nested callouts use the same Aside component.
+:::
+
+```mdx
+:::note
+This fenced example stays code.
+:::
+```
+::::
+
+### Syntax and behavior
+
 Built-in types: `note`, `info`, `tip`, `caution`, `warning`, `important`, `danger`. Add synonyms with `admonitions: { typeAliases: { heads: "tip" } }`. `Aside` must be in your components registry (the default starter exports it).
 
-## The Sätteri constraint
+Titles use the existing plain `title` prop. Sätteri emits the string attribute; quotes and expression-looking text are not evaluated. Markup in titles remains literal text. Directive titles must still be valid MDX syntax because Sätteri parses the document before the AST pass runs. For arbitrary text such as an unclosed `<T>` or `{`, use the direct component's string prop:
 
-Nimbus wires the Rust-based **Sätteri** markdown processor by default for speed. Consequence: remark/rehype plugins attached via `mdx({ remarkPlugins })` silently no-op. Framework validators that would normally be remark plugins run as pre-build content passes instead.
-
-If you depend on the unified ecosystem (custom remark plugins, Mermaid, math), swap the processor. First install `@astrojs/markdown-remark` — Astro's MDX integration pulls it in transitively, but pnpm won't let you import a package you haven't declared:
-
-```sh
-pnpm add "@astrojs/markdown-remark@^7.2.0"
+```mdx
+<Aside title="Use <T>">Body content.</Aside>
 ```
 
+Sätteri parses the directives and their bodies; Nimbus maps recognized directive nodes to Aside. Body indentation is not rewritten. Code examples, frontmatter, expressions and JSX attributes remain protected.
+
+Nesting and fence termination follow Sätteri's native grammar. Use a longer outer fence for nested admonitions:
+
+```mdx
+::::note
+Outer content.
+
+:::tip
+Inner content.
+:::
+::::
+```
+
+Unknown directives remain literal by default. If your Sätteri processor explicitly enables native directives, unrecognized nodes remain available to your own AST plugins. Files with standalone carriage returns also remain literal; use LF or CRLF line endings.
+
+This feature requires Nimbus's native Sätteri MDX pipeline. Compatible explicit Sätteri processors are supported. For unified or another custom processor, set `admonitions: false` and retain that processor's callout implementation. `.md` files, raw imports and files outside `admonitions.contentDirs` are unchanged. Use `admonitions.skip` for per-file opt-outs.
+
+## Heading ids and math
+
+Turn on extra Markdown syntax with `markdown.features`. New sites start with heading ids on. For math, add the `math()` plugin and `math: true`:
+
 ```ts title="astro.config.ts"
-import { unified } from "@astrojs/markdown-remark";
+import { math, tableScroll } from "@cloudflare/nimbus-docs/markdown";
 
 nimbus(config, {
-  markdown: { processor: unified({ remarkPlugins: [/* … */] }) },
+  markdown: {
+    hastPlugins: [tableScroll(), math()],
+    features: { headingAttributes: true, math: true },
+  },
 });
 ```
 
-This trades the Sätteri performance win for plugin extensibility.
+With `headingAttributes`, `## Install the CLI {#install}` gets the id `install`, so links to `#install` survive a heading change.
+
+A heading ending in other `{…}` text, such as `## GET /accounts/{account_id}`, is read as attributes too; leave the feature off if your headings end that way.
+
+Pages, generated Markdown, reusable snippets and `nimbus-docs lint` all read Markdown with the same features.
+
+### Math
+
+With `features.math` and the `math()` plugin, write math in TeX. Math is off unless you turn it on, so prose with `$` is never misread on sites that don't use it:
+
+```md
+The energy is $E = mc^2$.
+
+$$
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+```
+
+A ` ```math ` fence works like `$$`. Formulas are typeset during the build into MathML, which every current browser renders natively, so pages load no math JavaScript. Each formula carries its TeX source in the page for tools, and the page's Markdown version keeps the `$…$` source for agents.
+
+- **Prices and shell variables.** A single `$` starts inline math, so "costs $5 and $10" or `$HOME` in prose can turn into a formula. If your docs have them, use `math: { singleDollarTextMath: false }` and write inline math as `$$x^2$$`.
+- **Macros.** Give every formula the same shortcuts with `math({ macros: { "\\R": "\\mathbb{R}" } })`.
+- **Equation numbers.** `\begin{equation}` numbers an equation, and `\label{eq:name}` with `\eqref{eq:name}` refers to it.
+- **Mistakes.** A formula that can't be typeset is shown as its source, marked, and the build warns with its file and line.
+- **Your own renderer.** Remove `math()`. Math then reaches the page as `<code class="language-math">` elements, with `math-inline` or `math-display`. If you call `math()` from your own plugin or processor instead, add `import "@cloudflare/nimbus-docs/styles/math.css"` to your layout so formulas get their font and spacing.
+
+## Extending Markdown
+
+Extend Sätteri with `markdown.mdastPlugins` for Markdown AST transformations and `markdown.hastPlugins` for HTML AST transformations. Nimbus provides native plugins through `@cloudflare/nimbus-docs/markdown`:
+
+```ts title="astro.config.ts"
+import { externalLinks } from "@cloudflare/nimbus-docs/markdown";
+
+nimbus(config, {
+  markdown: { hastPlugins: [externalLinks()] },
+});
+```
+
+Remark and rehype plugins passed to `mdx()` silently do nothing, because Nimbus parses Markdown with Sätteri, not unified. Use `markdown.mdastPlugins` and `markdown.hastPlugins` instead.
+
+To keep a unified plugin you can't replace, set `markdown.processor` to a unified processor, and turn off features that need Sätteri, such as admonitions.
+
+## Links under a deployment base
+
+Write site links as logical root paths without Astro's deployment base. If the site is deployed with `base: "/docs"`, write `[Install](/guides/install)`, not `[Install](/docs/guides/install)`. Nimbus adds `/docs` during the build.
+
+This applies to Markdown links, reference definitions, native `<a href>` attributes, and static component `href` strings. Relative links, external URLs, fragments, query strings, code, and dynamic JSX expressions are left unchanged.
+
+For a link computed in component or route code, import `withBase` from `@cloudflare/nimbus-docs/runtime` and apply it once:
+
+```ts
+import { withBase } from "@cloudflare/nimbus-docs/runtime";
+
+const href = withBase("/quickstart", import.meta.env.BASE_URL);
+```
+
+Do not pass an already based path to `withBase`; with a `/docs` base, `withBase("/docs/guides/install", "/docs")` intentionally produces `/docs/docs/guides/install`.
+
+## Images under a deployment base
+
+Prefer relative image paths (`./architecture.png`) or files in `src/assets`. Astro optimizes them, and they work under any base.
+
+A file in `public/` is served under the base, and images follow Astro's rule rather than the link rule above: Nimbus adds the base to reference definitions, but not to inline images. With `base: "/docs"` and `public/architecture.png`:
+
+```md
+![Architecture](/docs/architecture.png)
+
+![Architecture][arch]
+
+[arch]: /architecture.png
+```
+
+Write the base in an inline image or `<img src>`, and leave it out of a reference definition. `nimbus-docs lint` reports either mistake with `nimbus/image-ref`, and `nimbus-docs lint --fix` repairs inline images and definitions when the file is in `public/`.

@@ -1,0 +1,82 @@
+---
+title: API versions
+description: Serve several versions of an API from one family, with a version picker that keeps readers on the same page.
+aiGenerated: true
+sidebar:
+  order: 2
+  label: Versions
+---
+
+API versions live inside the `api` entry. This is separate from the top-level `versions` option used for authored prose documentation. An entry accepts either `spec` for one version or `versions` for a family, not both. This example uses the default operation-ID routes; route policies are set independently on each version:
+
+```ts title="astro.config.ts"
+api: [
+  {
+    collection: "api",
+    label: "Acme API",
+    requireOperationId: true,
+    versions: [
+      {
+        version: "v2",
+        spec: "./src/api/openapi-v2.yaml",
+        default: true,
+        status: "ga",
+      },
+      {
+        version: "v1",
+        spec: "./src/api/openapi-v1.yaml",
+        status: "deprecated",
+      },
+    ],
+  },
+],
+```
+
+The version marked `default: true` owns `/api`; other versions mount below their version, such as `/api/v1`. If none is marked, the first version is the default. A deprecated version renders its status in the reference UI.
+
+The version picker sits in the header beside search on every API page, at every width; the recipe's route passes it to `Header`'s `actions` slot. It keeps readers on the same page when they switch versions. Nimbus links pages across versions in this order:
+
+1. **Same coordinate.** Pages that share a coordinate, such as the same `operationId`, are the same page. This link always wins.
+2. **Same method and path.** When an `operationId` changed, an operation links to the one with the same method and path, if that match is unique. A whole-segment parameter may be renamed, so `/zones/{zone_id}` matches `/zones/{id}`. Links chain, so v1 can reach v3 through v2.
+3. **No match.** An ambiguous or conflicting match links nothing, and the picker opens the other version's landing page.
+
+Route policies belong to each version in a version family. This makes URL decisions explicit when two specifications use different base paths or need different overrides.
+
+### Versions in the query
+
+A request-rendered family can keep one path per operation and select the version with a query parameter instead of a path prefix. Query mode needs `versions` and request rendering for the family, since a static file is the same whatever the query says:
+
+```ts title="astro.config.ts"
+rendering: { default: "request" },
+api: [
+  {
+    collection: "api",
+    label: "Acme API",
+    versionUrl: { in: "query" },
+    versions: [
+      { version: "v2", spec: "./src/api/openapi-v2.yaml", default: true },
+      { version: "v1", spec: "./src/api/openapi-v1.yaml" },
+      { version: "2026-11-30.preview", spec: "./src/api/openapi-preview.yaml", hidden: true },
+    ],
+  },
+],
+```
+
+Every version serves from the family's own path: `/api/pets/` is the default version, and `/api/pets/?version=v1` is `v1`. An unknown id returns the 404 page, and an empty `version` selects the default. There are no `/api/v1/` paths in this mode.
+
+An operation keeps its path across versions while its slug does. A renamed operation has a different path in each version, and the version picker links them.
+
+Inside a non-default version, every generated link carries its `version` query, so readers stay in the version they chose.
+
+To use another parameter name, set it with `versionUrl: { in: "query", param: "api-version" }` (any lowercase name). Avoid `lang`: the starter's code samples use it for the selected language.
+
+The sitemap, Markdown versions, `llms.txt` and `llms-full.txt` describe only the default version, at the plain URLs.
+
+- **Catalog.** The API catalog lists each visible version, a non-default one at its query URL with its spec at `/api/v1/openapi.json`. The homepage `Link` header lists only the default.
+- **Search engines.** Non-default pages are `noindex`, with the default page as canonical when one exists.
+- **Markdown.** Only the default version has Markdown. A `.md` URL serves the default version whatever its `version` says, or returns 404 with `bundle: false`.
+- **Hidden versions** are reached only by their query, but `hidden` isn't access control: `/nimbus-api/coordinates.json` lists them, and their spec is published unless `publishSpec: false`.
+
+If a cache sits in front of the site, its cache key must keep the version parameter and vary on `Accept`, or readers get another version's page or the wrong format.
+
+Without `versionUrl`, versions sit in the path (`{ in: "path" }`, the default). In both modes, a version id uses lowercase letters, digits, dots, and dashes, and starts and ends with a letter or digit (`2026-11-30.air`).

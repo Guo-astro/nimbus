@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { runningNimbusVersion, selectUpgradeEntries, type UpgradeEntry } from "../src/_internal/upgrades.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cli = path.join(packageRoot, "src", "cli", "index.ts");
@@ -41,6 +41,63 @@ function run(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}) {
     encoding: "utf8",
     env: { ...process.env, NO_COLOR: "1", ...env },
   });
+}
+
+function syntheticEntry(id: string, mode: UpgradeEntry["mode"]): UpgradeEntry {
+  return {
+    id,
+    introducedIn: CURRENT_VERSION,
+    mode,
+    summary: `Review ${id}.`,
+    affected: "Existing sites.",
+    instructions: ["Review the entry."],
+    verify: ["Build the site."],
+  };
+}
+
+function manifestCommand(args: string[], entries: UpgradeEntry[]) {
+  const upgrades = pathToFileURL(path.join(packageRoot, "src", "_internal", "upgrades.ts")).href;
+  const cliUrl = pathToFileURL(cli).href;
+  const source = `
+    import { UPGRADE_MANIFEST } from ${JSON.stringify(upgrades)};
+    UPGRADE_MANIFEST.entries = JSON.parse(process.env.NIMBUS_TEST_ENTRIES);
+    process.argv = [process.execPath, ${JSON.stringify(cli)}, ...JSON.parse(process.env.NIMBUS_TEST_ARGS)];
+    await import(${JSON.stringify(cliUrl)});
+  `;
+  return {
+    command: [process.execPath, "--import", tsx, "--input-type=module", "--eval", source],
+    env: {
+      ...process.env,
+      NO_COLOR: "1",
+      NIMBUS_TEST_ARGS: JSON.stringify(args),
+      NIMBUS_TEST_ENTRIES: JSON.stringify(entries),
+    },
+  };
+}
+
+function runWithManifest(cwd: string, args: string[], entries: UpgradeEntry[]) {
+  const { command: [bin, ...rest], env } = manifestCommand(args, entries);
+  return spawnSync(bin!, rest, { cwd, encoding: "utf8", env });
+}
+
+/** A project that has run its install: the running CLI is the installed one. */
+function installNimbus(root: string): void {
+  const dir = path.join(root, "node_modules", "@cloudflare", "nimbus-docs");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "@cloudflare/nimbus-docs", version: CURRENT_VERSION }));
+}
+
+function makeCleanUpgradeProject(): string {
+  const root = makeProject();
+  fs.writeFileSync(
+    path.join(root, "src", "pages", "[...slug].astro"),
+    `---\nconst title = "Docs";\n---\n<p>{title}</p>\n`,
+  );
+  fs.writeFileSync(
+    path.join(root, "nimbus.json"),
+    `${JSON.stringify({ lastReviewedNimbusVersion: "0.14.1" }, null, 2)}\n`,
+  );
+  return root;
 }
 
 test("migrate plans, diffs, applies, preserves modes, and becomes idempotent", () => {
@@ -115,6 +172,12 @@ test("migrate plans, diffs, applies, preserves modes, and becomes idempotent", (
 });
 
 test("historical jumps stay blocked until a clean consented rerun records the range", () => {
+  const expectedEntries = selectUpgradeEntries("0.11.0", CURRENT_VERSION);
+  const expectedReviewIds = expectedEntries.map(entry => entry.id);
+  // Optional entries enter this range once the package version reaches their release.
+  const expectedRequiredIds = expectedEntries.filter(entry => entry.mode !== "optional").map(entry => entry.id);
+  const expectedOptionalIds = expectedEntries.filter(entry => entry.mode === "optional").map(entry => entry.id);
+  assert.ok(expectedReviewIds.includes("partial-resolver-to-markdown"));
   const root = makeProject();
   const nimbusFile = path.join(root, "nimbus.json");
   fs.writeFileSync(nimbusFile, `${JSON.stringify({ lastReviewedNimbusVersion: "0.11.0" }, null, 2)}\n`);
@@ -124,7 +187,8 @@ test("historical jumps stay blocked until a clean consented rerun records the ra
   const plan = JSON.parse(planned.stdout);
   assert.equal(plan.status, "blocked");
   assert.equal(plan.baseline.fromVersion, "0.11.0");
-  assert.equal(plan.reviews.length, 9);
+  assert.equal(plan.baseline.targetVersion, CURRENT_VERSION);
+  assert.deepEqual(plan.reviews.map((review: { id: string }) => review.id), expectedReviewIds);
   assert.equal(plan.migrations[0].state, "available");
   const dryRun = run(root, ["migrate", "--dry-run", "--from", "0.11.0"]);
   assert.equal(dryRun.status, 1, dryRun.stderr);
@@ -137,20 +201,138 @@ test("historical jumps stay blocked until a clean consented rerun records the ra
 
   const pendingCheck = run(root, ["check", "--migrations", "--json"]);
   assert.equal(pendingCheck.status, 1, pendingCheck.stderr);
-  assert.equal(JSON.parse(pendingCheck.stdout).findings.length, 9);
-  assert.ok(JSON.parse(pendingCheck.stdout).findings.every((finding: { code: string }) => finding.code === "nimbus/upgrade-review"));
+  const pendingFindings = JSON.parse(pendingCheck.stdout).findings as Array<{
+    code: string;
+    severity: string;
+    message: string;
+    migration?: { id: string };
+  }>;
+  const requiredFindings = pendingFindings.filter((finding) => finding.code === "nimbus/upgrade-review");
+  const optionalFindings = pendingFindings.filter((finding) => finding.code === "nimbus/upgrade-optional");
+  assert.equal(requiredFindings.length + optionalFindings.length, pendingFindings.length);
+  assert.deepEqual(requiredFindings.map((finding) => finding.migration?.id), expectedRequiredIds);
+  assert.equal(optionalFindings.length, expectedOptionalIds.length);
+  for (const [index, id] of expectedOptionalIds.entries()) {
+    assert.equal(optionalFindings[index].severity, "info");
+    assert.match(optionalFindings[index].message, new RegExp(`\`${id}\``));
+  }
 
   const completed = run(root, ["migrate", "--yes", "--json"]);
   assert.equal(completed.status, 0, completed.stderr);
   const result = JSON.parse(completed.stdout);
   assert.equal(result.status, "passed");
   assert.equal(result.baseline.recorded, true);
-  assert.equal(result.reviews.length, 9);
+  assert.deepEqual(result.reviews.map((review: { id: string }) => review.id), expectedReviewIds);
   assert.equal(JSON.parse(fs.readFileSync(nimbusFile, "utf8")).lastReviewedNimbusVersion, CURRENT_VERSION);
 
   const checked = run(root, ["check", "--migrations", "--json"]);
   assert.equal(checked.status, 0, checked.stderr);
   assert.equal(JSON.parse(checked.stdout).findings.length, 0);
+});
+
+test("with --cwd, the printed command runs from where migrate was run", () => {
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cli-migrate-outer-"));
+  roots.push(outer);
+  fs.writeFileSync(path.join(outer, "package.json"), `{ "name": "workspace" }`);
+  fs.writeFileSync(path.join(outer, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+  const site = path.join(outer, "site");
+  fs.renameSync(makeCleanUpgradeProject(), site);
+  fs.writeFileSync(
+    path.join(site, "package.json"),
+    JSON.stringify({ devDependencies: { "@cloudflare/nimbus-docs": "*" } }),
+  );
+  fs.writeFileSync(path.join(site, "pnpm-lock.yaml"), "lockfileVersion: 9\n");
+  installNimbus(site);
+
+  const result = runWithManifest(outer, ["migrate", "--dry-run", "--cwd", "site"], [syntheticEntry("optional-one", "optional")]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(
+    result.stdout.includes(`pnpm dlx @cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd 'site' --yes`),
+    result.stdout,
+  );
+});
+
+test("synthetic optional entries are informational across migrate, check, and outdated", () => {
+  const root = makeCleanUpgradeProject();
+  const entries = [
+    syntheticEntry("optional-one", "optional"),
+    syntheticEntry("optional-two", "optional"),
+  ];
+
+  const planned = runWithManifest(root, ["migrate", "--json"], entries);
+  assert.equal(planned.status, 0, planned.stderr);
+  const report = JSON.parse(planned.stdout);
+  assert.equal(report.status, "passed");
+  assert.equal(report.baseline.recorded, false);
+  assert.deepEqual(report.reviews.map((entry: UpgradeEntry) => entry.mode), ["optional", "optional"]);
+
+  const human = runWithManifest(root, ["migrate", "--dry-run"], entries);
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /Optional upgrade entries:\noptional-one: optional/);
+
+  const checked = runWithManifest(root, ["check", "--migrations", "--json"], entries);
+  assert.equal(checked.status, 0, checked.stderr || checked.stdout);
+  const checkResult = JSON.parse(checked.stdout);
+  assert.ok(checkResult.findings.every((finding: { code: string; severity: string }) =>
+    finding.code === "nimbus/upgrade-optional" && finding.severity === "info"
+  ));
+  assert.ok(
+    checkResult.findings.every((finding: { message: string }) =>
+      /Optional upgrade `[^`]+`: listed until `[^`]*migrate[^`]*` records \S+ as reviewed \(answer yes, or pass --yes\)\./.test(finding.message),
+    ),
+    JSON.stringify(checkResult.findings.map((f: { message: string }) => f.message)),
+  );
+
+  const template = path.join(root, "template-source");
+  fs.mkdirSync(path.join(template, "src"), { recursive: true });
+  fs.writeFileSync(path.join(template, "package.json"), "{}\n");
+  fs.writeFileSync(
+    path.join(root, "nimbus.json"),
+    `${JSON.stringify({
+      lastReviewedNimbusVersion: "0.14.1",
+      templatesTag: "templates-v0.7.6",
+      variant: "template",
+      install: { root: "src" },
+      components: [],
+    }, null, 2)}\n`,
+  );
+  const outdated = runWithManifest(root, ["outdated", "--json", "--template-dir", template], entries);
+  assert.equal(outdated.status, 0, outdated.stderr);
+  const outdatedResult = JSON.parse(outdated.stdout);
+  assert.equal(outdatedResult.status, "current");
+  assert.equal(outdatedResult.summary.packageApis, 2);
+  assert.equal(outdatedResult.summary.requiredPackageApis, 0);
+  assert.deepEqual(outdatedResult.packageApis.map((entry: { mode: string }) => entry.mode), ["optional", "optional"]);
+  const outdatedHuman = runWithManifest(root, ["outdated", "--template-dir", template], entries);
+  assert.equal(outdatedHuman.status, 0, outdatedHuman.stderr);
+  // Optional-only reviews change nothing, but the baseline is behind until recorded.
+  assert.match(outdatedHuman.stdout, /Package APIs: nothing to change; review not recorded/);
+  assert.ok(outdatedResult.warnings.some((warning: { code: string }) => warning.code === "reviewed-behind"));
+  assert.match(outdatedHuman.stdout, /Optional upgrade entries: 2/);
+
+  const completed = runWithManifest(root, ["migrate", "--yes", "--json"], entries);
+  assert.equal(completed.status, 0, completed.stderr);
+  assert.equal(JSON.parse(completed.stdout).baseline.recorded, true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(root, "nimbus.json"), "utf8")).lastReviewedNimbusVersion, CURRENT_VERSION);
+});
+
+test("synthetic required entries still block alone and mixed with optional entries", () => {
+  for (const entries of [
+    [syntheticEntry("required-one", "review-required")],
+    [syntheticEntry("optional-one", "optional"), syntheticEntry("required-one", "review-required")],
+  ]) {
+    const root = makeCleanUpgradeProject();
+    const result = runWithManifest(root, ["migrate", "--json"], entries);
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, "blocked");
+  }
+
+  const root = makeCleanUpgradeProject();
+  const rendered = runWithManifest(root, ["migrate", "--dry-run"], [
+    syntheticEntry("optional-one", "optional"),
+    syntheticEntry("required-one", "review-required"),
+  ]);
+  assert.ok(rendered.stdout.indexOf("Required upgrade reviews:") < rendered.stdout.indexOf("Optional upgrade entries:"));
 });
 
 test("runtime imports cannot bypass migration completion", () => {
@@ -240,7 +422,7 @@ test("missing baselines require --from before completion", () => {
 
   const task = run(root, ["migrate", "--cwd", ".", "--src-dir", "src", "--from", "0.11.0", "--print"]);
   assert.equal(task.status, 0, task.stderr);
-  assert.match(task.stdout, /nimbus-docs migrate --cwd '\.' --src-dir 'src' --from 0\.11\.0 --yes/);
+  assert.ok(task.stdout.includes(`@cloudflare/nimbus-docs@${CURRENT_VERSION} migrate --cwd '.' --src-dir 'src' --from 0.11.0 --yes`), task.stdout);
   assert.match(task.stdout, /rerun with consent before project verification/);
 });
 
@@ -298,8 +480,13 @@ test("diff exits nonzero while a clean baseline is still pending", () => {
     JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "https://pkg.pr.new/@cloudflare/nimbus-docs@123" } }),
   );
   fs.writeFileSync(path.join(root, "nimbus.json"), JSON.stringify({ lastReviewedNimbusVersion: null, preview: { pr: "123" } }));
+  installNimbus(root);
   const preview = run(root, ["migrate", "--diff"]);
   assert.equal(preview.status, 0, preview.stderr);
+  const printed = run(root, ["migrate", "--print"]);
+  assert.equal(printed.status, 0, printed.stderr);
+  assert.match(printed.stdout, /This site runs a preview build .*Upgrade reviews start once it's on a released version\./);
+  assert.doesNotMatch(printed.stdout, /No known Nimbus migrations/);
 });
 
 test("check and outdated expose the same pending migration", () => {
@@ -321,6 +508,7 @@ test("check and outdated expose the same pending migration", () => {
   const outdatedResult = JSON.parse(outdated.stdout);
   assert.equal(outdatedResult.status, "partial");
   assert.equal(outdatedResult.packageApis[0].migrationId, "partial-resolver-to-markdown");
+  assert.equal(outdatedResult.packageApis[0].mode, "automatic");
   assert.equal(outdatedResult.packageApis[0].action.automatic, true);
   assert.deepEqual(outdatedResult.packageApis[0].action.command.args.slice(-3), ["migrate", "--yes", "--json"]);
   assert.equal(outdatedResult.errors[0].code, "no-provenance");
@@ -517,6 +705,97 @@ test("blocked output is vendor-neutral and never probes a local agent", () => {
   const packageAction = JSON.parse(outdated.stdout).packageApis[0].action;
   assert.equal(packageAction.automatic, false);
   assert.deepEqual(packageAction.command.args.slice(-2), ["migrate", "--print"]);
+});
+
+test("a baseline behind with no entries in range passes and says so", () => {
+  const root = makeCleanUpgradeProject();
+
+  const json = runWithManifest(root, ["migrate", "--dry-run", "--json"], []);
+  assert.equal(json.status, 0, json.stderr);
+  const report = JSON.parse(json.stdout);
+  assert.equal(report.status, "passed");
+  assert.equal(report.baseline.recorded, false);
+
+  const human = runWithManifest(root, ["migrate", "--dry-run"], []);
+  assert.equal(human.status, 0, human.stderr);
+  assert.match(human.stdout, /No migrations or upgrade reviews between Nimbus 0\.14\.1 and /);
+  assert.match(human.stdout, /nimbus-docs migrate --yes/);
+
+  // With nothing to diff, --diff reports the same result and next step.
+  for (const args of [["migrate", "--diff"], ["migrate", "--dry-run", "--diff"]]) {
+    const diff = runWithManifest(root, args, []);
+    assert.equal(diff.status, 0, diff.stderr);
+    assert.equal(diff.stdout, human.stdout, args.join(" "));
+  }
+
+  const required = runWithManifest(root, ["migrate", "--dry-run"], [
+    syntheticEntry("required-one", "review-required"),
+  ]);
+  assert.equal(required.status, 1, required.stderr);
+});
+
+test("an up-to-date project says so on a dry run", () => {
+  const root = makeCleanUpgradeProject();
+  fs.writeFileSync(
+    path.join(root, "nimbus.json"),
+    `${JSON.stringify({ lastReviewedNimbusVersion: CURRENT_VERSION }, null, 2)}\n`,
+  );
+  for (const args of [["migrate", "--dry-run"], ["migrate", "--dry-run", "--diff"]]) {
+    const human = run(root, args);
+    assert.equal(human.status, 0, human.stderr);
+    assert.match(human.stdout, new RegExp(`Nimbus ${CURRENT_VERSION.replaceAll(".", "\\.")} is up to date`), args.join(" "));
+  }
+});
+
+test("declining the record prompt in a terminal says how to record it later", { skip: process.platform === "win32" }, (context) => {
+  const root = makeCleanUpgradeProject();
+  const before = fs.readFileSync(path.join(root, "nimbus.json"), "utf8");
+  const { command, env } = manifestCommand(["migrate"], []);
+  const scriptArgs = process.platform === "darwin"
+    ? ["-q", "/dev/null", ...command]
+    : ["-q", "-c", command.map(shellQuote).join(" "), "/dev/null"];
+  const result = spawnSync("script", scriptArgs, { cwd: root, encoding: "utf8", input: "n\n", env });
+  if (result.error && (result.error as NodeJS.ErrnoException).code === "ENOENT") {
+    context.skip("script is unavailable");
+    return;
+  }
+  const output = `${result.stdout}${result.stderr}`;
+  if (/tcgetattr\/ioctl/.test(output)) {
+    context.skip("script requires a controlling terminal");
+    return;
+  }
+  assert.match(output, /Record the installed Nimbus version as reviewed\?/);
+  assert.equal(output.match(/No migrations or upgrade reviews between/g)?.length, 1, output);
+  assert.equal(output.match(/rerun with consent/g)?.length, 1, output);
+  assert.match(output, /nimbus-docs migrate --yes/);
+  assert.doesNotMatch(output, /No Nimbus migrations detected|is up to date/);
+  assert.equal(fs.readFileSync(path.join(root, "nimbus.json"), "utf8"), before);
+});
+
+test("an up-to-date project reports it once when migrate records nothing", () => {
+  const root = makeCleanUpgradeProject();
+  fs.writeFileSync(
+    path.join(root, "nimbus.json"),
+    `${JSON.stringify({ lastReviewedNimbusVersion: CURRENT_VERSION }, null, 2)}\n`,
+  );
+  const result = runWithManifest(root, ["migrate", "--yes"], []);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.match(/is up to date/g)?.length, 1, result.stdout);
+});
+
+test("before dependencies are installed, migrate records nothing and says to install", () => {
+  const root = makeProject();
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ dependencies: { "@cloudflare/nimbus-docs": "^0.15.0" } }),
+  );
+  fs.writeFileSync(path.join(root, "package-lock.json"), "{}");
+  const before = fs.readFileSync(path.join(root, "nimbus.json"), "utf8").replace(CURRENT_VERSION, "0.15.0");
+  fs.writeFileSync(path.join(root, "nimbus.json"), before);
+  const result = run(root, ["migrate", "--yes"]);
+  assert.notEqual(result.status, 0, result.stdout);
+  assert.match(result.stdout + result.stderr, /@cloudflare\/nimbus-docs is not installed in this project\. Install dependencies first with `npm install`/);
+  assert.equal(fs.readFileSync(path.join(root, "nimbus.json"), "utf8"), before);
 });
 
 function shellQuote(value: string): string {

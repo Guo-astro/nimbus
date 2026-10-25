@@ -132,7 +132,11 @@ export function initTabs(config: TabsConfig): TabsInstance {
       // `tabs[index]!`: `activate(index)` is only called with validated indices.
       const label = getLabel(tabs[index]!);
       const store = getStorage(sync.storage === "session" ? "session" : "local");
-      store?.setItem(sync.key, label);
+      try {
+        store?.setItem(sync.key, label);
+      } catch {
+        // Persistence is optional; a full storage quota must not prevent sync.
+      }
       window.dispatchEvent(
         new CustomEvent("ui-tab-sync", {
           detail: { key: sync.key, label, origin: container },

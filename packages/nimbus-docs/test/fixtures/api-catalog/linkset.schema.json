@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nimbus-docs.com/schemas/api-catalog-linkset.json",
+  "title": "RFC 9264 JSON linkset as used by an RFC 9727 API catalog (Nimbus transcription)",
+  "type": "object",
+  "required": ["linkset"],
+  "additionalProperties": false,
+  "properties": {
+    "linkset": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["anchor"],
+        "properties": {
+          "anchor": { "type": "string", "format": "uri" },
+          "service-desc": { "$ref": "#/$defs/targets" },
+          "service-doc": { "$ref": "#/$defs/targets" },
+          "service-meta": { "$ref": "#/$defs/targets" },
+          "status": { "$ref": "#/$defs/targets" },
+          "item": { "$ref": "#/$defs/targets" },
+          "api-catalog": { "$ref": "#/$defs/targets" }
+        },
+        "additionalProperties": { "$ref": "#/$defs/targets" }
+      }
+    }
+  },
+  "$defs": {
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["href"],
+        "properties": {
+          "href": { "type": "string", "format": "uri-reference" },
+          "type": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
+          "title": { "type": "string" },
+          "media": { "type": "string" },
+          "hreflang": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

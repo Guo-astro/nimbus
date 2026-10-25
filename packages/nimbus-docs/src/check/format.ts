@@ -4,7 +4,8 @@
  * `notes`, a per-scope `scopes[]` (derived status + notes + optional reason),
  * and the flat `findings[]`. The pretty form is a *lookup* from those signals,
  * never a guess from an error count: the scope glyph is `✗ / ○ / ✓` off
- * `status`, notes render as dim trailing text on a `✓` line, and the headline
+ * `status` (`◐` for an evaluated scope with notes, which render as dim
+ * trailing text), and the headline
  * says "Ready" / "Buildable" / "Couldn't fully verify" / "Not buildable"
  * strictly per the glyph rule.
  */
@@ -24,6 +25,18 @@ export interface PrettyOptions {
   color: boolean;
   quiet?: boolean;
   invocation: string;
+  /** The plain `check` command, in the site's package manager. */
+  rerun: string;
+  /**
+   * Fixes `--fix` skipped: prompts for a value need a terminal, installs need
+   * `--yes`. `invocation` is then the `check --fix` command to build on.
+   */
+  skippedFixes?: ReadonlyArray<"needs-terminal" | "needs-yes">;
+  /**
+   * False without a terminal (an agent, CI, piped output): `--fix` there
+   * skips fixes that need input and installs without `--yes`.
+   */
+  interactive?: boolean;
 }
 
 const SCOPE_LABELS: Record<CheckScope, string> = {
@@ -32,6 +45,11 @@ const SCOPE_LABELS: Record<CheckScope, string> = {
   migrations: "Migrations",
   authoring: "Authoring",
   types: "Types",
+};
+
+/** What an evaluated scope covers, when that's less than its name suggests. */
+const SCOPE_COVERAGE: Partial<Record<CheckScope, string>> = {
+  types: "(.ts and .tsx files). .astro files aren't type-checked here: run `astro check`.",
 };
 
 export function formatCheckJson(result: CheckResult): string {
@@ -58,6 +76,7 @@ export function formatCheckJson(result: CheckResult): string {
           ...(n.requiresInput ? { requiresInput: true } : {}),
         })),
       })),
+      ...(result.collections ? { collections: result.collections.map(({ name, url, source }) => ({ name, url, source })) } : {}),
       findings: result.findings.map((f) => ({
         scope: f.scope,
         code: f.code,
@@ -84,11 +103,33 @@ export function formatCheckPretty(result: CheckResult, opts: PrettyOptions): str
   for (const scope of result.scopes) {
     lines.push(...renderScope(scope, opts, paint));
   }
+  // Only when a route moves a collection: otherwise every URL is `/<name>`.
+  if (!opts.quiet && result.collections?.some((collection) => collection.moved)) {
+    const width = (key: "name" | "url") => Math.max(...result.collections!.map((collection) => collection[key].length));
+    lines.push("", "  Collection URLs");
+    for (const collection of result.collections)
+      lines.push(`    ${collection.name.padEnd(width("name"))}  ${collection.url.padEnd(width("url"))}  ${paint(COLORS.dim, collection.source)}`);
+  }
 
   lines.push("");
   lines.push(...renderHeadline(result, opts, paint));
+  for (const hint of skippedFixHints(result, opts)) lines.push(paint(COLORS.yellow, hint));
   lines.push("");
   return lines.join("\n");
+}
+
+function skippedFixHints(result: CheckResult, opts: PrettyOptions): string[] {
+  // With --quiet, a skipped fix for a hidden warning isn't worth a line.
+  const shown = result.findings.filter((f) => f.fixable && (!opts.quiet || f.severity === "error"));
+  const skipped = opts.skippedFixes ?? [];
+  const hints: string[] = [];
+  if (skipped.includes("needs-yes") && shown.some((f) => !f.fix?.requiresInput)) {
+    hints.push(`  → Some fixes install packages: run \`${opts.invocation} --yes\` to allow them`);
+  }
+  if (skipped.includes("needs-terminal") && shown.some((f) => f.fix?.requiresInput)) {
+    hints.push(`  → Some fixes ask for a value: edit it by hand, or run \`${opts.invocation}\` in an interactive terminal`);
+  }
+  return hints;
 }
 
 function renderScope(
@@ -99,12 +140,13 @@ function renderScope(
   const label = SCOPE_LABELS[scope.scope].padEnd(14);
   const errors = scope.findings.filter((f) => f.severity === "error");
   const warns = opts.quiet ? [] : scope.findings.filter((f) => f.severity === "warn");
+  const infos = opts.quiet ? [] : scope.findings.filter((f) => f.severity === "info");
 
   if (scope.status === "failed" && errors.length > 0) {
     const [first, ...rest] = errors as [CheckFinding, ...CheckFinding[]];
     const out = [`  ${label}${paint(COLORS.red, "✗")} ${first.message}`];
     out.push(...findingDetail(first, paint));
-    for (const f of [...rest, ...warns]) out.push(...renderFinding(f, paint));
+    for (const f of [...rest, ...warns, ...infos]) out.push(...renderFinding(f, paint));
     return out;
   }
 
@@ -113,12 +155,15 @@ function renderScope(
     return [`  ${label}${paint(COLORS.yellow, "○")} not evaluated — ${paint(COLORS.dim, reason)}`];
   }
 
+  // A scope that ran but skipped some of its checks is only partly checked.
   const trailing = scope.notes.map((n) => noteTrail(n)).join(" · ");
-  const summary = trailing
-    ? `ok · ${paint(COLORS.dim, trailing)}`
-    : "ok";
-  const out = [`  ${label}${paint(COLORS.green, "✓")} ${summary}`];
-  for (const f of warns) out.push(...renderFinding(f, paint));
+  const coverage = SCOPE_COVERAGE[scope.scope];
+  const out = [
+    trailing
+      ? `  ${label}${paint(COLORS.yellow, "◐")} ok, partly checked · ${paint(COLORS.dim, trailing)}`
+      : `  ${label}${paint(COLORS.green, "✓")} ok${coverage ? ` ${paint(COLORS.dim, coverage)}` : ""}`,
+  ];
+  for (const f of [...warns, ...infos]) out.push(...renderFinding(f, paint));
   return out;
 }
 
@@ -131,8 +176,11 @@ function renderFinding(
   f: CheckFinding,
   paint: (code: string, text: string) => string,
 ): string[] {
-  const mark =
-    f.severity === "error" ? paint(COLORS.red, "✗") : paint(COLORS.yellow, "!");
+  const mark = f.severity === "error"
+    ? paint(COLORS.red, "✗")
+    : f.severity === "warn"
+      ? paint(COLORS.yellow, "!")
+      : paint(COLORS.dim, "i");
   return [`    ${mark} ${f.message}`, ...findingDetail(f, paint)];
 }
 
@@ -172,7 +220,7 @@ function renderHeadline(
   }
 
   if (result.status === "passed") return passedHeadline(result, opts, secs, paint);
-  return partialHeadline(result, secs, paint);
+  return partialHeadline(result, opts, secs, paint);
 }
 
 /**
@@ -183,6 +231,7 @@ function renderHeadline(
  */
 function partialHeadline(
   result: CheckResult,
+  opts: PrettyOptions,
   secs: string,
   paint: (code: string, text: string) => string,
 ): string[] {
@@ -199,7 +248,14 @@ function partialHeadline(
     const out = [paint(COLORS.green, `  ✓ Buildable — checked env + structure in ${secs}s`)];
     if (gapLine) {
       out.push(gapLine);
-      out.push(paint(COLORS.dim, `    → run a build, then \`nimbus-docs check\` again`));
+      // A build can't close a gap that waits on input (a preview's missing
+      // upgrade baseline); its scope line above says what it needs.
+      const buildHelps = result.scopes.some(
+        (s) => s.status === "not_evaluated" || s.notes.some((n) => !n.requiresInput),
+      );
+      if (buildHelps) {
+        out.push(paint(COLORS.dim, `    → run a build, then \`${opts.rerun}\` again`));
+      }
     }
     return out;
   }
@@ -213,7 +269,7 @@ function partialHeadline(
   const out =
     passed.length > 0
       ? [paint(COLORS.green, `  ✓ ${passed.join(" + ")} checked in ${secs}s`)]
-      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`nimbus-docs check\` again`)];
+      : [paint(COLORS.yellow, `  ○ Nothing fully verified yet — run a build, then \`${opts.rerun}\` again`)];
   if (gapLine) out.push(gapLine);
   return out;
 }
@@ -262,7 +318,13 @@ function problemHeadline(
   // `blocked` is verified non-buildable; `unknown` is unverified — don't claim either.
   const lead = result.readiness === "blocked" ? "Not buildable — " : "";
   let head = `  ✗ ${lead}${parts.join(" · ")}`;
-  if (autoFixable + needsInput > 0) head += ` → run \`${opts.invocation}\``;
+  // Before an install, the next step is the install its finding names; `--fix` can't do it.
+  const installFirst = visible.some((f) => f.code === "nimbus/dependencies-missing");
+  if (autoFixable + needsInput > 0 && !opts.skippedFixes?.length && !installFirst) {
+    if (opts.interactive !== false) head += ` → run \`${opts.invocation}\``;
+    else if (autoFixable > 0) head += ` → run \`${opts.invocation} --yes\``;
+    else head += ` → edit by hand (${needsInput === 1 ? "it needs a choice" : "each needs a choice"} only you can make)`;
+  }
   return [paint(COLORS.red, head), checkedIn];
 }
 
@@ -312,6 +374,10 @@ function gapLabel(scope: CheckScope, note: Note): string {
       return "opt-in authoring rules";
     case "nimbus/internal-link-skipped":
       return "link checking";
+    case "nimbus/api-collections-skipped":
+      return "API collection checks";
+    case "nimbus/rendering-policy-skipped":
+      return "rendering policy checks";
     default:
       return SCOPE_LABELS[scope].toLowerCase();
   }

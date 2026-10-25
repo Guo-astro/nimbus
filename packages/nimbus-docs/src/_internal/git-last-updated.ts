@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 import { runtimeWarn } from "./runtime-warn.js";
+import { isContentSourcePath } from "./source-paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,12 +51,14 @@ export function parseGitLog(text: string): Map<string, Date> {
   return map;
 }
 
-async function detectShallow(): Promise<boolean> {
+// A shallow clone's history stops at the fetch depth, so every file would get
+// the newest fetched commit's date. No date is better than a wrong one.
+async function detectShallow(cwd?: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync(
       "git",
       ["rev-parse", "--is-shallow-repository"],
-      { windowsHide: true },
+      { cwd, windowsHide: true },
     );
     return stdout.trim() === "true";
   } catch {
@@ -111,24 +114,45 @@ function streamBulk(map: DateSink = cache, cwd?: string): Promise<void> {
   });
 }
 
-export async function buildLastUpdatedIndex(
-  cwd: string,
-): Promise<Record<string, string>> {
+export interface LastUpdatedIndex {
+  /** Project-relative content path → ISO date. Empty on a shallow clone. */
+  dates: Record<string, string>;
+  /** The repository is a shallow clone, so no dates were read. */
+  shallow: boolean;
+}
+
+/** The one `git log` pass of a build, from the project root. */
+export async function loadLastUpdatedIndex(cwd: string): Promise<LastUpdatedIndex> {
+  if (await detectShallow(cwd)) return { dates: {}, shallow: true };
   const dates = new Map<string, Date>();
   try {
     await streamBulk(dates, cwd);
   } catch {
-    return {};
+    return { dates: {}, shallow: false };
   }
-  return Object.fromEntries(
-    [...dates].map(([filePath, date]) => [filePath, date.toISOString()]),
-  );
+  return {
+    dates: Object.fromEntries(
+      [...dates].map(([filePath, date]) => [filePath, date.toISOString()]),
+    ),
+    shallow: false,
+  };
 }
+
+export async function buildLastUpdatedIndex(
+  cwd: string,
+): Promise<Record<string, string>> {
+  return (await loadLastUpdatedIndex(cwd)).dates;
+}
+
+export const SHALLOW_CLONE_MESSAGE =
+  "this is a shallow clone, so pages get no git dates (sitemap lastmod, " +
+  '"Last updated"). Run git fetch --unshallow, or set fetch-depth: 0 in CI, to restore them.';
 
 async function doBulkLoad(): Promise<void> {
   try {
     isShallow = await detectShallow();
-    await streamBulk();
+    if (isShallow) runtimeWarn(SHALLOW_CLONE_MESSAGE);
+    if (!isShallow) await streamBulk();
     bulkLoaded = true;
     bulkCount = cache.size;
   } catch {
@@ -143,6 +167,9 @@ export async function getLastUpdatedFromGit(
   filePath: string,
 ): Promise<Date | undefined> {
   if (!filePath) return undefined;
+  // A content-source snapshot has no history of its own (its `.git` is
+  // deleted), so its pages have no date, and they never count as misses.
+  if (isContentSourcePath(filePath)) return undefined;
   const key = norm(filePath);
   if (cache.has(key)) return cache.get(key);
 

@@ -9,9 +9,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, posix, relative, sep } from "node:path";
 
 import * as p from "@clack/prompts";
+import { valid } from "semver";
 
 import { assertInsideSrc } from "./component.js";
 import { invocation } from "./pm.js";
+import { progress } from "./progress.js";
 import {
   NIMBUS_JSON,
   bytesHash,
@@ -156,6 +158,53 @@ export async function reconstructComponents(
   return { components, stats };
 }
 
+interface KeptProvenance {
+  version: string | null;
+  lastReviewedNimbusVersion: string | null;
+  templatesTag: string | null;
+  templatesTagByFile?: Record<string, string>;
+  variant: string | null;
+  preview?: Record<string, unknown>;
+  serverOutput?: { adapter: string; [key: string]: unknown };
+}
+
+/**
+ * The provenance an existing nimbus.json already records, kept through
+ * `--force`: only components and install paths are rebuilt, so the reviewed
+ * baseline, the starter version, a preview's record, and the server-output
+ * opt-in survive. Each field is kept only when valid, and read without the
+ * strict parser because `--force` exists for files that don't parse.
+ */
+function keptProvenance(cwd: string): KeptProvenance {
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(cwd, NIMBUS_JSON), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) raw = parsed as Record<string, unknown>;
+  } catch {
+    // Unreadable: rebuild from scratch.
+  }
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  const object = (value: unknown) =>
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  const baseline = raw.lastReviewedNimbusVersion;
+  const preview = object(raw.preview);
+  const serverOutput = object(raw.serverOutput);
+  const byFile = Object.entries(object(raw.templatesTagByFile) ?? {}).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
+  );
+  return {
+    version: typeof raw.version === "string" && valid(raw.version) === raw.version ? raw.version : null,
+    lastReviewedNimbusVersion: typeof baseline === "string" && valid(baseline) === baseline ? baseline : null,
+    templatesTag: text(raw.templatesTag),
+    ...(byFile.length > 0 ? { templatesTagByFile: Object.fromEntries(byFile) } : {}),
+    variant: text(raw.variant),
+    ...(preview ? { preview } : {}),
+    ...(serverOutput && typeof serverOutput.adapter === "string"
+      ? { serverOutput: serverOutput as { adapter: string } }
+      : {}),
+  };
+}
+
 export interface InitFlags {
   force?: boolean;
   root?: string;
@@ -179,7 +228,7 @@ export async function initCommand(flags: InitFlags): Promise<void> {
   }
 
   p.intro("nimbus-docs init"); // banner label, not a runnable hint
-  const spinner = p.spinner();
+  const spinner = progress();
   spinner.start("Reconstructing provenance from installed components");
 
   const { components, stats } = await reconstructComponents({
@@ -202,16 +251,16 @@ export async function initCommand(flags: InitFlags): Promise<void> {
 
   spinner.stop(`Scanned ${components.length} component${components.length === 1 ? "" : "s"}.`);
 
+  const kept = keptProvenance(cwd);
+  // The create-nimbus-docs version and templates tag aren't recoverable from
+  // the repo alone; the upgrade commands read `reconstructed` to know starter
+  // provenance is partial.
+  const starterKnown = kept.version !== null && (kept.templatesTag !== null || kept.preview !== undefined);
   const record: NimbusJson = {
     $schema: SCHEMA_URL,
-    // create-nimbus-docs version + templates tag aren't recoverable from the
-    // repo alone; the upgrade commands read `reconstructed` to know starter provenance is partial.
-    version: null,
-    lastReviewedNimbusVersion: null,
-    templatesTag: null,
-    variant: null,
+    ...kept,
     registry: registrySource(),
-    reconstructed: true,
+    ...(starterKnown ? {} : { reconstructed: true }),
     install: { root, aliases: { "@/*": `${root}/*` } },
     components,
   };
@@ -223,11 +272,13 @@ export async function initCommand(flags: InitFlags): Promise<void> {
   if (stats.unverified) parts.push(`${stats.unverified} unverified (offline)`);
   if (stats.handAuthored) parts.push(`${stats.handAuthored} hand-authored (not in any registry)`);
   p.log.info(parts.join("\n  "));
-  p.log.info(
-    "Starter provenance (version, templatesTag, variant) couldn't be recovered from the " +
+  if (!starterKnown) {
+    p.log.info(
+      "Starter provenance (version, templatesTag, variant) couldn't be recovered from the " +
       "repo — set them by hand in nimbus.json if you know the create-nimbus-docs version " +
       "you scaffolded with. Commit nimbus.json so upgrades can track what you own.",
-  );
+    );
+  }
 
   await reportReadiness(cwd);
 }
@@ -255,7 +306,7 @@ async function reportReadiness(cwd: string): Promise<void> {
           `Set up, but env couldn't be fully verified: ${gap.reason} Run \`${invocation("check")}\` after a build.`,
         );
       } else {
-        p.outro(`✓ set up — run \`npm run build\`, or \`${invocation("check")}\` anytime`);
+        p.outro(`✓ set up — run a build, or \`${invocation("check")}\` anytime`);
       }
       return;
     }
@@ -268,6 +319,6 @@ async function reportReadiness(cwd: string): Promise<void> {
       `Run \`${invocation("check")}\` for the full report, or \`${invocation("check --fix")}\` to fix what's safe.`,
     );
   } catch {
-    p.outro(`✓ set up — run \`npm run build\`, or \`${invocation("check")}\` anytime`);
+    p.outro(`✓ set up — run a build, or \`${invocation("check")}\` anytime`);
   }
 }

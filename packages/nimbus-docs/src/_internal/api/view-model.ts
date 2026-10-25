@@ -17,29 +17,37 @@ import type {
   ParameterFacts,
   RequestBodyFacts,
   ResponseFacts,
+  ResponseMediaFacts,
   ScalarShape,
   SchemaFacts,
+  SectionFacts,
   SecuritySchemeFacts,
   UnionShape,
   VariantRef,
 } from "./model.js";
+import { operationShape } from "./coordinates.js";
 import {
   apiSchemaVersion,
   type ApiAuthView,
   type ApiBreadcrumb,
   type ApiConstraint,
   type ApiFieldView,
+  type ApiIndexGroup,
+  type ApiIndexSection,
   type ApiNav,
   type ApiNavItem,
   type ApiNodeKind,
   type ApiOperationPage,
+  type ApiOperationRef,
   type ApiPageBase,
   type ApiPageIndexEntry,
   type ApiPageProps,
   type ApiParamGroup,
   type ApiRef,
   type ApiRequestBodyView,
+  type ApiResponseMediaView,
   type ApiResponseView,
+  type ApiRootIndex,
   type ApiRootPage,
   type ApiRouteProvenance,
   type ApiScalarView,
@@ -50,7 +58,10 @@ import {
   type ApiVariant,
   type JsonValue,
 } from "./api-view-types.js";
+import type { ApiExtensionValues } from "../../types.js";
 import { renderMarkdown } from "../../markdown/render.js";
+import { toDocumentHref } from "../url.js";
+import { apiPrevNext } from "./nav-bounds.js";
 
 export * from "./api-view-types.js";
 
@@ -68,6 +79,19 @@ const PARAM_LABELS: Record<(typeof PARAM_LOCATIONS)[number], string> = {
  * A view over one model that indexes children by parent once, so projection is
  * a linear walk rather than a filter-per-node scan.
  */
+const pageReferenceModels = new WeakSet<DocsModel>();
+
+/** Build-only mode: preserve page identity while leaving URL context to the reader. */
+export function setApiModelPageReferences(
+  model: DocsModel,
+  enabled: boolean,
+): void {
+  if (enabled) pageReferenceModels.add(model);
+  else pageReferenceModels.delete(model);
+  viewCache.delete(model);
+  navBaseCache.delete(model);
+}
+
 class ModelView {
   private readonly childrenByParent = new Map<Coordinate, Node[]>();
   private readonly apiFacts: ApiFacts | undefined;
@@ -95,9 +119,18 @@ class ModelView {
     return this.apiFacts?.securitySchemes?.[name];
   }
 
+  /** The page's link, shaped by Astro's `trailingSlash` and `build.format`.
+   *  In query mode every same-version link carries the version's query. */
   href(coordinate: Coordinate): string {
+    if (pageReferenceModels.has(this.model))
+      return `nimbus-ref:v1:${Buffer.from(coordinate, "utf8").toString("base64url")}`;
+    return `${toDocumentHref(this.routePath(coordinate) || "/")}${this.model.urlQuery ?? ""}`;
+  }
+
+  private routePath(coordinate: Coordinate): string {
     const slug = this.model.pages.slugs.get(coordinate);
-    const base = this.model.mountPath ?? `/${this.model.collection}`;
+    const base =
+      this.model.urlBasePath ?? this.model.mountPath ?? `/${this.model.collection}`;
     if (slug === undefined || slug === "") return base;
     return `${base}/${slug}`;
   }
@@ -108,8 +141,13 @@ class ModelView {
     return this.model.pages.pages.has(coordinate);
   }
 
-  markdownHref(coordinate: Coordinate): string {
-    return `${this.href(coordinate)}/index.md`;
+  markdownHref(coordinate: Coordinate): string | undefined {
+    if (pageReferenceModels.has(this.model)) return undefined;
+    // A non-default query-mode page has no per-page Markdown affordance:
+    // only default-version entries publish twins, and this page's
+    // version-free `.md` URL would be another version's content.
+    if (this.model.urlQuery) return undefined;
+    return `${this.routePath(coordinate)}/index.md`;
   }
 }
 
@@ -219,7 +257,7 @@ function descriptionOf(node: Node): string | undefined {
 function labelFor(node: Node): string {
   const f = node.facts;
   if (f.kind === "operation") return f.summary ?? node.id;
-  if (f.kind === "section") return f.name;
+  if (f.kind === "section") return f.displayName ?? f.name;
   if (f.kind === "schema") return f.name;
   if (f.kind === "api") return f.title ?? node.id;
   return node.id;
@@ -328,9 +366,12 @@ function variantView(
   inlineFields = false,
 ): ApiVariant {
   const resolved = v.coordinate && view.node(v.coordinate) ? v.coordinate : undefined;
-  const out: ApiVariant = resolved
-    ? { label: v.label, href: view.href(resolved) }
-    : { label: v.label };
+  // Links follow pages, not nodes: with `schemaPages: false` the schema node
+  // still exists (so its properties preview inline) but has no page to link to.
+  const out: ApiVariant =
+    resolved && view.hasPage(resolved)
+      ? { label: v.label, href: view.href(resolved) }
+      : { label: v.label };
   if (inlineFields && resolved) {
     // Inline the variant's properties one level deep — nested unions inside the
     // variant link out (allowInline = false) so a cyclic union can't recurse.
@@ -436,11 +477,20 @@ function fieldView(
     out.descriptionHtml = renderMarkdown(description);
   }
   if (f.union) out.union = unionView(view, f.union, allowInline);
-  if (f.typeRef?.coordinate && view.node(f.typeRef.coordinate)) {
+  if (f.typeRef?.coordinate && view.hasPage(f.typeRef.coordinate)) {
     out.typeRef = { label: f.typeRef.label, href: view.href(f.typeRef.coordinate) };
   }
+  const extensions = extensionsView(f.extensions);
+  if (extensions) out.extensions = extensions;
 
   return out;
+}
+
+function extensionsView(values: Record<string, unknown> | undefined): ApiExtensionValues | undefined {
+  if (!values) return undefined;
+  const out: Record<string, JsonValue> = {};
+  for (const [name, value] of Object.entries(values)) out[name] = jsonOrOmit(value) ?? null;
+  return out as ApiExtensionValues;
 }
 
 function topLevelFields(
@@ -498,27 +548,60 @@ function deriveHeaderName(scheme: SecuritySchemeFacts | undefined): string | und
   return undefined;
 }
 
-function additionalBodyViews(view: ModelView, opCoord: Coordinate): ApiRequestBodyView[] {
-  const nodes = view.childrenOf(opCoord).filter((n) => n.kind === "requestBody");
-  const out: ApiRequestBodyView[] = [];
-  for (const node of nodes) {
-    const f = node.facts as RequestBodyFacts;
-    const bounded = boundFields(topLevelFields(view, node.id));
-    const union = f.union ? unionView(view, f.union, true) : undefined;
-    const exampleValue = f.example ? jsonOrOmit(f.example.value) : undefined;
-    const body: ApiRequestBodyView = {
-      mediaType: f.mediaType,
-      anchor: coordinateAnchor(`requestBody-${leafName(node.id)}`),
-      fields: bounded.fields,
-    };
-    if (bounded.truncated) body.truncated = { total: bounded.total };
-    if (union) body.union = union;
-    if (f.example && exampleValue !== undefined) {
-      body.example = { mediaType: f.example.mediaType, value: exampleValue };
-    }
-    out.push(body);
+/** One non-primary media node (request body or response media) → its view.
+ *  Both kinds share a shape: fields as child nodes, plus optional union/example. */
+function mediaView(
+  view: ModelView,
+  node: Node,
+  f: RequestBodyFacts | ResponseMediaFacts,
+  anchor: string,
+): ApiRequestBodyView | ApiResponseMediaView {
+  const bounded = boundFields(topLevelFields(view, node.id));
+  const union = f.union ? unionView(view, f.union, true) : undefined;
+  const exampleValue = f.example ? jsonOrOmit(f.example.value) : undefined;
+  const body: ApiRequestBodyView = {
+    mediaType: f.mediaType,
+    anchor,
+    fields: bounded.fields,
+  };
+  if (bounded.truncated) body.truncated = { total: bounded.total };
+  if (union) body.union = union;
+  if (f.example && exampleValue !== undefined) {
+    body.example = { mediaType: f.example.mediaType, value: exampleValue };
   }
-  return out;
+  return body;
+}
+
+function additionalBodyViews(view: ModelView, opCoord: Coordinate): ApiRequestBodyView[] {
+  return view
+    .childrenOf(opCoord)
+    .filter((n) => n.kind === "requestBody")
+    .map((node) =>
+      mediaView(
+        view,
+        node,
+        node.facts as RequestBodyFacts,
+        coordinateAnchor(`requestBody-${leafName(node.id)}`),
+      ),
+    );
+}
+
+function additionalMediaViews(
+  view: ModelView,
+  respCoord: Coordinate,
+  status: string,
+): ApiResponseMediaView[] {
+  return view
+    .childrenOf(respCoord)
+    .filter((n) => n.kind === "responseMedia")
+    .map((node) =>
+      mediaView(
+        view,
+        node,
+        node.facts as ResponseMediaFacts,
+        coordinateAnchor(`response-${status}-${leafName(node.id)}`),
+      ),
+    );
 }
 
 function responseViews(view: ModelView, opCoord: Coordinate): ApiResponseView[] {
@@ -544,6 +627,9 @@ function responseViews(view: ModelView, opCoord: Coordinate): ApiResponseView[] 
       const value = jsonOrOmit(f.example.value);
       if (value !== undefined) out.example = { mediaType: f.example.mediaType, value };
     }
+    if (f.mediaType) out.mediaType = f.mediaType;
+    const additionalMedia = additionalMediaViews(view, node.id, f.status);
+    if (additionalMedia.length > 0) out.additionalMedia = additionalMedia;
     return out;
   });
 }
@@ -589,12 +675,106 @@ function refFor(view: ModelView, node: Node): ApiRef {
   return { label: labelFor(node), href: view.href(node.id) };
 }
 
+// Child sections a page can link to. A section without a page (an x-tagGroups
+// category) would otherwise link to the API root, so its own children stand in.
+function sectionRefs(view: ModelView, parent: Coordinate): ApiRef[] {
+  return view
+    .childrenOf(parent)
+    .filter((n) => n.kind === "section")
+    .flatMap((n) =>
+      view.hasPage(n.id) ? [refFor(view, n)] : sectionRefs(view, n.id),
+    );
+}
+
 function protocolString(
   protocol: Record<string, unknown>,
   key: string,
 ): string | undefined {
   const value = protocol[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function operationRef(view: ModelView, node: Node, withDescription: boolean): ApiOperationRef {
+  const f = node.facts as OperationFacts;
+  const webhook = protocolString(f.protocol, "webhook");
+  const ref: ApiOperationRef = {
+    ...refFor(view, node),
+    method: protocolString(f.protocol, "method") ?? "",
+    path: protocolString(f.protocol, "path") ?? webhook ?? "",
+  };
+  const description = withDescription ? descriptionOf(node) : undefined;
+  if (description) ref.description = description;
+  if (f.deprecated) ref.deprecated = true;
+  if (webhook !== undefined) ref.webhook = true;
+  return ref;
+}
+
+// A node's operations and subsections for the API home. A subsection without
+// a page (an x-tagGroups category) hands its own operations and subsections
+// up, so every operation is listed exactly once.
+function indexChildren(
+  view: ModelView,
+  parent: Coordinate,
+): { operations: ApiOperationRef[]; sections: ApiIndexSection[] } {
+  const operations: ApiOperationRef[] = [];
+  const sections: ApiIndexSection[] = [];
+  for (const child of view.childrenOf(parent)) {
+    if (child.kind === "operation") operations.push(operationRef(view, child, false));
+    else if (child.kind === "section") {
+      if (view.hasPage(child.id)) sections.push(indexSection(view, child));
+      else {
+        const inner = indexChildren(view, child.id);
+        operations.push(...inner.operations);
+        sections.push(...inner.sections);
+      }
+    }
+  }
+  return { operations, sections };
+}
+
+function indexSection(view: ModelView, node: Node): ApiIndexSection {
+  const section: ApiIndexSection = {
+    ref: refFor(view, node),
+    anchor: coordinateAnchor(node.id),
+    ...indexChildren(view, node.id),
+  };
+  const description = descriptionOf(node);
+  if (description) section.description = description;
+  return section;
+}
+
+function rootIndex(view: ModelView, root: Node): ApiRootIndex {
+  const grouped: Array<{ order: number; group: ApiIndexGroup }> = [];
+  const ungrouped: ApiIndexGroup = { label: null, anchor: "more", sections: [], operations: [] };
+  const operations: ApiOperationRef[] = [];
+  const webhooks: ApiOperationRef[] = [];
+  for (const child of view.childrenOf(root.id)) {
+    if (child.kind === "operation") {
+      const ref = operationRef(view, child, false);
+      (ref.webhook ? webhooks : operations).push(ref);
+      continue;
+    }
+    if (child.kind !== "section") continue;
+    const order = (child.facts as SectionFacts).group;
+    if (order !== undefined) {
+      const group: ApiIndexGroup = {
+        label: labelFor(child),
+        anchor: coordinateAnchor(child.id),
+        ...indexChildren(view, child.id),
+      };
+      if (view.hasPage(child.id)) group.ref = refFor(view, child);
+      grouped.push({ order, group });
+    } else if (view.hasPage(child.id)) {
+      ungrouped.sections.push(indexSection(view, child));
+    } else {
+      const inner = indexChildren(view, child.id);
+      ungrouped.operations.push(...inner.operations);
+      ungrouped.sections.push(...inner.sections);
+    }
+  }
+  const groups = grouped.sort((a, b) => a.order - b.order).map(({ group }) => group);
+  if (ungrouped.sections.length > 0 || ungrouped.operations.length > 0) groups.push(ungrouped);
+  return { groups, operations, webhooks };
 }
 
 export function projectPageProps(
@@ -613,6 +793,15 @@ function projectPageWithView(
 ): ApiPageProps {
   const node = view.node(coordinate);
   if (!node) throw new Error(`No API node for coordinate "${coordinate}".`);
+  // A node without a page (a schema under `schemaPages: false`, an x-tagGroups
+  // category) has no route of its own; projecting it would hand back the API
+  // root's href and Markdown URL as if they were its own.
+  if (!view.hasPage(coordinate)) {
+    throw new Error(
+      `Coordinate "${coordinate}" is a ${node.kind} node, which is not a page` +
+        (node.kind === "schema" ? " (schema pages are off for this collection)." : "."),
+    );
+  }
 
   switch (node.kind) {
     case "operation": {
@@ -630,15 +819,29 @@ function projectPageWithView(
         parameters: paramGroups(view, node.id),
         body: bodyFields.fields,
         responses: responseViews(view, node.id),
-        samples: f.samples.map((s) => ({ lang: s.lang, label: s.label, source: s.source })),
+        samples: f.samples.map((s) => ({ id: s.id, lang: s.lang, label: s.label, source: s.source })),
       };
       if (bodyFields.truncated) page.bodyTruncated = { total: bodyFields.total };
+      const extensions = extensionsView(f.extensions);
+      if (extensions) page.extensions = extensions;
       if (f.example) {
         const value = jsonOrOmit(f.example.value);
         if (value !== undefined) page.example = { mediaType: f.example.mediaType, value };
       }
+      if (f.requestExamples) {
+        const requestExamples = f.requestExamples.flatMap((example) => {
+          const value = jsonOrOmit(example.value);
+          return value === undefined ? [] : [{ ...example, value }];
+        });
+        if (requestExamples.length > 0) page.requestExamples = requestExamples;
+      }
       if (f.bodyUnion) page.bodyUnion = unionView(view, f.bodyUnion, true);
       if (f.bodyMediaType) page.bodyMediaType = f.bodyMediaType;
+      if (f.bodyRequired !== undefined) page.bodyRequired = f.bodyRequired;
+      if (f.bodyDescription) {
+        page.bodyDescription = f.bodyDescription;
+        page.bodyDescriptionHtml = renderMarkdown(f.bodyDescription);
+      }
       const additionalBodies = additionalBodyViews(view, node.id);
       if (additionalBodies.length > 0) page.additionalBodies = additionalBodies;
       if (f.server) page.server = f.server.replace(/\/+$/, "");
@@ -663,25 +866,25 @@ function projectPageWithView(
       const operations = view
         .childrenOf(node.id)
         .filter((n) => n.kind === "operation")
-        .map((n) => refFor(view, n));
+        .map((n) => operationRef(view, n, true));
       const page: ApiSectionPage = {
         ...base(view, node),
         kind: "section",
         operations,
       };
+      const sections = sectionRefs(view, node.id);
+      if (sections.length > 0) page.sections = sections;
       return page;
     }
     case "api": {
       const f = node.facts as ApiFacts;
-      const sections = view
-        .childrenOf(node.id)
-        .filter((n) => n.kind === "section")
-        .map((n) => refFor(view, n));
+      const sections = sectionRefs(view, node.id);
       const page: ApiRootPage = {
         ...base(view, node),
         kind: "api",
         servers: [...f.servers],
         sections,
+        index: rootIndex(view, node),
       };
       if (f.version) page.version = f.version;
       return page;
@@ -724,6 +927,18 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** The sidebar group that lists webhooks. Not a model coordinate: no
+ *  coordinate contains a space, so it can't collide with one. */
+const WEBHOOKS_NAV = "webhooks group";
+
+function webhookCoordinates(model: DocsModel): Coordinate[] {
+  const view = viewOf(model);
+  return [...model.pages.pages].filter((coordinate) => {
+    const node = view.node(coordinate);
+    return node?.facts.kind === "operation" && protocolString(node.facts.protocol, "webhook") !== undefined;
+  });
+}
+
 function projectNavBase(model: DocsModel): ApiNavItem[] {
   const cached = navBaseCache.get(model);
   if (cached) return cached;
@@ -740,8 +955,7 @@ function projectNavBase(model: DocsModel): ApiNavItem[] {
     // Nav-only grouping nodes (x-tagGroups categories) carry no page, so they
     // get no href — the row renders as a disclosure header, not a link.
     if (view.hasPage(nav.coordinate)) {
-      const href = view.href(nav.coordinate);
-      item.href = href.endsWith("/") ? href : `${href}/`;
+      item.href = view.href(nav.coordinate);
     }
     if (node?.facts.kind === "operation") {
       const method = protocolString(node.facts.protocol, "method");
@@ -752,6 +966,19 @@ function projectNavBase(model: DocsModel): ApiNavItem[] {
   };
 
   const base = model.nav.roots.map(toItem);
+  // Webhooks belong to no tag, so the parsed nav never holds them: they get a
+  // closing "Webhooks" group of their own, in spec order.
+  const webhooks = webhookCoordinates(model);
+  if (webhooks.length > 0) {
+    base.push({
+      coordinate: WEBHOOKS_NAV,
+      label: "Webhooks",
+      kind: "section",
+      children: webhooks.map((coordinate) =>
+        toItem({ coordinate, label: labelFor(view.node(coordinate)!), kind: "operation", children: [] }),
+      ),
+    });
+  }
   deepFreeze(base);
   navBaseCache.set(model, base);
   return base;
@@ -768,6 +995,10 @@ export function projectNav(
   }
 
   const ancestors = ancestorsOf(viewOf(model), activeCoordinate);
+  // A webhook's group is a sidebar-only parent.
+  if (base.some((item) => item.coordinate === WEBHOOKS_NAV && item.children.some((c) => c.coordinate === activeCoordinate))) {
+    ancestors.add(WEBHOOKS_NAV);
+  }
   const onPath = new Set<Coordinate>(ancestors);
   onPath.add(activeCoordinate);
 
@@ -781,10 +1012,12 @@ export function projectNav(
     return next;
   };
 
+  const prevNext = apiPrevNext(base, activeCoordinate);
   return {
     apiSchemaVersion,
     collection: model.collection,
     items: base.map(overlay),
+    ...(prevNext && { prevNext }),
   };
 }
 
@@ -793,6 +1026,38 @@ export function projectNav(
  *  reads this to compare `derived` slugs only. */
 export function routeProvenance(model: DocsModel): Map<string, ApiRouteProvenance> {
   return model.pages.provenance ?? new Map();
+}
+
+/**
+ * Coordinate → wire shape (`operationShape`) for every operation page.
+ * The version-fallback matcher pairs operations whose `operationId` changed
+ * by this shape. Webhooks carry no path and are excluded.
+ */
+export function operationShapes(model: DocsModel): Map<string, string> {
+  const shapes = new Map<string, string>();
+  for (const coordinate of model.pages.pages) {
+    const node = model.nodes.get(coordinate);
+    if (!node || node.kind !== "operation") continue;
+    const facts = node.facts as OperationFacts;
+    const method = protocolString(facts.protocol, "method");
+    const path = protocolString(facts.protocol, "path");
+    const webhook = protocolString(facts.protocol, "webhook");
+    if (!method || !path || webhook) continue;
+    shapes.set(coordinate, operationShape(method, path));
+  }
+  return shapes;
+}
+
+/** Each operation's path, as the spec writes it. */
+export function operationPaths(model: DocsModel): Record<string, string> {
+  const paths: Record<string, string> = {};
+  for (const coordinate of model.pages.pages) {
+    const node = model.nodes.get(coordinate);
+    if (node?.kind !== "operation") continue;
+    const path = protocolString((node.facts as OperationFacts).protocol, "path");
+    if (path) paths[coordinate] = path;
+  }
+  return paths;
 }
 
 export function pageSlugs(
@@ -863,6 +1128,10 @@ function pageFieldRoots(page: ApiPageProps): ApiFieldView[] {
     for (const r of page.responses) {
       roots.push(...(r.headers ?? []));
       if (!r.bodyUnion) roots.push(...r.fields);
+      // Additional response media render like additional request bodies.
+      for (const m of r.additionalMedia ?? []) {
+        if (!m.union) roots.push(...m.fields);
+      }
     }
     return roots;
   }

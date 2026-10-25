@@ -1,0 +1,53 @@
+---
+title: Deploy to other hosts
+description: Publish your site to any static host, or run it as a server on Netlify, Node or Vercel.
+aiGenerated: true
+sidebar:
+  order: 2
+  label: Other hosts
+---
+
+A Nimbus site builds to static files by default, so any host that serves files can run it. Astro's [deploy guides](https://docs.astro.build/en/guides/deploy/) cover each host's settings.
+
+## Prerequisites
+
+- A Nimbus site. Scaffold with `--deploy other` to leave out the Cloudflare files, or delete `wrangler.jsonc` and the `deploy`, `predeploy` and `preview:cf` scripts from an existing one.
+
+## Steps
+
+<Steps>
+  <Step title="Set the site address">
+    In `astro.config.ts`, set `site` in the Nimbus config to the address readers will use. On Netlify and Vercel production builds, Nimbus reads the address from the host while `site` is still the placeholder.
+  </Step>
+  <Step title="Build">
+    <PackageManagers pkg="build" type="run" />
+  </Step>
+  <Step title="Publish the output">
+    Upload the `dist/` folder to your host, or point the host's build settings at `npm run build` with `dist` as the output directory.
+  </Step>
+</Steps>
+
+## Verify
+
+Open the deployed address, then the homepage's Markdown version at `/index.md`. Both load: the host is serving the HTML and the agent files.
+
+## With a server
+
+[Request rendering](/reference/rendering), the [remote MCP server](/ai/remote-mcp) and [Markdown at page URLs](/ai/markdown-negotiation) need a server. Add the adapter for your host:
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-node" />
+
+For Netlify or Vercel, use `adapter-netlify` or `adapter-vercel`. On Node, the installer adds a `start` script, `node ./dist/server/entry.mjs`. To start a new site with a server, pass `--adapter` to the scaffolder.
+
+## Redirects and headers
+
+Redirects in `astro.config.ts` reach every host. The old Markdown and `llms.txt` URLs need host rules too; see [Redirects](/navigation/redirects#host-level-redirects). Nimbus writes headers to `_headers`, which hosts other than Cloudflare and Netlify may ignore; set the [discovery headers](/ai/agent-discovery#homepage-link-header) in the host's own configuration.
+
+## Deploy from CI
+
+The "Last updated" line and the sitemap's dates come from git history, and most CI systems clone only the latest commit. Set `fetch-depth: 0` on the checkout step in GitHub Actions, or run `git fetch --unshallow`, before the build.
+
+## Next steps
+
+- [Serve under a path](/deploy/base-path): publish at `example.com/docs/`.
+- [Metadata and SEO](/publish/metadata-and-seo): titles, share cards and sitemaps.

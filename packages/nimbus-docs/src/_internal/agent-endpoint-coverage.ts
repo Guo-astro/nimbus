@@ -1,0 +1,103 @@
+/**
+ * Build-end check that every baked Markdown page and every `llms.txt` index
+ * has a prerendered file. The route factories can't see the route file's
+ * `prerender` flag when they are re-exported from another module, so the
+ * build reads the result instead: an expected URL with no file, served by an
+ * endpoint route, is reported with that route.
+ */
+
+import type { LlmsEndpointReference } from "../agent-endpoints.js";
+
+export interface EndpointRouteRecord {
+  pattern: string;
+  entrypoint: string;
+  regex: RegExp;
+  prerendered: boolean;
+}
+
+export interface UngeneratedAgentPage {
+  url: string;
+  owner: EndpointRouteRecord;
+}
+
+const LISTED_PER_ROUTE = 10;
+
+export function llmsAssetUrl(reference: LlmsEndpointReference): string {
+  if (reference.scope === "section") {
+    return `/${reference.section}/${reference.surface === "full" ? "llms-full.txt" : "llms.txt"}`;
+  }
+  return reference.surface === "full" ? "/llms-full.txt" : "/llms.txt";
+}
+
+/**
+ * Expected URLs with no generated file, each with the endpoint route that
+ * serves it: the first in Astro's priority order whose pattern matches. A URL
+ * no endpoint matches is one the site chose not to serve and is skipped, and
+ * so is one whose owning route renders on request — agent files follow the
+ * rendering policy, so a request-rendered owner serves the URL itself.
+ */
+export function findUngeneratedAgentPages(
+  routes: readonly EndpointRouteRecord[],
+  urls: Iterable<string>,
+  generated: Pick<ReadonlySet<string>, "has">,
+): UngeneratedAgentPage[] {
+  const missing = new Map<string, UngeneratedAgentPage>();
+  for (const url of urls) {
+    if (missing.has(url) || generated.has(url)) continue;
+    const owner = routes.find((route) => route.regex.test(url));
+    if (owner?.prerendered) missing.set(url, { url, owner });
+  }
+  return [...missing.values()].sort((a, b) => a.url.localeCompare(b.url));
+}
+
+export function formatUngeneratedAgentPages(
+  missing: readonly UngeneratedAgentPage[],
+): string {
+  const byOwner = new Map<EndpointRouteRecord, string[]>();
+  for (const { owner, url } of missing) {
+    byOwner.set(owner, [...(byOwner.get(owner) ?? []), url]);
+  }
+  const lines = [...byOwner].map(([owner, urls]) => {
+    const listed = urls.slice(0, LISTED_PER_ROUTE).join(", ");
+    const more =
+      urls.length > LISTED_PER_ROUTE
+        ? ` and ${urls.length - LISTED_PER_ROUTE} more`
+        : "";
+    return `  - ${owner.entrypoint} (${owner.pattern}) is prerendered but did not generate: ${listed}${more}`;
+  });
+  return (
+    `nimbus-docs: ${missing.length} Markdown or llms.txt page${missing.length === 1 ? " was" : "s were"} ` +
+    "not prerendered:\n" +
+    `${lines.join("\n")}\n` +
+    "Generate these paths from the route's getStaticPaths, or set the collection's " +
+    "rendering mode to \"request\" so the route serves them on request."
+  );
+}
+
+/**
+ * Split `llms-full.txt` files that a route meant for something else answers
+ * first, such as a project `/<mount>/[llms].txt`, whose parameter also
+ * matches `llms-full`: the file is linked but never served.
+ */
+export function findShadowedLlmsFullFiles(
+  routes: readonly EndpointRouteRecord[],
+  urls: Iterable<string>,
+): UngeneratedAgentPage[] {
+  const shadowed: UngeneratedAgentPage[] = [];
+  for (const url of urls) {
+    const owner = routes.find((route) => route.regex.test(url));
+    if (owner && !owner.pattern.endsWith("/llms-full.txt")) shadowed.push({ url, owner });
+  }
+  return shadowed.sort((a, b) => a.url.localeCompare(b.url));
+}
+
+export function formatShadowedLlmsFullFiles(shadowed: readonly UngeneratedAgentPage[]): string {
+  const lines = shadowed.map(
+    ({ url, owner }) => `  - ${owner.entrypoint} (${owner.pattern}) answers ${url}`,
+  );
+  return (
+    "nimbus-docs: llms-full.txt is split by section, but another route answers some of its files, so they aren't served:\n" +
+    `${lines.join("\n")}\n` +
+    "Rename those routes so they don't match `llms-full.txt`: a route that serves one llms.txt is `llms.txt.ts`, not a dynamic `[name].txt.ts`."
+  );
+}

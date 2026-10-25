@@ -22,3 +22,12 @@ test("title-cases hyphenated ascii segments as before", () => {
 test("does not throw on malformed percent sequences", () => {
   assert.doesNotThrow(() => breadcrumbsFromUrl("/bad%zz"));
 });
+
+test("a collection at a nested URL starts its crumbs at its own root", () => {
+  assert.deepEqual(
+    breadcrumbsFromUrl("/products/sdk/guides/auth", "Home", "/products/sdk").map((crumb) => crumb.href),
+    ["/", "/products/sdk/", "/products/sdk/guides/", "/products/sdk/guides/auth/"],
+  );
+  assert.equal(breadcrumbsFromUrl("/products/sdk", "Home", "/products/sdk").length, 2);
+  assert.equal(breadcrumbsFromUrl("/other/page", "Home", "/products/sdk")[1]!.href, "/other/");
+});

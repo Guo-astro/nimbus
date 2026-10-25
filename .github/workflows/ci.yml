@@ -35,8 +35,89 @@ jobs:
       # Root script builds nimbus-docs, then runs `pnpm -r typecheck`.
       - run: pnpm typecheck
 
+  # `next` applies pending changesets exactly as the release PR will (versions,
+  # CHANGELOGs, reviewed baselines, registry) before testing, so a test that
+  # depends on the version fails here instead of on the release PR. Nothing is
+  # committed.
+  #
+  # The nimbus-docs suite runs in four shards per lane with node's own
+  # --test-shard, which sorts the matched files and deals them round-robin, so
+  # every file lands on exactly one shard. `other` runs the upgrade tests and
+  # the remaining packages.
   test:
+    name: ${{ matrix.next && 'Test at the next release version' || 'Test' }} (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        next: [false, true]
+        shard: [1/4, 2/4, 3/4, 4/4, other]
+        include:
+          - next: false
+            fetch-depth: 1
+          - next: true
+            fetch-depth: 0 # changelog-github finds the commit that added each changeset
+    permissions:
+      contents: read
+      pull-requests: read # changelog-github reads the PR behind each changeset
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: ${{ matrix.fetch-depth }}
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - if: matrix.next
+        run: pnpm changeset:version
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - run: pnpm --filter ./packages/nimbus-docs build
+
+      - if: matrix.shard == 'other'
+        run: pnpm test:upgrades
+
+      - if: matrix.shard == 'other'
+        run: pnpm -r --filter '!@cloudflare/nimbus-docs' test
+
+      # The packed-migration test installs a published release from npm and
+      # packs this one. A packed tarball can only regress at a release, so it
+      # runs on main and the release PR, not on every feature PR.
+      #
+      # --test-timeout fails a hung test by name; --test-force-exit then exits
+      # the process instead of waiting on whatever handle hung it.
+      - if: matrix.shard != 'other'
+        working-directory: packages/nimbus-docs
+        run: node --import tsx --test --test-concurrency=4 --test-timeout=300000 --test-force-exit --test-shard=${{ matrix.shard }} "test/**/*.test.ts"
+        env:
+          RUN_PACKED_MIGRATION: ${{ github.ref == 'refs/heads/main' || startsWith(github.head_ref, 'changeset-release/') }}
+
+  # One check under the old name. `always()` so a cancelled run gets a red
+  # summary rather than a skipped one, which a required check would count as
+  # passing.
+  test-summary:
     name: Test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "$RESULT" = success || { echo "::error::test finished with result '$RESULT'"; exit 1; }
+        env:
+          RESULT: ${{ needs.test.result }}
+
+  # The docs site is otherwise built only when it's deployed, after a
+  # release; build it on every PR so a broken page or a framework change that
+  # breaks it fails here.
+  docs-site:
+    name: Docs site build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,11 +133,51 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter ./packages/nimbus-docs build
+      - run: pnpm --filter "@nimbus/www..." build
 
-      - run: pnpm test:upgrades
+  # The weather demo is deployed with each release; check and build it on
+  # every PR so a framework or starter change that breaks it fails here.
+  demo-weather:
+    name: Weather demo build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - run: pnpm -r test
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter "@nimbus/demo-weather^..." build
+
+      - run: pnpm --filter @nimbus/demo-weather check
+
+      - run: pnpm --filter @nimbus/demo-weather build
+
+  windows-child-process:
+    name: Windows child process
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: node --test scripts/child-process.test.mjs
 
   lint:
     name: Lint

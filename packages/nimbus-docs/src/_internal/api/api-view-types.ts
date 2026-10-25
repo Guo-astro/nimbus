@@ -5,16 +5,11 @@
  */
 
 import type { RoutePolicy } from "./route-policy.js";
+import type { ApiExtensionValues, ApiJsonValue, ApiSamples, PrevNext } from "../../types.js";
 
 export const apiSchemaVersion = 1;
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+export type JsonValue = ApiJsonValue;
 
 export type ApiNodeKind = "api" | "section" | "operation" | "schema";
 
@@ -28,12 +23,28 @@ export interface SpecSource {
   collection: string;
   spec: string | Record<string, JsonValue>;
   label?: string;
+  /** The project-relative file the spec was read from, for diagnostics. */
+  path?: string;
   /** Base URL for this model's pages. Defaults to `/<collection>` when absent. */
   mountPath?: string;
+  /**
+   * Public URL base, when it differs from `mountPath`: a query-mode version
+   * mounts its store at `mountPath` but its pages live at the version-free
+   * family base.
+   */
+  urlBasePath?: string;
+  /** Query string every same-version page link carries (query mode, non-default). */
+  urlQuery?: string;
   /** Fail the build on an operation missing a usable `operationId`. Default false. */
   requireOperationId?: boolean;
+  /** Publish a page per `components/schemas` entry. Default false. */
+  schemaPages?: boolean;
   /** Route convention for this model's pages. Absent = legacy operationId URLs. */
   routes?: RoutePolicy;
+  /** Code sample policy. Absent = authored `x-codeSamples` replace generated ones. */
+  samples?: ApiSamples;
+  /** `x-*` extension names whose values are copied onto pages. */
+  extensions?: readonly string[];
 }
 
 declare const ApiModelBrand: unique symbol;
@@ -84,6 +95,8 @@ export interface ApiFieldView {
   link?: ApiRef;
   /** The field's union shape, when it is a `oneOf`/`anyOf` (or an array of one). */
   union?: ApiUnionView;
+  /** The listed `x-*` fields this field declares (`api[].extensions`). */
+  extensions?: ApiExtensionValues;
 }
 
 export interface ApiBreadcrumb {
@@ -96,7 +109,9 @@ export interface ApiPageBase {
   collection: string;
   coordinate: string;
   href: string;
-  markdownHref: string;
+  /** The page's clean-Markdown URL, absent when the page has no per-page
+   *  Markdown affordance (a non-default query-mode version). */
+  markdownHref?: string;
   tokenCount?: number;
   title: string;
   description?: string;
@@ -142,6 +157,14 @@ export interface ApiResponseView {
   /** Derived example response body for this status. Symmetric with the request
    *  `ApiOperationPage.example`; present when the engine could resolve one. */
   example?: ApiExampleView;
+  /** The primary response media type (the one `fields`/`bodyUnion`/`example`
+   *  describe). Present when the response declares content. */
+  mediaType?: string;
+  /** Response bodies for media types BEYOND the primary (e.g. `text/csv` beside
+   *  JSON), mirroring `ApiOperationPage.additionalBodies`. Each renders its own
+   *  field list/example; the fields are citable under
+   *  `<op>.response.<status>.<mediaToken>.…`. Absent for a single-media response. */
+  additionalMedia?: ApiResponseMediaView[];
 }
 
 export interface ApiOperationPage extends ApiPageBase {
@@ -162,6 +185,14 @@ export interface ApiOperationPage extends ApiPageBase {
   /** The primary request body's media type, so the renderer labels it correctly
    *  instead of assuming JSON. Present when the operation has a request body. */
   bodyMediaType?: string;
+  /** `requestBody.required`, shared by every media type. Absent when the spec
+   *  does not state it (OpenAPI then defaults to optional). */
+  bodyRequired?: boolean;
+  /** `requestBody.description` (CommonMark), shared by every media type.
+   *  Absent when not authored. */
+  bodyDescription?: string;
+  /** `bodyDescription` rendered to HTML, like every other `descriptionHtml`. */
+  bodyDescriptionHtml?: string;
   /** Request bodies for media types BEYOND the primary (e.g. a `multipart/form-data`
    *  variant beside JSON). Each renders its own field list/example; the fields are
    *  fully citable under their own coordinates. Absent for a single-media body. */
@@ -169,14 +200,24 @@ export interface ApiOperationPage extends ApiPageBase {
   responses: ApiResponseView[];
   /** Derived minimal request body, for the request example display. */
   example?: ApiExampleView;
+  /** Authored named examples for the primary request media type. */
+  requestExamples?: ApiRequestExampleView[];
   /** Per-language request samples; `x-codeSamples` from the spec win. */
   samples: ApiCodeSampleView[];
+  /** The listed `x-*` fields this operation declares (`api[].extensions`). */
+  extensions?: ApiExtensionValues;
 }
 
 export interface ApiExampleView {
   mediaType: string;
   value: JsonValue;
   highlightedHtml?: string;
+}
+
+export interface ApiRequestExampleView extends ApiExampleView {
+  id: string;
+  label: string;
+  description?: string;
 }
 
 export interface ApiRequestBodyView {
@@ -191,7 +232,27 @@ export interface ApiRequestBodyView {
   example?: ApiExampleView;
 }
 
+/** A non-primary response media type — the response counterpart of
+ *  `ApiRequestBodyView`, with the same shape. */
+export interface ApiResponseMediaView {
+  mediaType: string;
+  anchor: string;
+  fields: ApiFieldView[];
+  /** Set only when `fields` hit `FIELD_INLINE_CEILING` (see `ApiParamGroup`). */
+  truncated?: { total: number };
+  /** The body's union shape, when this media type is a top-level `oneOf`/`anyOf`. */
+  union?: ApiUnionView;
+  /** Derived example for this media type, when the engine could resolve one. */
+  example?: ApiExampleView;
+}
+
 export interface ApiCodeSampleView {
+  /** Unique within the operation; key panels and picker options by this. The
+   *  first sample in a language uses the language itself (`python`), so a
+   *  saved or linked language choice still matches; further samples in the
+   *  same language are `python-2`, `python-3`, and so on. */
+  id: string;
+  /** Syntax for highlighting and Markdown fences. Several samples may share it. */
   lang: string;
   label: string;
   source: string;
@@ -244,16 +305,69 @@ export interface ApiDiscriminatorEntry {
   variant: ApiVariant;
 }
 
+/** An operation in a list: its link, plus what a row shows without opening it. */
+export interface ApiOperationRef extends ApiRef {
+  /** The HTTP method, as on the operation page (`GET`, …). */
+  method: string;
+  /** The path, or a webhook's name. */
+  path: string;
+  /** Present on section pages; the API home's index leaves it out to stay small. */
+  description?: string;
+  deprecated?: boolean;
+  /** A webhook: `path` is its name, and it is delivered rather than called. */
+  webhook?: boolean;
+}
+
 export interface ApiSectionPage extends ApiPageBase {
   kind: "section";
-  operations: ApiRef[];
+  operations: ApiOperationRef[];
+  /** Subsections that have pages, in navigation order. Absent when none. A
+   *  subsection without a page is replaced by its own subsections. */
+  sections?: ApiRef[];
 }
 
 export interface ApiRootPage extends ApiPageBase {
   kind: "api";
   version?: string;
   servers: string[];
+  /** Top-level sections that have pages. An `x-tagGroups` category has no page,
+   *  so its member sections are listed in its place. */
   sections: ApiRef[];
+  /** Every operation and webhook of this version, each exactly once, in reading
+   *  order. Split it into pages with `chunkApiIndex`. */
+  index: ApiRootIndex;
+}
+
+/** The API home's list: tag groups, then untagged operations, then webhooks. */
+export interface ApiRootIndex {
+  /** In `x-tagGroups` order. Sections in no group come last, in a group whose
+   *  `label` is `null`; without `x-tagGroups` that is the only group. */
+  groups: ApiIndexGroup[];
+  /** Operations with no tag, which belong to the API root. */
+  operations: ApiOperationRef[];
+  webhooks: ApiOperationRef[];
+}
+
+export interface ApiIndexGroup {
+  /** `null` for the sections in no group. */
+  label: string | null;
+  /** A fragment id for the group's heading. */
+  anchor: string;
+  /** Present when the group's name is also a tag with a page. */
+  ref?: ApiRef;
+  sections: ApiIndexSection[];
+  /** Operations tagged with the group itself. */
+  operations: ApiOperationRef[];
+}
+
+export interface ApiIndexSection {
+  ref: ApiRef;
+  /** A fragment id for the section's heading. */
+  anchor: string;
+  description?: string;
+  operations: ApiOperationRef[];
+  /** Subsections, in navigation order. */
+  sections: ApiIndexSection[];
 }
 
 export type ApiPageProps =
@@ -273,6 +387,13 @@ export interface ApiNavItem {
   deprecated?: boolean;
   active?: boolean;
   expanded?: boolean;
+  /** A collapsed group whose children are not in this page (`sidebar:
+   *  "on-demand"`). `children` is then empty. */
+  deferred?: boolean;
+  /** For a deferred group: the page whose sidebar lists its children — the
+   *  group's own page, or the API overview for a group without one.
+   *  Root-relative, without the site base, like `href`. */
+  childrenHref?: string;
   children: ApiNavItem[];
 }
 
@@ -280,6 +401,13 @@ export interface ApiNav {
   apiSchemaVersion: number;
   collection: string;
   items: ApiNavItem[];
+  /** Under `sidebar: "on-demand"`: a JSON list of every page in this version
+   *  (`title`, `method`, `path`, `url`), for filtering pages the sidebar
+   *  hasn't loaded. Root-relative, without the site base, like `href`. */
+  listHref?: string;
+  /** The pages before and after the current one in sidebar order, including
+   *  pages a bounded sidebar doesn't list. Absent on a nav with no current page. */
+  prevNext?: PrevNext;
 }
 
 export interface ApiPageIndexEntry {

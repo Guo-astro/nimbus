@@ -1,6 +1,10 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { sanitizeWorkerName } from "@cloudflare/nimbus-docs/adapters";
+import {
+  declineBuildScript as declinePnpmBuildScript,
+  sanitizeWorkerName,
+  workersCompatibilityDate,
+} from "@cloudflare/nimbus-docs/adapters";
 
 /**
  * Apply deploy target configuration.
@@ -33,38 +37,25 @@ export async function applyDeployTarget(
 }
 
 /**
- * Add `<name>` to both decline lists in the generated pnpm-workspace.yaml
- * (pnpm-11 `allowBuilds` map + pnpm-10 `ignoredBuiltDependencies` list).
- * No-op if already listed or the file is absent.
+ * Decline `<name>`'s build script in the generated pnpm-workspace.yaml (pnpm 11
+ * `allowBuilds`, pnpm 10 `ignoredBuiltDependencies`). No-op if the file is
+ * absent; `nimbus-docs add adapter-cloudflare` does the same for later installs.
  */
 export function declineBuildScript(dir: string, name: string): void {
   const wsPath = join(dir, "pnpm-workspace.yaml");
-  if (!existsSync(wsPath)) return;
-  let text = readFileSync(wsPath, "utf-8");
-  if (!new RegExp(`^[ \\t]+${name}:\\s`, "m").test(text)) {
-    text = text.replace(
-      /^(allowBuilds:.*\n(?:[ \t]+\S.*\n)*)/m,
-      (block) => `${block}  ${name}: false\n`,
-    );
-  }
-  if (!new RegExp(`^[ \\t]+-\\s+${name}\\s*$`, "m").test(text)) {
-    text = text.replace(
-      /^(ignoredBuiltDependencies:.*\n(?:[ \t]+-.*\n)*)/m,
-      (block) => `${block}  - ${name}\n`,
-    );
-  }
-  writeFileSync(wsPath, text);
+  if (existsSync(wsPath)) declinePnpmBuildScript(wsPath, name);
 }
 
 async function writeWranglerConfig(dir: string): Promise<void> {
   const projectName = dir.split(/[\\/]/).pop() ?? "my-docs";
+  const compatibilityDate = await workersCompatibilityDate(dir);
   writeFileSync(
     join(dir, "wrangler.jsonc"),
     JSON.stringify(
       {
         $schema: "node_modules/wrangler/config-schema.json",
         name: sanitizeWorkerName(projectName),
-        compatibility_date: today(),
+        compatibility_date: compatibilityDate,
         assets: {
           directory: "./dist",
           not_found_handling: "404-page",
@@ -74,8 +65,4 @@ async function writeWranglerConfig(dir: string): Promise<void> {
       2,
     ) + "\n",
   );
-}
-
-export function today(): string {
-  return new Date().toISOString().slice(0, 10);
 }

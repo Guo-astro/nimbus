@@ -364,7 +364,9 @@ export function titleAndLangTransformer(): ShikiTransformer {
         children.push({
           type: "element",
           tagName: "figcaption",
-          properties: { class: "nb-code-title" },
+          // Search indexes the code, not the title bar: without this the
+          // title and language glue onto the first line ("Terminalshnpx…").
+          properties: { class: "nb-code-title", "data-pagefind-ignore": "" },
           children: [
             {
               type: "element",

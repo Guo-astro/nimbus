@@ -1,0 +1,76 @@
+---
+title: Publish Agent Skills
+description: Publish skills agents can install from your site, from a folder of SKILL.md files in your project.
+aiGenerated: true
+sidebar:
+  order: 6
+  label: Agent Skills
+---
+
+An [Agent Skill](https://agentskills.io/specification) is a folder of instructions a coding agent loads when a task calls for it. Nimbus publishes the skills in your project at `/.well-known/agent-skills/`, so agents that find your site can install them.
+
+## Prerequisites
+
+- A Nimbus site that builds with `npm run build`
+
+## Steps
+
+<Steps>
+  <Step title="Create a skill folder">
+    In the project root, create `skills/getting-started/`. The folder name is the skill's name.
+  </Step>
+  <Step title="Write the skill">
+    Create `skills/getting-started/SKILL.md`:
+
+    ```md title="skills/getting-started/SKILL.md"
+    ---
+    name: getting-started
+    description: Help a user install and configure the example project.
+    ---
+
+    # Getting started
+
+    Read the installation guide before changing project configuration.
+    ```
+
+    `name` must match the folder name. Add scripts or reference files beside `SKILL.md` if the skill needs them.
+  </Step>
+  <Step title="Build the site">
+    ```sh
+    npm run build
+    ```
+  </Step>
+</Steps>
+
+## Verify
+
+Open `dist/.well-known/agent-skills/index.json` (`dist/client/` with a server adapter). It lists `getting-started` with a SHA-256 digest:
+
+```json
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "getting-started",
+      "type": "skill-md",
+      "description": "Help a user install and configure the example project.",
+      "url": "/.well-known/agent-skills/getting-started/SKILL.md",
+      "digest": "sha256:<hash>"
+    }
+  ]
+}
+```
+
+If the skill is missing, the build printed a warning naming the folder and the rule its frontmatter breaks. Fix the frontmatter and build again.
+
+## How skills are published
+
+- A skill with only `SKILL.md` is published as that file. A skill with more files is published as a `.tar.gz` with `SKILL.md` at its root.
+- Dotfiles are left out of archives, and symlinks are skipped.
+- Deleting a skill folder removes it from the next build.
+- The index is listed in the [discovery manifest](/ai/agent-discovery#discovery-manifest), unless `agents.discovery` is `false`.
+
+## Next steps
+
+- [Agent discovery](/ai/agent-discovery): the other files agents read to find your site.
+- [Remote MCP server](/ai/remote-mcp): let agents read your docs over MCP.

@@ -22,6 +22,8 @@
  */
 
 import { suggest } from "../levenshtein.js";
+import { fencedBlocks, INLINE_CODE } from "../code-regions.js";
+import { toDocumentHref } from "../url.js";
 
 /** The one prefix that marks a link target as a coordinate citation. */
 export const CITATION_SENTINEL = "api.ref:";
@@ -75,11 +77,40 @@ export interface ParsedCitation {
  * `citationKey`; the family-default target is also stored under the unversioned
  * key so an unversioned citation resolves to it.
  */
-export type CitationIndex = ReadonlyMap<string, string>;
+export interface CitationIndex extends ReadonlyMap<string, string> {
+  /** Optional on-demand keys for one historical version, never the full history. */
+  keysForVersion?(scope: string): Iterable<string>;
+}
 
 /** The lookup key for a parsed citation. Version-bearing when a version is given. */
 export function citationKey(collection: string, version: string | undefined, coordinate: string): string {
   return version ? `${collection}@${version}:${coordinate}` : `${collection}:${coordinate}`;
+}
+
+/** The response field with the same path as an unknown request body field
+ *  (`op.id` → `op.response.201.id`), which is where a readOnly field is
+ *  listed. Only searched when a citation already fails. */
+function responseFieldFor(key: string, index: CitationIndex, known: ReadonlySet<string>): string | undefined {
+  const colon = key.indexOf(":");
+  const scope = key.slice(0, colon + 1);
+  const coordinate = key.slice(colon + 1);
+  const candidates = scope.includes("@")
+    ? [...known, ...(index.keysForVersion?.(scope.slice(0, -1)) ?? [])]
+    : known;
+  for (let dot = coordinate.lastIndexOf("."); dot > 0; dot = coordinate.lastIndexOf(".", dot - 1)) {
+    const page = index.get(`${scope}${coordinate.slice(0, dot)}`);
+    if (!page || page.includes("#")) continue;
+    const prefix = `${scope}${coordinate.slice(0, dot)}.response.`;
+    const suffix = coordinate.slice(dot);
+    for (const candidate of candidates) {
+      if (!candidate.startsWith(prefix) || !candidate.endsWith(suffix)) continue;
+      const responsePath = candidate.slice(prefix.length, candidate.length - suffix.length);
+      const status = responsePath.split(".")[0];
+      if (status && index.has(`${prefix}${status}`)) return candidate;
+    }
+    return undefined;
+  }
+  return undefined;
 }
 
 /**
@@ -137,9 +168,13 @@ export function isSafeCitationPath(value: string): boolean {
   return true;
 }
 
-/** Resolve a parsed citation against a citation index. `undefined` when unknown. */
+/**
+ * Resolve a parsed citation against a citation index, shaped like every other
+ * generated page link (Astro's `trailingSlash`). `undefined` when unknown.
+ */
 export function resolveCitation(parsed: ParsedCitation, citationIndex: CitationIndex): string | undefined {
-  return citationIndex.get(citationKey(parsed.collection, parsed.version, parsed.coordinate));
+  const url = citationIndex.get(citationKey(parsed.collection, parsed.version, parsed.coordinate));
+  return url === undefined ? undefined : toDocumentHref(url);
 }
 
 export interface ResolveCitationsResult {
@@ -150,6 +185,12 @@ export interface ResolveCitationsResult {
 export interface ResolveCitationsOptions {
   mode: ResolveMode;
   citationIndex: CitationIndex;
+  /**
+   * Citation keys of schemas (and their fields) that exist but have no page
+   * because their collection sets `schemaPages: false` → the schema's name.
+   * Author mode fails such a citation with a reason that names the option.
+   */
+  unpublished?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -173,7 +214,7 @@ export function hasCitation(source: string): boolean {
  * `error` diagnostic fails the build.
  */
 export function resolveCitations(source: string, options: ResolveCitationsOptions): ResolveCitationsResult {
-  const { mode, citationIndex } = options;
+  const { mode, citationIndex, unpublished } = options;
   const diagnostics: CitationDiagnostic[] = [];
   const known = new Set(citationIndex.keys());
   // An unknown coordinate in a known collection fails an author build; a
@@ -217,8 +258,24 @@ export function resolveCitations(source: string, options: ResolveCitationsOption
     if (url !== undefined) return url;
 
     const key = citationKey(parsed.collection, parsed.version, parsed.coordinate);
-    const hint = suggest(key, known, 4);
-    const detail = hint ? ` Did you mean "${CITATION_SENTINEL}${hint}"?` : "";
+    const schema = mode === "author" ? unpublished?.get(key) : undefined;
+    if (schema !== undefined) {
+      const target =
+        parsed.coordinate === schema ? `"${schema}" is a schema` : `"${parsed.coordinate}" is a field of schema "${schema}"`;
+      diagnostics.push({
+        level: "error",
+        message:
+          `Citation "${token}" has no page to link to: ${target}, and schema pages are off for "${parsed.collection}" ` +
+          `(\`schemaPages: false\`). Cite an operation that uses it, or set \`schemaPages: true\`.`,
+        token,
+      });
+      return "#";
+    }
+    const response = mode === "author" ? responseFieldFor(key, citationIndex, known) : undefined;
+    const hint = response ?? suggest(key, known, 4);
+    const detail = response
+      ? ` Request field lists leave out readOnly fields; if it is readOnly, cite it under the response: "${CITATION_SENTINEL}${response}".`
+      : hint ? ` Did you mean "${CITATION_SENTINEL}${hint}"?` : "";
     const authoritative = knownCollections.has(parsed.collection);
     if (mode === "author" && authoritative) {
       diagnostics.push({
@@ -250,8 +307,15 @@ function protectCode(source: string): { code: string; restore: (value: string) =
   const chunks: string[] = [];
   const PREFIX = "\x00NIMBUS_CITE_CODE_";
   const SUFFIX = "\x00";
-  let code = source.replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, store);
-  code = code.replace(/`[^`\n]+`/g, store);
+  const lines = source.split("\n");
+  const out: string[] = [];
+  let next = 0;
+  for (const { open, close } of fencedBlocks(lines)) {
+    out.push(...lines.slice(next, open), store(lines.slice(open, close + 1).join("\n")));
+    next = close + 1;
+  }
+  out.push(...lines.slice(next));
+  const code = out.join("\n").replace(INLINE_CODE, store);
   function store(match: string): string {
     const index = chunks.length;
     chunks.push(match);

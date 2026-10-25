@@ -1,5 +1,8 @@
-import { defineCollection, z } from "astro:content";
+import { defineCollection } from "astro:content";
+import { z } from "astro/zod";
+import { pathToFileURL } from "node:url";
 import { componentsCollection, docsCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
+import { releasesLoader } from "./lib/releases";
 
 export const collections = {
   docs: defineCollection(
@@ -12,9 +15,24 @@ export const collections = {
         // reviewed by a human. Surfaces an "awaiting review" label in the
         // page actions. Remove the flag once a human has reviewed the page.
         aiGenerated: z.boolean().optional(),
+        // The date a person last followed the page's steps and they worked,
+        // as our content recipes ask. Set it when you re-run a page.
+        lastVerified: z.coerce.date().optional(),
       },
     }),
   ),
   partials: defineCollection(partialsCollection()),
   components: defineCollection(componentsCollection()),
+  // /changelog/: the packages' releases, from their CHANGELOG.md files and
+  // release tags. The build runs in apps/www, two folders below the repo.
+  releases: defineCollection({
+    loader: releasesLoader(new URL("../../", pathToFileURL(`${process.cwd()}/`))),
+    schema: z.object({
+      title: z.string(),
+      package: z.enum(["nimbus-docs", "create-nimbus-docs"]),
+      version: z.string(),
+      date: z.date().optional(),
+      order: z.number(),
+    }),
+  }),
 };

@@ -1,5 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   ADAPTER_IDS,
@@ -54,10 +56,27 @@ test("flips output and wires each adapter at the marker", () => {
   }
 });
 
-test("cloudflare recipe uses node prerender env and pins <14.2.0", () => {
+test("cloudflare recipe uses node prerender env and pins 14.3.x", () => {
   const cf = ADAPTER_RECIPES.cloudflare;
   assert.match(cf.adapterExpression, /prerenderEnvironment:\s*"node"/);
-  assert.match(cf.installSpec, /<\s*14\.2\.0/);
+  assert.equal(cf.installSpec, "@astrojs/cloudflare@~14.3.0");
+});
+
+test("the partial builds guide names the cloudflare recipe's versions", () => {
+  const cf = ADAPTER_RECIPES.cloudflare;
+  const guide = readFileSync(
+    fileURLToPath(new URL("../../../apps/www/src/content/docs/publish/partial-builds.mdx", import.meta.url)),
+    "utf8",
+  );
+  const range = (spec: string) => spec.slice(spec.lastIndexOf("@") + 1);
+  assert.ok(
+    guide.includes(`\`${cf.pkg}\` (\`${range(cf.installSpec)}\``),
+    `partial-builds.mdx must name ${cf.installSpec}`,
+  );
+  assert.ok(
+    guide.includes(`\`wrangler\` \`${range(cf.serverWrangler!.wranglerFloor)}\``),
+    `partial-builds.mdx must name ${cf.serverWrangler!.wranglerFloor}`,
+  );
 });
 
 test("cloudflare inserts request rendering in a semicolonless Nimbus config", () => {
@@ -185,6 +204,43 @@ export default defineConfig({
   assert.equal(result.status, "applied");
   if (result.status !== "applied") return;
   assert.match(result.source, /\{ \/\/ Preserve this comment\n      rendering:/);
+});
+
+test("cloudflare edits rendering in place on the api-reference recipe shape", () => {
+  // The recipe adds `api` to the inline config instead of moving the config
+  // into nimbus.config.ts, so the installer can still edit it.
+  const cfg = STARTER_CONFIG.replace(
+    '  title: "Nimbus",\n',
+    `  title: "Nimbus",
+  api: [
+    { collection: "api", spec: "./src/api/openapi.yaml", label: "Example API" },
+    { collection: "billing", versions: [{ id: "v2", spec: "./src/api/v2.yaml" }] },
+  ],
+`,
+  );
+  const result = applyAdapterToConfig(cfg, "cloudflare");
+  assert.equal(result.status, "applied");
+  if (result.status !== "applied") return;
+  assert.equal(result.requestRendering, "inserted");
+  assert.match(
+    result.source,
+    /const nimbusConfig = defineNimbusConfig\(\{\n  rendering: \{ default: "request" \},\n  site:/,
+  );
+  assert.equal((result.source.match(/rendering:/g) ?? []).length, 1);
+  assert.ok(result.source.includes('{ collection: "api", spec: "./src/api/openapi.yaml"'));
+
+  // Today's shape imports the config from nimbus.config.ts: nothing to edit.
+  const imported = applyAdapterToConfig(
+    STARTER_CONFIG.replace(
+      /const nimbusConfig = defineNimbusConfig\(\{[\s\S]*?\}\);\n/,
+      'import nimbusConfig from "./nimbus.config";\n',
+    ),
+    "cloudflare",
+  );
+  assert.equal(imported.status, "applied");
+  if (imported.status !== "applied") return;
+  assert.notEqual(imported.requestRendering, "inserted");
+  assert.doesNotMatch(imported.source, /default:\s*"request"/);
 });
 
 test("cloudflare leaves spread-provided rendering unresolved", () => {

@@ -102,6 +102,8 @@ export interface OpenApiParameter {
   required?: boolean;
   deprecated?: boolean;
   schema?: OpenApiSchema;
+  example?: unknown;
+  examples?: Record<string, { value?: unknown; externalValue?: string } | undefined>;
 }
 
 export interface OpenApiRequestBody {
@@ -121,7 +123,24 @@ export interface OpenApiMediaType {
   // Per OpenAPI, an entry carries EITHER an inline `value` OR an `externalValue`
   // URL. The engine reads only `value`; `externalValue` is modeled so it can be
   // deliberately skipped (never fetched — the build stays hermetic).
-  examples?: Record<string, { value?: unknown; externalValue?: string }>;
+  examples?: Record<
+    string,
+    {
+      summary?: string;
+      description?: string;
+      value?: unknown;
+      externalValue?: string;
+    }
+  >;
+  /** How each property of a form body is serialized. */
+  encoding?: Record<string, OpenApiEncoding | undefined>;
+}
+
+export interface OpenApiEncoding {
+  contentType?: string;
+  style?: string;
+  explode?: boolean;
+  allowReserved?: boolean;
 }
 
 export interface OpenApiSchema {
@@ -129,6 +148,8 @@ export interface OpenApiSchema {
   title?: string;
   description?: string;
   deprecated?: boolean;
+  readOnly?: boolean;
+  writeOnly?: boolean;
   format?: string;
   properties?: Record<string, OpenApiSchema>;
   required?: string[];
@@ -136,18 +157,28 @@ export interface OpenApiSchema {
   /** A schema value = a typed map (`{ [key]: T }`); `true`/absent = free-form. */
   additionalProperties?: boolean | OpenApiSchema;
   enum?: unknown[];
+  /** OAS 3.1 / JSON Schema single-value literal. */
+  const?: unknown;
   default?: unknown;
   example?: unknown;
+  /** OAS 3.1 / JSON Schema example list. */
+  examples?: unknown[];
   nullable?: boolean;
   oneOf?: OpenApiSchema[];
   anyOf?: OpenApiSchema[];
   allOf?: OpenApiSchema[];
+  /** JSON Schema conditional; the sampler merges `if` and `then`. */
+  if?: OpenApiSchema;
+  then?: OpenApiSchema;
   discriminator?: { propertyName: string; mapping?: Record<string, string> };
   minimum?: number;
   maximum?: number;
   minLength?: number;
   maxLength?: number;
   pattern?: string;
+  /** OAS 3.1 / JSON Schema: a string's media type (raw bytes, unless `contentEncoding` is set). */
+  contentMediaType?: string;
+  contentEncoding?: string;
   /** Present on schemas the parser could not fully dereference (a cycle). */
   $ref?: string;
   /** Schema name recovered from the components map, when known. */

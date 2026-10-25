@@ -1,0 +1,92 @@
+---
+import { config } from "virtual:nimbus/config";
+import DocsLayout from "@/layouts/DocsLayout.astro";
+import ChangelogFeed from "./ChangelogFeed.astro";
+import { Pagination } from "@/components/ui/pagination";
+import { TOC } from "@/components/ui/toc";
+import { CHANGELOG_DESCRIPTION, CHANGELOG_TITLE, releaseLabel, type ChangelogPageData } from "./changelog";
+import { withBase } from "@cloudflare/nimbus-docs/runtime";
+import type { TOCItem } from "@cloudflare/nimbus-docs/types";
+
+interface Props {
+  data: ChangelogPageData;
+}
+
+const { data } = Astro.props;
+const { page } = data;
+const headings: TOCItem[] = data.years.flatMap((group) => [
+  { depth: 2, text: String(group.year), slug: group.anchor },
+  ...group.releases.map(({ entry, anchor }) => ({ depth: 3, text: releaseLabel(entry), slug: anchor })),
+]);
+const prevNext = {
+  prev: data.newer && { label: data.newer.range, href: data.newer.href },
+  next: data.older && { label: data.older.range, href: data.older.href },
+};
+const rss = withBase("/changelog/rss.xml", import.meta.env.BASE_URL);
+---
+
+<DocsLayout
+  title={page === 1 ? CHANGELOG_TITLE : `${CHANGELOG_TITLE}, page ${page}`}
+  description={page === 1 ? CHANGELOG_DESCRIPTION : `Releases ${data.range}.`}
+  sidebar={false}
+  headings={headings}
+  prevNext={prevNext}
+  breadcrumbs={page === 1 ? [] : [{ label: CHANGELOG_TITLE, href: "/changelog/" }, { label: `Page ${page}` }]}
+  socialImage="/og/changelog.png"
+  head={[{ tag: "link", attrs: { rel: "alternate", type: "application/rss+xml", title: `${config.title} ${CHANGELOG_TITLE}`, href: rss } }]}
+>
+  <ChangelogFeed years={data.years} />
+  <Fragment slot="toc">
+    <TOC headings={headings} />
+    {data.otherPages.length > 0 && (
+      <nav aria-label="Other changelog pages" class="more-pages">
+        <h2>More releases</h2>
+        <ul>
+          {data.otherPages.map((other) =>
+            other ? (
+              <li><a href={withBase(other.href, import.meta.env.BASE_URL)}>{other.range}</a></li>
+            ) : (
+              <li aria-hidden="true" class="gap">…</li>
+            ),
+          )}
+        </ul>
+      </nav>
+    )}
+  </Fragment>
+  <Pagination slot="pagination" prevNext={prevNext} prevLabel="Newer" nextLabel="Older" />
+</DocsLayout>
+
+<style>
+  .more-pages {
+    margin-top: 2rem;
+  }
+
+  .more-pages h2 {
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    color: var(--nb-foreground);
+  }
+
+  .more-pages ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .more-pages a,
+  .gap {
+    display: block;
+    padding: 0.375rem 0;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--nb-muted-foreground);
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .more-pages a:hover {
+    color: var(--nb-foreground);
+  }
+</style>

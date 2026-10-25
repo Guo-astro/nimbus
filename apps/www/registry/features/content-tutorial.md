@@ -17,7 +17,7 @@ The full, browsable version of this recipe, with the complete rationale, lives a
 
 Inspect the repo before writing — do not assume:
 
-- `package.json` — confirm this is a Nimbus project (depends on `nimbus-docs`).
+- `package.json` — confirm this is a Nimbus project (depends on `@cloudflare/nimbus-docs`).
 - `src/components.ts` — the registered MDX components. Tutorials lean on `Steps`/`Step` (or numbered `##` parts), fenced code blocks for the verbatim "You should see" output, `PackageManagers` for pinned install commands, and `Aside` used sparingly. Tabs exist but tutorials avoid them (one path, zero alternatives). Use only registered components; install a missing one with `nimbus-docs add <slug>` and register it.
 - `src/content.config.ts` — the docs collection's frontmatter schema, so you only emit fields the site accepts.
 - `src/content/docs/` — where the page belongs; match sibling folder and sidebar-order conventions.
@@ -99,7 +99,7 @@ Create `src/content/docs/<section>/<slug>.mdx` following the skeleton, adapted t
 ## 7. Verify
 
 - Run the build, matching the user's package manager (`pnpm build`, `npm run build`, …); confirm it completes clean.
-- If the site has lint configured, run `pnpm exec nimbus-docs lint`.
+- If the site has lint configured, run `npx @cloudflare/nimbus-docs lint`.
 - Re-run the tutorial end-to-end on a cold environment and stamp `lastVerified`.
 - Self-review against the checklist below.
 

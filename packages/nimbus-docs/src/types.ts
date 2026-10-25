@@ -2,6 +2,33 @@
  * Public type surface for `nimbus-docs/types`.
  */
 
+/** Published resources exposed through virtual:nimbus/agent-capabilities. */
+export interface AgentApiPublication {
+  collection: string;
+  version?: string;
+  /** False for a non-default version; homepage headers link only defaults. Absent means default. */
+  isDefault?: boolean;
+  /** The HTML reference. */
+  docsUrl: string;
+  /** The reference's Markdown representation, when the version has one. */
+  markdownUrl?: string;
+  /** The published self-contained spec, when publishing is on and bundling succeeded. */
+  spec?: { url: string; type: string };
+}
+
+export interface AgentCapabilities {
+  search: "pagefind" | "unavailable";
+  versions: string[];
+  apis: AgentApiPublication[];
+  homepageMarkdownUrl?: string;
+  homepageDiscoverable?: boolean;
+  llmsUrl?: string;
+  /** The Agent Skills discovery index, when the site publishes skills. */
+  skillsIndexUrl?: string;
+  /** The remote MCP endpoint, when `agents.mcp` is on. Its Server Card is at `server-card` under it. */
+  mcpUrl?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -127,6 +154,15 @@ export interface NimbusConfig {
    */
   api?: ApiSpec[];
   /**
+   * Git repositories whose files this site reads at build time, by name.
+   * A collection reads one with `docsCollection({ source: "<name>" })` and
+   * an API spec with `api[].spec: { source: "<name>", path }`. Each resolves
+   * before content sync to a snapshot under `.nimbus/sources/`: a pinned
+   * commit is fetched once and reused with no network call; a branch or tag
+   * is resolved at every build. The name: lowercase letters, digits, dashes.
+   */
+  sources?: Record<string, ContentSource>;
+  /**
    * Remote API references this site only *cites* — it does not build or publish
    * them. Each entry names a `collection` and points at another Nimbus site's
    * published `coordinates.json` (the {@link NimbusConfig.api} half emits one at
@@ -144,6 +180,29 @@ export interface NimbusConfig {
    * default. Overrides are collection names, not URL patterns or API versions.
    */
   rendering?: RenderingConfig;
+  /**
+   * Agent-facing services the site runs, and what it publishes for agents.
+   *
+   *   - `mcp` — serve a remote MCP server at `/mcp` from the site's own
+   *     server, with `get_page` and `list_pages` over the published
+   *     Markdown. Needs a server adapter and the
+   *     `@modelcontextprotocol/server` package in the project.
+   *   - `discovery` — `false` leaves the origin root's discovery files to
+   *     the site that owns it, on a domain shared with other sites.
+   */
+  agents?: AgentsConfig;
+}
+
+export interface AgentsConfig {
+  /** Serve a remote MCP server at `/mcp`. Default `false`. */
+  mcp?: boolean;
+  /**
+   * Origin-root discovery: `/.well-known/{ard.json, ai-catalog.json, api-catalog}`
+   * and the homepage `rel="ard"` / `rel="api-catalog"` links. Default `true`.
+   * `false`: none of these; your own `.well-known` files are kept.
+   * `llms.txt`, Markdown links, skills and MCP are unaffected.
+   */
+  discovery?: boolean;
 }
 
 export type RenderingMode = "build" | "request";
@@ -162,27 +221,22 @@ export interface RenderingConfig {
  * change.
  */
 export interface CoordinatesManifest {
-  version: 1;
-  collections: Record<
-    string,
-    {
-      /** The family-default version id, or `null` for an unversioned collection. */
-      defaultVersion: string | null;
-      /**
-       * One entry per coordinate. The coordinate is the map key (opaque — may
-       * contain any character, including `@` or spaces), so the encoding is
-       * lossless. `url` is the family-default target; `versions` maps a version
-       * id to its per-version target.
-       */
-      entries: Record<
-        string,
-        {
-          url?: string;
-          versions?: Record<string, string>;
-        }
-      >;
-    }
-  >;
+  version: 2;
+  collections: Record<string, {
+    /** The family-default version id, or null for an unversioned collection. */
+    defaultVersion: string | null;
+    /** Explicit bare targets; not inferred from defaultVersion. */
+    pages: CoordinatePageGroup[];
+    /** Explicit version-qualified targets, independent of bare targets. */
+    versions?: Record<string, CoordinatePageGroup[]>;
+  }>;
+}
+
+export interface CoordinatePageGroup {
+  /** Exact URL before the first #, including any query string. */
+  url: string;
+  /** null: no fragment; 0: fragment equals coordinate; string: exact fragment. */
+  entries: Record<string, null | 0 | string>;
 }
 
 /**
@@ -215,12 +269,14 @@ export interface ApiReference {
  * An opt-in, explicitly versioned route convention for a collection's generated
  * pages. `resource-action-v1` derives concise `<resource>/<action>` slugs from the OpenAPI
  * path (see the API route convention docs); the `operationId` stays the
- * permanent coordinate. Existing collections omit `routes` and keep today's
- * `operationId`-based URLs unchanged.
+ * permanent coordinate. `resource-action-v2` derives the same operation slugs
+ * and also routes tag pages at lowercase kebab-case URLs (`tags/user-management`).
+ * Existing collections omit `routes` and keep today's `operationId`-based URLs
+ * unchanged.
  */
 export interface ApiRoutePolicy {
   /** The convention name. Its rules are frozen; a change ships as a new name. */
-  convention: "resource-action-v1";
+  convention: "resource-action-v1" | "resource-action-v2";
   /**
    * Base path prefixes stripped (whole-segment, longest-match, case-sensitive)
    * before classification, e.g. `["/v1"]` so `/v1/charges` derives `charges/…`.
@@ -232,11 +288,80 @@ export interface ApiRoutePolicy {
    * intentional vocabulary, and already-published routes.
    */
   operations?: Record<string, string>;
+  /**
+   * Where tag pages live under `resource-action-v2`. `"flat"` (default) is
+   * `tags/<segment>`. `"hierarchical"` follows the tag hierarchy (`tag.parent`,
+   * `x-tagGroups`): a tag `devices` under `zero-trust` is served at
+   * `zero-trust/devices`. A tag whose segment starts with its parent's
+   * (`zero-trust-devices`) drops that prefix. Coordinates do not change.
+   */
+  sections?: "flat" | "hierarchical";
+  /**
+   * Tag name → its own URL segment (one lowercase kebab-case segment), replacing
+   * the derived one. How a tag named like a reserved segment (`tags`) gets a URL.
+   */
+  tagSegments?: Record<string, string>;
 }
 
 /**
+ * A git repository whose files the site reads at build time. Declared by name
+ * in {@link NimbusConfig.sources}.
+ */
+export interface ContentSource {
+  /**
+   * Anything `git clone` accepts: an https or ssh URL, or a local path
+   * (relative to the project root). Never a credential: a URL with a token
+   * or password in it is refused. Give credentials to git instead (a
+   * credential helper, an SSH key, or `http.<url>.extraHeader` in CI).
+   */
+  repo: string;
+  /**
+   * A 40-character commit, or a branch or tag name. A commit is fetched once
+   * and reused; a branch or tag is resolved at every build, so pages can
+   * change under it (`nimbus-docs check` reports it as floating). Template it
+   * for previews: `process.env.SDK_DOCS_REF ?? "<commit>"`.
+   */
+  ref: string;
+  /**
+   * Folder inside the repository to check out, relative to its root. `""`
+   * (the default) is the whole repository. Collections read inside it.
+   */
+  path?: string;
+  /**
+   * Edit-link pattern for pages read from this source, used by `getEditUrl`.
+   * `{path}` is the file's repository-relative path and `{ref}` is `ref` as
+   * written here. Without it, pages from this source get no edit link.
+   * Example: `"https://github.com/acme/sdk/edit/{ref}/{path}"`.
+   */
+  editPattern?: string;
+}
+
+/**
+ * What the page bundle (`virtual:nimbus/config`) carries of a content source:
+ * the inputs of `getEditUrl`, never `repo` or `path`.
+ */
+export type RuntimeContentSource = Pick<ContentSource, "ref" | "editPattern">;
+
+/** The Nimbus config as the runtime helpers read it: `sources` reduced to {@link RuntimeContentSource}. */
+export type RuntimeNimbusConfig = Omit<NimbusConfig, "sources"> & {
+  sources?: Record<string, RuntimeContentSource>;
+};
+
+/**
+ * An `api[].spec` that lives in a declared content source. A type alias, not
+ * an interface, so it stays assignable where the inline-object form is.
+ */
+export type ApiSpecSource = {
+  /** A key of {@link NimbusConfig.sources}. */
+  source: string;
+  /** The spec file, relative to the repository root, inside the source's `path`. */
+  path: string;
+};
+
+/**
  * One OpenAPI reference spec, mounted as a content collection named
- * `collection` at `/<collection>`. Declared once in `nimbus.config.ts`.
+ * `collection` at `/<collection>`. Declared once in the Nimbus config's `api`
+ * array and registered in `src/content.config.ts` with `apiCollection()`.
  *
  * For a single, unversioned reference, set `spec`. For a **version family**,
  * set `versions` instead: the default version mounts at `/<collection>` and
@@ -247,10 +372,12 @@ export interface ApiSpec {
   /** Collection name + base URL prefix, e.g. `"api"` → routes under `/api`. */
   collection: string;
   /**
-   * Local file path (relative to the project root) or an inline OpenAPI
-   * document object. Not a remote URL in v1. Omit when `versions` is set.
+   * Local file path (relative to the project root), a file inside a declared
+   * content source (`{ source, path }`, `path` relative to that repository's
+   * root), or an inline OpenAPI document object. Not a remote URL in v1.
+   * Omit when `versions` is set.
    */
-  spec?: string | Record<string, unknown>;
+  spec?: string | ApiSpecSource | Record<string, unknown>;
   /** Human label for build diagnostics (falls back to `collection`). */
   label?: string;
   /**
@@ -260,6 +387,18 @@ export interface ApiSpec {
    */
   versions?: ApiVersionSpec[];
   /**
+   * Where a version sits in URLs. `{ in: "path" }` (the default) mounts each
+   * non-default version at `/<collection>/<version>`. `{ in: "query" }` gives
+   * every operation one URL: `/<collection>/<slug>` with the version in
+   * `?version=<id>` (`param` renames it) — absent means the default, unknown
+   * or repeated is a 404, and a hidden version's pages are reachable only by
+   * query. Query URLs require `versions` and the family's effective rendering
+   * mode to be `"request"`: a static site serves the same file whatever the
+   * query says. Links using 0.17's `?api-version=` redirect to the configured
+   * parameter.
+   */
+  versionUrl?: ApiVersionUrl;
+  /**
    * Require every operation to declare a stable `operationId`. When `false` (the
    * default), an operation missing one warns and falls back to a path-derived
    * coordinate so the spec still renders; that coordinate moves if the method,
@@ -267,6 +406,47 @@ export interface ApiSpec {
    * missing case a build error. A coordinate/URL collision is always fatal.
    */
   requireOperationId?: boolean;
+  /** Code sample policy. Applies to every version of a family. */
+  samples?: ApiSamples;
+  /**
+   * OpenAPI specification extensions (`x-*` fields) to keep, by name, such as
+   * `["x-acme-plans"]`. Each listed field's value is copied unchanged onto the
+   * operation or field that declares it (`page.extensions`,
+   * `field.extensions`), for your own components to render. Nimbus renders
+   * nothing from them. A version can set its own list. Declare value types by
+   * augmenting {@link ApiExtensions}.
+   */
+  extensions?: string[];
+  /**
+   * Publish this collection's spec as one self-contained JSON file at
+   * `/<collection>/openapi.json` (each version at its own mount path) and
+   * list it in the API catalog. Default `true`. A version can override it.
+   * Opting out keeps the catalog entry with documentation links only.
+   */
+  publishSpec?: boolean;
+  /**
+   * Bundle this API's page data into the server. Default `true`.
+   *
+   * Set `false` for a large API or one that keeps many versions: its pages
+   * are then stored as static assets beside the site and read on request, so
+   * the server bundle stays small however many versions you add. Requires the
+   * collection to render on request (`rendering`) and the Cloudflare or Node
+   * adapter. Search, `llms.txt`, the sitemap and Markdown versions then cover
+   * the default version only; older versions stay readable as HTML.
+   */
+  bundle?: boolean;
+  /**
+   * Publish a page for each `components/schemas` entry, at
+   * `/<collection>/schemas/<Name>`. Default `false`. Applies to every version
+   * of a family.
+   *
+   * By default, types show only inline: schemas shape operation pages (fields,
+   * union previews) but get no page, Markdown file, sitemap or search entry, or
+   * citation coordinate, type names render as text, and a citation to a schema
+   * fails the build. Set `true` to publish schema pages, link type names to
+   * them, and make schemas citable.
+   */
+  schemaPages?: boolean;
   /**
    * Route convention for this collection's pages. Omit to keep the default
    * `operationId`-based URLs. For a version family, set `routes` on each
@@ -274,10 +454,84 @@ export interface ApiSpec {
    * there is no implicit family/version merge.
    */
   routes?: ApiRoutePolicy;
+  /**
+   * How much of the API navigation each page includes. Applies to every
+   * version of a family.
+   *
+   * - `"full"` (default): every page includes the whole tree.
+   * - `"on-demand"`: a page includes the top-level items plus its own branch.
+   *   A collapsed group links to its page, and with JavaScript it opens in
+   *   place, loading its rows from that page's sidebar.
+   *
+   * Use `"on-demand"` for large APIs, where the full tree dominates page size.
+   */
+  sidebar?: ApiSidebarMode;
 }
+
+/**
+ * The value types of your API's `x-*` extensions, keyed by name. Empty by
+ * default, so every value is a plain JSON value. Declare your own once, in a
+ * file of its own such as `src/nimbus-api.d.ts`:
+ *
+ * ```ts
+ * export {};
+ *
+ * declare module "@cloudflare/nimbus-docs/types" {
+ *   interface ApiExtensions {
+ *     "x-acme-plans": string[];
+ *   }
+ * }
+ * ```
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- empty until a site augments it
+export interface ApiExtensions {}
+
+/** A JSON value, as an `x-*` extension holds. */
+export type ApiJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | ApiJsonValue[]
+  | { [key: string]: ApiJsonValue };
+
+/** The listed `x-*` values an operation or field declares: the types you
+ *  declared in {@link ApiExtensions}, and JSON for any other name. */
+export type ApiExtensionValues = { [K in keyof ApiExtensions]?: ApiExtensions[K] } & Record<string, ApiJsonValue>;
+
+/** A language Nimbus generates code samples for. */
+export type ApiSampleLang = "curl" | "typescript" | "python";
+
+/** Code sample policy for one API collection. See {@link ApiSpec.samples}. */
+export interface ApiSamples {
+  /**
+   * Languages Nimbus generates samples in, on every operation. Default: all
+   * three. `[]` generates none, so operations show only authored samples.
+   */
+  generate?: ApiSampleLang[];
+  /**
+   * Generated languages kept when an operation has authored `x-codeSamples`.
+   * They follow the authored samples; an authored sample in the same language
+   * replaces the generated one. Each must also be in `generate`. Default `[]`:
+   * authored samples replace all generated ones.
+   */
+  keepGenerated?: ApiSampleLang[];
+}
+
+/** How much of the API navigation each page includes. See {@link ApiSpec.sidebar}. */
+export type ApiSidebarMode = "full" | "on-demand";
 
 /** Maturity/deprecation status for one API version. */
 export type ApiVersionStatus = "ga" | "beta" | "deprecated";
+
+/** Where an API family's version sits in its URLs. */
+export type ApiVersionUrl =
+  | { in: "path" }
+  | {
+      in: "query";
+      /** The query parameter. Default `"version"`. */
+      param?: string;
+    };
 
 /**
  * One version within an {@link ApiSpec} family. Each version parses its own
@@ -292,8 +546,11 @@ export interface ApiVersionSpec {
    * once shipped (it becomes part of every non-default URL).
    */
   version: string;
-  /** Local file path (relative to the project root) or inline OpenAPI object. */
-  spec: string | Record<string, unknown>;
+  /**
+   * Local file path (relative to the project root), a file inside a declared
+   * content source (`{ source, path }`), or an inline OpenAPI object.
+   */
+  spec: string | ApiSpecSource | Record<string, unknown>;
   /**
    * Marks the family default — mounts at the bare `/<collection>` and is the
    * canonical target for cross-version links. At most one version may set this;
@@ -310,6 +567,10 @@ export interface ApiVersionSpec {
   hidden?: boolean;
   /** Display label override for the picker (defaults to `version`). */
   label?: string;
+  /** Override the family's {@link ApiSpec.publishSpec} for this version. */
+  publishSpec?: boolean;
+  /** Replace the family's {@link ApiSpec.extensions} list for this version. */
+  extensions?: string[];
   /**
    * Route convention for this version's pages. Each version carries its own
    * policy; a shared route map may be imported into several versions, but every
@@ -800,6 +1061,12 @@ export interface BasePageProps {
    * when absent.
    */
   socialImage?: string;
+  /**
+   * Pixel size of `socialImage`, for `og:image:width`/`height`, when it's an
+   * image Nimbus can't measure (a remote URL, a per-page file). Generated
+   * cards and files in `public/` referenced by the config are sized already.
+   */
+  socialImageSize?: { width: number; height: number };
   /**
    * ISO date for `article:modified_time`. Today this is sourced from
    * frontmatter `lastUpdated`; a future git-based source can populate the

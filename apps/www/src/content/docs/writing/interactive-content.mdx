@@ -1,9 +1,10 @@
 ---
-title: Interactive content
+title: Diagrams and interactive content
 description: Author bespoke interactive diagrams on a headless React wrapper that owns the tedious lifecycle.
 aiGenerated: true
 sidebar:
-  order: 6
+  order: 5
+  label: Diagrams
 ---
 import { Tabs, TabItem } from "@/components/ui/tabs";
 import { PrimitivesDiagram } from "@/components/react/diagram-showcase/PrimitivesDiagram";
@@ -57,7 +58,7 @@ The smallest meaningful example — `usePhase` walks two steps and the rendered 
 
 Action bars, tab groups, and play/pause controls are **visual chrome you own**. They install on demand into `src/components/react/diagram/` via the registry:
 
-<PackageManagers pkg="@cloudflare/nimbus-docs" type="dlx" args="add diagram" />
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add diagram" />
 
 Edit, restyle, or replace them freely — the hooks keep working. Sites that never author an interactive card pay nothing: `react` and `react-dom` are optional peer dependencies, loaded only when you import `nimbus-docs/react`.
 

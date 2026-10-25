@@ -12,6 +12,11 @@
  */
 
 export { mount } from "./mount";
+export { initDocumentationWebMcp } from "./webmcp";
+export type { DocumentationWebMcpOptions } from "./webmcp";
+export { initNavSidebar } from "./nav-sidebar";
+export { loadNavList, matchNavList } from "./nav-list";
+export type { NavListRow } from "./nav-list";
 export { makeDisclosure } from "./disclosure";
 export type { DisclosureOptions, DisclosureInstance } from "./disclosure";
 export { initDisclosureGroup } from "./disclosure-group";
@@ -24,3 +29,5 @@ export { FOCUSABLE } from "./dom";
 export { codeCopy } from "./code-copy";
 export { headingAnchors } from "./heading-anchors";
 export { readUrlParam, writeUrlParam } from "./url-param";
+export { mergeSearchIndexes } from "./search-indexes";
+export type { MergeablePagefind } from "./search-indexes";

@@ -7,7 +7,6 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -19,6 +18,7 @@ import { markdownSourcePlugin } from "../src/_internal/markdown-source-vite-plug
 import { getPreparedMarkdownSnapshot } from "../src/_internal/prepared-markdown-registry.ts";
 import { runningNimbusVersion } from "../src/_internal/upgrades.ts";
 import nimbus from "../src/index.ts";
+import { TEST_TMP } from "./fixtures/temp-root.js";
 
 const temporaryRoots: string[] = [];
 
@@ -49,7 +49,7 @@ function sourceIntegration(contentDir: string): AstroIntegration {
 }
 
 async function buildFixture(sourceFirst: boolean): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-mdx-order-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-mdx-order-"));
   temporaryRoots.push(root);
   await symlink(
     path.resolve(import.meta.dirname, "../node_modules"),
@@ -81,7 +81,7 @@ test("MDX source normalization precedes compilation in either integration order"
 });
 
 test("MDX source adapter ignores virtual, queried, and missing files", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-mdx-source-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-mdx-source-"));
   temporaryRoots.push(root);
   const sourcePath = path.join(root, "source.mdx");
   await writeFile(sourcePath, "unchanged", "utf8");
@@ -103,7 +103,7 @@ test("MDX source adapter ignores virtual, queried, and missing files", async () 
 });
 
 test("MDX source adapter rejects symlinks outside its content directory", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "nimbus-mdx-symlink-"));
+  const root = await mkdtemp(path.join(TEST_TMP, "nimbus-mdx-symlink-"));
   temporaryRoots.push(root);
   const contentDir = path.join(root, "content");
   const outside = path.join(root, "outside.mdx");
@@ -124,7 +124,7 @@ test("MDX source adapter rejects symlinks outside its content directory", async 
 
 test("Nimbus production wiring normalizes Markdown and MDX compilation", async () => {
   const root = await mkdtemp(
-    path.join(os.tmpdir(), "nimbus-authored-integration-"),
+    path.join(TEST_TMP, "nimbus-authored-integration-"),
   );
   temporaryRoots.push(root);
   await writeFile(

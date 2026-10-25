@@ -1,0 +1,60 @@
+---
+title: Deploy to Cloudflare
+description: Publish your site to Cloudflare Workers with one command, static or with a server.
+aiGenerated: true
+sidebar:
+  order: 1
+  label: Cloudflare
+---
+
+The scaffolder sets every new site up for Cloudflare: a `wrangler.jsonc` that serves the built `dist/` folder with Workers Static Assets, and a `deploy` script. A static site needs no Astro adapter.
+
+## Prerequisites
+
+- A site created with the [Quickstart](/quickstart), without `--deploy other`
+- A Cloudflare account
+
+## Steps
+
+<Steps>
+  <Step title="Set the site address">
+    In `astro.config.ts`, set `site` in the Nimbus config to the address readers will use. `nimbus-docs check` warns while it's still the placeholder.
+  </Step>
+  <Step title="Deploy">
+    <PackageManagers pkg="deploy" type="run" />
+
+    `predeploy` runs `astro check` and `astro build` first. The first run opens a browser to sign in to Cloudflare.
+  </Step>
+</Steps>
+
+## Verify
+
+Wrangler prints the site's address when it finishes:
+
+```text
+Deployed my-docs triggers (<n> sec)
+  https://my-docs.<your-subdomain>.workers.dev
+```
+
+Open it: your site, as it ran locally. To check the production build before deploying, run `npm run preview:cf`, which serves it with `wrangler dev` as Cloudflare will.
+
+## Use your own domain
+
+In the Cloudflare dashboard, add a custom domain to the Worker. Then set `site` to that domain and deploy again.
+
+## With a server
+
+[Request rendering](/reference/rendering), the [remote MCP server](/ai/remote-mcp) and [Markdown at page URLs](/ai/markdown-negotiation) need a server. Add the Cloudflare adapter:
+
+<PackageManagers pkg="@cloudflare/nimbus-docs" type="exec" args="add adapter-cloudflare" />
+
+The scripts stay the same: `deploy` builds and publishes the Worker. To start a new site with a server, pass `--adapter cloudflare` to the scaffolder.
+
+## Deploy from CI
+
+The "Last updated" line and the sitemap's dates come from git history, and most CI systems clone only the latest commit. Set `fetch-depth: 0` on the checkout step in GitHub Actions, or run `git fetch --unshallow`, before the build.
+
+## Next steps
+
+- [Serve under a path](/deploy/base-path): publish at `example.com/docs/`.
+- [Metadata and SEO](/publish/metadata-and-seo): titles, share cards and sitemaps.

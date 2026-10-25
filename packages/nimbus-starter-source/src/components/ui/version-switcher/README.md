@@ -1,10 +1,18 @@
 # VersionSwitcher
 
-Header dropdown + mobile sidebar control for switching docs versions.
+Header dropdown + mobile sidebar control for switching docs versions or
+API versions.
 
 Reads from the framework's data layer (`getVersions`,
 `getVersionAlternates`, `getCurrentVersion`). Renders nothing when the
-site is unversioned or has only one version.
+site is unversioned or has only one version, or when the page's
+`collection` isn't a docs version (an API reference or blog page).
+
+## API versions
+
+`ApiLayout` (from `nimbus-docs add api-layout`) already mounts the picker in
+API mode at the top of its sidebar, which the mobile drawer reuses. Nothing
+to wire. It renders nothing for an unversioned or single-version API.
 
 ## After `nimbus-docs add version-switcher`, wire two placements
 
@@ -38,19 +46,19 @@ const { collection, entryId } = Astro.props;
 ### 2. Mobile sidebar
 
 Edit `src/layouts/DocsLayout.astro`. Inside the mobile sidebar drawer
-(the `<dialog data-mobile-sidebar>` block), add the picker above the
-sidebar nav:
+(the `<dialog data-mobile-sidebar>` block), add the picker between the
+"Navigation" header bar and the `data-nb-sidebar-drawer-slot` div. Leave
+the slot empty: the rail's sidebar tree moves into it while the drawer is
+open.
 
 ```astro
-<nav class="px-4 pb-8 pt-5">
-  <VersionSwitcher
-    collection={collection}
-    entryId={entryId}
-    variant="sidebar"
-  />
-  <SidebarFilter />
-  <Sidebar items={sidebar} />
-</nav>
+<VersionSwitcher
+  collection={collection}
+  entryId={entryId}
+  variant="sidebar"
+  class="mx-4 mt-4"
+/>
+<div data-nb-sidebar-drawer-slot class="..."></div>
 ```
 
 The `variant="sidebar"` mode has no built-in breakpoint gating — it
@@ -78,8 +86,11 @@ required props chain: `route → DocsLayout → BaseLayout → NimbusHead` +
 
 | Prop | Type | Default | Notes |
 |---|---|---|---|
-| `collection` | `string` | `undefined` | `entry.collection` from your route. Drives the "stay on this page" logic for the current version. |
+| `collection` | `string` | `undefined` | `entry.collection` from your route. Drives the "stay on this page" logic for the current version. A collection outside the docs versions hides the docs picker. |
 | `entryId` | `string` | `undefined` | `entry.id` from your route. Drives per-version `href` via the alternates table. |
+| `apiCollection` | `string` | `undefined` | API mode: the `api` entry's collection. Set it to switch API versions instead of docs versions. |
+| `apiVersion` | `string \| null` | `undefined` | API mode: this page's version, from `getApiRoute`. |
+| `coordinate` | `string` | `undefined` | API mode: this page's coordinate, from `getApiRoute`. Keeps the reader on the same operation in the target version. |
 | `variant` | `"header"` \| `"sidebar"` | `"header"` | Desktop popover or mobile sidebar section. |
 
 Both placements share the same data; render both and let CSS pick.

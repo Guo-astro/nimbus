@@ -4,6 +4,11 @@ import path from "node:path";
 export interface MarkdownSourcePluginOptions {
   contentDirs: ReadonlyArray<string>;
   transform: (source: string, filePath: string) => string | Promise<string>;
+  /**
+   * Also in scope: a file outside `contentDirs` that a page or partials
+   * collection recorded, matched by its canonical path.
+   */
+  isRecorded?: (canonicalPath: string) => boolean;
 }
 
 function isMissingPath(error: unknown): boolean {
@@ -54,7 +59,7 @@ export function markdownSourcePlugin(options: MarkdownSourcePluginOptions) {
           `Nimbus Markdown source ${sourcePath} resolves outside its content directory.`,
         );
       }
-      if (!canonicallyInScope) return null;
+      if (!canonicallyInScope && !options.isRecorded?.(absolute)) return null;
 
       const transformed = await options.transform(source, absolute);
       return { code: transformed, map: null };

@@ -2,6 +2,7 @@ import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
 import nimbus, { defineConfig as defineNimbusConfig } from "@cloudflare/nimbus-docs";
+import { tableScroll } from "@cloudflare/nimbus-docs/markdown";
 
 const nimbusConfig = defineNimbusConfig({
   site: "https://nimbus-docs.com",
@@ -10,35 +11,58 @@ const nimbusConfig = defineNimbusConfig({
   locale: "en",
   github: "https://github.com/cloudflare/nimbus",
   socialImageAlt: "Nimbus documentation preview",
+  editPattern: "https://github.com/cloudflare/nimbus/edit/main/apps/www/{path}",
+  // The sidebar follows the content tree: each top-level folder's index.mdx
+  // names its group and its place (sidebar.group, sidebar.order).
   sidebar: {
     indexDisplay: "overview-leaf",
+    defaultCollapsed: true,
     items: [
-      "get-started",
-      "installation",
-      "philosophy",
-      "cli",
-      "registry",
-      "project-structure",
-      "configuration",
-      "api-reference",
-      "adding-components",
-      { label: "Writing", icon: "ph:pencil-simple", autogenerate: { directory: "writing" } },
-      { label: "Navigation", icon: "ph:compass", autogenerate: { directory: "navigation" } },
-      { label: "Styling", icon: "ph:palette", autogenerate: { directory: "styling" } },
-      { label: "AI-ready", icon: "ph:sparkle", autogenerate: { directory: "ai" } },
-      {
-        label: "Components",
-        icon: "ph:puzzle-piece",
-        collapsed: false,
-        autogenerate: { collection: "components" },
-      },
+      { autogenerate: { collection: "docs" } },
+      { label: "Components", icon: "ph:puzzle-piece", autogenerate: { collection: "components" } },
+      // The glossary is an appendix, after the component catalog.
+      { label: "Glossary", link: "/glossary" },
+      { label: "Changelog", link: "/changelog/" },
     ],
   },
 });
 
+// Pages that moved when the docs were reorganized by task. Each old URL
+// reaches its new page in one hop; public/_redirects adds the `/old/` forms
+// and the Markdown versions.
+const moved = {
+  "/get-started": "/quickstart",
+  "/installation": "/quickstart",
+  "/philosophy": "/why-nimbus",
+  "/partial-builds": "/publish/partial-builds",
+  "/adding-components": "/styling/add-components",
+  "/ai/metadata-and-seo": "/publish/metadata-and-seo",
+  "/writing/frontmatter": "/reference/frontmatter",
+  "/configuration": "/reference/configuration",
+  "/writing/api-reference": "/api-reference/openapi/setup",
+  "/writing/recipes": "/style-guide",
+  ...Object.fromEntries(
+    ["overview", "quickstart", "tutorial", "how-to", "concept", "reference", "example", "troubleshooting", "changelog"].map(
+      (type) => [`/writing/recipes/${type}`, `/style-guide/${type}`],
+    ),
+  ),
+};
+
+// `/` is src/home/HomePage.astro, a route of its own so its styles stay off the
+// docs pages.
+const homepage = {
+  name: "www-homepage",
+  hooks: {
+    "astro:config:setup": ({ injectRoute }: { injectRoute: (route: { pattern: string; entrypoint: string }) => void }) => {
+      injectRoute({ pattern: "/", entrypoint: "./src/home/HomePage.astro" });
+    },
+  },
+};
+
 export default defineConfig({
   output: "static",
-  integrations: [react(), nimbus(nimbusConfig)],
+  redirects: Object.fromEntries(Object.entries(moved).map(([from, to]) => [from, { status: 301, destination: to }])),
+  integrations: [homepage, react(), nimbus(nimbusConfig, { markdown: { hastPlugins: [tableScroll()] } })],
   vite: {
     // Tailwind v4 via its Vite plugin (replaces the PostCSS plugin, which
     // doesn't build under Astro 7's Vite 8 bundler).

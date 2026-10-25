@@ -5,9 +5,19 @@
   "type": "object",
   "properties": {
     "$schema": { "type": "string" },
-    "version": { "type": ["string", "null"] },
-    "lastReviewedNimbusVersion": { "type": ["string", "null"] },
+    "version": {
+      "type": ["string", "null"],
+      "description": "The create-nimbus-docs scaffolder version. It is independent of the installed @cloudflare/nimbus-docs version."
+    },
+    "lastReviewedNimbusVersion": {
+      "type": ["string", "null"],
+      "description": "The framework version whose upgrade entries have been reviewed. Preview scaffolds leave this null."
+    },
     "templatesTag": { "type": ["string", "null"] },
+    "templatesTagByFile": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
     "variant": { "type": ["string", "null"] },
     "registry": { "type": "string" },
     "reconstructed": { "type": "boolean" },

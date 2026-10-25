@@ -12,24 +12,50 @@ import {
   type ProsePage,
 } from "../src/_internal/page-resolution.js";
 import type { ApiSpec } from "../src/types.js";
+import { collectionsByFolder } from "../src/_internal/collection-mount.js";
 import {
   getApiPage,
+  getApiRoute,
   getCollectionPageProps,
   getDocsPageProps,
 } from "../src/index.js";
 
+/** A request context; the route pattern defaults to the URL's folder above the page. */
 function context(
   pathname: string,
   slug: string | undefined,
   props: Record<string, unknown> = {},
+  routePattern?: string,
 ): PageResolutionContext {
+  const segments = pathname.split("/").filter(Boolean);
+  const folder = segments.slice(0, segments.length - (slug?.split("/").length ?? 0));
   return {
     props,
     params: { slug },
     url: new URL(pathname, "https://example.com"),
+    routePattern: routePattern ?? `/${[...folder, "[...slug]"].join("/")}`,
     projection: { audience: { key: "test" } },
   };
 }
+
+// `sdk` served from src/pages/products/kit/ with a kept copy at src/pages/es/sdk/,
+// and the API from src/pages/reference/api/.
+const folders = collectionsByFolder(["docs", "docs-v1", "blog", "sdk", "api"], {
+  versions: { others: ["v1"] },
+  routes: new Map([
+    ["sdk", { mount: "/products/kit", file: "src/pages/products/kit/[...slug].astro", aliases: ["/es/sdk"] }],
+    ["api", { mount: "/reference/api", file: "src/pages/reference/api/[...slug].astro", aliases: [] }],
+  ]),
+});
+let warnings: string[] = [];
+const routeDependencies = {
+  async getCollectionAt(folder: string) {
+    return folders.get(folder);
+  },
+  warn(message: string) {
+    warnings.push(message);
+  },
+};
 
 function entry(
   collection: string,
@@ -65,6 +91,49 @@ test("public static helpers preserve missing-prop diagnostics", async () => {
   );
 });
 
+test("collection page helpers take the collection name, and still reject the removed options object", async () => {
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk"),
+    /expected `entry` in Astro\.props/,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, {} as never),
+    /getCollectionPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, {} as never),
+    /getDocsPageProps\(Astro, options\) was removed/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "blog" as never),
+    /getDocsPageProps\(Astro\) always serves docs.*getCollectionPageProps\(Astro, "blog"\)/,
+  );
+  await assert.rejects(
+    () => getDocsPageProps({ props: {} } as never, "docs" as never),
+    /Drop the argument: getDocsPageProps\(Astro\)\./,
+  );
+  await assert.rejects(
+    () => (getDocsPageProps as (...args: unknown[]) => Promise<unknown>)({ props: {} }, undefined, "blog"),
+    /getDocsPageProps takes \(Astro\), but was passed 2 more arguments\./,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, "sdk", "sdk" as never),
+    /getCollectionPageProps takes \(Astro, collection\), but was passed 1 more argument\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", "api" as never),
+    /getApiRoute takes \(Astro, collection, options\), with options last\./,
+  );
+  assert.throws(
+    () => getApiRoute({ props: {} } as never, "api", {}, {} as never),
+    /getApiRoute takes \(Astro, collection, options\), but was passed 1 more argument\./,
+  );
+  await assert.rejects(
+    () => getCollectionPageProps({ props: {} } as never, undefined),
+    /expected `entry` in Astro\.props/,
+  );
+});
+
 describe("prose page resolution", () => {
   const entries = new Map([
     ["docs:index", entry("docs", "index")],
@@ -73,10 +142,13 @@ describe("prose page resolution", () => {
     ["docs-v1:v1", entry("docs-v1", "v1")],
     ["docs-v1:guides/setup", entry("docs-v1", "guides/setup")],
     ["blog:v1", entry("blog", "v1")],
+    ["sdk:setup", entry("sdk", "setup")],
+    ["sdk:index", entry("sdk", "index")],
   ]);
   let lookups: Array<{ collection: string; id: string; audience?: string }> =
     [];
   const dependencies = {
+    ...routeDependencies,
     async getVisibleEntry(
       collection: string,
       id: string,
@@ -187,6 +259,57 @@ describe("prose page resolution", () => {
       assert.equal(blogLeaf.page.identity.collection, "blog");
       assert.equal(blogLeaf.page.entry.id, "v1");
     }
+    // A version route that names its collection, as check --fix writes it.
+    const named = await resolveProsePage(context("/v1/v1/", "v1"), { collection: "docs-v1" }, dependencies);
+    assert.equal(named.status === "found" && named.page.entry.id, "v1");
+  });
+  test("an index path is not a second URL for a landing", async () => {
+    for (const [pathname, slug, collection] of [
+      ["/index", "index", "docs"],
+      ["/index/", "index", "docs"],
+      ["/v1/index", "v1/index", "docs"],
+      ["/products/kit/index/", "index", undefined],
+    ] as const) {
+      const result = await resolveProsePage(context(pathname, slug), { collection }, dependencies);
+      assert.deepEqual(result, { status: "not-found" }, pathname);
+    }
+    const landing = await resolveProsePage(context("/products/kit/", undefined, {}, "/products/kit/[...slug]"), {}, dependencies);
+    assert.equal(landing.status, "found");
+  });
+
+  test("a request route's page helper names its collection", async () => {
+    const result = await resolveProsePage(context("/products/kit/setup/", "setup", {}, "/products/kit/[...slug]"), { collection: "sdk" }, dependencies);
+    assert.equal(result.status, "found");
+    if (result.status === "found") assert.equal(result.page.identity.collection, "sdk");
+  });
+
+  test("resolves a request route by its folder, nested, under a base, or a kept copy", async () => {
+    for (const [pathname, pattern] of [
+      ["/products/kit/setup/", "/products/kit/[...slug]"],
+      ["/docs/products/kit/setup/", "/products/kit/[...slug]"],
+      ["/es/sdk/setup/", "/es/sdk/[...slug]"],
+    ] as const) {
+      const result = await resolveProsePage(context(pathname, "setup", {}, pattern), {}, dependencies);
+      assert.equal(result.status, "found", pathname);
+      if (result.status === "found") assert.equal(result.page.identity.collection, "sdk");
+    }
+  });
+
+  test("a request route under a folder no collection is served from is not found, reported once", async () => {
+    warnings = [];
+    for (let i = 0; i < 2; i++) {
+      const result = await resolveProsePage(context("/kits/sdk/setup/", "setup"), {}, dependencies);
+      assert.deepEqual(result, { status: "not-found" });
+    }
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0]!, /the route \/kits\/sdk\/\[\.\.\.slug\] renders on request, but no page collection is served from \/kits\/sdk/);
+    assert.match(warnings[0]!, /#collection-urls/);
+  });
+
+  test("a request route under a dynamic folder resolves by the URL segment before the page", async () => {
+    const result = await resolveProsePage(context("/es/blog/v1/", "v1", {}, "/[locale]/blog/[...slug]"), {}, dependencies);
+    assert.equal(result.status, "found");
+    if (result.status === "found") assert.equal(result.page.identity.collection, "blog");
   });
 });
 
@@ -201,7 +324,8 @@ describe("API page resolution", () => {
     },
   ];
   const entries = new Map([
-    ["api:index", entry("api", "index", { coordinate: "root", version: "v2" })],
+    // A root page's coordinate is its collection's name.
+    ["api:index", entry("api", "index", { coordinate: "api", version: "v2" })],
     [
       "api:charges/create",
       entry("api", "charges/create", {
@@ -209,7 +333,9 @@ describe("API page resolution", () => {
         version: "v2",
       }),
     ],
-    ["api:v1", entry("api", "v1", { coordinate: "root", version: "v1" })],
+    ["api:v1", entry("api", "v1", { coordinate: "api", version: "v1" })],
+    // `index` is reserved only at the top, so an operation can end in it.
+    ["api:search/index/2", entry("api", "search/index/2", { coordinate: "searchIndexTwo", version: "v2" })],
     [
       "api:v1/charges/create",
       entry("api", "v1/charges/create", {
@@ -222,6 +348,7 @@ describe("API page resolution", () => {
     [];
   let collectionLoads = 0;
   const dependencies = {
+    ...routeDependencies,
     async getApiCollections() {
       collectionLoads++;
       return api.map(({ collection }) => collection);
@@ -257,11 +384,11 @@ describe("API page resolution", () => {
     },
   };
 
-  test("uses existing static API identity without request lookup", async () => {
+  test("resolves a static API identity by its lightweight route props", async () => {
     lookups = [];
     collectionLoads = 0;
     const result = await resolveApiPage(
-      context("/api/charges/create/", "ignored", {
+      context("/api/charges/create/", "charges/create", {
         collection: "api",
         version: "v2",
         coordinate: "createCharge",
@@ -274,19 +401,21 @@ describe("API page resolution", () => {
     if (result.status !== "found") return;
     assert.equal(result.page.coordinate, "createCharge");
     assert.equal(result.page.version, "v2");
-    assert.deepEqual(lookups, []);
+    assert.deepEqual(lookups, [
+      { collection: "api", id: "charges/create", audience: "test" },
+    ]);
     assert.equal(collectionLoads, 0);
   });
 
   test("resolves default root and nested API request paths", async () => {
     lookups = [];
     const root = await resolveApiPage(
-      context("/base/api/", undefined),
+      context("/base/reference/api/", undefined, {}, "/reference/api/[...slug]"),
       {},
       dependencies,
     );
     const nested = await resolveApiPage(
-      context("/base/api/charges/create/", "charges/create"),
+      context("/reference/api/charges/create/", "charges/create"),
       {},
       dependencies,
     );
@@ -301,12 +430,12 @@ describe("API page resolution", () => {
 
   test("resolves version roots and leaves from their indexed store IDs", async () => {
     const root = await resolveApiPage(
-      context("/api/v1/", "v1"),
+      context("/reference/api/v1/", "v1"),
       {},
       dependencies,
     );
     const leaf = await resolveApiPage(
-      context("/api/v1/charges/create/", "v1/charges/create"),
+      context("/reference/api/v1/charges/create/", "v1/charges/create"),
       {},
       dependencies,
     );
@@ -320,7 +449,7 @@ describe("API page resolution", () => {
 
   test("returns not-found for missing and unknown API paths", async () => {
     const missing = await resolveApiPage(
-      context("/api/missing/", "missing"),
+      context("/reference/api/missing/", "missing"),
       {},
       dependencies,
     );
@@ -330,7 +459,7 @@ describe("API page resolution", () => {
       dependencies,
     );
     const rootAlias = await resolveApiPage(
-      context("/api/index/", "index"),
+      context("/reference/api/index/", "index"),
       {},
       dependencies,
     );
@@ -338,6 +467,49 @@ describe("API page resolution", () => {
     assert.deepEqual(missing, { status: "not-found" });
     assert.deepEqual(unknown, { status: "not-found" });
     assert.deepEqual(rootAlias, { status: "not-found" });
+  });
+
+  test("resolves the home's later parts to the home, on request or built", async () => {
+    const request = await resolveApiPage(context("/reference/api/index/2/", "index/2"), {}, dependencies);
+    const versioned = await resolveApiPage(context("/reference/api/v1/index/3/", "v1/index/3"), {}, dependencies);
+    const built = await resolveApiPage(
+      context("/api/index/2/", "index/2", { collection: "api", version: "v2", coordinate: "api", homePart: 2 }),
+      {},
+      dependencies,
+    );
+    for (const [result, part, version] of [
+      [request, 2, "v2"],
+      [versioned, 3, "v1"],
+      [built, 2, "v2"],
+    ] as const) {
+      assert.equal(result.status, "found");
+      if (result.status !== "found") continue;
+      assert.equal(result.page.coordinate, "api");
+      assert.equal(result.page.version, version);
+      assert.equal(result.page.homePart, part);
+    }
+  });
+
+  test("a page whose own URL ends in index/<n> is that page, not a part", async () => {
+    const request = await resolveApiPage(context("/reference/api/search/index/2/", "search/index/2"), {}, dependencies);
+    const built = await resolveApiPage(
+      context("/api/search/index/2/", "search/index/2", { collection: "api", version: "v2", coordinate: "searchIndexTwo" }),
+      {},
+      dependencies,
+    );
+    for (const result of [request, built]) {
+      assert.equal(result.status, "found");
+      if (result.status !== "found") continue;
+      assert.equal(result.page.coordinate, "searchIndexTwo");
+      assert.equal(result.page.homePart, undefined);
+    }
+  });
+
+  test("only the home has later parts, numbered from 2", async () => {
+    for (const slug of ["charges/create/index/2", "index/1", "index/02", "missing/index/2"]) {
+      const result = await resolveApiPage(context(`/reference/api/${slug}/`, slug), {}, dependencies);
+      assert.deepEqual(result, { status: "not-found" }, slug);
+    }
   });
 
   test("preserves an unversioned API's null version", async () => {

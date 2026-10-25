@@ -28,8 +28,9 @@ src/_internal/
   astro-slug.ts          canonicalSlug + canonicalEntryUrl — mirror of Astro's content-layer
                          slug normalization (github-slugger + trailing-/index strip).
   collection-mount.ts    PRIMARY_COLLECTION + collectionMountPrefix — single source of truth
-                         for "where does collection X mount?". Shared by index.ts and
-                         site-model.ts so duplicate-slug can't drift from real routing.
+                         for "where does collection X mount?", from the versions and the
+                         route map (`collection-routes.ts` reads route files). Shared by
+                         index.ts and site-model.ts so duplicate-slug can't drift.
 ```
 
 Parsing uses Sätteri's own `mdxToMdast` — the same parser that renders the
@@ -56,9 +57,11 @@ projects get zero new transitive deps when they install `nimbus-docs`.
   integration at `astro:config:setup` and throw to fail the build. They
   can't be configured. Shipped: `duplicate-slug`, `mdx-syntax`.
 - **Authoring rules** (`kind: "authoring"`) run in `nimbus-docs lint`,
-  default to `error`, and are configurable via the integration's `rules`
-  option (materialized to `.nimbus/lint.json`). The build is never gated
-  on them.
+  are off by default, and are enabled via the integration's `rules`
+  option, which `astro build` and `astro dev` materialize to
+  `.nimbus/lint.json`. Without that file every rule would be off, so
+  `nimbus-docs lint` exits 1 asking for a build, unless `--rule` names the
+  rule to run. The build is never gated on them.
 
 ## Shipped rules
 
@@ -77,7 +80,8 @@ projects get zero new transitive deps when they install `nimbus-docs`.
 | `emphasis-style` | authoring | remark-lint | ✓ |
 | `bare-url` | authoring | remark-lint | — |
 | `internal-link` | authoring | hand-rolled | did-you-mean hint |
-| `image-ref` | authoring | hand-rolled | did-you-mean hint |
+| `redirected-link` | authoring | hand-rolled | destination hint |
+| `image-ref` | authoring | hand-rolled | ✓ (the site base) |
 | `duplicate-slug` | build | hand-rolled | — |
 | `mdx-syntax` | build | parser | — |
 
@@ -114,7 +118,7 @@ Three design calls hold this rule together:
   per source, groups by URL.
 
   - **Content entries** use `collectionMountPrefix(entry.collection,
-    versions) + canonicalEntryUrl(prefix, entry.id)` — the same logic
+    context) + canonicalEntryUrl(prefix, entry.id)` — the same logic
     the framework uses in `getIndexedTopLevel`, sidebar hrefs, etc.
     (shared from `_internal/collection-mount.ts` + `_internal/astro-slug.ts`).
     This catches cross-collection (`docs/blog/post.mdx` vs
@@ -128,10 +132,10 @@ Three design calls hold this rule together:
     pre-build. This catches `pages/search.astro` shadowing
     `content/docs/search.mdx` at `/search`.
 
-- **Scoped to indexable collections, honors custom bases.** Only
-  collections that survive `filterIndexableCollections` (`partials`,
-  `_*`-prefixed names excluded) participate — non-routed collections
-  aren't pages. The walk uses `parseCollectionBases` to read each
+- **Scoped to page collections, honors custom bases.** Runs after
+  content sync, over the page collections the Nimbus helpers loaded
+  (partials and plain data collections aren't pages and don't
+  participate). The walk uses `parseCollectionBases` to read each
   collection's `base:` override from `content.config.ts`: a
   `docsCollection({ base: "documentation" })` collection gets scanned at
   `src/content/documentation/` and tagged with key `docs`, rather than
@@ -142,12 +146,15 @@ The rule lives in the integration rather than the standalone CLI because
 its inputs (filesystem layout + `versions` config + `content.config.ts`)
 are framework-side. The CLI doesn't need to re-do it.
 
-**Known limitations** (false negatives only — never false positives):
+**Known limitations:**
 
-- `data.slug` frontmatter overrides aren't honored. An entry with a
-  custom `data.slug` could collide with another URL and the check would
-  miss it. Reading frontmatter from every entry pre-build adds noticeable
-  I/O; deferred.
+- Only `.mdx` entries are read, so `.md` pages, with or without a
+  `slug`, aren't checked for collisions. A frontmatter `slug` replaces
+  the path, as in Astro's glob loader; reading it costs one bounded read
+  of each entry's frontmatter pre-build.
+- A hand-rolled collection whose custom `generateId` ignores `slug` can
+  get a false collision from an entry's `slug`, which fails the build.
+  Remove the `slug` or make `generateId` honor it.
 - Dynamic page routes (`pages/blog/[id].astro`) are skipped — their
   emitted URLs come from `getStaticPaths`. A collision between a
   dynamic page route and a content entry can still happen (Astro's
@@ -167,23 +174,37 @@ match what Astro actually serves, each runs through `canonicalEntryUrl`
 in `_internal/astro-slug.ts`, which mirrors Astro's content-layer
 normalization (`github-slugger` per segment + trailing-`/index` strip).
 
-`data.slug` frontmatter overrides and custom `generateId` loaders aren't
-honored by this mirror, so projects using either must supply route-aware
-values at the public helper boundary.
+Custom `generateId` loaders aren't honored by this mirror. The duplicate
+check reads a frontmatter `slug` itself (`enumerateEntries*`); other
+callers holding a final `entry.id` use `entryRouteKey`.
 
 `github-slugger` is bundled into `dist/` via tsdown's `noExternal`, so
 this doesn't add a transitive dep for consumers.
 
 ### `internal-link` — route truth
 
-The integration hooks into `astro:build:done` and writes Astro's emitted
-`pages` array verbatim into `.nimbus/routes.json`. Every URL on that list
-is a page Astro just wrote to disk — there is no reconstruction step, no
-slug mirroring, and no coupling to Astro's internal URL-normalization
-rules. The build/lint contract is straightforward:
+At the end of `astro:build:done`, after Nimbus has written its own outputs,
+the integration writes `.nimbus/routes.json` from what the build emitted:
 
-> After `astro build`, `.nimbus/routes.json` reflects exactly what the
-> site serves. `nimbus/internal-link` resolves links against that set.
+- Astro's `pages` array;
+- every file in the output directory Astro passes to the hook (the client
+  directory for server output), as route keys: `foo/index.html` and
+  `foo.html` become `/foo`, every other file keeps its extension
+  (`/llms.txt`, `/welcome/index.md`, `/files/doc.pdf`). Left out: Astro's
+  final `build.assets` directory (read at `astro:config:done`), `pagefind/`, `_nimbus/`, and the platform files
+  `_headers`, `_redirects`, `_routes.json`, `.assetsignore`, and
+  `_worker.js` at the output root;
+- the site's redirects (see **Redirects** below);
+- request-rendered pages from the request-route inventory, and concrete
+  on-demand routes.
+
+Links and routes share one key function (`_internal/route-key.ts`), so the
+two sides can't drift. There is no reconstruction step, no slug mirroring,
+and no coupling to Astro's internal URL-normalization rules. The
+build/lint contract:
+
+> After `astro build`, `.nimbus/routes.json` lists every URL the build
+> produced. `nimbus/internal-link` resolves links against that set.
 
 **What this catches that filesystem-based reconstruction misses:**
 
@@ -191,33 +212,70 @@ rules. The build/lint contract is straightforward:
   `github-slugger` (lowercase, hyphenation, unicode), so `WIP/Foo.mdx`
   serves at `/wip/foo`. A reconstructed URL from the raw filesystem path
   would say `/WIP/Foo` and false-flag every valid lowercase link.
-- `trailingSlash`, `base`, `i18n` routing, `build.format` — Astro applies
-  these during route resolution. The emitted pathnames are the truth;
-  any reconstruction has to chase Astro's config surface in lockstep.
+- `trailingSlash`, `i18n` routing, `build.format` — Astro applies these
+  during route resolution. The emitted pathnames are the truth; any
+  reconstruction has to chase Astro's config surface in lockstep.
 - `draft: true` filtering — draft entries are excluded from the build,
   so a link from a published page to a draft page is genuinely broken in
   production. The materialized truth correctly excludes drafts.
 
 **Why not reconstruct from filesystem?** Filesystem reconstruction must
-duplicate Astro's routing and content-layer normalization. Using the
-emitted `pages` list avoids that coupling.
+duplicate Astro's routing and content-layer normalization. Using what the
+build emitted avoids that coupling.
+
+**`base` is never stripped.** Output paths are base-free, and the renderer
+prefixes `base` to every authored root-relative link
+(`_internal/authored-links.ts`). So an authored `/x` is compared with the
+route `/x`, and a link that repeats the base (`/docs/x` under
+`base: "/docs"`) is reported, because it renders as `/docs/docs/x`. The
+hint prints the route as stored (`/x`). `ignore` patterns match the same
+key, so they're written without the base too.
 
 **Trade-off: lint requires `astro build`.** `astro sync` and `astro dev`
 don't emit pages, so they don't update `.nimbus/routes.json`. CI is
-typically build-then-lint. Local hooks running `nimbus-docs lint` should
-chain `astro build` first. The rule's behavior when `routes.json` is absent
-or stale is documented below.
+build-then-lint, in one job or with the whole `.nimbus/` directory passed
+as an artifact (lint exits 1 without `lint.json`). Files written by integrations
+whose `build:done` runs after Nimbus's aren't captured.
 
-**Missing route truth → silent skip.** When `.nimbus/routes.json` is
-absent, `nimbus/internal-link` writes one warning line to stderr and
-skips. Without route truth, every link would otherwise false-positive —
-the worst possible outcome for a trust-sensitive rule.
+**Missing route truth fails closed.** `astro build` invalidates the
+previous file at the start of `astro:config:setup`, before any setup work
+that can throw and before content sync: it deletes the file, or, when
+that fails, overwrites it with `{ "incomplete": true }`. When it can do
+neither, the build fails and asks for the permissions to be fixed. The old
+file is still on disk then, and a separately run lint would accept it; the
+build failure is what keeps a build-then-lint CI gate from passing. When an enabled link rule meets a `routes.json` that's
+missing, unreadable, incomplete, or has an unknown `version`,
+`nimbus-docs lint` reports one `error` on `.nimbus/routes.json` at 1:1,
+whatever the configured severity, and doesn't run the rule
+(`guardRouteTruth` in `engine.ts`). `nimbus-docs check` is a build-free
+preflight: it checks links against a `routes.json` an earlier build left,
+but a missing file is a note and disables the rule there. Reliable CI link
+gating is `astro build`, then `lint`.
 
 **Stale route truth → may miss new content.** Between builds, content
 added since the last build doesn't appear in `routes.json`. Links to
 those pages get flagged. This is correct behavior given the contract —
 the site doesn't serve them yet either — but worth knowing when shipping
 new content in a single commit alongside the links into it.
+
+**Redirects (`link-resolver.ts`).** Route truth also lists the site's
+redirect rules (the output's `_redirects`, then the `redirectsFile`
+integration option) and, separately, Astro's redirect pages. A link that matches a source follows the chain,
+whatever each hop's status, and is broken only when it ends nowhere, loops,
+or passes 20 hops. A source wins over a file at the same path. Exact `200`
+sources are rewrites; pattern `200` sources are dropped. `redirected-link`
+reports links whose first hop is permanent, naming the last permanent
+destination, written without `base`, resolving with `internal-link`'s
+options (`RuleContext.optionsOf`). Sources match the pathname as written,
+encoded, per `RouteTruth.redirectRules` (`netlify` with a `netlify.toml`,
+else `cloudflare`): Cloudflare matches exactly, trailing slash included,
+and applies a rule over an existing file; Netlify ignores the trailing
+slash and applies only forced (`!`) rules over an existing file. Astro's
+meta-refresh pages are recorded separately (`redirectPages`): when no rule
+applies at a path (including a shadowed Netlify rule), the page sends the
+link on to its destination. The incoming query passes through a destination without its own.
+`ignore` applies to every destination in a chain. Route keys are only for built pages and globs. A line without a status is `301`
+on Netlify, `302` on Cloudflare.
 
 A near-match within Levenshtein distance 3 produces a "did you mean"
 hint via the same `_internal/levenshtein.ts:suggest` helper the

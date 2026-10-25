@@ -7,9 +7,17 @@
  * `operationId` in two versions ⇒ the same logical operation ⇒ one equivalence
  * class. No heuristics, no author annotation — the linking is deterministic.
  *
- * v1 is identity-only: an operation added or removed between versions is a
- * singleton class (no alternate); the picker degrades it to the version
- * landing. Rename/lineage is a later axis and is deliberately not modelled here.
+ * Identity comes first: same `operationId` in two versions is one class, and
+ * an `operationId` match is never overridden. When an id is missing from
+ * another version, a **method-and-path fallback** pairs operations whose wire
+ * shape (`operationShape`: lowercased method, parameter-name-blind path)
+ * matches — only when the pairing is unambiguous between that pair of
+ * versions, and only when merging every such candidate stays consistent. The
+ * matching is two-phase (collect candidates for every version pair, then
+ * merge with union-find and discard any contradictory connected component),
+ * so the result cannot depend on the order versions are configured in. An
+ * ambiguous or competing pairing stays unmatched and goes to the version
+ * landing, as before: the picker never guesses.
  *
  * Runs once at `astro:config:setup` and reads the spec files directly (via
  * `projectRoot`), never the content layer — so it does not depend on the
@@ -20,7 +28,12 @@
  */
 
 import type { ApiSpec } from "../../types.js";
-import { toBrowserHref } from "../url.js";
+import { collectionMountPrefix } from "../collection-mount.js";
+import { projectMountContext } from "../project-mount-context.js";
+import {
+  matchApiVersions,
+  type ApiVersionMatchSummary,
+} from "./version-matches.js";
 import type {
   VersionAlternatesTable,
   VersionPageRef,
@@ -36,22 +49,26 @@ export async function buildApiVersionAlternates(
   );
   if (families.length === 0) return {};
 
-  const { resolveApiFamily } = await import("./resolve-versions.js");
+  const { pageUrl, resolveApiFamily, targetUrlFields } = await import("./resolve-versions.js");
   const { resolveSpecSource } = await import("./resolve-spec.js");
   const { buildApiModel, getApiPageSlugs } = await import("../../api/index.js");
+  const { operationShapes } = await import("./view-model.js");
+  const { unwrapModel } = await import("./model-handle.js");
 
   const table: VersionAlternatesTable = {};
 
   for (const entry of families) {
-    const targets = resolveApiFamily(entry);
+    const targets = resolveApiFamily(entry, collectionMountPrefix(entry.collection, projectMountContext(projectRoot)));
     const defaultVersion = targets.find((t) => t.isDefault)!.version!;
     const hiddenVersions = new Set(
       targets.filter((t) => t.hidden).map((t) => t.version!),
     );
     const versionOrder = new Map(targets.map((t, i) => [t.version!, i]));
 
-    // Group every page across every version by its coordinate.
+    // Group every page across every version by its coordinate, and keep
+    // each version's operation wire shapes for the fallback matcher.
     const byCoordinate = new Map<string, VersionPageRef[]>();
+    const summaries: ApiVersionMatchSummary[] = [];
     for (const target of targets) {
       let model;
       try {
@@ -61,8 +78,12 @@ export async function buildApiVersionAlternates(
             spec: target.spec,
             label: target.label,
             mountPath: target.mountPath,
+            ...targetUrlFields(target),
             requireOperationId: target.requireOperationId,
+            schemaPages: target.schemaPages,
             routes: target.routes,
+            samples: target.samples,
+            extensions: target.extensions,
           },
           projectRoot,
         );
@@ -74,14 +95,18 @@ export async function buildApiVersionAlternates(
           { cause: err },
         );
       }
-      for (const { coordinate, slug } of getApiPageSlugs(model)) {
-        const path =
-          slug === "" ? target.mountPath : `${target.mountPath}/${slug}`;
+      const pages = getApiPageSlugs(model);
+      summaries.push({
+        version: target.version,
+        rows: pages.map(({ coordinate, slug }) => ({ id: coordinate, slug })),
+        shapes: Object.fromEntries(operationShapes(unwrapModel(model))),
+      });
+      for (const { coordinate, slug } of pages) {
         const ref: VersionPageRef = {
           collection: target.versionKey,
           version: target.version!,
           slug: coordinate,
-          url: toBrowserHref(path),
+          url: pageUrl(target, slug),
         };
         const bucket = byCoordinate.get(coordinate);
         if (bucket) bucket.push(ref);
@@ -89,9 +114,25 @@ export async function buildApiVersionAlternates(
       }
     }
 
+    // Share matching semantics with the asset-backed path; only this legacy
+    // consumer expands compact classes into eager per-page alternates.
+    const matches = matchApiVersions(summaries);
+    const keys = new Map<string, string>();
+    for (const result of matches) {
+      for (const [id, key] of Object.entries(result.byId)) keys.set(id, key);
+    }
+    const groups = new Map<string, VersionPageRef[]>();
+    for (const [coordinate, refs] of byCoordinate) {
+      const key = keys.get(coordinate)!;
+      const members = groups.get(key) ?? [];
+      members.push(...refs);
+      groups.set(key, members);
+    }
+    const finalClasses = groups.values();
+
     // Emit one record per page. Canonical is the default-version member (API's
     // equivalent of the docs "current"); alternates exclude hidden versions.
-    for (const refs of byCoordinate.values()) {
+    for (const refs of finalClasses) {
       refs.sort(
         (a, b) => versionOrder.get(a.version)! - versionOrder.get(b.version)!,
       );

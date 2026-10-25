@@ -1,0 +1,81 @@
+---
+/* Experiment: a sentence as the interface. No frame; each key word opens a small card that shows the thing itself. */
+import { Icon } from "@/home/icon";
+
+const { label = "One file" } = Astro.props;
+const word = "group relative inline-block cursor-default rounded-md px-1 -mx-1 text-foreground underline decoration-border-strong decoration-dotted underline-offset-[6px] outline-none transition-colors hover:bg-accent focus-visible:bg-accent data-[open]:bg-accent";
+const pop = "pointer-events-none absolute whitespace-normal bottom-[calc(100%+12px)] left-0 z-10 w-[min(16rem,70vw)] origin-bottom-left translate-y-0.5 scale-[0.98] rounded-xl bg-card p-3 text-left text-[12px] leading-5 tracking-normal opacity-0 shadow-(--www-shadow-menu) transition-[opacity,transform] duration-150 ease-out group-hover:translate-y-0 group-hover:scale-100 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:scale-100 group-focus-visible:opacity-100 group-data-[open]:translate-y-0 group-data-[open]:scale-100 group-data-[open]:opacity-100";
+---
+<div class="overflow-x-clip py-6" data-exp-sentence>
+  {label && <p class="text-[13px] leading-none text-muted-foreground">{label}</p>}
+  <p class:list={["max-w-5xl text-balance font-display text-[26px] leading-8 tracking-[-0.015em] text-muted-foreground md:text-[32px] md:leading-[44px]", label && "mt-6"]}>
+    You write a page once. Nimbus{" "}
+    <span class="whitespace-nowrap"><span class={word} tabindex="0">checks it
+      <span class={pop}>
+        <span class="block font-mono text-[11px] leading-4 text-muted-foreground">nimbus-docs check</span>
+        {["Links resolve", "Components valid", "Headings in order", "Code blocks labelled"].map((c) => (<span class="mt-1.5 flex items-center gap-2"><Icon name="ph:check-circle-fill" class="size-3.5 text-success" />{c}</span>))}
+      </span>
+    </span>,</span>{" "}
+    <span class="whitespace-nowrap"><span class={word} tabindex="0">holds it for review
+      <span class={pop}>
+        <span class="flex items-center justify-between"><span class="font-mono text-[11px] leading-4 text-muted-foreground">alerts.mdx</span><span class="rounded-full bg-warning-muted px-2 text-[11px] leading-5 font-medium text-warning">Draft</span></span>
+        <span class="mt-2 block text-[13px] leading-5 font-medium">Ready for review</span>
+        <span class="block text-muted-foreground">Every draft waits for a sign-off, whoever wrote it.</span>
+        <span class="mt-3 flex items-center gap-2"><span class="grid size-5 place-items-center rounded-full bg-accent text-[10px] leading-4 font-medium">S</span><span class="text-muted-foreground">Waiting for Sam</span><span class="ml-auto rounded-md bg-foreground px-2 text-[11px] leading-6 text-background">Approve</span></span>
+      </span>
+    </span>,</span>{" "}
+    {" "}and{" "}
+    <span class={word} tabindex="0">ships it
+      <span class={pop}>
+        {[["/docs/forecast", "page"], ["/docs/forecast.md", "markdown"], ["/llms.txt", "+1 line"], ["/og/forecast.png", "share card"], ["/sitemap.xml", "+1 URL"]].map(([p, k]) => (<span class="flex h-6 items-center gap-2"><Icon name="ph:check" class="size-3 text-success" /><span class="font-mono text-[11px] leading-4">{p}</span><span class="ml-auto text-muted-foreground">{k}</span></span>))}
+      </span>
+    </span>
+    {" "}to{" "}
+    <span class={word} tabindex="0">people
+      <span class={pop}>
+        <span class="relative flex h-[120px] flex-col overflow-hidden rounded-lg bg-[linear-gradient(160deg,#dbe8f7,#f6efe4)] p-3 text-[#1c1917]">
+          <span class="absolute -top-6 -right-4 size-20 rounded-full bg-[radial-gradient(circle,#ffd98a,transparent_70%)]"></span>
+          <span class="relative font-mono text-[10px] leading-4 opacity-60">Sample Co · docs</span>
+          <span class="relative mt-auto text-[17px] leading-5 font-medium">Get a forecast</span>
+        </span>
+        <span class="mt-2 block text-muted-foreground">The card people see when it's shared.</span>
+      </span>
+    </span>
+    {" "}and{" "}
+    <span class={word} tabindex="0">agents.
+      <span class={pop}>
+        <span class="block font-mono text-[11px] leading-5"><span class="text-success">GET</span> /docs/forecast.md</span>
+        <span class="mt-1.5 block rounded-md bg-muted px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground/80"><span class="block text-info"># Get a forecast</span><span class="block">Hourly weather for anywhere</span><span class="block">on Earth, in a single request.</span></span>
+      </span>
+    </span>
+  </p>
+</div>
+
+<script>
+  // Taps open a card on touch screens; every card shifts sideways to stay inside the sentence.
+  document.querySelectorAll<HTMLElement>("[data-exp-sentence]").forEach((root) => {
+    const words = Array.from(root.querySelectorAll<HTMLElement>("span[tabindex]"));
+    const fit = (w: HTMLElement) => {
+      const card = w.querySelector<HTMLElement>(":scope > span");
+      if (!card) return;
+      card.style.left = "0px";
+      const box = root.getBoundingClientRect(), r = card.getBoundingClientRect();
+      let shift = 0;
+      if (r.right > box.right - 8) shift = box.right - 8 - r.right;
+      if (r.left + shift < box.left + 8) shift = box.left + 8 - r.left;
+      card.style.left = `${Math.round(shift)}px`;
+    };
+    const close = () => words.forEach((w) => w.removeAttribute("data-open"));
+    words.forEach((w) => {
+      w.addEventListener("mouseenter", () => fit(w));
+      w.addEventListener("focus", () => fit(w));
+      w.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const open = w.hasAttribute("data-open");
+        close();
+        if (!open) { fit(w); w.setAttribute("data-open", ""); }
+      });
+    });
+    document.addEventListener("click", close);
+  });
+</script>

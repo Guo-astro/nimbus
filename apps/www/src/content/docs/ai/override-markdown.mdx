@@ -1,0 +1,187 @@
+---
+title: Override generated Markdown
+description: Customize the Markdown versions, llms.txt indexes, and OG cards without giving up the shared routes.
+aiGenerated: true
+sidebar:
+  order: 3
+  label: Custom Markdown
+---
+
+The starter's `src/pages/[...slug]/index.md.ts` and `src/pages/[...slug]/index.mdx.ts` routes serve the Markdown and source versions of every page. You can change what they serve at three levels:
+
+- Wrap the shared route to change the output for every page.
+- Replace the shared route with your own code.
+- Add a more specific route file to take over one collection.
+
+The examples use the `.md` route. The `.mdx` route works the same way with `markdownSourceRoute()`. The `llms.txt` routes and the OG card route follow the same pattern; see [Override an `llms.txt` index](#override-an-llmstxt-index) and [Customize OG cards](#customize-og-cards).
+
+## Wrap the shared route
+
+Call the shared route's `GET`, then change its response. This example adds a license line to every Markdown version:
+
+```ts title="src/pages/[...slug]/index.md.ts"
+import type { APIRoute } from "astro";
+import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
+
+const route = markdownRoute();
+export const getStaticPaths = route.getStaticPaths;
+
+export const GET: APIRoute = async (context) => {
+  const response = await route.GET(context);
+  if (!response.ok) return response;
+  const body = await response.text();
+  return new Response(`${body}\nLicensed under CC BY 4.0.\n`, {
+    headers: response.headers,
+  });
+};
+```
+
+## Replace the shared route
+
+Write your own `GET` with the public helpers from `@cloudflare/nimbus-docs/agent-endpoints`. `getMarkdownPayload()` returns a page's generated Markdown as `body`, and only the page content, without the frontmatter and index preamble, as `content`. Keep the shared route's `getStaticPaths`: it lists every collection's pages, skips pages that more specific routes own, and passes each page's `reference` as a prop.
+
+This example serves only the page content:
+
+```ts title="src/pages/[...slug]/index.md.ts"
+import type { APIRoute } from "astro";
+import {
+  getMarkdownPayload,
+  markdownRoute,
+  type MarkdownEndpointReference,
+} from "@cloudflare/nimbus-docs/agent-endpoints";
+
+export const { getStaticPaths } = markdownRoute();
+
+export const GET: APIRoute = async ({ props, request }) => {
+  const { reference } = props as { reference: MarkdownEndpointReference };
+  const payload = await getMarkdownPayload({
+    collection: reference.collection,
+    surface: "markdown",
+    reference,
+    context: { request },
+  });
+  if (!payload) return new Response("Not found", { status: 404 });
+  return new Response(payload.content, {
+    headers: { "Content-Type": payload.mediaType },
+  });
+};
+```
+
+To list pages yourself, `getMarkdownStaticPaths({ collection, surface })` returns one collection's paths. A route built from it serves only the collections it lists.
+
+## Take over one collection
+
+Astro gives a more specific route priority. Add a route file under a collection's URL prefix, and it serves that collection's Markdown versions. The shared route skips every URL the more specific route's pattern matches.
+
+`markdownRoute()` works in any route file and serves only the URLs its route matches. Wrap it to customize one collection:
+
+```ts title="src/pages/blog/[...slug]/index.md.ts"
+import type { APIRoute } from "astro";
+import { markdownRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
+
+const route = markdownRoute();
+export const getStaticPaths = route.getStaticPaths;
+
+export const GET: APIRoute = async (context) => {
+  const response = await route.GET(context);
+  if (!response.ok) return response;
+  const body = await response.text();
+  return new Response(`${body}\nSubscribe at https://example.com/blog/rss.xml\n`, {
+    headers: response.headers,
+  });
+};
+```
+
+Or write the route with the public helpers. This route builds a `changelog` collection's frontmatter itself. To add fields from a page's frontmatter, [`markdownFields`](/ai/publish-markdown#add-your-own-frontmatter) needs no route; write one for anything it can't produce:
+
+```ts title="src/pages/changelog/[...slug]/index.md.ts (abridged)"
+export const getStaticPaths = async () =>
+  getMarkdownStaticPaths({ collection: "changelog", surface: "markdown" });
+
+export async function GET({ params, props, request }: SlugContext) {
+  const payload = await getMarkdownPayload({
+    collection: "changelog",
+    surface: "markdown",
+    slug: params.slug,
+    reference: props.reference,
+    context: { request },
+  });
+  if (!payload) return new Response("Not found", { status: 404 });
+  // Build the frontmatter from the entry's data, then append payload.content.
+}
+```
+
+A more specific route must generate every page its pattern matches. If it skips some, those pages have no Markdown version while `llms.txt` still links to them. Nimbus lists the missing paths and the route that owns them as a build warning. The build fails instead when Astro's `prerenderConflictBehavior` is `"error"`.
+
+## Override an `llms.txt` index
+
+The starter's `llms.txt` routes call `llmsRoute()`, `llmsFullRoute()`, and `llmsSectionRoute()`. Wrap the returned `GET` the same way. This example adds a support link to `/llms.txt`:
+
+```ts title="src/pages/llms.txt.ts"
+import type { APIRoute } from "astro";
+import { llmsRoute } from "@cloudflare/nimbus-docs/agent-endpoints";
+
+const route = llmsRoute();
+
+export const GET: APIRoute = async (context) => {
+  const response = await route.GET(context);
+  if (!response.ok) return response;
+  const body = await response.text();
+  return new Response(`${body}\n## Support\n\n- [Contact support](https://example.com/support)\n`, {
+    headers: response.headers,
+  });
+};
+```
+
+For section indexes, keep `llmsSectionRoute()`'s `getStaticPaths`, which lists every section, and wrap its `GET`. To build a body from scratch, call `getLlmsPayload()` with a `reference` such as `{ scope: "section", surface: "index", section: "writing" }` (or `"reference/functions"` for a nested section); it returns `null` for an unknown index.
+
+## Customize OG cards
+
+Each page's card shows the site's logo, the page's section and its title. Two parts draw it:
+
+- `src/pages/og/_card.ts` is the card's look: colours, fonts, sizes, layout. It's yours to edit.
+- `@cloudflare/nimbus-docs/og` is the mechanism: it loads the fonts, fits text to its lines by measuring it, and renders the PNG with [Satori](https://github.com/vercel/satori) and resvg. Its fixes arrive with Nimbus releases.
+
+The logo comes from `src/components/logo.ts`, the drawing the header's `Logo.astro` renders too. Replace it there and the header and every card change together. Keep it a single-colour mark: the card fills it with the text colour.
+
+### Change the look
+
+Colours and sizes are constants at the top of `_card.ts`. The title comes from `renderer.fit()`, which returns the largest size that sets it in the lines you allow, and a text block to place in the card:
+
+```ts title="src/pages/og/_card.ts"
+const heading = await renderer.fit(title, { width: COLUMN, sizes: [64, 56, 50, 44], lines: 3, style: TITLE });
+// heading.size, heading.text, and heading.node to put in the card
+```
+
+`style` takes typography only: `fontFamily`, `lineHeight`, `fontWeight`, `fontStyle`, `letterSpacing`, `color`, `textAlign` and `textTransform`. Put spacing and position on a wrapper around `heading.node`. For a different design, replace the element tree in `card()`; `fit()` is optional.
+
+### Add a font for another script
+
+The card's Inter draws Latin, Greek and Cyrillic. For titles in other scripts, such as Chinese or Japanese, add a TTF or OTF font that covers them to `fonts` in `createCardRenderer()`. A character the first font lacks is drawn from the next one that has it. Until then, the build warns once that cards contain text the fonts don't draw. Right-to-left titles aren't supported.
+
+### Change a card's text
+
+`src/pages/og/[...slug].ts` lists the cards from `getOgImagePages()`, keyed so each one is written at its page's `ogImageUrl`. Each value is the page's `IndexedEntry`. The section above the title comes from `getPageSection(page)`: the page's nearest parent in its breadcrumbs. This example labels changelog cards instead:
+
+```ts title="src/pages/og/[...slug].ts"
+export const GET: APIRoute<{ page: Page }> = async ({ props: { page } }) => {
+  const section = page.collection === "changelog" ? "What's new" : await getPageSection(page);
+  return new Response(await renderPageCard({ section, title: page.title }), {
+    headers: { "Content-Type": "image/png" },
+  });
+};
+```
+
+Keep the route at `src/pages/og/[...slug].ts`, the map's keys as the `slug` parameter, and PNG output. Page routes link to `ogImageUrl`, so a changed location, key or format leaves pages pointing at cards that don't exist.
+
+A page whose frontmatter sets `socialImage` uses that image instead, because the page route passes `entry.data.socialImage ?? ogImageUrl`.
+
+## What an override changes
+
+An override changes only what that route serves. `llms-full.txt` and hosted MCP keep the Markdown Nimbus generates.
+
+The shared routes and routes that call an agent factory render the same way as the pages they describe: ahead of time on a static site, and in their collection's mode with a [`rendering` policy](/reference/rendering). `nimbus-docs check --fix` writes that mode into the file; for a route it can't edit, such as a wrapped one, it says what to change.
+
+Call the factory in the route file itself, as above. Nimbus finds it by reading the route file, as Astro does for `prerender`, so a factory re-exported from another module isn't checked at startup.
+
+At the end of the build, Nimbus warns about any Markdown version or `llms.txt` index that no route generated, and names the route to add.

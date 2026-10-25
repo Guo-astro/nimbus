@@ -4,22 +4,30 @@
  * through the SAME atoms as the docs sidebar (`SidebarGroupHeader`,
  * `SidebarLink`) so the two rails are one visual language; the only
  * API-specific decoration is the leading `ApiMethodChip` on operation leaves.
- * Open/active state is pre-resolved by `getApiNav` (`expanded` marks the active
- * trail, `active` marks the current node), so this maps those flags straight
- * onto the shared header/link props — no descendant scan.
+ * Groups are native `<details>`; a group with its own page lists it as the
+ * group's first child, labelled "Overview". Open/active state is pre-resolved
+ * by `getApiNav` (`expanded` marks the active trail, `active` the current
+ * node), so this maps those flags straight onto the shared atoms.
+ *
+ * Under `sidebar: "on-demand"`, a collapsed group arrives `deferred`, with no
+ * children and a `childrenHref`: the page whose sidebar lists them. It renders
+ * as a closed group whose list holds only the Overview row; `initNavSidebar`
+ * (mounted by `ApiLayout`) fills the list from that page when the group
+ * opens. Without JavaScript, the Overview row still reaches its page.
  */
-import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import SidebarGroupHeader from "@/components/ui/sidebar/SidebarGroupHeader.astro";
 import SidebarLink from "@/components/ui/sidebar/SidebarLink.astro";
 import ApiMethodChip from "./ApiMethodChip.astro";
 import type { ApiNavItem } from "@cloudflare/nimbus-docs/api";
+import { withBase } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   item: ApiNavItem;
 }
 
 const { item } = Astro.props;
-const hasChildren = item.children.length > 0;
+const deferred = Boolean(item.deferred && item.childrenHref);
+const hasChildren = item.children.length > 0 || deferred;
 // `expanded` ⟺ ancestor of the active node; `active` ⟺ the current node. Both
 // mean "on the active trail" for header emphasis, and either opens the group.
 const onActiveTrail = Boolean(item.expanded || item.active);
@@ -27,31 +35,32 @@ const onActiveTrail = Boolean(item.expanded || item.active);
 
 {
   hasChildren ? (
-    <Collapsible open={onActiveTrail} data-nb-sidebar-group>
-      <SidebarGroupHeader
-        label={item.label}
-        isOpen={onActiveTrail}
-        hasActive={onActiveTrail}
-        indexHref={item.href}
-        indexIsCurrent={item.active}
-        deprecated={item.deprecated}
-      />
-      <CollapsibleContent data-nb-state={onActiveTrail ? "open" : "closed"}>
-        <ul class="mt-0.5 ml-3 list-none border-l border-border p-0 pl-2 flex flex-col gap-px">
-          {item.children.map((child) => (
-            <li class="break-words">
+    <details
+      data-nb-nav-group={item.coordinate}
+      data-nb-nav-src={deferred ? withBase(item.childrenHref!, import.meta.env.BASE_URL) : undefined}
+      open={onActiveTrail || undefined}
+    >
+      <SidebarGroupHeader label={item.label} hasActive={onActiveTrail} deprecated={item.deprecated} />
+      <ul>
+        {item.href && (
+          <li>
+            <SidebarLink label="Overview" href={item.href} isCurrent={item.active} />
+          </li>
+        )}
+        {!deferred &&
+          item.children.map((child) => (
+            <li>
               <Astro.self item={child} />
             </li>
           ))}
-        </ul>
-      </CollapsibleContent>
-    </Collapsible>
+      </ul>
+    </details>
   ) : (
     <SidebarLink
       label={item.label}
       href={item.href ?? "#"}
       isCurrent={item.active}
-      class={item.deprecated ? "px-1 line-through" : "px-1"}
+      class={item.deprecated ? "line-through" : undefined}
     >
       <ApiMethodChip slot="leading" method={item.method} display="label" />
     </SidebarLink>

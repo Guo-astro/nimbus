@@ -1,13 +1,21 @@
-import fs from "node:fs";
-
 import { discoverMigrations } from "../_internal/migrations.js";
-import { resolveUpgradeBaseline, selectUpgradeEntries } from "../_internal/upgrades.js";
+import { dependenciesMissing, resolveUpgradeBaseline, selectUpgradeEntries, siteScope } from "../_internal/upgrades.js";
+import { selfCommand } from "../cli/pm.js";
 import type { ScopeReport } from "./finding.js";
 
 export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeReport {
+  // The env scope reports the missing install; there's no version to compare yet.
+  if (dependenciesMissing(cwd)) {
+    return {
+      scope: "migrations",
+      findings: [],
+      notes: [{ code: "nimbus/dependencies-missing", reason: "dependencies aren't installed yet" }],
+      evaluated: true,
+    };
+  }
   const baseline = resolveUpgradeBaseline({ projectRoot: cwd });
   const entries = baseline.fromVersion && !baseline.error
-    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion)
+    ? selectUpgradeEntries(baseline.fromVersion, baseline.targetVersion, siteScope(cwd, srcDirOverride))
     : [];
   const discovery = discoverMigrations({
     projectRoot: cwd,
@@ -15,14 +23,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
     allowUnresolvedLayout: baseline.fromVersion === baseline.targetVersion && !baseline.error,
   });
   const baselineBlocked = Boolean(baseline.error || (!baseline.fromVersion && baseline.source !== "preview"));
-  const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : "nimbus-docs";
-  const migrateArgs = [entry, "migrate", ...(srcDirOverride ? ["--src-dir", srcDirOverride] : [])];
-  const command = {
-    bin: process.execPath,
-    args: migrateArgs,
-    cwd: ".",
-    display: [process.execPath, ...migrateArgs].map(shell).join(" "),
-  };
+  const command = selfCommand(["migrate", ...(srcDirOverride ? ["--src-dir", srcDirOverride] : [])], cwd);
   return {
     scope: "migrations",
     findings: [
@@ -52,18 +53,25 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
       ...(baseline.fromVersion && !baseline.error
         ? entries.map((entry) => ({
             scope: "migrations" as const,
-            code: "nimbus/upgrade-review",
-            severity: "error" as const,
-            message: `${entry.summary} Review upgrade \`${entry.id}\` with \`${command.display}\`.`,
+            code: entry.mode === "optional" ? "nimbus/upgrade-optional" : "nimbus/upgrade-review",
+            severity: entry.mode === "optional" ? ("info" as const) : ("error" as const),
+            message:
+              entry.mode === "optional"
+                ? `${entry.summary} Optional upgrade \`${entry.id}\`: listed until \`${command.display}\` records ${baseline.targetVersion} as reviewed (answer yes, or pass --yes).`
+                : `${entry.summary} Review upgrade \`${entry.id}\` with \`${command.display}\`.`,
             fixable: false,
-            migration: {
-              id: entry.id,
-              introducedIn: entry.introducedIn,
-              state: "blocked" as const,
-              command,
-            },
+            ...(entry.mode === "optional"
+              ? {}
+              : {
+                  migration: {
+                    id: entry.id,
+                    introducedIn: entry.introducedIn,
+                    state: "blocked" as const,
+                    command,
+                  },
+                }),
           }))
-         : []),
+        : []),
       ...(baselineBlocked
         ? [{
             scope: "migrations" as const,
@@ -82,7 +90,7 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
         ? [{
             code: "nimbus/upgrade-baseline-missing",
             reason: baseline.source === "preview"
-              ? "Preview scaffolds do not establish a stable Nimbus release baseline."
+              ? `This preview has no reviewed Nimbus release, so upgrade reviews aren't checked. Once you install a release, run \`${command.display} --from <version>\` with the last release the site used before the preview; for a site created from the preview, the latest release on the day you created it.`
               : `Nimbus cannot determine the previously reviewed version. Run \`${command.display} --from <version>\`.`,
             requiresInput: true,
           }]
@@ -90,8 +98,4 @@ export function checkMigrations(cwd: string, srcDirOverride?: string): ScopeRepo
     ],
     evaluated: true,
   };
-}
-
-function shell(value: string): string {
-  return /^[A-Za-z0-9@._/:+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
 }

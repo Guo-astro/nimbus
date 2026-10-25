@@ -19,6 +19,7 @@
  */
 
 import type { Coordinate, NodeKind, ParameterLocation } from "./model.js";
+import { normalizeResourceActionSegment } from "./route-policy.js";
 
 /** Reserved top-level namespaces, enforced where collisions are real. */
 export const RESERVED_NAMESPACES = ["errors", "tags", "changelog"] as const;
@@ -106,6 +107,27 @@ export function fallbackOperationCoordinate(method: string, path: string): Coord
   return [method.toLowerCase(), ...segments].join("/");
 }
 
+/**
+ * Wire shape for cross-version pairing: the lowercased method joined to the
+ * path split on `/` with every `{name}` segment replaced by `{}` — parameter
+ * names are the author's choice and can be renamed between versions, so the
+ * shape is parameter-name-blind. Distinct from `fallbackOperationCoordinate`,
+ * which keeps parameter names (it mints a page identity) and so can't be
+ * reused here.
+ */
+export function operationShape(method: string, path: string): string {
+  // Segments are kept verbatim — empty ones included, so `/a//b` never
+  // equates to `/a/b` — and only a segment that is exactly one placeholder
+  // normalizes. A composite segment (`{name}.{format}`) keeps its text: its
+  // parameter names stay significant, and an uncertain pairing must stay
+  // unmatched rather than guessed.
+  const segments = path
+    .replace(/^\//u, "")
+    .split("/")
+    .map((segment) => (/^\{[^{}]*\}$/u.test(segment) ? "{}" : segment));
+  return [method.toLowerCase(), ...segments].join("/");
+}
+
 /** Webhook = the `webhooks` map key, always (even if an operationId exists). */
 export function webhookCoordinate(key: string): Coordinate {
   return key;
@@ -151,6 +173,27 @@ export function responseFieldCoordinate(
   path: string,
 ): Coordinate {
   return joinPath(op, "response", status, path);
+}
+
+/** Non-primary response media node = `<op>.response.<status>.<mediaToken>` (the
+ *  primary keeps the response's own coordinates, as on the request side). */
+export function responseMediaCoordinate(
+  op: Coordinate,
+  status: string,
+  mediaToken: string,
+): Coordinate {
+  return joinPath(op, "response", status, mediaToken);
+}
+
+/** Field of a non-primary response media type =
+ *  `<op>.response.<status>.<mediaToken>.<dotted path>`. */
+export function responseMediaFieldCoordinate(
+  op: Coordinate,
+  status: string,
+  mediaToken: string,
+  path: string,
+): Coordinate {
+  return joinPath(op, "response", status, mediaToken, path);
 }
 
 /**
@@ -254,6 +297,33 @@ export function tagRouteSegment(tag: string): string {
   return cleaned === "" ? `tag-${fnv1a36(tag)}` : cleaned;
 }
 
+/**
+ * The `resource-action-v2` routing segment for a tag: the same lowercase
+ * kebab-case projection operation slugs use, so `User Management` routes at
+ * `tags/user-management` beside `users/list`. A projection that empties out
+ * falls back to the same deterministic hash as `tagRouteSegment`. The result
+ * always passes the route-policy segment grammar; two tags that collapse to one
+ * segment are caught by `registerSlug` as a pointed build error.
+ */
+export function policyTagRouteSegment(tag: string): string {
+  const cleaned = normalizeResourceActionSegment(tag);
+  return cleaned === "" ? `tag-${fnv1a36(tag)}` : cleaned;
+}
+
+/**
+ * A tag's own segment on a hierarchical section path: its v2 segment with the
+ * parent's projected name and a following `-` removed when it starts that way,
+ * so `zero-trust-devices` under `zero-trust` is `devices`. The comparison is on
+ * projected names, never on the parent's own (already stripped) segment.
+ */
+export function hierarchicalTagRouteSegment(tag: string, parent?: string): string {
+  const own = policyTagRouteSegment(tag);
+  if (parent === undefined) return own;
+  const prefix = `${policyTagRouteSegment(parent)}-`;
+  const stripped = own.startsWith(prefix) ? own.slice(prefix.length) : own;
+  return stripped === "" ? `tag-${fnv1a36(tag)}` : stripped;
+}
+
 /** True when a top-level body property name reads like a coordinate prefix. */
 export function isShadowingBodyProperty(name: string): boolean {
   return SHADOWING_NAMES.has(name);
@@ -261,13 +331,48 @@ export function isShadowingBodyProperty(name: string): boolean {
 
 /** URL/coordinate-safe token for a media type (lowercased, non-alphanumerics
  *  collapsed to `-`); an empty projection falls back to a deterministic hash.
- *  Two media types that collapse to one token are caught by `registerSlug`. */
+ *  The projection is lossy — use `mediaTypeTokens` to token a whole `content`
+ *  map, which keeps sibling tokens distinct. */
 export function mediaTypeToken(mediaType: string): string {
   const cleaned = mediaType
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   return cleaned === "" ? `media-${fnv1a36(mediaType)}` : cleaned;
+}
+
+/**
+ * Tokens for the non-primary media types of one `content` map, in the caller's
+ * (deterministic, declaration-order-independent) order. A token is a coordinate
+ * segment beside the primary body's own top-level fields, so it must be distinct
+ * from both its siblings (distinct media types can project to one token, e.g.
+ * `application/vnd.a+json` and `application/vnd.a-json`) and every segment in
+ * `claimed` (the primary's top-level field names). The first media type keeps
+ * the plain token when it is free; otherwise it gets a
+ * `--<hash of its raw media type>` suffix. A plain token never contains `--`
+ * (runs collapse to one `-`), so a suffixed token cannot collide with a plain
+ * one, and a map with no collision keeps exactly the tokens it always had.
+ */
+export function mediaTypeTokens(
+  mediaTypes: readonly string[],
+  claimed: ReadonlySet<string> = new Set(),
+): string[] {
+  const taken = new Set<string>();
+  return mediaTypes.map((mediaType) => {
+    const plain = mediaTypeToken(mediaType);
+    const token =
+      taken.has(plain) || claimed.has(plain) ? `${plain}--${fnv1a36(mediaType)}` : plain;
+    taken.add(token);
+    return token;
+  });
+}
+
+/** The first coordinate segment of each dotted field path — the segments a
+ *  media token placed beside those fields must not reuse. */
+export function leadingSegments(paths: Iterable<string>): Set<string> {
+  const out = new Set<string>();
+  for (const path of paths) out.add(path.split(".", 1)[0]!);
+  return out;
 }
 
 // --- The registry -------------------------------------------------------------
@@ -454,12 +559,16 @@ export class CoordinateRegistry {
         ? `Adjust the \`routes.operations\` override target for one of them so their URLs stay distinct.`
         : kinds.includes("derived")
           ? `Pin an explicit \`routes.operations\` override for one of them so their URLs stay distinct — ` +
-            `a resource-action-v1 slug is derived from the operation's method and path, so renaming the operationId will not change it.`
+            `a derived slug comes from the operation's method and path, so renaming the operationId will not change it.`
           : `Rename one operation, schema, tag, or webhook so their URLs stay distinct.`;
+      // A tag page's segment is set in config, so name that remedy when a tag is one side.
+      const tag = [coordinate, prior].find((c) => c.startsWith("tags."))?.slice("tags.".length);
+      const tagAdvice = tag ? ` Or give tag "${tag}" another segment in \`routes.tagSegments\`.` : "";
       this.error(
         `pages "${prior}"${at(priorReg)}${via(prior)} and "${coordinate}"${at(currReg)}${via(coordinate)} both map to the ` +
           `route slug "${slug || "(index)"}". ` +
           advice +
+          tagAdvice +
           synthesizedFixHint([priorReg ?? {}, currReg ?? {}]),
         coordinate,
         currReg?.source ?? source,

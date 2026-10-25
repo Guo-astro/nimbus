@@ -1,0 +1,25 @@
+---
+/* The Sample Co overview page in a browser frame that bleeds off the bottom
+   of the stage. The shot always fills the frame's width, cropping from the
+   top left; light or dark follows the www page's own mode. Shots come from
+   weather-prose. */
+interface Props { class?: string }
+const { class: cls = "" } = Astro.props;
+const alt = "The Sample Co docs overview page, built with Nimbus.";
+---
+<div class:list={["sample-shot overflow-hidden rounded-t-lg border border-b-0 border-border bg-card", cls]}>
+  <div class="flex h-[37px] items-center gap-1.5 border-b border-border px-4" aria-hidden="true">
+    <i class="size-2.5 rounded-full bg-border"></i><i class="size-2.5 rounded-full bg-border"></i><i class="size-2.5 rounded-full bg-border"></i>
+    <span class="ml-3 rounded bg-accent px-2.5 font-mono text-[11px] leading-5 text-foreground/75">docs.weather.example</span>
+  </div>
+  <div class="relative aspect-[16/10] overflow-hidden md:aspect-auto md:h-[560px]">
+    <img src="/www/sample/overview-current-light.webp" alt={alt} width="2880" height="1800" decoding="async" data-shot-mode="light" class="absolute inset-0 size-full object-cover object-left-top" />
+    <img src="/www/sample/overview-current-dark.webp" alt={alt} width="2880" height="1800" loading="lazy" decoding="async" data-shot-mode="dark" class="absolute inset-0 size-full object-cover object-left-top" />
+  </div>
+</div>
+
+<style>
+  .sample-shot img[data-shot-mode="dark"] { visibility: hidden; }
+  :global([data-mode="dark"]) .sample-shot img[data-shot-mode="dark"] { visibility: visible; }
+  :global([data-mode="dark"]) .sample-shot img[data-shot-mode="light"] { visibility: hidden; }
+</style>

@@ -13,21 +13,35 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Features } from "satteri";
+
+import { setMarkdownFeatures } from "../_internal/markdown-features.js";
 import {
   findMdxFiles,
   lintPaths,
+  ruleEnabledAnywhere,
   validateLintOptions,
+  withRuleOff,
   IMPLEMENTED_CODES,
   type CollectionsConfig,
   type RulesConfig,
 } from "../lint/index.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { BASE_FROM_ROUTES_MESSAGE, resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
+import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import { fromDiagnostic, type CheckFinding, type Note, type ScopeReport } from "./finding.js";
 
-export function checkAuthoring(cwd: string): ScopeReport {
+const LINK_RULES = ["nimbus/internal-link", "nimbus/redirected-link"] as const;
+
+export function checkAuthoring(
+  cwd: string,
+  snapshots: ReadonlyMap<string, { contentDir: string }> = new Map(),
+): ScopeReport {
   const findings: CheckFinding[] = [];
   const notes: Note[] = [];
   const hasLintJson = fs.existsSync(path.join(cwd, ".nimbus", "lint.json"));
   const { config, error } = loadMaterializedConfig(cwd);
+  if (config.markdownFeatures) setMarkdownFeatures(config.markdownFeatures);
 
   if (error) {
     findings.push({
@@ -40,12 +54,47 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   }
 
-  const files = findMdxFiles([path.join(cwd, "src", "content")]);
+  if (hasLintJson && !error && lintConfigIsStale(cwd, config)) {
+    findings.push({
+      scope: "authoring",
+      code: "nimbus/lint-config-stale",
+      severity: "warn",
+      file: ".nimbus/lint.json",
+      message: STALE_LINT_CONFIG_MESSAGE,
+      fixable: false,
+    });
+  }
+
+  const lintScope = pageCollectionLintScope(cwd, snapshots);
+  const files = [
+    ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
+  ].sort();
+  for (const note of lintScope.notes) {
+    notes.push({
+      code: note.startsWith("not inspected") ? "nimbus/page-collection-not-on-disk" : "nimbus/markdown-not-linted",
+      reason: note,
+    });
+  }
   if (files.length === 0) {
     return { scope: "authoring", findings, notes, evaluated: true };
   }
 
-  let effective = config;
+  const { base, known: baseKnown } = resolveLintBase(cwd, config.base);
+  const imageRefRuns = ruleEnabledAnywhere("nimbus/image-ref", config.rules, config.collections);
+  if (imageRefRuns && !baseKnown) {
+    notes.push({ code: "nimbus/site-base-unknown", reason: UNKNOWN_SITE_BASE_MESSAGE, requiresBuild: true });
+  } else if (imageRefRuns && hasLintJson && config.base === undefined) {
+    notes.push({ code: "nimbus/site-base-from-routes", reason: BASE_FROM_ROUTES_MESSAGE, requiresBuild: true });
+  }
+
+  let effective = {
+    ...config,
+    base,
+    collectionOf: lintScope.collectionOf,
+    displayPath: lintScope.displayPath,
+    readOnlySource: lintScope.readOnlySource,
+    sourceFolder: lintScope.sourceFolder,
+  };
   if (!hasLintJson) {
     notes.push({
       code: "nimbus/authoring-optin-skipped",
@@ -55,58 +104,31 @@ export function checkAuthoring(cwd: string): ScopeReport {
     });
   } else if (
     !error &&
-    internalLinkEnabled(config) &&
+    LINK_RULES.some((code) => ruleEnabledAnywhere(code, config.rules, config.collections)) &&
     !fs.existsSync(path.join(cwd, ".nimbus", "routes.json"))
   ) {
     notes.push({
       code: "nimbus/internal-link-skipped",
       reason:
-        "link checking skipped — `nimbus/internal-link` resolves against the route map `astro build` materializes into `.nimbus/routes.json`, which doesn't exist yet. Other authoring rules still ran.",
+        "link checking skipped — the link rules resolve against the route map `astro build` materializes into `.nimbus/routes.json`, which doesn't exist yet. Other authoring rules still ran.",
       requiresBuild: true,
     });
-    // Noted structurally above — disable the rule so it doesn't also run and
-    // write its own skip warning to stderr.
-    effective = withRuleDisabled(config, "nimbus/internal-link");
+    // Noted structurally above — disable the rules so they don't also run
+    // and write their own skip warning to stderr.
+    for (const code of LINK_RULES) effective = withRuleOff(effective, code);
   }
 
   for (const d of lintPaths(files, cwd, effective)) findings.push(fromDiagnostic(d));
   return { scope: "authoring", findings, notes, evaluated: true };
 }
 
-function withRuleDisabled(
-  config: MaterializedConfig,
-  code: keyof RulesConfig,
-): MaterializedConfig {
-  const collections: CollectionsConfig = {};
-  for (const [name, collection] of Object.entries(config.collections)) {
-    collections[name] = collection.rules
-      ? { ...collection, rules: { ...collection.rules, [code]: "off" } }
-      : collection;
-  }
-  return {
-    ...config,
-    rules: { ...config.rules, [code]: "off" },
-    collections,
-  };
-}
-
-function internalLinkEnabled(config: MaterializedConfig): boolean {
-  const code = "nimbus/internal-link";
-  const settings: unknown[] = [(config.rules as Record<string, unknown>)[code]];
-  for (const collection of Object.values(config.collections)) {
-    const rules = collection.rules as Record<string, unknown> | undefined;
-    if (rules) settings.push(rules[code]);
-  }
-  return settings.some((setting) => {
-    const severity = Array.isArray(setting) ? setting[0] : setting;
-    return severity === "error" || severity === "warn";
-  });
-}
-
 export interface MaterializedConfig {
   rules: RulesConfig;
   collections: CollectionsConfig;
   site?: string;
+  markdownFeatures?: Features;
+  /** The site base as the renderer applies it; absent in a file from an older version. */
+  base?: string;
 }
 
 export interface LoadMaterializedResult {
@@ -132,7 +154,13 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
     return { config: { rules: {}, collections: {} }, error: null };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown };
+  let parsed: {
+    rules?: unknown;
+    collections?: unknown;
+    site?: unknown;
+    markdownFeatures?: unknown;
+    base?: unknown;
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -149,12 +177,21 @@ export function loadMaterializedConfig(cwd: string): LoadMaterializedResult {
       IMPLEMENTED_CODES,
     );
     const site = typeof parsed.site === "string" ? parsed.site : undefined;
+    const markdownFeatures = materializedFeatures(parsed.markdownFeatures);
+    const base = typeof parsed.base === "string" ? parsed.base : undefined;
     return {
-      config: { rules: validated.rules, collections: validated.collections, site },
+      config: { rules: validated.rules, collections: validated.collections, site, markdownFeatures, base },
       error: null,
     };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return { config: { rules: {}, collections: {} }, error: `${rel} is invalid — ${detail}.` };
   }
+}
+
+/** The site's Markdown features from `.nimbus/lint.json`; files from older builds have none. */
+export function materializedFeatures(value: unknown): Features | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Features)
+    : undefined;
 }

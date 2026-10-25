@@ -72,7 +72,16 @@ function makeTemplate(astroConfig = STARTER_CONFIG): string {
 }
 
 function makeCwd(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  // A wrangler the scaffold target resolves from its parent, the way a
+  // workspace hoists it: a new wrangler.jsonc takes its compatibility date
+  // from this workerd, and no test reaches the registry.
+  fs.mkdirSync(path.join(cwd, "node_modules", "wrangler"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
+  return cwd;
 }
 
 function internals(cwd: string, templateDir: string) {
@@ -109,7 +118,9 @@ for (const adapter of ADAPTER_IDS) {
         path.join(cwd, "my-docs", "astro.config.ts"),
         "utf8",
       );
-      const cliEdit = applyAdapterToConfig(STARTER_CONFIG, adapter);
+      const cliEdit = applyAdapterToConfig(STARTER_CONFIG, adapter, {
+        requestRendering: adapter === "cloudflare" ? true : { collections: ["docs"] },
+      });
       assert.equal(cliEdit.status, "applied");
       const expected = cliEdit.status === "applied" ? cliEdit.source : "";
       assert.equal(scaffolded, expected);
@@ -168,20 +179,25 @@ test("server + cloudflare defaults canonical collections to request rendering", 
   }
 });
 
-test("explicit non-Cloudflare adapters leave request rendering disabled", async () => {
-  const cwd = makeCwd();
-  const tmpl = makeTemplate();
-  try {
-    await scaffold(
-      { ...BASE, output: "server", adapter: "vercel", dir: "my-docs" },
-      internals(cwd, tmpl),
-    );
-
-    const config = fs.readFileSync(path.join(cwd, "my-docs", "astro.config.ts"), "utf8");
-    assert.doesNotMatch(config, /default:\s*["']request["']/);
-  } finally {
-    cleanup(cwd, tmpl);
+test("server scaffolds request-render docs (everything on Cloudflare); adding an adapter to a site doesn't", async () => {
+  for (const adapter of ADAPTER_IDS) {
+    const cwd = makeCwd();
+    const tmpl = makeTemplate();
+    try {
+      await scaffold({ ...BASE, output: "server", adapter, dir: "my-docs" }, internals(cwd, tmpl));
+      const config = fs.readFileSync(path.join(cwd, "my-docs", "astro.config.ts"), "utf8");
+      assert.match(
+        config,
+        adapter === "cloudflare" ? /rendering: \{ default: "request" \}/ : /rendering: \{ collections: \{ "docs": "request" \} \}/,
+        adapter,
+      );
+    } finally {
+      cleanup(cwd, tmpl);
+    }
   }
+  const added = applyAdapterToConfig(STARTER_CONFIG, "vercel");
+  assert.equal(added.status, "applied");
+  assert.doesNotMatch(added.status === "applied" ? added.source : "", /default:\s*["']request["']/);
 });
 
 test("server + cloudflare writes a server wrangler.jsonc (nodejs_compat, no static assets.directory)", async () => {
@@ -196,6 +212,8 @@ test("server + cloudflare writes a server wrangler.jsonc (nodejs_compat, no stat
     const wrangler = readJson(path.join(cwd, "my-docs", "wrangler.jsonc"));
     assert.ok(wrangler.$schema, "carries a $schema");
     assert.deepEqual(wrangler.compatibility_flags, ["nodejs_compat"]);
+    // The resolved wrangler's workerd date, not today's.
+    assert.equal(wrangler.compatibility_date, "2025-01-01");
     assert.equal(
       wrangler.assets?.directory,
       undefined,
@@ -215,7 +233,7 @@ test("server + cloudflare pins the adapter in dependencies and wrangler at the s
   const tmpl = makeTemplate();
   try {
     await scaffold(
-      { ...BASE, output: "server", adapter: "cloudflare", dir: "my-docs" },
+      { ...BASE, packageManager: "pnpm", output: "server", adapter: "cloudflare", dir: "my-docs" },
       internals(cwd, tmpl),
     );
 
@@ -405,5 +423,30 @@ module.exports = defineConfig({
     assert.equal(fs.existsSync(path.join(cwd, "my-docs")), false);
   } finally {
     cleanup(cwd, tmpl);
+  }
+});
+
+test("server scaffolds write route files that match the rendering they set", async () => {
+  const starterPages = new URL("../../nimbus-starter-source/src/pages/", import.meta.url);
+  const routes = ["[...slug].astro", "[...slug]/index.md.ts", "[...slug]/index.mdx.ts", "[...section]/llms.txt.ts", "llms.txt.ts", "llms-full.txt.ts"];
+  for (const adapter of ["cloudflare", "node"] as const) {
+    const cwd = makeCwd();
+    const tmpl = makeTemplate();
+    for (const route of routes) {
+      fs.mkdirSync(path.dirname(path.join(tmpl, "src/pages", route)), { recursive: true });
+      fs.copyFileSync(new URL(route, starterPages), path.join(tmpl, "src/pages", route));
+    }
+    try {
+      await scaffold({ ...BASE, output: "server", adapter, dir: "my-docs" }, internals(cwd, tmpl));
+      for (const route of routes) {
+        const source = fs.readFileSync(path.join(cwd, "my-docs", "src/pages", route), "utf8");
+        // Off Cloudflare only docs render on request; the site-wide llms files stay built.
+        const built = adapter === "node" && !route.startsWith("[");
+        assert.equal(/^export const prerender = true;$/m.test(source), built, `${adapter} ${route}`);
+        assert.doesNotMatch(source, /getStaticPaths/, `${adapter} ${route}`);
+      }
+    } finally {
+      cleanup(cwd, tmpl);
+    }
   }
 });

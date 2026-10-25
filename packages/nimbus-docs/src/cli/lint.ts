@@ -8,22 +8,35 @@
  *
  * Severity overrides live with the integration
  * (`nimbus(config, { rules })`), which materializes them to
- * `.nimbus/lint.json` at build/dev time; this command reads that file when
- * present and otherwise runs every authoring rule at its default. In-file
- * disables (`nimbusDisableRules`, inline comments) work with no config.
+ * `.nimbus/lint.json` at build/dev time; this command reads that file.
+ * Without it every authoring rule is off, so a run would check nothing:
+ * the command exits 1 asking for `astro build`, unless `--rule` names the
+ * rule to run. In-file disables (`nimbusDisableRules`, inline comments)
+ * work with no config.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
+import type { Features } from "satteri";
+
+import { setMarkdownFeatures } from "../_internal/markdown-features.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { leaseCurrentSources } from "../_internal/content-sources.js";
+import { materializedFeatures } from "../check/authoring.js";
+import { isBuildValidator } from "../lint/diagnostic.js";
+import { BASE_FROM_ROUTES_MESSAGE, resolveLintBase, UNKNOWN_SITE_BASE_MESSAGE } from "../lint/site-base.js";
+import { lintConfigIsStale, STALE_LINT_CONFIG_MESSAGE } from "../lint/stale-config.js";
 import {
   findMdxFiles,
   fixPaths,
   formatJson,
   formatPretty,
+  guardRouteTruth,
   IMPLEMENTED_CODES,
   isRuleCode,
   lintPaths,
+  ruleEnabledAnywhere,
   summarize,
   validateLintOptions,
   type CollectionsConfig,
@@ -39,6 +52,30 @@ export interface LintCliFlags {
   fix?: boolean;
 }
 
+const LINT_DOCS = "https://nimbus-docs.com/writing/linting/";
+
+export function lintHelp(usage: string): string {
+  return `
+  Usage:  ${usage}
+
+  Lints the .mdx files under src/content/, and those of any page collection
+  whose loader reads another folder, with the rules enabled in the Nimbus
+  integration's \`rules\` option. Exits 1 when an error-severity finding remains.
+
+  Flags:
+    --fix                  apply auto-fixes in place
+    --rule <nimbus/...>    run a single rule
+    --format json          machine-readable output
+    --quiet                errors only, suppress warnings
+    --color, --no-color    force color on or off (default: auto)
+
+  Rules:
+${[...IMPLEMENTED_CODES].sort().map((code) => `    ${code}`).join("\n")}
+
+  Rule reference: ${LINT_DOCS}
+`;
+}
+
 export async function lintCommand(flags: LintCliFlags): Promise<void> {
   const cwd = process.cwd();
   const contentDir = path.join(cwd, "src", "content");
@@ -46,23 +83,34 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
   if (flags.rule) {
     if (!isRuleCode(flags.rule)) {
       process.stderr.write(
-        `Unknown rule code: \`${flags.rule}\`. See https://nimbus-docs.com/lint for the rule list.\n`,
+        `Unknown rule code: \`${flags.rule}\`. See ${LINT_DOCS} for the rule list.\n`,
       );
       process.exit(1);
     }
     // Build validators run inside `astro build`; this command accepts only
     // authoring rules with an available rule module.
     if (!IMPLEMENTED_CODES.has(flags.rule)) {
+      // Build validators can't be picked or turned off: they always run.
+      const always =
+        flags.rule === "nimbus/mdx-syntax"
+          ? "always runs: `lint` reports any file that fails to parse, and so does `astro build`. "
+          : "always runs inside `astro build`, not here. ";
       process.stderr.write(
-        `Rule \`${flags.rule}\` is not an implemented lint rule. ` +
-          `Build validators run inside \`astro build\`, not here. ` +
-          `Implemented authoring rules: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
+        (isBuildValidator(flags.rule)
+          ? `Rule \`${flags.rule}\` ${always}`
+          : `Rule \`${flags.rule}\` is not an implemented lint rule. `) +
+          `Rules \`--rule\` can run: ${[...IMPLEMENTED_CODES].sort().join(", ")}.\n`,
       );
       process.exit(1);
     }
   }
 
-  const files = findMdxFiles([contentDir]);
+  // Read source snapshots under a lease, so a build can't prune one mid-read.
+  const sources = await leaseCurrentSources(cwd);
+  process.once("exit", sources.release);
+  const scope = pageCollectionLintScope(cwd, sources.snapshots);
+  const files = [...new Set([...findMdxFiles([contentDir]), ...scope.files])].sort();
+  for (const note of scope.notes) process.stderr.write(`nimbus-docs: ${note}\n`);
   if (files.length === 0) {
     // Exit nonzero: a lint step that finds nothing to lint is almost always a
     // misconfigured working directory, not a clean pass. Failing loudly stops a
@@ -74,17 +122,55 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     process.exit(1);
   }
 
-  const { rules, collections, site } = loadMaterializedConfig(cwd);
-  const opts = {
+  const { rules, collections, site, markdownFeatures, base: materializedBase, found } =
+    loadMaterializedConfig(cwd);
+  if (markdownFeatures) setMarkdownFeatures(markdownFeatures);
+  else if (found) {
+    process.stderr.write(
+      "nimbus-docs: `.nimbus/lint.json` is from an older build, so lint reads Markdown with the default features. " +
+        "Run `astro build` to use the site's `markdown.features`.\n",
+    );
+  }
+  const { base, known: baseKnown } = resolveLintBase(cwd, materializedBase);
+  const imageRefRuns = flags.rule
+    ? flags.rule === "nimbus/image-ref"
+    : ruleEnabledAnywhere("nimbus/image-ref", rules, collections);
+  if (imageRefRuns && !baseKnown) {
+    process.stderr.write(`nimbus-docs: ${UNKNOWN_SITE_BASE_MESSAGE}\n`);
+  } else if (imageRefRuns && found && materializedBase === undefined) {
+    process.stderr.write(`nimbus-docs: ${BASE_FROM_ROUTES_MESSAGE}\n`);
+  }
+  if (found && lintConfigIsStale(cwd, { rules, collections, base: materializedBase })) {
+    process.stderr.write(`nimbus-docs: ${STALE_LINT_CONFIG_MESSAGE}\n`);
+  }
+  if (!found && !flags.rule) {
+    // Exit nonzero for the same reason as no `.mdx` files: with no
+    // materialized config every authoring rule is off, so a "clean" result
+    // would mean nothing was checked, and a CI lint gate would go green.
+    process.stderr.write(
+      "`.nimbus/lint.json` is missing, so no lint rules are enabled. " +
+        "Run `astro build` or `astro dev` first; it writes the `rules` from your Astro config there. " +
+        "To run one rule without it, pass `--rule <code>`.\n",
+    );
+    process.exit(1);
+  }
+  // Fail closed: a link rule that's on but has no usable route truth is one
+  // error on `.nimbus/routes.json`, and doesn't run.
+  const { opts, diagnostic: routeTruthFailure } = guardRouteTruth(cwd, {
     rules,
     collections,
     site,
+    base,
     // `flags.rule` already passed through validation that rejects build
     // validators; the cast here is the type-level reflection of that runtime
     // narrowing (LintOptions.only is `AuthoringRuleCode` because `--rule`
     // can't force-enable a build validator).
     only: flags.rule as import("../lint/diagnostic.js").AuthoringRuleCode | undefined,
-  };
+  });
+  opts.collectionOf = scope.collectionOf;
+  opts.displayPath = scope.displayPath;
+  opts.readOnlySource = scope.readOnlySource;
+  opts.sourceFolder = scope.sourceFolder;
 
   let diagnostics: Diagnostic[];
   let interrupted = false;
@@ -132,6 +218,7 @@ export async function lintCommand(flags: LintCliFlags): Promise<void> {
     diagnostics = lintPaths(files, cwd, opts);
   }
 
+  if (routeTruthFailure) diagnostics.unshift(routeTruthFailure);
   const summary = summarize(diagnostics, files.length);
 
   if (flags.format === "json") {
@@ -174,12 +261,17 @@ interface MaterializedConfig {
   rules: RulesConfig;
   collections: CollectionsConfig;
   site?: string;
+  markdownFeatures?: Features;
+  /** The site base as the renderer applies it; absent in a file from an older version. */
+  base?: string;
+  /** False when `.nimbus/lint.json` doesn't exist. */
+  found: boolean;
 }
 
 /**
  * Read the integration's materialized lint config from `.nimbus/lint.json`.
- * Returns empty defaults when the file is absent or unreadable (lint must
- * work before the first build).
+ * Returns empty defaults and `found: false` when the file is absent or
+ * unreadable; the caller decides whether a run without it means anything.
  *
  * **Re-validates the parsed config** against `validateLintOptions`, the
  * same validator the integration ran at config-setup time. The materialized
@@ -194,10 +286,16 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
   try {
     raw = fs.readFileSync(file, "utf8");
   } catch {
-    return { rules: {}, collections: {} };
+    return { rules: {}, collections: {}, found: false };
   }
 
-  let parsed: { rules?: unknown; collections?: unknown; site?: unknown };
+  let parsed: {
+    rules?: unknown;
+    collections?: unknown;
+    site?: unknown;
+    markdownFeatures?: unknown;
+    base?: unknown;
+  };
   try {
     parsed = JSON.parse(raw) as typeof parsed;
   } catch (err) {
@@ -226,5 +324,12 @@ function loadMaterializedConfig(cwd: string): MaterializedConfig {
   }
 
   const site = typeof parsed.site === "string" ? parsed.site : undefined;
-  return { rules: validated.rules, collections: validated.collections, site };
+  return {
+    rules: validated.rules,
+    collections: validated.collections,
+    site,
+    markdownFeatures: materializedFeatures(parsed.markdownFeatures),
+    base: typeof parsed.base === "string" ? parsed.base : undefined,
+    found: true,
+  };
 }

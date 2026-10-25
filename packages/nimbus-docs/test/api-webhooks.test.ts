@@ -72,7 +72,7 @@ describe("a webhook assembles the full request/response contract", () => {
     const page = hook();
     assert.equal(page.kind, "operation");
     assert.equal(page.isWebhook, true);
-    assert.equal(page.href, "/hooks/webhooks/orderCreated");
+    assert.equal(page.href, "/hooks/webhooks/orderCreated/");
   });
 
   test("its parameters are minted (not the old empty shell)", () => {
@@ -104,5 +104,47 @@ describe("a webhook assembles the full request/response contract", () => {
   test("the payload survives into the rendered Markdown version", () => {
     const md = renderApiPageMarkdown(hook());
     assert.ok(md.includes("orderCreated.id"), "the body field row is emitted");
+  });
+});
+
+describe("a webhook and the API's top-level security", () => {
+  test("operations inherit it, a webhook shows only its own", async () => {
+    const secured = await buildApiModel({
+      collection: "hooks",
+      label: "hooks",
+      spec: `
+openapi: 3.1.0
+info: { title: T, version: "1" }
+servers:
+  - url: https://api.example.com
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+    signature: { type: apiKey, in: header, name: X-Signature }
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        "200": { description: ok }
+webhooks:
+  orderCreated:
+    post:
+      responses:
+        "200": { description: received }
+  orderShipped:
+    post:
+      security:
+        - signature: []
+      responses:
+        "200": { description: received }
+`,
+    });
+    const auth = (id: string) => (getApiPageProps(secured, id) as ApiOperationPage).auth;
+    assert.equal(auth("ping").length, 1, "the endpoint keeps the API's bearer auth");
+    assert.deepEqual(auth("orderCreated"), [], "the receiver isn't told to expect your API's token");
+    assert.equal(auth("orderShipped").length, 1, "a webhook's own security still shows");
   });
 });

@@ -9,11 +9,15 @@ import fs from "node:fs";
 
 import * as p from "@clack/prompts";
 
+import { BUILD_ONLY_ENV } from "../_internal/build-slice.js";
 import { rewriteConfigField } from "../_internal/parse-nimbus-config.js";
 import { isAbsoluteHttpUrl } from "../_internal/validate.js";
 import { depInstalled, hasPackageJson } from "../check/probe.js";
 import { loadMaterializedConfig } from "../check/authoring.js";
 import { findMdxFiles, fixPaths } from "../lint/index.js";
+import { pageCollectionLintScope } from "../lint/collection-scope.js";
+import { leaseCurrentSources } from "../_internal/content-sources.js";
+import { applyRouteFiles, planRouteFiles } from "../_internal/route-files.js";
 import {
   ALL_SCOPES,
   exitCodeFor,
@@ -50,11 +54,17 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
   }
 
   const cwd = process.cwd();
+  if (process.env[BUILD_ONLY_ENV]?.trim()) {
+    process.stderr.write(
+      `nimbus-docs: ${BUILD_ONLY_ENV} is set, but only \`astro build\` builds a slice; check reads the whole site and ignores it.\n`,
+    );
+  }
   const scopes = resolveScopes(flags);
   const wantJson = flags.json === true || flags.format === "json";
 
   let result = await runChecks(cwd, scopes, { srcDir: flags.srcDir });
   let interrupted = false;
+  const skipped = new Set<FixSkip>();
 
   if (flags.fix) {
     const interactive = isTTY() && !wantJson;
@@ -75,6 +85,8 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
         wantJson,
         scopes,
         signal: ac.signal,
+        skipped,
+        srcDir: flags.srcDir,
       });
     } finally {
       process.off("SIGINT", onSigint);
@@ -90,6 +102,9 @@ export async function checkCommand(flags: CheckCliFlags): Promise<void> {
         color: shouldUseColor(flags.color),
         quiet: flags.quiet,
         invocation: invocation("check --fix", cwd),
+        rerun: invocation("check", cwd),
+        skippedFixes: [...skipped],
+        interactive: isTTY(),
       }),
     );
   }
@@ -110,12 +125,17 @@ export function resolveScopes(flags: CheckCliFlags): CheckScopes {
   };
 }
 
+/** Why a fix was left for the user: it prompts for a value, or it needs consent. */
+type FixSkip = "needs-terminal" | "needs-yes";
+
 interface FixContext {
   interactive: boolean;
   yes: boolean;
   wantJson: boolean;
   scopes: CheckScopes;
   signal: AbortSignal;
+  skipped: Set<FixSkip>;
+  srcDir?: string;
 }
 
 async function applyFixes(
@@ -126,18 +146,31 @@ async function applyFixes(
   const applied: string[] = [];
 
   if (ctx.scopes.authoring && !ctx.signal.aborted) {
-    const files = findMdxFiles([path.join(cwd, "src", "content")]);
+    const sources = await leaseCurrentSources(cwd);
+    const lintScope = pageCollectionLintScope(cwd, sources.snapshots);
+    const files = [
+      ...new Set([...findMdxFiles([path.join(cwd, "src", "content")]), ...lintScope.files]),
+    ].sort();
     if (files.length > 0) {
       const { config } = loadMaterializedConfig(cwd);
-      const run = fixPaths(files, cwd, { ...config, signal: ctx.signal });
+      const run = fixPaths(files, cwd, {
+        ...config,
+        collectionOf: lintScope.collectionOf,
+        displayPath: lintScope.displayPath,
+        readOnlySource: lintScope.readOnlySource,
+        sourceFolder: lintScope.sourceFolder,
+        signal: ctx.signal,
+      });
       if (run.fixed > 0) {
         applied.push(
           `fixed ${run.fixed} authoring issue(s) across ${run.filesChanged} file(s)`,
         );
       }
     }
+    sources.release();
   }
 
+  const routeFiles = new Set<string>();
   for (const f of result.findings) {
     if (ctx.signal.aborted) break;
     if (!f.fixable || !f.fix) continue;
@@ -148,10 +181,23 @@ async function applyFixes(
       case "install-dep":
         await fixInstallDep(cwd, f.fix.package ?? "", f.fix.dev === true, ctx, applied);
         break;
+      case "route-file":
+        routeFiles.add(f.fix.path ?? "");
+        break;
+    }
+  }
+  if (routeFiles.size > 0 && !ctx.signal.aborted) {
+    const plan = planRouteFiles(cwd, ctx.srcDir);
+    if (plan.ok) {
+      const { updated, manual } = applyRouteFiles(cwd, plan.files.filter((entry) => routeFiles.has(entry.file)));
+      const partly = new Map(manual.map((entry) => [entry.file, entry.edit.status === "manual" ? entry.edit.todo : ""]));
+      const whole = updated.filter((file) => !partly.has(file));
+      if (whole.length > 0) applied.push(`updated ${whole.join(", ")}`);
+      for (const file of updated.filter((file) => partly.has(file))) applied.push(`partly updated ${file}; still to do: ${partly.get(file)}`);
     }
   }
 
-  if (applied.length > 0 && ctx.interactive) {
+  if (applied.length > 0 && !ctx.wantJson) {
     p.log.success(`Applied:\n  ${applied.join("\n  ")}`);
   }
 }
@@ -164,7 +210,10 @@ async function fixSetConfig(
   applied: string[],
 ): Promise<void> {
   if (key !== "site" || !result.location) return;
-  if (!ctx.interactive) return;
+  if (!ctx.interactive) {
+    ctx.skipped.add("needs-terminal");
+    return;
+  }
 
   const value = await p.text({
     message:
@@ -223,6 +272,7 @@ async function fixInstallDep(
     const ok = await p.confirm({ message: `Install now? (${cmd})` });
     if (p.isCancel(ok) || !ok) return;
   } else if (!ctx.yes) {
+    ctx.skipped.add("needs-yes");
     return;
   }
 

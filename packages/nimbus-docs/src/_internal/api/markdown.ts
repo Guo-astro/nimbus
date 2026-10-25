@@ -138,10 +138,10 @@ function renderField(field: ApiFieldView, depth: number, out: string[], base?: s
   flags.push(field.required ? "required" : "optional");
   if (field.nullable) flags.push("nullable");
   if (field.deprecated) flags.push("deprecated");
-  // The field's own coordinate is its identifier — `create.amount`, not the bare
-  // leaf `amount` — so an agent reading the Markdown can cite it unambiguously.
-  // Indentation still conveys nesting; the leaf is the suffix.
-  let head = `${pad}- ${inlineCode(field.coordinate)} (${flags.join(", ")})`;
+  // Named as the page names it, with its coordinate (`create.amount`) beside
+  // it so an agent can still cite the field unambiguously.
+  const id = field.name && field.name !== field.coordinate ? `${inlineCode(field.name)} (${inlineCode(field.coordinate)}; ` : `${inlineCode(field.coordinate)} (`;
+  let head = `${pad}- ${id}${flags.join(", ")})`;
   if (field.description) head += ` — ${inlineText(field.description)}`;
   if (field.link) head += ` (${link("details", field.link.href, base)})`;
   out.push(head);
@@ -244,8 +244,23 @@ function renderExample(heading: string, example: ApiExampleView, out: string[]):
     typeof example.value === "string" && !isJson
       ? example.value
       : JSON.stringify(example.value, null, 2);
-  out.push(heading, "");
+  if (heading) out.push(heading, "");
   fenced(isJson ? "json" : "text", body, out);
+}
+
+/** One media type's body: its union, else its field list (and any omission). */
+function renderMediaBody(
+  body: { fields: ApiFieldView[]; truncated?: { total: number }; union?: ApiUnionView },
+  out: string[],
+  base?: string,
+): void {
+  if (body.union) {
+    renderUnion(body.union, out, base);
+  } else {
+    for (const field of body.fields) renderField(field, 0, out, base);
+    if (body.truncated) renderOmitted(body.truncated.total, body.fields.length, out);
+    if (body.fields.length > 0) out.push("");
+  }
 }
 
 function renderResponses(responses: ApiResponseView[], out: string[], base?: string): void {
@@ -254,19 +269,38 @@ function renderResponses(responses: ApiResponseView[], out: string[], base?: str
   for (const response of responses) {
     out.push(`### ${inlineText(response.status)}`, "");
     if (response.description) out.push(safeBlock(response.description), "");
-    if (response.example) renderExample("#### Example", response.example, out);
-    if (response.headers && response.headers.length > 0) {
-      out.push("Headers:", "");
-      for (const header of response.headers) renderField(header, 0, out, base);
-      out.push("");
+    const primary = {
+      fields: response.fields,
+      truncated: response.truncated,
+      union: response.bodyUnion,
+    };
+    const additional = response.additionalMedia ?? [];
+    if (additional.length === 0) {
+      if (response.example) renderExample("#### Example", response.example, out);
+      renderResponseHeaders(response, out, base);
+      renderMediaBody(primary, out, base);
+      continue;
     }
-    if (response.bodyUnion) {
-      renderUnion(response.bodyUnion, out, base);
-    } else {
-      for (const field of response.fields) renderField(field, 0, out, base);
-      if (response.truncated) renderOmitted(response.truncated.total, response.fields.length, out);
-      if (response.fields.length > 0) out.push("");
+    // Several media types: headers are shared, then one labeled body per media
+    // type, the primary first — the request side's `Request body (<type>)` shape.
+    renderResponseHeaders(response, out, base);
+    const mediaType = response.mediaType ?? response.example?.mediaType;
+    out.push(mediaType ? `#### Body (${inlineText(mediaType)})` : "#### Body", "");
+    renderMediaBody(primary, out, base);
+    if (response.example) renderExample("##### Example", response.example, out);
+    for (const media of additional) {
+      out.push(`#### Body (${inlineText(media.mediaType)})`, "");
+      renderMediaBody(media, out, base);
+      if (media.example) renderExample("##### Example", media.example, out);
     }
+  }
+}
+
+function renderResponseHeaders(response: ApiResponseView, out: string[], base?: string): void {
+  if (response.headers && response.headers.length > 0) {
+    out.push("Headers:", "");
+    for (const header of response.headers) renderField(header, 0, out, base);
+    out.push("");
   }
 }
 
@@ -315,29 +349,45 @@ export function renderApiPageMarkdown(props: ApiPageProps, options?: { base?: st
         hasAdditional && props.bodyMediaType
           ? `Request body (${props.bodyMediaType})`
           : "Request body";
+      // The Request Body Object's own facts, shared by every media type: stated
+      // required-ness and the authored description. Omitted when not in the spec.
+      const bodyMeta: string[] = [];
+      if (props.bodyRequired !== undefined) {
+        bodyMeta.push(props.bodyRequired ? "_Required._" : "_Optional._", "");
+      }
+      if (props.bodyDescription) bodyMeta.push(safeBlock(props.bodyDescription), "");
       if (props.bodyUnion) {
-        out.push(`## ${bodyHeading}`, "");
+        out.push(`## ${bodyHeading}`, "", ...bodyMeta);
         renderUnion(props.bodyUnion, out, base);
+      } else if (bodyMeta.length > 0) {
+        out.push(`## ${bodyHeading}`, "", ...bodyMeta);
+        for (const field of props.body) renderField(field, 0, out, base);
+        if (props.bodyTruncated) renderOmitted(props.bodyTruncated.total, props.body.length, out);
+        out.push("");
       } else {
         renderFieldSection(bodyHeading, props.body, out, props.bodyTruncated, base);
       }
-      if (props.example) renderExample("## Example request", props.example, out);
+      if ((props.requestExamples?.length ?? 0) > 0) {
+        out.push("## Example requests", "");
+        for (const example of props.requestExamples ?? []) {
+          out.push(`### ${inlineText(example.label)}`, "");
+          if (example.description) out.push(safeBlock(example.description), "");
+          renderExample("", example, out);
+        }
+      } else if (props.example) {
+        renderExample("## Example request", props.example, out);
+      }
       for (const body of props.additionalBodies ?? []) {
         out.push(`## Request body (${body.mediaType})`, "");
-        if (body.union) {
-          renderUnion(body.union, out, base);
-        } else {
-          for (const field of body.fields) renderField(field, 0, out, base);
-          if (body.truncated) renderOmitted(body.truncated.total, body.fields.length, out);
-          if (body.fields.length > 0) out.push("");
-        }
+        renderMediaBody(body, out, base);
         if (body.example) renderExample("### Example", body.example, out);
       }
       if (props.samples.length > 0) {
         out.push("## Code samples", "");
         for (const sample of props.samples) {
           out.push(`### ${inlineText(sample.label)}`, "");
-          fenced(sample.lang, sample.source, out);
+          // A cURL sample is a shell command, fenced as the page highlights it.
+          fenced(sample.lang === "curl" ? "bash" : sample.lang, sample.source, out);
         }
       }
       renderResponses(props.responses, out, base);
@@ -357,7 +407,10 @@ export function renderApiPageMarkdown(props: ApiPageProps, options?: { base?: st
     case "section": {
       if (props.description) out.push(safeBlock(props.description), "");
       if (props.operations.length > 0) renderRefs("Operations", props.operations, out, base);
-      else if (!props.description) out.push("_No operations._", "");
+      if (props.sections) renderRefs("Sections", props.sections, out, base);
+      if (props.operations.length === 0 && !props.sections && !props.description) {
+        out.push("_No operations._", "");
+      }
       break;
     }
     case "api": {

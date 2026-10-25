@@ -49,36 +49,36 @@ function identity(model: ApiModel): IdentityRow[] {
 // The frozen contract. Captured from the pinned smallco fixture under the `api`
 // collection. Do not edit to make a test pass — a diff here means a permalink moved.
 const SMALLCO_IDENTITY: IdentityRow[] = [
-  { coordinate: "AliasUnion", slug: "schemas/AliasUnion", href: "/api/schemas/AliasUnion" },
-  { coordinate: "AllOfCurrency", slug: "schemas/AllOfCurrency", href: "/api/schemas/AllOfCurrency" },
-  { coordinate: "api", slug: "", href: "/api" },
-  { coordinate: "BankAccount", slug: "schemas/BankAccount", href: "/api/schemas/BankAccount" },
-  { coordinate: "Card", slug: "schemas/Card", href: "/api/schemas/Card" },
-  { coordinate: "Charge", slug: "schemas/Charge", href: "/api/schemas/Charge" },
-  { coordinate: "ColorList", slug: "schemas/ColorList", href: "/api/schemas/ColorList" },
-  { coordinate: "create", slug: "charges/create", href: "/api/charges/create" },
-  { coordinate: "Currency", slug: "schemas/Currency", href: "/api/schemas/Currency" },
-  { coordinate: "Dispute", slug: "schemas/Dispute", href: "/api/schemas/Dispute" },
-  { coordinate: "DisputeDuplicate", slug: "schemas/DisputeDuplicate", href: "/api/schemas/DisputeDuplicate" },
-  { coordinate: "DisputeFraud", slug: "schemas/DisputeFraud", href: "/api/schemas/DisputeFraud" },
-  { coordinate: "DisputeNotReceived", slug: "schemas/DisputeNotReceived", href: "/api/schemas/DisputeNotReceived" },
-  { coordinate: "EitherAccount", slug: "schemas/EitherAccount", href: "/api/schemas/EitherAccount" },
-  { coordinate: "Error", slug: "schemas/Error", href: "/api/schemas/Error" },
-  { coordinate: "list", slug: "charges/list", href: "/api/charges/list" },
-  { coordinate: "Mixed", slug: "schemas/Mixed", href: "/api/schemas/Mixed" },
-  { coordinate: "openDispute", slug: "disputes/openDispute", href: "/api/disputes/openDispute" },
-  { coordinate: "payment.succeeded", slug: "webhooks/payment.succeeded", href: "/api/webhooks/payment.succeeded" },
-  { coordinate: "search", slug: "search/search", href: "/api/search/search" },
-  { coordinate: "TaggedCharge", slug: "schemas/TaggedCharge", href: "/api/schemas/TaggedCharge" },
-  { coordinate: "tags.charges", slug: "tags/charges", href: "/api/tags/charges" },
-  { coordinate: "tags.disputes", slug: "tags/disputes", href: "/api/tags/disputes" },
-  { coordinate: "tags.search", slug: "tags/search", href: "/api/tags/search" },
-  { coordinate: "upload", slug: "charges/upload", href: "/api/charges/upload" },
+  { coordinate: "AliasUnion", slug: "schemas/AliasUnion", href: "/api/schemas/AliasUnion/" },
+  { coordinate: "AllOfCurrency", slug: "schemas/AllOfCurrency", href: "/api/schemas/AllOfCurrency/" },
+  { coordinate: "api", slug: "", href: "/api/" },
+  { coordinate: "BankAccount", slug: "schemas/BankAccount", href: "/api/schemas/BankAccount/" },
+  { coordinate: "Card", slug: "schemas/Card", href: "/api/schemas/Card/" },
+  { coordinate: "Charge", slug: "schemas/Charge", href: "/api/schemas/Charge/" },
+  { coordinate: "ColorList", slug: "schemas/ColorList", href: "/api/schemas/ColorList/" },
+  { coordinate: "create", slug: "charges/create", href: "/api/charges/create/" },
+  { coordinate: "Currency", slug: "schemas/Currency", href: "/api/schemas/Currency/" },
+  { coordinate: "Dispute", slug: "schemas/Dispute", href: "/api/schemas/Dispute/" },
+  { coordinate: "DisputeDuplicate", slug: "schemas/DisputeDuplicate", href: "/api/schemas/DisputeDuplicate/" },
+  { coordinate: "DisputeFraud", slug: "schemas/DisputeFraud", href: "/api/schemas/DisputeFraud/" },
+  { coordinate: "DisputeNotReceived", slug: "schemas/DisputeNotReceived", href: "/api/schemas/DisputeNotReceived/" },
+  { coordinate: "EitherAccount", slug: "schemas/EitherAccount", href: "/api/schemas/EitherAccount/" },
+  { coordinate: "Error", slug: "schemas/Error", href: "/api/schemas/Error/" },
+  { coordinate: "list", slug: "charges/list", href: "/api/charges/list/" },
+  { coordinate: "Mixed", slug: "schemas/Mixed", href: "/api/schemas/Mixed/" },
+  { coordinate: "openDispute", slug: "disputes/openDispute", href: "/api/disputes/openDispute/" },
+  { coordinate: "payment.succeeded", slug: "webhooks/payment.succeeded", href: "/api/webhooks/payment.succeeded/" },
+  { coordinate: "search", slug: "search/search", href: "/api/search/search/" },
+  { coordinate: "TaggedCharge", slug: "schemas/TaggedCharge", href: "/api/schemas/TaggedCharge/" },
+  { coordinate: "tags.charges", slug: "tags/charges", href: "/api/tags/charges/" },
+  { coordinate: "tags.disputes", slug: "tags/disputes", href: "/api/tags/disputes/" },
+  { coordinate: "tags.search", slug: "tags/search", href: "/api/tags/search/" },
+  { coordinate: "upload", slug: "charges/upload", href: "/api/charges/upload/" },
 ];
 
 let smallco: ApiModel;
 before(async () => {
-  smallco = await buildApiModel({ collection: "api", spec: fixtureText("smallco.yaml") });
+  smallco = await buildApiModel({ collection: "api", spec: fixtureText("smallco.yaml"), schemaPages: true });
 });
 
 describe("api identity stability", () => {
@@ -91,7 +91,7 @@ describe("api identity stability", () => {
     // cache hit that never reparses — evict first to force a genuine second parse,
     // else this compares the frozen handle to itself and can't fail.
     clearApiModelCache("api");
-    const rebuilt = await buildApiModel({ collection: "api", spec: fixtureText("smallco.yaml") });
+    const rebuilt = await buildApiModel({ collection: "api", spec: fixtureText("smallco.yaml"), schemaPages: true });
     assert.deepEqual(identity(rebuilt), identity(smallco));
   });
 
@@ -101,10 +101,10 @@ describe("api identity stability", () => {
     // coordinate/URL state were shared across collections, the neighbour's parse
     // would perturb the first's fresh reparse. It must not — adding/removing a
     // neighbour never moves a permalink (collection-as-namespace).
-    const before = identity(await buildApiModel({ collection: "solo", spec: fixtureText("smallco.yaml") }));
-    await buildApiModel({ collection: "neighbour", spec: fixtureText("deviant.yaml") });
+    const before = identity(await buildApiModel({ collection: "solo", spec: fixtureText("smallco.yaml"), schemaPages: true }));
+    await buildApiModel({ collection: "neighbour", spec: fixtureText("deviant.yaml"), schemaPages: true });
     clearApiModelCache("solo");
-    const after = identity(await buildApiModel({ collection: "solo", spec: fixtureText("smallco.yaml") }));
+    const after = identity(await buildApiModel({ collection: "solo", spec: fixtureText("smallco.yaml"), schemaPages: true }));
     assert.deepEqual(after, before);
   });
 
@@ -115,6 +115,7 @@ describe("api identity stability", () => {
   test("a nested version mount shifts hrefs by the prefix and moves no coordinate", async () => {
     clearApiModelCache("api");
     const versioned = await buildApiModel({
+      schemaPages: true,
       collection: "api",
       spec: fixtureText("smallco.yaml"),
       mountPath: "/api/v2",
@@ -123,7 +124,7 @@ describe("api identity stability", () => {
       coordinate: row.coordinate,
       slug: row.slug,
       // Root href is the bare mount; others gain the `/v2` segment.
-      href: row.slug === "" ? "/api/v2" : `/api/v2/${row.slug}`,
+      href: row.slug === "" ? "/api/v2/" : `/api/v2/${row.slug}/`,
     }));
     assert.deepEqual(identity(versioned), expected);
   });

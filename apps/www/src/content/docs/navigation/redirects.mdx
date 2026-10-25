@@ -1,25 +1,12 @@
 ---
 title: Redirects
-description: Point old URLs at new ones — sidebar rewrites, renamed pages, and host-level redirects.
+description: Send old URLs to new ones — renamed pages across versions, and host-level redirects.
 aiGenerated: true
 sidebar:
-  order: 3
+  order: 5
 ---
 
-Three mechanisms cover the common cases: rewriting a sidebar link, renaming a page across versions, and host-level URL redirects.
-
-## Rewrite a sidebar link
-
-`external_link` changes where the sidebar links a page without moving where it builds. Point a deprecated entry at its replacement, or send an entry off-site:
-
-```yaml
----
-title: Old guide
-external_link: /guides/new-guide
----
-```
-
-It accepts an absolute URL (`https://…`) or a site-absolute path (`/foo/bar`). The page still builds at its own path; only the rail link changes. Absolute URLs render with `target="_blank"`.
+Two mechanisms cover the common cases: renaming a page across versions, and host-level URL redirects. To change only where a sidebar entry links, without a redirect, see [`external_link`](/navigation/sidebar#hide-or-change-one-pages-entry).
 
 ## Renamed pages across versions
 
@@ -28,7 +15,7 @@ When a page's slug changes between versions, declare the old slug on the new pag
 ```yaml
 ---
 title: Configuration
-previousSlug: config        # was /config in v1, now /configuration
+previousSlug: config        # was /config in v1, now /reference/configuration
 ---
 ```
 
@@ -47,3 +34,21 @@ export default defineConfig({
 ```
 
 On static hosts these compile to redirect files; on Cloudflare and other adapters they become native redirect rules.
+
+When you move a collection to another folder ([Collection URLs](/writing/collections#collection-urls)), redirect its old URLs with one dynamic entry:
+
+```ts title="astro.config.ts"
+export default defineConfig({
+  redirects: {
+    "/sdk/[...slug]": "/products/sdk/[...slug]",
+  },
+});
+```
+
+Astro writes a redirect page for each old page URL. It doesn't redirect the old Markdown and `llms.txt` URLs, and with a `base` it can't redirect the pages either. For those, add a host rule to `public/_redirects` (Cloudflare or Netlify), with the `base` in both paths:
+
+```text title="public/_redirects"
+/docs/sdk/* /docs/products/sdk/:splat 301
+```
+
+When you move the collection again, point the existing entry at the new folder too; Astro rejects a redirect to a folder no route serves.

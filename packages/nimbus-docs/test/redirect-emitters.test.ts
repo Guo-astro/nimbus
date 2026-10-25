@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   detectDeploySignals,
+  expandDynamicRedirects,
   formatRedirectsFile,
   normalizeRedirects,
   shouldEmitRedirects,
@@ -85,6 +86,22 @@ test("normalizeRedirects: dynamic patterns are skipped, self-redirects dropped",
   );
   assert.deepEqual(out, [{ from: "/ok/", to: "/fine/", status: 301 }]);
   assert.deepEqual(skipped, ["/blog/[slug]/"]);
+});
+
+test("expandDynamicRedirects: one page per built route a dynamic source matches", () => {
+  const redirects: Record<string, RedirectConfigLike> = {
+    "/sdk/[...slug]": "/products/kit/[...slug]",
+    "/blog/[year]/[slug]": { status: 302, destination: "/news/[slug]" },
+    "/old": "/new",
+    "/ext/[...slug]": "https://example.com/[...slug]",
+  };
+  const routes = ["/sdk", "/sdk/setup", "/sdk/guides/install", "/sdkx/setup", "/blog/2024/launch", "/blog/2024", "/ext/a", "/products/kit/setup"];
+  assert.deepEqual(expandDynamicRedirects(redirects, routes, "/docs"), [
+    { from: "/docs/sdk", to: "/docs/products/kit", status: 301 },
+    { from: "/docs/sdk/setup", to: "/docs/products/kit/setup", status: 301 },
+    { from: "/docs/sdk/guides/install", to: "/docs/products/kit/guides/install", status: 301 },
+    { from: "/docs/blog/2024/launch", to: "/docs/news/launch", status: 302 },
+  ]);
 });
 
 test("formatRedirectsFile: fresh file, ordering preserved", () => {

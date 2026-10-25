@@ -1,14 +1,16 @@
 /**
  * Registry generator.
  *
- * Reads two sources:
+ * Reads three sources:
  *   - `apps/www/registry/manifests.ts`  — component + utility entries
  *   - `apps/www/registry/features/*.md` — feature entries (agent-handoff)
+ *   - `apps/www/registry/sources/*.md`  — content sources (`add source <name>`)
  *
  * Emits (all under `apps/www/public/registry/` so the Astro app serves
  * them as static assets at `/registry/*`):
  *   - `components/<slug>.json` per component/utility
  *   - `features/<slug>.md` copied verbatim from the source dir
+ *   - `sources/<name>.md` copied verbatim
  *   - `registry.json` unified top-level index
  *
  * Feature markdown files are themselves the artifact (no JSON wrapper);
@@ -55,6 +57,13 @@ const FEATURES_DIR = resolve(SOURCE_REGISTRY_DIR, "features");
 const PUBLIC_REGISTRY_OUT = resolve(__dirname, "..", "public", "registry");
 const COMPONENTS_OUT = resolve(PUBLIC_REGISTRY_OUT, "components");
 const FEATURES_OUT = resolve(PUBLIC_REGISTRY_OUT, "features");
+const SOURCES_DIR = resolve(SOURCE_REGISTRY_DIR, "sources");
+const SOURCES_OUT = resolve(PUBLIC_REGISTRY_OUT, "sources");
+/**
+ * Kinds `nimbus-docs add` reads as grammar (`add source <name>`). No registry
+ * slug may take one of these names, or the kind would shadow it.
+ */
+const ADD_KINDS = ["source"];
 const INDEX_OUT = resolve(PUBLIC_REGISTRY_OUT, "registry.json");
 const BUNDLED_INDEX_OUT = resolve(
   ROOT,
@@ -103,6 +112,7 @@ interface RegistryItem {
   version: string;
   dependencies: string[];
   registryDependencies: string[];
+  docs?: string;
   files: RegistryFile[];
 }
 
@@ -115,9 +125,22 @@ interface RegistryIndex {
 
 interface RegistryIndexEntry {
   name: string;
-  type: "registry:ui" | "registry:lib" | "registry:feature";
+  type: "registry:ui" | "registry:lib" | "registry:feature" | "registry:source";
   title: string;
   description: string;
+  /** `registry:source` only: other names for the entry, each with the host it names. */
+  aliases?: Record<string, string>;
+}
+
+/** Frontmatter shape parsed from source markdown files. */
+interface SourceFrontmatter {
+  name: string;
+  type: "registry:source";
+  title: string;
+  description: string;
+  aliases?: Record<string, string>;
+  /** The generic guide `add source <url>` prints; not a name. */
+  url?: boolean;
 }
 
 /** Frontmatter shape parsed from feature markdown files. */
@@ -217,13 +240,16 @@ function emitBundledIndex(index: RegistryIndex): void {
     "export type RegistryEntryType =",
     `  | "registry:ui"`,
     `  | "registry:lib"`,
-    `  | "registry:feature";`,
+    `  | "registry:feature"`,
+    `  | "registry:source";`,
     "",
     "export interface RegistryIndexEntry {",
     "  name: string;",
     "  type: RegistryEntryType;",
     "  title: string;",
     "  description: string;",
+    "  /** `registry:source` only: other names for the entry, each with the host it names. */",
+    "  aliases?: Record<string, string>;",
     "}",
     "",
     "export interface BundledIndex {",
@@ -308,6 +334,38 @@ function collectFeatures(): RegistryIndexEntry[] {
     });
   }
   return entries;
+}
+
+/** Parse and check one source file's JSON frontmatter. */
+function parseSourceFrontmatter(name: string, raw: string): SourceFrontmatter {
+  const match = raw.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!match) throw new Error(`Source "${name}" is missing a JSON frontmatter block.`);
+  let parsed: Partial<SourceFrontmatter>;
+  try {
+    parsed = JSON.parse(match[1]!) as Partial<SourceFrontmatter>;
+  } catch (err) {
+    throw new Error(`Source "${name}" has invalid JSON in its frontmatter: ${(err as Error).message}`);
+  }
+  for (const key of ["name", "type", "title", "description"] as const) {
+    if (typeof parsed[key] !== "string") {
+      throw new Error(`Source "${name}" frontmatter is missing required string field "${key}".`);
+    }
+  }
+  if (parsed.type !== "registry:source") {
+    throw new Error(`Source "${name}" must have type "registry:source", got "${parsed.type}".`);
+  }
+  if (parsed.name !== name) {
+    throw new Error(`Source "${name}" frontmatter has name "${parsed.name}"; it must match the filename.`);
+  }
+  return parsed as SourceFrontmatter;
+}
+
+function collectSources(): SourceFrontmatter[] {
+  if (!existsSync(SOURCES_DIR)) return [];
+  return readdirSync(SOURCES_DIR)
+    .filter((file) => file.endsWith(".md"))
+    .sort()
+    .map((file) => parseSourceFrontmatter(file.slice(0, -3), readFileSync(join(SOURCES_DIR, file), "utf8")));
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +458,7 @@ function main(): void {
       version: REGISTRY_VERSION,
       dependencies: entry.dependencies ?? [],
       registryDependencies: entry.registryDependencies ?? [],
+      ...(entry.type === "registry:ui" && entry.docs ? { docs: entry.docs } : {}),
       files,
     };
 
@@ -429,6 +488,35 @@ function main(): void {
     indexItems[feat.name] = feat;
   }
 
+  // 5b. Discover content sources. Their names and aliases share the slug
+  // namespace (so `add notion` can point at `add source notion`), and no
+  // slug may be a kind `add` reads as grammar.
+  const sources = collectSources();
+  const sourceNames = new Set<string>();
+  for (const source of sources) {
+    if (source.url) continue;
+    for (const name of [source.name, ...Object.keys(source.aliases ?? {})]) {
+      if (name in indexItems || sourceNames.has(name)) {
+        console.error(`[generate-registry] error: slug collision — source name "${name}" is already taken.`);
+        process.exit(1);
+      }
+      sourceNames.add(name);
+    }
+    indexItems[source.name] = {
+      name: source.name,
+      type: "registry:source",
+      title: source.title,
+      description: source.description,
+      ...(source.aliases ? { aliases: source.aliases } : {}),
+    };
+  }
+  for (const kind of ADD_KINDS) {
+    if (kind in indexItems) {
+      console.error(`[generate-registry] error: "${kind}" is a kind \`nimbus-docs add\` reads (\`add ${kind} <name>\`); no registry slug may use it.`);
+      process.exit(1);
+    }
+  }
+
   // 6. Emit registry.json index. No timestamp: a stale-or-fresh signal
   // adds nothing for consumers (the CLI only reads `items`) but produces
   // a 1-line diff on every regen, polluting commits that touch the
@@ -446,6 +534,9 @@ function main(): void {
   if (existsSync(FEATURES_DIR)) {
     cpSync(FEATURES_DIR, FEATURES_OUT, { recursive: true });
   }
+  if (existsSync(SOURCES_DIR)) {
+    cpSync(SOURCES_DIR, SOURCES_OUT, { recursive: true });
+  }
 
   // 8. Emit bundled TS index for the CLI to import at build time
   emitBundledIndex(index);
@@ -455,9 +546,10 @@ function main(): void {
   const ui = Object.values(MANIFESTS).filter((m) => m.type === "registry:ui").length;
   const lib = manifestCount - ui;
   const feat = features.length;
+  const src = sources.filter((source) => !source.url).length;
   console.log(
-    `[generate-registry] emitted ${manifestCount + feat} entries ` +
-      `(${ui} components, ${lib} libs, ${feat} features)`,
+    `[generate-registry] emitted ${manifestCount + feat + src} entries ` +
+      `(${ui} components, ${lib} libs, ${feat} features, ${src} sources)`,
   );
   console.log(`[generate-registry]   → apps/www/public/registry/`);
   console.log(

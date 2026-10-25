@@ -8,11 +8,18 @@
  */
 import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { ApiSidebar } from "@/components/ui/api-sidebar";
+import ApiMethodChip from "@/components/ui/api-sidebar/ApiMethodChip.astro";
+import { SidebarFilter, SidebarLink } from "@/components/ui/sidebar";
 import { ApiCodeRail } from "@/components/ui/api-code-rail";
 import { Banner } from "@/components/ui/banner";
+import { Pagination } from "@/components/ui/pagination";
 import ApiBody from "./ApiBody.astro";
-import { getApiVersionAlternates, getVersionStatus, withBase } from "@cloudflare/nimbus-docs/runtime";
+import { TOC } from "@/components/ui/toc";
+import { cn } from "@/lib/cn";
+import { getApiVersionHead, getVersionStatus, navBuildId, navStateScript, withBase } from "@cloudflare/nimbus-docs/runtime";
 import type { ApiNav, ApiPageProps } from "@cloudflare/nimbus-docs/api";
+import type { TOCItem } from "@cloudflare/nimbus-docs/types";
+import type { ApiHome } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   page: ApiPageProps;
@@ -22,9 +29,16 @@ interface Props {
   collection?: string;
   version?: string | null;
   coordinate?: string;
+  /** On the API home and its later parts, from `getApiRoute`: the part to
+   *  show, and every part. */
+  home?: ApiHome;
 }
 
-const { page, nav, collection, version, coordinate } = Astro.props;
+const { page, nav, collection, version, coordinate, home } = Astro.props;
+const homePart = home && home.part.number > 1;
+// Sidebar state is shared per API version, across both sidebar copies. The
+// base keeps two sites on one origin apart.
+const navKey = `${import.meta.env.BASE_URL}|${nav.collection}${version ? `@${version}` : ""}`;
 
 const versionStatus =
   collection && version
@@ -32,7 +46,7 @@ const versionStatus =
     : null;
 const currentSiblingUrl =
   collection && version && coordinate
-    ? ((await getApiVersionAlternates(collection, version, coordinate))?.canonical
+    ? ((await getApiVersionHead(collection, version, coordinate, Astro.request))?.canonical
         ?.url ?? null)
     : null;
 const currentSiblingHref = withBase(currentSiblingUrl ?? "/", import.meta.env.BASE_URL);
@@ -40,13 +54,28 @@ const currentSiblingHref = withBase(currentSiblingUrl ?? "/", import.meta.env.BA
 // The rail column is reserved ONLY when it has content — a request sample or a
 // response example (mirrors ApiCodeRail's own gate). A bodyless GET with no
 // samples otherwise pins an empty sticky column at the page's right edge.
+// "On this page" for the API home: its tag groups and their sections. A link
+// to a part that hasn't loaded yet loads the list up to it.
+const tocHeadings: TOCItem[] =
+  page.kind === "api" && !homePart
+    ? [
+        ...page.index.groups.flatMap((group) => [
+          ...(group.label ? [{ depth: 2, text: group.label, slug: group.anchor }] : []),
+          ...group.sections.map((section) => ({ depth: group.label ? 3 : 2, text: section.ref.label, slug: section.anchor })),
+        ]),
+        ...(page.index.operations.length > 0 ? [{ depth: 2, text: "Other endpoints", slug: "endpoints" }] : []),
+        ...(page.index.webhooks.length > 0 ? [{ depth: 2, text: "Webhooks", slug: "webhooks" }] : []),
+      ]
+    : [];
+
 const hasRail =
   page.kind === "operation" &&
   (page.samples.length > 0 || page.responses.some((r) => r.example !== undefined));
 
 const pagefindAttrs: Record<string, string> = {};
 const pagefindDeprecated = !versionStatus?.isHidden && Boolean(versionStatus?.isDeprecated);
-if (versionStatus?.isHidden) {
+// A later part of the API home repeats the home's list.
+if (versionStatus?.isHidden || homePart) {
   pagefindAttrs["data-pagefind-ignore"] = "";
 } else {
   pagefindAttrs["data-pagefind-body"] = "";
@@ -56,17 +85,87 @@ if (versionStatus?.isHidden) {
 }
 ---
 
-<div class="flex w-full">
-  <aside
-    class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border bg-background [scrollbar-color:gray_transparent] [scrollbar-width:thin] md:flex lg:w-(--nb-sidebar-width)"
+{/* Mobile navigation — native <dialog> for free focus trap, escape, backdrop.
+    It comes before the rail so the inline restore script after the rail
+    finds both sidebar copies already parsed. */}
+<dialog
+  data-mobile-sidebar
+  data-state="closed"
+  class="group fixed inset-0 m-0 h-full w-full max-h-full max-w-full border-0 bg-transparent p-0 [&::backdrop]:bg-transparent"
+  aria-label="API navigation"
+>
+  <div
+    data-mobile-sidebar-panel
+    class="flex h-full w-(--nb-sidebar-width) max-w-[85vw] -translate-x-full flex-col border-e border-border bg-card transition-transform duration-250 ease-out group-data-[state=open]:translate-x-0 rtl:translate-x-full rtl:group-data-[state=open]:translate-x-0 motion-reduce:transition-none"
   >
-    <div class="flex-1 pt-8 pb-12 pl-6 pr-4">
-      <ApiSidebar items={nav.items} />
+    <div class="z-[1] flex items-center justify-between border-b border-border bg-card px-4 py-3">
+      <span class="text-sm font-semibold text-foreground">Navigation</span>
+      <button
+        data-close-sidebar
+        class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        aria-label="Close navigation"
+      >
+        <Icon name="ph:x" class="h-5 w-5" />
+      </button>
+    </div>
+    {/* The rail's tree is moved here while the drawer is open — one tree
+        per page, one open/scroll state. */}
+    <div data-nb-api-drawer-slot class="flex min-h-0 flex-1 flex-col [&>[data-nb-api-tree]]:min-h-0 [&>[data-nb-api-tree]]:flex-1 [&>[data-nb-api-tree]]:overflow-y-auto [&>[data-nb-api-tree]]:overscroll-contain"></div>
+  </div>
+</dialog>
+
+<div class="flex w-full">
+  {/* The rail keeps its open groups and scroll across pages: the inline script
+      below restores them before paint, and `initNavSidebar` records them. It is
+      excluded from the page transition so it never fades or replays. */}
+  <aside
+    aria-label="Sidebar"
+    transition:name="nb-api-sidebar"
+    transition:animate="none"
+    class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-60 shrink-0 flex-col border-e border-border bg-background md:flex lg:w-(--nb-sidebar-width)"
+  >
+    <div
+      data-nb-api-tree
+      data-nb-nav-state={navKey}
+      data-nb-nav-build={navBuildId}
+      data-nb-nav-scroller="nav"
+      class="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+    >
+      {/* A full tree filters in place, as the docs sidebar does. An on-demand
+          tree holds only part of the API, so its filter searches the
+          version's page list instead (`api-nav-filter.client`). */}
+      <div class="px-4 pb-12 pt-5" data-nb-sidebar={nav.listHref ? undefined : ""}>
+        <SidebarFilter data-nb-nav-list={nav.listHref && withBase(nav.listHref, import.meta.env.BASE_URL)} />
+        {nav.listHref && (
+          <>
+            <p data-nb-nav-status role="status" class="px-3 pb-2 text-xs text-muted-foreground empty:p-0"></p>
+            <ul data-nb-nav-results hidden class="flex list-none flex-col gap-0.5 p-0"></ul>
+            <template data-nb-nav-result>
+              <li>
+                <SidebarLink label="" href="/">
+                  <ApiMethodChip slot="leading" method="GET" display="label" />
+                </SidebarLink>
+              </li>
+            </template>
+          </>
+        )}
+        <ApiSidebar items={nav.items} />
+      </div>
     </div>
     <div class="pointer-events-none sticky bottom-0 h-8 bg-gradient-to-t from-background to-transparent"></div>
   </aside>
+  {/* Inline and unbundled (`aria-hidden` keeps Astro from hoisting it) so it
+      runs before the page paints and before the disclosures mount. */}
+  <script is:inline aria-hidden="true" set:html={navStateScript} />
 
-  <div data-api-layout class="flex min-w-0 flex-1 flex-col min-[90rem]:flex-row">
+  {/* Reserve both desktop tracks before the streamed body/rail HTML arrives.
+      Flex only reserves the rail's width once its later sibling is parsed,
+      making long API bodies reflow sideways during navigation. */}
+  <div data-api-layout class={cn(
+    "flex min-w-0 flex-1 flex-col",
+    !hasRail && tocHeadings.length > 0 && "xl:flex-row",
+    hasRail && "min-[90rem]:grid min-[90rem]:grid-cols-[minmax(0,1fr)_29rem] 2xl:grid-cols-[minmax(0,1fr)_var(--nb-code-rail-width)]",
+  )}>
     <main id="main-content" tabindex="-1" class="min-w-0 flex-1" {...pagefindAttrs}>
       <div class="mx-auto max-w-(--nb-content-max) px-4 md:px-8 2xl:px-16 pt-8 pb-12">
         {pagefindDeprecated && <span hidden data-pagefind-filter="status:deprecated"></span>}
@@ -79,7 +178,8 @@ if (versionStatus?.isHidden) {
             />
           </div>
         )}
-        <ApiBody page={page} />
+        <ApiBody page={page} home={home} />
+        {nav.prevNext && !hasRail && <Pagination prevNext={nav.prevNext} data-pagefind-ignore />}
       </div>
     </main>
 
@@ -87,8 +187,14 @@ if (versionStatus?.isHidden) {
         content, so unlike the TOC they stay in the no-JS HTML for crawlability);
         at 90rem+ it becomes the sticky right column. The left padding keeps overflow-y-auto
         from clipping the LayerCard's outset ring at the scroll edge. */}
+    {!hasRail && tocHeadings.length > 0 && (
+      <aside aria-label="On this page" data-nb-toc-scroll-host class="hidden xl:block w-(--nb-toc-width) shrink-0 sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto">
+        <div class="pt-8 pb-8 ps-8 pe-6"><TOC headings={tocHeadings} /></div>
+      </aside>
+    )}
+
     {hasRail && (
-      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 min-[90rem]:mx-0 min-[90rem]:max-w-none min-[90rem]:sticky min-[90rem]:top-14 min-[90rem]:h-[calc(100vh-3.5rem)] min-[90rem]:w-[29rem] min-[90rem]:shrink-0 min-[90rem]:overflow-y-auto min-[90rem]:pt-8 min-[90rem]:pr-6 min-[90rem]:pb-8 min-[90rem]:pl-1 min-[90rem]:[scrollbar-color:gray_transparent] min-[90rem]:[scrollbar-width:thin] 2xl:w-(--nb-code-rail-width)">
+      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 md:px-8 min-[90rem]:col-start-2 min-[90rem]:row-span-2 min-[90rem]:row-start-1 min-[90rem]:mx-0 min-[90rem]:max-w-none min-[90rem]:sticky min-[90rem]:top-14 min-[90rem]:h-[calc(100vh-3.5rem)] min-[90rem]:w-[29rem] min-[90rem]:shrink-0 min-[90rem]:overflow-y-auto min-[90rem]:pt-8 min-[90rem]:pe-6 min-[90rem]:pb-8 min-[90rem]:ps-1 2xl:w-(--nb-code-rail-width)">
         <ApiCodeRail
           responses={page.responses}
           samples={page.samples}
@@ -98,38 +204,24 @@ if (versionStatus?.isHidden) {
         />
       </div>
     )}
+
+    {/* With a rail, previous/next sits after it, so on narrow screens the
+        samples come before it; from 90rem it returns under the body. */}
+    {hasRail && nav.prevNext && (
+      <div class="mx-auto w-full max-w-(--nb-content-max) px-4 pb-12 -mt-12 md:px-8 2xl:px-16 min-[90rem]:col-start-1 min-[90rem]:row-start-2">
+        <Pagination prevNext={nav.prevNext} data-pagefind-ignore />
+      </div>
+    )}
   </div>
 </div>
 
-{/* Mobile navigation — native <dialog> for free focus trap, escape, backdrop. */}
-<dialog
-  data-mobile-sidebar
-  data-state="closed"
-  class="group fixed inset-0 m-0 h-full w-full max-h-full max-w-full border-0 bg-transparent p-0 [&::backdrop]:bg-transparent"
-  aria-label="API navigation"
->
-  <div
-    data-mobile-sidebar-panel
-    class="h-full w-(--nb-sidebar-width) max-w-[85vw] -translate-x-full overflow-y-auto overscroll-contain border-r border-border bg-card transition-transform duration-250 ease-out group-data-[state=open]:translate-x-0 motion-reduce:transition-none"
-  >
-    <div class="sticky top-0 z-[1] flex items-center justify-between border-b border-border bg-card px-4 py-3">
-      <span class="text-sm font-semibold text-foreground">Navigation</span>
-      <button
-        data-close-sidebar
-        class="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        aria-label="Close navigation"
-      >
-        <Icon name="ph:x" class="h-5 w-5" />
-      </button>
-    </div>
-    <nav class="px-4 pb-8 pt-5">
-      <ApiSidebar items={nav.items} />
-    </nav>
-  </div>
-</dialog>
 
 <script>
-  import { mount, lockScroll, unlockScroll, generateId } from "@cloudflare/nimbus-docs/client";
+  import { mount, lockScroll, unlockScroll, generateId, initNavSidebar } from "@cloudflare/nimbus-docs/client";
+  import "@/components/ui/sidebar/sidebar.client";
+  import "@/components/ui/api-sidebar/api-nav-filter.client";
+
+  mount("[data-nb-nav-state]", initNavSidebar);
 
   const CLOSE_DURATION_MS = 250;
   const DESKTOP_QUERY = "(min-width: 48rem)";
@@ -160,6 +252,21 @@ if (versionStatus?.isHidden) {
       }
     };
 
+    // One tree per page: the drawer borrows the rail's tree node while it
+    // is open and returns it on close. `initNavSidebar` restores the scroll
+    // whenever the tree is revealed.
+    const tree = document.querySelector<HTMLElement>("[data-nb-api-tree]");
+    const rail = tree?.parentElement ?? null;
+    // Back to the same place: before whatever follows it in the rail.
+    const railNext = tree?.nextElementSibling ?? null;
+    const drawerSlot = dialog.querySelector<HTMLElement>("[data-nb-api-drawer-slot]");
+    const moveTreeToDrawer = () => {
+      if (tree && drawerSlot && tree.parentElement !== drawerSlot) drawerSlot.append(tree);
+    };
+    const moveTreeToRail = () => {
+      if (tree && rail && tree.parentElement !== rail) rail.insertBefore(tree, railNext);
+    };
+
     const openSidebar = () => {
       clearTimer();
       if (dialog.open) {
@@ -168,6 +275,7 @@ if (versionStatus?.isHidden) {
         return;
       }
 
+      moveTreeToDrawer();
       dialog.showModal();
       dialog.dataset.state = "closed";
       lockScroll();
@@ -209,6 +317,7 @@ if (versionStatus?.isHidden) {
     dialog.addEventListener("close", () => {
       clearTimer();
       dialog.dataset.state = "closed";
+      moveTreeToRail();
       unlockScroll();
       trigger.setAttribute("aria-expanded", "false");
       trigger.focus();
@@ -232,6 +341,7 @@ if (versionStatus?.isHidden) {
     return () => {
       controller.abort();
       clearTimer();
+      moveTreeToRail();
       trigger.setAttribute("aria-expanded", "false");
       // A swap while open never fires `close`; balance the scroll lock.
       if (dialog.open) unlockScroll();

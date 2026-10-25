@@ -13,6 +13,7 @@ let model: ApiModel;
 
 before(async () => {
   model = await buildApiModel({
+    schemaPages: true,
     collection: "pu",
     label: "pu",
     spec: `
@@ -57,8 +58,8 @@ describe("a union parameter recovers named, linked variants", () => {
     assert.deepEqual(
       filterParam().union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/pu/schemas/ById"],
-        ["ByName", "/pu/schemas/ByName"],
+        ["ById", "/pu/schemas/ById/"],
+        ["ByName", "/pu/schemas/ByName/"],
       ],
     );
   });
@@ -68,6 +69,7 @@ describe("a shared path-item union parameter recovers named, linked variants", (
   let sharedModel: ApiModel;
   before(async () => {
     sharedModel = await buildApiModel({
+      schemaPages: true,
       collection: "spu",
       label: "spu",
       spec: `
@@ -104,8 +106,8 @@ components:
     assert.deepEqual(
       filter!.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/spu/schemas/ById"],
-        ["ByName", "/spu/schemas/ByName"],
+        ["ById", "/spu/schemas/ById/"],
+        ["ByName", "/spu/schemas/ByName/"],
       ],
     );
   });
@@ -115,6 +117,7 @@ describe("a $ref'd union parameter recovers named, linked variants", () => {
   let refModel: ApiModel;
   before(async () => {
     refModel = await buildApiModel({
+      schemaPages: true,
       collection: "rpu",
       label: "rpu",
       spec: `
@@ -154,8 +157,8 @@ components:
     assert.deepEqual(
       filter!.union!.variants.map((v) => [v.label, v.href]),
       [
-        ["ById", "/rpu/schemas/ById"],
-        ["ByName", "/rpu/schemas/ByName"],
+        ["ById", "/rpu/schemas/ById/"],
+        ["ByName", "/rpu/schemas/ByName/"],
       ],
     );
   });
@@ -163,8 +166,8 @@ components:
   test("the generated Markdown carries the union branch links", () => {
     const md = renderApiPageMarkdown(getApiPageProps(refModel, "search"));
     assert.match(md, /one of:/);
-    assert.match(md, /\[ById\]\(\/rpu\/schemas\/ById\)/);
-    assert.match(md, /\[ByName\]\(\/rpu\/schemas\/ByName\)/);
+    assert.match(md, /\[ById\]\(\/rpu\/schemas\/ById\/\)/);
+    assert.match(md, /\[ByName\]\(\/rpu\/schemas\/ByName\/\)/);
   });
 });
 
@@ -172,6 +175,7 @@ describe("a top-level oneOf request/response body surfaces branch links in gener
   let bodyModel: ApiModel;
   before(async () => {
     bodyModel = await buildApiModel({
+      schemaPages: true,
       collection: "bpu",
       label: "bpu",
       spec: `
@@ -210,9 +214,9 @@ components:
   test("both bodies expose their branch links in the Markdown version", () => {
     const md = renderApiPageMarkdown(getApiPageProps(bodyModel, "pay"));
     assert.match(md, /## Request body/);
-    assert.match(md, /\[ByCard\]\(\/bpu\/schemas\/ByCard\)/);
-    assert.match(md, /\[ByBank\]\(\/bpu\/schemas\/ByBank\)/);
-    assert.match(md, /\[Accepted\]\(\/bpu\/schemas\/Accepted\)/);
-    assert.match(md, /\[Pending\]\(\/bpu\/schemas\/Pending\)/);
+    assert.match(md, /\[ByCard\]\(\/bpu\/schemas\/ByCard\/\)/);
+    assert.match(md, /\[ByBank\]\(\/bpu\/schemas\/ByBank\/\)/);
+    assert.match(md, /\[Accepted\]\(\/bpu\/schemas\/Accepted\/\)/);
+    assert.match(md, /\[Pending\]\(\/bpu\/schemas\/Pending\/\)/);
   });
 });

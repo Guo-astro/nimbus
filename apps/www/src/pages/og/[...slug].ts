@@ -1,22 +1,35 @@
 import type { APIRoute, GetStaticPaths } from "astro";
 import { getCollection } from "astro:content";
-import { renderOgCard } from "./_renderer";
+import { renderDocsOgCard } from "./_renderer";
 
-type OgProps = { title: string; description: string };
+type OgProps = { section: string; title: string };
 
 export const getStaticPaths: GetStaticPaths = async () => {
   const entries = await getCollection("docs", (e) => !e.data.draft);
-  return entries.map((entry) => ({
-    params: { slug: `${entry.id}.png` },
-    props: {
-      title: entry.data.title,
-      description: entry.data.description ?? "",
-    } satisfies OgProps,
-  }));
+  // A page's section names its top-level folder the way the site does
+  // elsewhere: the folder index's group label, else its title, else the
+  // folder. Pages at the root are "Docs".
+  const groups = new Map<string, string>();
+  for (const entry of entries) {
+    // Only a folder's own index names its section (a root index isn't one).
+    if (entry.id === "index" || entry.id.includes("/") || !/\/index\.mdx?$/.test(entry.filePath ?? "")) continue;
+    const sidebar = entry.data.sidebar;
+    groups.set(entry.id, (sidebar ? sidebar.group?.label : undefined) ?? entry.data.title);
+  }
+  return entries.map((entry) => {
+    const top = entry.id.split("/")[0]!;
+    return {
+      params: { slug: `${entry.id}.png` },
+      props: {
+        section: groups.get(top) ?? (entry.id.includes("/") ? top : "Docs"),
+        title: entry.data.title,
+      } satisfies OgProps,
+    };
+  });
 };
 
 export const GET: APIRoute = async ({ props }) => {
-  const png = await renderOgCard(props as OgProps);
+  const png = await renderDocsOgCard(props as OgProps);
   return new Response(png, {
     headers: { "Content-Type": "image/png" },
   });

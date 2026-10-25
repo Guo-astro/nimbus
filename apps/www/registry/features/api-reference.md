@@ -18,6 +18,10 @@ version of every page, and automatic `llms.txt` indexes and `llms-full.txt`.
 The render is Nimbus's own — the spec is parsed once per build and projected
 into a stable view-model. There is no third-party reference renderer.
 
+A new site can start with the reference instead: `create-nimbus-docs --api`
+adds it at `/api`, and `--template api` makes it the whole site. Both write
+what this recipe writes.
+
 **For hand-authored API docs, this is the wrong recipe.** If the user wants to
 write their API docs by hand as MDX pages (prose, curated examples, no spec),
 that's a plain content tree — use `nimbus-docs add new-collection` and pick
@@ -35,35 +39,53 @@ Before prompting the user or writing anything, inspect the project:
   (`pnpm`/`npm`/`yarn`) from the lockfile so later commands match.
 - `src/content.config.ts` — read it in full. Note the `defineCollection`
   import and the existing `collections` object shape so your edit matches.
-- The Nimbus config — inline in `astro.config.ts` for most projects, or split
-  into a `nimbus.config.ts`. Read it; you'll add an `api` entry and, if it's
-  still inline, extract it so `content.config.ts` can share the same list.
+- The Nimbus config — the object passed to `nimbus(...)` in `astro.config.ts`
+  (the starter declares it as `const nimbusConfig = defineNimbusConfig({ … })`).
+  Read it; you'll add an `api` entry there. Leave it where it is: don't move it
+  into another file.
 - `src/pages/[...slug].astro`, `src/pages/[...slug]/index.md.ts`,
   `src/pages/llms.txt.ts`, `src/pages/llms-full.txt.ts`, and
-  `src/pages/[section]/llms.txt.ts` — the primary docs page, Markdown version,
-  and index routes. The API routes are siblings that mirror the Markdown
-  route's frontmatter and headers, so match their style.
+  `src/pages/[...section]/llms.txt.ts` — the primary docs page, Markdown version,
+  and index routes. The API page route is a sibling of the primary docs page,
+  so match its style.
   If any are missing, stop and install `nimbus-docs add ai-native` first.
+- Confirm `src/pages/[...slug]/index.md.ts` calls `markdownRoute()` from
+  `@cloudflare/nimbus-docs/agent-endpoints`. This shared route serves every
+  API page's `.md` version, so the reference needs no Markdown route.
+  If it instead passes `collection: "docs"` (an older starter), stop: the
+  new pages would get no `.md` files. Ask the user to update it first
+  with `nimbus-docs diff <file> --apply` if it is unmodified, or to
+  replace it with the three-line version from the `ai-native` recipe,
+  wrapping it to keep any customizations.
 - Locate the OpenAPI spec. Ask the user for its path if it isn't obvious
   (common: `src/api/openapi.yaml`, `openapi.json`, `api/spec.yaml`).
+- Read the spec's `paths`. If every path starts with the same version segment
+  (`/v1`, `/api/v1`), note it: it becomes `stripPathPrefixes` in 4b. Don't
+  work out routes yourself; the build derives and checks them in step 6.
 
 ## 2. Prompt the user
 
 ### Q1. Where is the OpenAPI spec?
 
 A local file path relative to the project root (e.g. `./src/api/openapi.yaml`).
-YAML or JSON in OpenAPI 3.x format. Convert Swagger 2.0 documents to OpenAPI
-3.x first. Remote URLs are not supported in v1 —
+YAML or JSON in OpenAPI 3.x format. A Swagger 2.0 document (`swagger: "2.0"`)
+fails the build: keep it as the source, and follow "Convert a Swagger 2.0
+document" in the API reference docs (https://nimbus-docs.com/api-reference) to
+generate the OpenAPI 3.x file Nimbus reads. Remote URLs are not supported in v1 —
 if the user only has a URL, have them save it into the repo first.
 
 ### Q2. Confirm the collection name + URL prefix (default: `api`).
 
-The collection name doubles as the URL prefix, so `api` mounts the reference at
-`/api`. It **must** be lowercase letters, digits, and dashes (`a-z0-9-`), must
-not collide with an existing collection, and must not be `docs` or `partials`
-(reserved). This recipe writes
-its routes under `src/pages/<collection>/` — substitute your chosen name for
-`api` everywhere below if it differs.
+The name must be lowercase letters, digits, and dashes (`a-z0-9-`), must not
+collide with an existing collection, and must not be `docs` or `partials`
+(reserved). The reference is served where its route file is: by default
+`src/pages/<collection>/`, so `api` serves at `/api`. If the user wants another
+URL (`/reference/api`), put the routes in that folder instead; it can be
+nested, and every URL Nimbus builds for the reference follows. For a site that
+is only the reference, put them at `src/pages/` to serve it at the root and
+follow 4f, which removes the docs part of the starter. Substitute the
+chosen folder for `api` in the route paths below, and the chosen name in the
+config and collection key.
 
 ## 3. Plan
 
@@ -75,13 +97,23 @@ Print a short, exact plan to the user **before** writing anything:
   the API engine's peer packages: `@scalar/openapi-parser` (the spec parser) plus
   `openapi-sampler` and `@readme/httpsnippet` (the code-sample generators). These
   stay out of the framework bundle, so they only land when you mount a spec.
-- Declare the spec **once** in the Nimbus config (an `api` entry); if that config
-  is still inline in `astro.config.ts`, extract it to a shared `nimbus.config.ts`
-  so `src/content.config.ts` can derive the collection from the same list — no
-  second spec declaration.
-- Create `src/pages/api/[...slug].astro` and `src/pages/api/[...slug]/index.md.ts`.
+- Declare the spec **once**, as an `api` entry in the Nimbus config in
+  `astro.config.ts`.
+- Register the collection with one line in `src/content.config.ts`:
+  `api: defineCollection(apiCollection())`. It reads its entry from the config,
+  so the spec is never declared twice.
+- Create `src/pages/api/[...slug].astro`. The shared
+  `src/pages/[...slug]/index.md.ts` route serves the Markdown versions.
+- Routes follow the `resource-action-v2` convention: `/api/<resource>/<action>`
+  for operations (`/api/events/retrieve`), lowercase `/api/tags/<tag>` pages
+  (`/api/tags/user-management`), with the shared path prefix from step 1
+  stripped. The first build checks them (step 6).
 - Resulting URLs: `/api` (overview), `/api/<slug>` (each page), the matching
   `/api/<slug>/index.md` versions, and `/api/llms.txt`.
+- At the root (Q2): the route replaces the docs route at
+  `src/pages/[...slug].astro`, the `docs` collection and its sidebar entries
+  are removed (4f), and the URLs drop `/api`: `/`, `/<slug>`,
+  `/<slug>/index.md`, with the sections listed in `/llms.txt`.
 
 Wait for confirmation before executing.
 
@@ -93,7 +125,7 @@ Run the registry recipe — it copies four owned, editable components that rende
 the view-model, and installs the API engine's peer packages:
 
 ```sh
-pnpm exec nimbus-docs add api-layout   # or: npm / yarn
+npx @cloudflare/nimbus-docs add api-layout
 ```
 
 This lands `ApiLayout`, `ApiSidebar`, `ApiFieldRow`, and `ApiCodeRail` under
@@ -106,7 +138,7 @@ install them.
 
 The components read the frozen view-model only (hrefs, anchors, flags, grouping
 are all pre-resolved) and own nothing but their look — restyle them freely,
-they're yours now. The route in 4e composes them.
+they're yours now. The route in 4d composes them.
 
 Confirm your `src/styles/globals.css` carries the method-colour tokens
 `--nb-m-get`, `--nb-m-post`, `--nb-m-put`, `--nb-m-delete`, and `--nb-m-other`
@@ -120,163 +152,66 @@ If you're wiring the engine by hand instead of via this recipe, install those
 peers yourself: `@scalar/openapi-parser` is required; the other two are optional
 (their absence just omits code samples).
 
-### 4b. Declare the spec once, in a shared Nimbus config
+### 4b. Declare the spec in the Nimbus config
 
-The spec is declared in exactly **one** place — the Nimbus config's `api[]`
-array — and the content collection (4c) derives from it, so the two can never
-drift. For `src/content.config.ts` to read that array without pulling the
-integration into the content layer, the config must be its own module built with
-the **side-effect-free** `defineConfig` entry.
-
-If your Nimbus config is still inline in `astro.config.ts`, extract it into a
-`nimbus.config.ts` at the project root:
+Add an `api` entry to the Nimbus config in `astro.config.ts`, next to the
+existing fields. Edit the config where it already is:
 
 ```ts
-// nimbus.config.ts
-import { defineConfig } from "@cloudflare/nimbus-docs/config";
-
-export default defineConfig({
+const nimbusConfig = defineNimbusConfig({
   // …your existing site / title / etc…
-  api: [{ collection: "api", spec: "./src/api/openapi.yaml" }],
+  api: [
+    {
+      collection: "api",
+      spec: "./src/api/openapi.yaml",
+      routes: {
+        convention: "resource-action-v2",
+        stripPathPrefixes: ["/v1"], // only when step 1 found a shared prefix
+      },
+    },
+  ],
 });
 ```
 
-Then import it in `astro.config.ts` (Astro's own `defineConfig` is unchanged):
+`collection` is the name from Q2. `spec` is the path from Q1, resolved from the
+project root (not the current working directory — builds from a monorepo root or
+`--root` resolve correctly). `spec` may also be an inline OpenAPI object. Add a
+`label` for a friendlier name in build diagnostics; it defaults to the
+collection name. To mount more than one spec, add one entry per spec.
 
-```ts
-import nimbus from "@cloudflare/nimbus-docs";
-import nimbusConfig from "./nimbus.config";
+`routes` gives new sites readable URLs derived from methods and paths. Write
+`stripPathPrefixes` only when step 1 found a prefix shared by every path, and
+no `operations` yet: step 6 adds overrides only for collisions the build
+reports. Without `routes`, pages use the spec's `operationId`s as URLs
+(`/api/Events/retrieveEvent`); that is what sites set up before this recipe
+wrote `routes` have, and the build keeps them as they are.
 
-// …integrations: [nimbus(nimbusConfig)] …
-```
+### 4c. Register the collection
 
-`spec` is the path from Q1, resolved from the project root (not the current
-working directory — builds from a monorepo root or `--root` resolve correctly).
-`spec` may also be an inline OpenAPI object. Add a `label` for a friendlier name
-in build diagnostics; it defaults to the collection name. To mount more than one
-spec, add more entries to the array and explicitly register each one in 4c.
-
-> **Why the `/config` entry?** `@cloudflare/nimbus-docs/config` exports only the
-> identity `defineConfig` with no side effects, so a `nimbus.config.ts` imported
-> by BOTH `astro.config.ts` and the early `content.config.ts` graph never drags
-> the integration (mdx/sitemap/…) into the content layer. Importing `defineConfig`
-> from the main `@cloudflare/nimbus-docs` barrel would.
-
-### 4c. Register the collection explicitly from that same config
-
-In `src/content.config.ts`, import the config, find the entry selected in 4b,
-and register it under an explicitly visible collection key. This keeps the spec
-declaration in one place while allowing Nimbus's static collection-name parser
-  to include the API reference in `llms.txt` indexes:
+In `src/content.config.ts`, add one line to the `collections` object. Use the
+collection name from 4b as the key:
 
 ```ts
 import { apiCollection } from "@cloudflare/nimbus-docs/content";
-import nimbus from "../nimbus.config";
-
-const apiConfig = nimbus.api?.find((entry) => entry.collection === "api");
-if (!apiConfig) throw new Error('Missing the "api" entry in nimbus.config.ts');
 
 export const collections = {
   // …docs, partials…
-  api: defineCollection(apiCollection(apiConfig)),
+  api: defineCollection(apiCollection()),
 };
 ```
 
-The import path is relative to `src/content.config.ts` (`../nimbus.config` for a
-root-level config). If Q2 chose another collection name, substitute it in the
-lookup and the object key (quote the key if it contains a dash). For multiple
-specs, add one explicit lookup and literal collection key per `api[]` entry;
-Nimbus does not discover collection names hidden behind a dynamic spread.
+`apiCollection()` takes no arguments: it indexes the `api` entry whose
+`collection` matches its key. If Q2 chose another name, use it as the key
+(quote the key if it contains a dash). For multiple specs, add one line per
+`api` entry, each under its own literal key; Nimbus doesn't find collection
+names behind a spread. A key with no `api` entry, or an entry with no key,
+fails the build with a message that names both files, and
+`nimbus-docs check` reports the same mismatch without building.
 
-### 4d. Scaffold the Markdown route
-
-Write `src/pages/api/[...slug]/index.md.ts`. This is the clean Markdown
-version of every API page — the render comes from Nimbus's emitter via
-`renderIndexedEntryMarkdown` (which handles both prose and API collections), so
-do **not** prepend a `# title`; the emitter already renders the page heading.
-
-<!-- api-reference-fixture:src/pages/api/[...slug]/index.md.ts -->
-```ts
-/**
- * Per-page `/api/<slug>/index.md` - the clean Markdown version of every
- * entry of the `api` reference collection. Sibling to the primary-collection
- * Markdown route at `pages/[...slug]/index.md.ts`; filtering to `api` keeps the two
- * rest routes from generating conflicting paths.
- */
-
-import {
-  getIndexedEntries,
-  renderIndexedEntryMarkdown,
-  type IndexedEntry,
-  withBase,
-} from "@cloudflare/nimbus-docs";
-import { config } from "virtual:nimbus/config";
-
-export const prerender = true;
-
-const API_COLLECTION = "api";
-const absoluteUrl = (path: string) =>
-  new URL(withBase(path, import.meta.env.BASE_URL), config.site).href;
-
-interface SlugProps {
-  item: IndexedEntry;
-}
-
-export async function getStaticPaths() {
-  const indexed = await getIndexedEntries();
-  return indexed
-    .filter((item) => item.collection === API_COLLECTION)
-    .map((item) => ({
-      // The root overview has entry id "index" -> emit at `/api/index.md`
-      // (undefined rest segment). Every other page emits at
-      // `/api/<id>/index.md`.
-      params: {
-        slug: item.entry.id === "index" ? undefined : item.entry.id,
-      },
-      props: { item } as SlugProps,
-    }));
-}
-
-export async function GET({ props }: { props: SlugProps }) {
-  const { item } = props;
-  const { title, description, markdownUrl, sourceUrl, version } = item;
-
-  const markdown = await renderIndexedEntryMarkdown(item, {
-    base: import.meta.env.BASE_URL,
-  });
-
-  const body = [
-    "---",
-    `title: ${JSON.stringify(title)}`,
-    ...(description ? [`description: ${JSON.stringify(description)}`] : []),
-    ...(config.socialImage
-      ? [`image: ${JSON.stringify(absoluteUrl(config.socialImage))}`]
-      : []),
-    ...(version ? [`version: ${JSON.stringify(version)}`] : []),
-    "---",
-    "",
-    "> Documentation Index",
-    `> Fetch the complete documentation index at: ${absoluteUrl("/llms.txt")}`,
-    "> Use this file to discover all available pages before exploring further.",
-    "",
-    markdown,
-    "",
-    // API pages have no authored `.mdx` source, so `sourceUrl` is undefined -
-    // fall back to the Markdown version's own URL.
-    `Source: ${absoluteUrl(sourceUrl ?? markdownUrl)}`,
-    "",
-  ].join("\n");
-
-  return new Response(body, {
-    headers: { "Content-Type": "text/markdown; charset=utf-8" },
-  });
-}
-```
-
-### 4e. Scaffold the HTML route
+### 4d. Scaffold the HTML route
 
 The route is thin: `getApiStaticPaths` enumerates one path per page, and
-`getApiRoute(Astro)` reads the page props and shared navigation prepared by the
+`getApiRoute(Astro, "api")` reads the page props and shared navigation prepared by the
 content loader, then marks the current navigation path active. It never reads
 or parses the OpenAPI source at request time. Hand both results to `ApiLayout`
 (installed in 4a). `ApiLayout` composes `ApiSidebar` (verb chips +
@@ -288,10 +223,11 @@ pre-resolved on the view-model; the components hold only the look.
 
 `getApiPage` also returns the page's versioning identity — `collection`,
 `version`, and `coordinate`. Threading them into `NimbusHead` emits the
-canonical + cross-version alternates on the coordinate axis, and into
-`ApiLayout` lights up the version picker and the deprecated-version banner. A
-single-version spec returns `version: null`, so both features stay dormant with
-no extra wiring.
+canonical + cross-version alternates on the coordinate axis, into `ApiLayout`
+the deprecated-version banner, and into `VersionSwitcher`, passed to `Header`'s
+`actions` slot, the version picker beside search. A single-version spec returns
+`version: null`, so the picker and the banner stay dormant with no extra
+wiring.
 
 `ApiLayout` renders the three-column region, not the document shell. The
 generated starter's `BaseLayout` already owns metadata, global styles, search,
@@ -305,47 +241,125 @@ Write `src/pages/api/[...slug].astro`:
 <!-- api-reference-fixture:src/pages/api/[...slug].astro -->
 ```astro
 ---
-import { getApiRoute, getApiStaticPaths } from "@cloudflare/nimbus-docs/runtime";
+import { getApiStaticPaths, getApiRoute } from "@cloudflare/nimbus-docs/runtime";
 import Header from "@/components/Header.astro";
-import { ApiLayout } from "@/components/ui/api-layout";
+import { API_HOME_CHUNK_SIZE, ApiLayout } from "@/components/ui/api-layout";
+import { VersionSwitcher } from "@/components/ui/version-switcher";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
-export const prerender = true;
-export const getStaticPaths = getApiStaticPaths("api");
+export const getStaticPaths = getApiStaticPaths("api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 
-const result = await getApiRoute(Astro);
+const result = await getApiRoute(Astro, "api", { homeChunkSize: API_HOME_CHUNK_SIZE });
 if (result instanceof Response) return result;
-const { page, nav, collection, version, coordinate } = result;
-const socialImage = `/og${page.href.replace(/\/$/, "")}.png`;
+const { page, nav, collection, version, coordinate, home } = result;
+// A later part of the API home's list: a page of its own, kept out of search.
+const part = home && home.part.number > 1 ? home.part : undefined;
+// The generated per-page card exists for the default version's version-free
+// URL; a non-default query-mode page (its href carries the version query) uses
+// the site's shared social image instead. The card path derives from the
+// documentation pathname, never from `page.href` verbatim — the query would
+// land inside the file name.
+const pagePathname = new URL(page.href, Astro.url).pathname;
+const socialImage = new URL(page.href, Astro.url).search
+  ? undefined
+  : `/og${pagePathname.replace(/\/$/, "")}.png`;
 ---
 
 <BaseLayout
-  title={`${page.title} · API`}
+  title={part ? `${page.title}: endpoints ${part.start}–${part.end} · API` : page.kind === "api" ? page.title : `${page.title} · API`}
   description={page.description}
   markdownUrl={page.markdownHref}
   socialImage={socialImage}
+  noindex={part !== undefined}
   collection={collection}
   apiVersion={version ?? undefined}
   coordinate={coordinate}
 >
-  <Header showSidebar collection={collection} />
-  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} />
+  <Header showSidebar collection={collection}>
+    <VersionSwitcher slot="actions" apiCollection={collection} apiVersion={version} coordinate={coordinate} />
+  </Header>
+  <ApiLayout page={page} nav={nav} collection={collection} version={version} coordinate={coordinate} home={home} />
 </BaseLayout>
 ```
+
+The route is written for a site built ahead of time on `output: "static"`. Run
+`nimbus-docs check --fix` next (at the root, after 4f), so it matches the
+site's `rendering` and `output`: a request-rendered route drops
+`getStaticPaths`, and a built route on `output: "server"` gets
+`export const prerender = true`.
+If it reports a file it can't edit, apply the same rule by hand: a `prerender`
+line only when the route's mode differs from `output`'s default, and
+`getStaticPaths` only on a built route.
 
 The nav is handled by `ApiSidebar` inside `ApiLayout` — there's no separate
 `ApiNavList` to write. To customise the tree's look (icons, grouping, a
 collapse-all affordance), edit `src/components/ui/api-sidebar/`; the active/
-expanded flags and verb come pre-resolved on each `ApiNavItem`.
+expanded flags and verb come pre-resolved on each `ApiNavItem`. For a large
+API (hundreds of operations), suggest `sidebar: "on-demand"` on the `api`
+entry so pages don't each carry the whole tree.
+
+### 4e. The API home's later parts
+
+The API home lists every endpoint of a version, at most `API_HOME_CHUNK_SIZE`
+endpoints a part. Later parts are pages of their own, served by the same route
+at `/api/index/2/`, `/api/index/3/` and so on (`index` is a reserved segment,
+so no endpoint's URL can take it). The home fetches them as the reader
+scrolls, and a reader without script walks them as ordinary pages. They're
+`noindex` and left out of the sitemap and search. The filter reads the
+version's page list, which Nimbus writes; there's no route to add.
+
+The route passes the size to both `getApiStaticPaths`, which builds one page
+per part, and `getApiRoute`, which reads it when the route renders on request.
+A built route fails the build if the two differ. Without it, the home lists every endpoint on
+one page.
+
+### 4f. A site that is only the reference
+
+Skip this unless Q2 chose the root. The API takes the URLs the docs had, so
+the starter's docs part goes:
+
+1. Write the route from 4d to `src/pages/[...slug].astro`, replacing the docs
+   route there. Keep `src/pages/[...slug]/index.md.ts`, the `llms.txt` routes
+   and `src/pages/[...section]/llms.txt.ts`: they serve the API's Markdown and
+   indexes.
+2. In `src/content.config.ts`, remove `docs` and the imports only it uses.
+   Keep `partials`: `src/components/Render.astro` reads it.
+
+   ```ts
+   import { defineCollection } from "astro:content";
+   import { apiCollection, partialsCollection } from "@cloudflare/nimbus-docs/content";
+
+   export const collections = {
+     partials: defineCollection(partialsCollection()),
+     api: defineCollection(apiCollection()),
+   };
+   ```
+
+3. Delete `src/content/docs/`.
+4. In the Nimbus config, remove `sidebar.items` entries that read the docs: page
+   slugs such as `"index"`, `{ autogenerate: { collection: "docs" } }` and
+   `directory` autogenerates. If nothing is left, remove `sidebar`. The API
+   pages draw their own navigation, so skip step 5.
+
+Run `nimbus-docs check`: its Collection URLs list shows `api  /`. An API and a
+`docs` collection both at the root fail with `nimbus/collection-same-url`.
+
 ## 5. Optional — add to the sidebar
 
 Sidebar layout is taste-laden; ask before editing. If the user wants an "API"
 entry in the site sidebar, add a manual link to the `sidebar.items` array in
 the Nimbus config (the API collection isn't a docs tree, so `autogenerate`
-won't apply to it):
+won't apply to it). Setting `sidebar.items` replaces the sidebar Nimbus builds
+from the docs folders, so if the config has no `sidebar.items` yet, keep the
+docs tree with an `autogenerate` entry:
 
 ```ts
-{ label: "API", link: "/api" },
+sidebar: {
+  items: [
+    { autogenerate: { collection: "docs" } }, // omit if `items` already lists the docs
+    { label: "API", link: "/api" },
+  ],
+},
 ```
 
 ## 6. Verify
@@ -356,12 +370,45 @@ After writing all files, run the user's build command and confirm:
 2. `dist/api/index.html` (overview) and `dist/api/<slug>/index.html` exist.
 3. `dist/api/index.md` and `dist/api/<slug>/index.md` exist and contain
    the rendered reference (operation method/path, request body, responses).
-4. `dist/api/llms.txt` lists every API page, and the root `dist/llms.txt`
-   includes `api` as a top-level section.
+4. `dist/api/llms.txt` links to one index per URL folder, such as
+   `dist/api/widgets/llms.txt`, and each of those lists its pages. The root
+   `dist/llms.txt` includes `api` as a top-level section.
 5. `dist/llms-full.txt` embeds the generated API Markdown.
 
+At the root (4f), the same files sit without `api/`: `dist/index.html`,
+`dist/<slug>/index.html` and their `index.md`. `dist/llms.txt` lists the API's
+index and sections directly, and the build prints no warning about a `docs`
+collection.
+
+If the build fails on a route, read its message and fix the config, then
+build again until it passes. The engine is the only route calculator; never
+predict a slug yourself.
+
+- **Two operations resolve to one slug** and both have `operationId`s (a `PUT`
+  and a `PATCH` on the same member both derive `<resource>/update`): add
+  `routes.operations` with one override. Use `<resource>/replace` for the
+  `PUT` of a `PUT`/`PATCH` pair; otherwise `<resource>/<operationId in
+  kebab-case>`. Override targets must be lowercase kebab-case segments.
+- **A reserved first segment** (the message says the slug's top-level segment
+  is a reserved route, as for `GET /schemas` deriving `schemas/list`) and the
+  operation has an `operationId`: override it with a slug whose first segment
+  isn't reserved, the `operationId` in kebab-case as one segment
+  (`listSchemas` → `list-schemas`).
+- **Anything else** (an operation without an `operationId`, or two tags that
+  map to one lowercase slug, such as `Accounts` and `accounts`): remove
+  `routes` from the entry, build again on the `operationId` URLs, and tell the
+  user what to change in the spec to switch to `resource-action-v2` later: add
+  `operationId`s, or rename one of the tags.
+- **The build fails without `routes` too** (two tags that collide under both
+  projections, such as `User Management` and `User-Management`): stop, name
+  both tags, and ask the user to rename one in the spec.
+
+List any route-fallback warnings the build printed, each with the
+`routes.operations` override that pins it.
+
 Then tell the user the URLs to visit: `/api`, `/api/<slug>`,
-`/api/<slug>/index.md`, `/api/llms.txt`.
+`/api/<slug>/index.md`, `/api/llms.txt` (at the root: `/`, `/<slug>`,
+`/<slug>/index.md`, `/llms.txt`).
 
 **Case-only coordinate collisions:** if the spec has two names that differ only
 by case (e.g. `createResponse` and `CreateResponse`), Nimbus emits a build
@@ -373,6 +420,12 @@ locally, this is why — rename in the spec or build on Linux.
 ## 7. Already installed?
 
 If `src/pages/api/[...slug].astro` already exists, do not overwrite it. Ask the
-user whether to replace, skip, or show a diff first. The `nimbus.config` `api[]`
-entry and the `content.config.ts` derive line may also already exist — check
-before editing.
+user whether to replace, skip, or show a diff first. The `api` entry in the
+Nimbus config and the `apiCollection()` line in `src/content.config.ts` may also
+already exist — check before editing.
+
+Projects set up by an earlier version of this recipe keep the Nimbus config in
+a separate file and pass the entry explicitly, as `apiCollection(apiConfig)`.
+That still builds. Add a new spec to the `api` array in that file and register
+it with a zero-argument `apiCollection()`. Move the config back into
+`astro.config.ts` only if the user asks.

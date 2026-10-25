@@ -1,4 +1,5 @@
 import { collectionMountPrefix } from "./collection-mount.js";
+import { isSearchable } from "./discoverability.js";
 import {
   contentInventoryEntryUrl,
   requestInventoryVersionStatusKey,
@@ -6,15 +7,12 @@ import {
 } from "./request-route-url.js";
 import {
   loadApiCollections,
+  loadMountContext,
   loadRequestRenderingCollections,
   loadNimbusConfig,
 } from "./runtime-config.js";
-import {
-  getIndexedEntries,
-  getVersionStatus,
-  renderIndexedEntryMarkdown,
-} from "../runtime.js";
-import { readMarkdownEndpointPayload } from "./agent-endpoint-assets.js";
+import { getIndexedEntries, getVersionStatus } from "../runtime.js";
+import { readConfiguredMarkdownEndpointPayload } from "./agent-endpoint-asset-reader.js";
 
 export const prerender = true;
 
@@ -29,14 +27,12 @@ export async function GET() {
   const requestCollections = new Set(await loadRequestRenderingCollections());
   const apiCollections = new Set(await loadApiCollections());
   const entries = await getIndexedEntries();
-  const versions = config.versions
-    ? { others: config.versions.others ?? [] }
-    : null;
+  const mountContext = await loadMountContext();
   const routes: RequestRouteInventoryEntry[] = [];
 
   for (const item of entries) {
     const collection = item.collection;
-    const prefix = collectionMountPrefix(collection, versions);
+    const prefix = collectionMountPrefix(collection, mountContext);
     const data = (item.entry.data ?? {}) as Record<string, unknown>;
     const request = requestCollections.has(collection);
     const versionStatus = await getVersionStatus(
@@ -47,16 +43,12 @@ export async function GET() {
       ),
     );
     const discoverable = data.noindex !== true && !versionStatus?.isHidden;
-    const searchable =
-      !versionStatus?.isHidden &&
-      (data.searchable === true ||
-        (data.searchable !== false && data.noindex !== true));
+    const searchable = !versionStatus?.isHidden && isSearchable(item.entry);
     const route: RequestRouteInventoryEntry = {
       collection,
       url: contentInventoryEntryUrl(
         prefix,
         item.entry.id,
-        apiCollections.has(collection),
         request,
       ),
       request,
@@ -69,18 +61,13 @@ export async function GET() {
     if (item.version) route.version = item.version;
     if (versionStatus?.isDeprecated) route.deprecated = true;
     if (route.request && searchable) {
-      route.content = apiCollections.has(collection)
-        ? await renderIndexedEntryMarkdown(item, { base: import.meta.env.BASE_URL })
-        : (
-            await readMarkdownEndpointPayload(
-              projectRoot,
-              {
-                collection,
-                id: item.entry.id,
-                surface: "markdown",
-              },
-            )
-          ).content;
+      route.content = (
+        await readConfiguredMarkdownEndpointPayload(projectRoot, {
+          collection,
+          id: item.entry.id,
+          surface: "markdown",
+        })
+      ).content;
     }
     routes.push(route);
   }

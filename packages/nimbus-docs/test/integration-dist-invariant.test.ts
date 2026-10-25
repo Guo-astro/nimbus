@@ -1,18 +1,14 @@
 /**
- * Dist-output invariant: with no adapter installed, the integration adds nothing
- * to `dist` beyond what it shipped before deploy-correctness — the new build
- * diagnostics go to the logger (stdout) and `.nimbus/` (project root), never to
- * `dist`. The single sanctioned dist artifact is `_redirects`, a deploy file
- * emitted only in the static lane when a deploy target is detected AND there is
- * at least one concrete redirect to write; otherwise dist stays identical to
- * baseline.
- *
- * Baseline = `_nimbus/shiki.css`, which predates this work and is always emitted.
+ * Deploy diagnostics go to the logger and `.nimbus/`, never to `dist`.
+ * Besides the normal discovery and code-style outputs, `_redirects` is added
+ * only for a detected static deployment with at least one concrete redirect.
+ * Prerendered discovery endpoints are covered by the real Astro build tests.
  */
 
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readdir,
@@ -28,10 +24,11 @@ import nimbus from "../src/index.js";
 import type { RedirectConfigLike } from "../src/_internal/redirect-emitters.js";
 import type { ResolvedRouteLike } from "../src/_internal/build-report.js";
 import { runningNimbusVersion } from "../src/_internal/upgrades.js";
+import { readRouteTruth } from "../src/lint/route-truth.js";
 
 const dirUrl = (p: string) => pathToFileURL(p + path.sep);
 
-const BASELINE_DIST = ["_nimbus/shiki.css"];
+const BASELINE_DIST = ["_headers", "_nimbus/shiki.css"];
 
 const CONTENT_CONFIG = `import { docsCollection } from "@cloudflare/nimbus-docs/content";
 export const collections = { docs: docsCollection({ base: "docs" }) };
@@ -75,6 +72,16 @@ async function driveBuild(
     routes?: ResolvedRouteLike[];
     base?: string;
     seedRedirects?: string;
+    /** Astro's final `build.assets`, as `astro:config:done` sees it. */
+    assets?: string;
+    /** Runs after the project is written, before `astro:config:setup`. */
+    beforeSetup?: (projectRoot: string) => Promise<void>;
+    /** Files written into dist before `astro:build:done`, path → body. */
+    seedDist?: Record<string, string>;
+    /** Files written into the project before `astro:config:setup`. */
+    seedProject?: Record<string, string>;
+    /** Stop after the setup hooks, as a build that fails before `astro:build:done` does. */
+    skipBuildDone?: boolean;
   },
 ): Promise<DriveResult> {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "nimbus-dist-root-"));
@@ -103,6 +110,10 @@ async function driveBuild(
   await write("src/components.ts", "export const components = {};\n");
   if (opts.signal === "cloudflare") await write("wrangler.jsonc", "{}\n");
   if (opts.signal === "netlify") await write("netlify.toml", "\n");
+  for (const [rel, body] of Object.entries(opts.seedProject ?? {})) {
+    await write(rel, body);
+  }
+  await opts.beforeSetup?.(projectRoot);
 
   const infos: string[] = [];
   const warnings: string[] = [];
@@ -141,6 +152,9 @@ async function driveBuild(
       srcDir: dirUrl(path.join(projectRoot, "src")),
       cacheDir: dirUrl(path.join(projectRoot, ".cache")),
       base: opts.base ?? "",
+      // `build.assets` left at its default here; `opts.assets` arrives at
+      // config:done, as when a later integration changes it.
+      build: { format: "directory" },
     },
     logger,
     command: "build",
@@ -164,6 +178,7 @@ async function driveBuild(
     config: {
       output: opts.output ?? "static",
       adapter: opts.adapter ? { name: opts.adapter } : null,
+      build: { format: "directory", assets: opts.assets ?? "_astro" },
       redirects: opts.redirects ?? {},
     },
   } as never);
@@ -178,6 +193,12 @@ async function driveBuild(
       opts.seedRedirects,
       "utf8",
     );
+  }
+
+  for (const [rel, body] of Object.entries(opts.seedDist ?? {})) {
+    const full = path.join(distDir, rel);
+    await mkdir(path.dirname(full), { recursive: true });
+    await writeFile(full, body, "utf8");
   }
 
   const runBuild = async () => {
@@ -198,7 +219,7 @@ async function driveBuild(
     } as never);
   };
 
-  await runBuild();
+  if (!opts.skipBuildDone) await runBuild();
 
   return {
     distEntries: await listFiles(distDir),
@@ -429,4 +450,219 @@ test("build diagnostics go to the logger and .nimbus/, never into dist", async (
       `${artifact} is materialized under the project root`,
     );
   }
+});
+
+async function readRouteTruthFile(projectRoot: string) {
+  return JSON.parse(
+    await readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
+  ) as { version: number; base: string; knownRoutes: string[] };
+}
+
+test("route truth records every emitted file except the final assets dir, search, internals, and platform files", async (t) => {
+  // Setup sees the default `_astro`; a later integration moves assets to
+  // `static/assets`, which config:done sees. A public `_astro/` file stays.
+  const { projectRoot } = await driveBuild(t, {
+    assets: "static/assets",
+    seedDist: {
+      "index.html": "",
+      "llms.txt": "",
+      "rss.xml": "",
+      "welcome/index.html": "",
+      "welcome/index.md": "",
+      "files/doc.pdf": "",
+      "keys/key.pem": "",
+      "foo/index.html": "",
+      "foo.html": "",
+      "404.html": "",
+      ".well-known/security.txt": "",
+      "static/assets/app.js": "",
+      "static/other.css": "",
+      "_astro/manual.pdf": "",
+      "pagefind/pagefind.js": "",
+      "pagefind/fragment/en_1.pf_fragment": "",
+      "_nimbus/agent/llms.txt": "",
+      _headers: "",
+      _redirects: "",
+      "_routes.json": "{}",
+      ".assetsignore": "",
+      "_worker.js/index.js": "",
+    },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.equal(truth.version, 3);
+  assert.deepEqual(truth.knownRoutes, [
+    "/",
+    "/.well-known/security.txt",
+    "/404",
+    "/_astro/manual.pdf",
+    "/files/doc.pdf",
+    "/foo",
+    "/index.md",
+    "/keys/key.pem",
+    "/llms.txt",
+    "/rss.xml",
+    "/static/other.css",
+    "/welcome",
+    "/welcome/index.md",
+  ]);
+});
+
+test("route truth leaves out the default _astro directory", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    seedDist: { "_astro/app.js": "", "robots.txt": "" },
+  });
+  assert.deepEqual((await readRouteTruthFile(projectRoot)).knownRoutes, [
+    "/",
+    "/robots.txt",
+  ]);
+});
+
+test("under a base, output paths are recorded as written, never with base added or removed", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    base: "/docs",
+    seedDist: { "x/index.html": "", "docs/x/index.html": "", "docs.html": "" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.equal(truth.base, "/docs");
+  assert.deepEqual(truth.knownRoutes, ["/", "/docs", "/docs/x", "/x"]);
+});
+
+const STALE_TRUTH = JSON.stringify({
+  version: 2,
+  base: "",
+  knownRoutes: ["/stale"],
+  opaqueNamespaces: [],
+});
+
+// Permission tests can't fail as root, which ignores file modes.
+const asRoot = process.getuid?.() === 0;
+
+test("a build that fails after setup leaves no routes.json behind", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    seedProject: { ".nimbus/routes.json": STALE_TRUTH },
+    skipBuildDone: true,
+  });
+  await assert.rejects(
+    readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
+    { code: "ENOENT" },
+  );
+});
+
+test("a build whose setup throws still leaves no routes.json behind", { skip: asRoot }, async (t) => {
+  // An unreadable page makes setup's `src/pages` scan throw, well before
+  // content sync.
+  let root = "";
+  await assert.rejects(
+    driveBuild(t, {
+      seedProject: {
+        ".nimbus/routes.json": STALE_TRUTH,
+        "src/pages/locked.ts": "export {};\n",
+      },
+      beforeSetup: async (projectRoot) => {
+        root = projectRoot;
+        await chmod(path.join(projectRoot, "src/pages/locked.ts"), 0o000);
+      },
+    }),
+    { code: "EACCES" },
+  );
+  await assert.rejects(
+    readFile(path.join(root, ".nimbus/routes.json"), "utf8"),
+    { code: "ENOENT" },
+  );
+});
+
+test("when routes.json can't be deleted, it's overwritten so lint reports an unfinished build", { skip: asRoot }, async (t) => {
+  let root = "";
+  t.after(() => chmod(path.join(root, ".nimbus"), 0o755));
+  await driveBuild(t, {
+    seedProject: { ".nimbus/routes.json": STALE_TRUTH },
+    beforeSetup: async (projectRoot) => {
+      root = projectRoot;
+      // Deleting needs a writable directory; overwriting doesn't.
+      await chmod(path.join(projectRoot, ".nimbus"), 0o555);
+    },
+    skipBuildDone: true,
+  });
+  const result = readRouteTruth(root);
+  assert.equal(result.truth, undefined);
+  assert.match(result.problem ?? "", /from a build that didn't finish/);
+});
+
+test("when routes.json can't be deleted or overwritten, the build fails", { skip: asRoot }, async (t) => {
+  let root = "";
+  t.after(() => chmod(path.join(root, ".nimbus"), 0o755));
+  await assert.rejects(
+    driveBuild(t, {
+      seedProject: { ".nimbus/routes.json": STALE_TRUTH },
+      beforeSetup: async (projectRoot) => {
+        root = projectRoot;
+        await chmod(path.join(projectRoot, ".nimbus/routes.json"), 0o444);
+        await chmod(path.join(projectRoot, ".nimbus"), 0o555);
+      },
+      skipBuildDone: true,
+    }),
+    /can't delete or overwrite \.nimbus\/routes\.json/,
+  );
+});
+
+test("a route truth failure is a warning and leaves no routes.json", { skip: asRoot }, async (t) => {
+  // An unreadable directory in the output makes the walk fail.
+  const { projectRoot, distDir, warnings, runBuild } = await driveBuild(t, {
+    seedDist: { "locked/file.txt": "", "llms.txt": "Docs\n" },
+    skipBuildDone: true,
+  });
+  await chmod(path.join(distDir, "locked"), 0o000);
+  try {
+    await runBuild();
+  } finally {
+    // Before driveBuild's cleanup, which can't remove an unreadable directory.
+    await chmod(path.join(distDir, "locked"), 0o755);
+  }
+  assert.ok(
+    warnings.some((w) => /failed to write \.nimbus\/routes\.json/.test(w)),
+    warnings.join("\n"),
+  );
+  assert.ok(
+    warnings.some((w) =>
+      /failed to collect emitted files for agent text headers/.test(w),
+    ),
+    warnings.join("\n"),
+  );
+  const headers = await readFile(path.join(distDir, "_headers"), "utf8");
+  assert.match(headers, /application\/json/);
+  assert.doesNotMatch(headers, /\/llms\.txt\n  Content-Type:/);
+  await assert.rejects(
+    readFile(path.join(projectRoot, ".nimbus/routes.json"), "utf8"),
+    { code: "ENOENT" },
+  );
+});
+
+test("route truth keeps platform rules and Astro's redirect pages apart", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    signal: "netlify",
+    redirects: { "/old": "/missing" },
+    seedDist: { "old/index.html": "", _redirects: "/old /good 301\n" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.equal(truth.redirectRules, "netlify");
+  assert.deepEqual(truth.redirectPages, [{ from: "/old", to: "/missing", status: 301 }]);
+  assert.deepEqual(
+    truth.redirects.filter((r: { from: string }) => r.from === "/old").map((r: { to: string }) => r.to),
+    ["/good"],
+  );
+});
+
+test("route truth follows the pages a dynamic Astro redirect writes, so lint reports links to the old URLs", async (t) => {
+  const { projectRoot } = await driveBuild(t, {
+    signal: "netlify",
+    redirects: { "/sdk/[...slug]": "/products/kit/[...slug]" },
+    seedDist: { "sdk/setup/index.html": "", "products/kit/setup/index.html": "" },
+  });
+  const truth = await readRouteTruthFile(projectRoot);
+  assert.deepEqual(truth.redirectPages, [{ from: "/sdk/setup", to: "/products/kit/setup", status: 301 }]);
+});
+
+test("without a netlify.toml, redirect rules are Cloudflare's", async (t) => {
+  const { projectRoot } = await driveBuild(t, { signal: "cloudflare" });
+  assert.equal((await readRouteTruthFile(projectRoot)).redirectRules, "cloudflare");
 });

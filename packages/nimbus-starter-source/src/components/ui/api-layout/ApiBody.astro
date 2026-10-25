@@ -17,16 +17,29 @@ import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ApiFieldList, ApiUnionExplorer } from "@/components/ui/api-field-row";
 import { PageActions } from "@/components/ui/page-actions";
 import ApiEndpointCard from "./ApiEndpointCard.astro";
+import ApiHome from "./ApiHome.astro";
+import ApiOperationList from "./ApiOperationList.astro";
+import ApiHomeChunk from "./ApiHomeChunk.astro";
+import Icon from "@cloudflare/nimbus-docs/components/Icon.astro";
 import { authFields } from "./auth";
 import { cn } from "@/lib/cn";
 import { withBase } from "@cloudflare/nimbus-docs/runtime";
-import type { ApiPageProps } from "@cloudflare/nimbus-docs/api";
+import type { ApiPageProps, ApiResponseView } from "@cloudflare/nimbus-docs/api";
+import type { ApiHome as ApiHomeView } from "@cloudflare/nimbus-docs/runtime";
 
 interface Props {
   page: ApiPageProps;
+  /** On the API home and its later parts, from `getApiRoute`: the part to
+   *  show, and every part. */
+  home?: ApiHomeView;
 }
 
-const { page } = Astro.props;
+const { page, home } = Astro.props;
+// A later part: one part of the API home's list, as a page of its own, so a
+// reader without script can walk the whole list.
+const homeChunk = page.kind === "api" && home && home.part.number > 1 ? home.part : undefined;
+const homeNext = homeChunk && home?.parts[homeChunk.number];
+const title = homeChunk ? `${page.title}: endpoints ${homeChunk.start}–${homeChunk.end}` : page.title;
 const markdownUrl = page.markdownHref;
 
 const detail = (v: unknown): string => JSON.stringify(v);
@@ -58,7 +71,26 @@ function statusToneClass(status: string): string {
   }
 }
 
+// A response with several media types renders one stacked body per media type,
+// the primary first, each labeled by its media type — the same shape as the
+// request's additional bodies. The primary's example stays in the code rail.
+const responseBodies = (r: ApiResponseView) => [
+  { mediaType: r.mediaType ?? "application/json", fields: r.fields, truncated: r.truncated, union: r.bodyUnion, anchor: undefined, example: undefined },
+  ...(r.additionalMedia ?? []),
+];
+
 const authFieldList = page.kind === "operation" ? authFields(page.auth) : [];
+// Named examples when the spec has them. Otherwise the request body shows
+// through the code samples; with none (e.g. `samples.generate: []`), the
+// primary example renders here so the page still shows what to send.
+const requestExamples =
+  page.kind !== "operation"
+    ? []
+    : page.requestExamples?.length
+      ? page.requestExamples
+      : page.samples.length === 0 && page.example
+        ? [{ ...page.example, id: "example", label: "Example" }]
+        : [];
 
 // Deprecation notice, built as sanitized HTML for the shared Banner (which takes
 // a content string, mirroring DocsLayout's version-deprecation banner).
@@ -84,25 +116,25 @@ const deprecationHtml = page.deprecated
 {/* Header order (locked): title → description → endpoint → page actions. The
     endpoint bar carries the sidebar method chip + verb + path; page actions sit
     beneath so they read as page-level utilities, not part of the endpoint. */}
-<div class="mt-6 flex flex-col gap-4">
-  <h1 class="mb-0 leading-tight text-foreground [text-wrap:balance]" style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)">{page.title}</h1>
+<div data-slot="page-header" class="mt-6 flex flex-col gap-4">
+  <h1 class="mb-0 leading-tight text-foreground [text-wrap:balance]" style="font-size:var(--nb-h1-size);font-weight:var(--nb-h1-weight);letter-spacing:var(--nb-h1-tracking)">{title}</h1>
 
-  {page.descriptionHtml && (
-    <div class="nb-md text-muted-foreground" set:html={page.descriptionHtml} />
+  {!homeChunk && page.descriptionHtml && (
+    <div class="nb-md text-muted-foreground [overflow-wrap:anywhere]" set:html={page.descriptionHtml} />
   )}
 
   {page.kind === "operation" && (
     <ApiEndpointCard method={page.method} path={page.path} server={page.server} isWebhook={page.isWebhook} />
   )}
 
-  <PageActions markdownUrl={markdownUrl} />
+  {!homeChunk && <PageActions markdownUrl={markdownUrl} />}
 </div>
 
 <div class="mt-8 flex flex-col gap-8">
   {page.kind === "operation" && (
     <>
       {authFieldList.length > 0 && (
-        <ApiFieldList as="h2" title="Authorisation" fields={authFieldList} />
+        <ApiFieldList as="h2" title="Authorization" fields={authFieldList} />
       )}
 
       {page.parameters.map((group) => (
@@ -110,18 +142,65 @@ const deprecationHtml = page.deprecated
       ))}
 
       {page.bodyUnion ? (
-        <ApiFieldList as="h2" title="Request body" badge={mediaBadge(page.bodyMediaType ?? "application/json")} collapsible>
+        <ApiFieldList as="h2" title="Request body" badge={mediaBadge(page.bodyMediaType ?? "application/json")} required={page.bodyRequired} descriptionHtml={page.bodyDescriptionHtml} collapsible>
           <ApiUnionExplorer union={page.bodyUnion} />
         </ApiFieldList>
       ) : page.body.length > 0 ? (
-        <ApiFieldList as="h2" title="Request body" badge={mediaBadge(page.bodyMediaType ?? "application/json")} fields={page.body} truncated={page.bodyTruncated} />
+        <ApiFieldList as="h2" title="Request body" badge={mediaBadge(page.bodyMediaType ?? "application/json")} required={page.bodyRequired} descriptionHtml={page.bodyDescriptionHtml} fields={page.body} truncated={page.bodyTruncated} />
+      ) : page.bodyRequired !== undefined || page.bodyDescriptionHtml ? (
+        <ApiFieldList as="h2" title="Request body" badge={page.bodyMediaType && mediaBadge(page.bodyMediaType)} required={page.bodyRequired} descriptionHtml={page.bodyDescriptionHtml} />
       ) : null}
+
+      {requestExamples.length > 0 && (
+        <section
+          class="scroll-mt-24"
+          data-request-examples={requestExamples.length > 1 ? "" : undefined}
+        >
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h2 class="fl-title">
+              {requestExamples.length === 1 ? "Example request" : "Example requests"}
+            </h2>
+            {requestExamples.length > 1 && (
+              <div class="flex flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1" role="tablist" aria-label="Request example">
+                {requestExamples.map((example, index) => (
+                  <button
+                    id={`request-example-trigger-${index}`}
+                    type="button"
+                    role="tab"
+                    class="rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground aria-[selected=true]:bg-background aria-[selected=true]:text-foreground aria-[selected=true]:shadow-sm"
+                    aria-controls={`request-example-panel-${index}`}
+                    aria-selected={index === 0 ? "true" : "false"}
+                    tabindex={index === 0 ? 0 : -1}
+                    data-request-example-trigger
+                  >
+                    {example.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {requestExamples.map((example, index) => (
+            <div
+              id={`request-example-panel-${index}`}
+              role={requestExamples.length > 1 ? "tabpanel" : undefined}
+              aria-labelledby={requestExamples.length > 1 ? `request-example-trigger-${index}` : undefined}
+              data-request-example-panel={requestExamples.length > 1 ? "" : undefined}
+              hidden={index !== 0}
+            >
+              {example.description && <p class="mb-2 text-sm text-muted-foreground">{example.description}</p>}
+              <div class="[&_.nb-code-figure]:my-0">
+                <Fragment set:html={preparedCode(example)} />
+              </div>
+            </div>
+          ))}
+        </section>
+      )}
 
       {page.additionalBodies?.map((body) => (
         <section id={body.anchor} class="scroll-mt-24">
           <div class="mb-2 flex items-center gap-2">
-            <h2 class="text-sm font-normal text-muted-foreground" aria-label={`Request body (${body.mediaType})`}>Request body</h2>
-            <span class="font-mono text-[0.6875rem] uppercase tracking-wide text-muted-foreground">{mediaBadge(body.mediaType)}</span>
+            <h2 class="fl-title" aria-label={`Request body (${body.mediaType})`}>Request body</h2>
+            <span class="font-mono text-[0.6875rem] uppercase text-muted-foreground">{mediaBadge(body.mediaType)}</span>
           </div>
           {body.union ? (
             <ApiFieldList collapsible>
@@ -131,7 +210,7 @@ const deprecationHtml = page.deprecated
             <ApiFieldList fields={body.fields} truncated={body.truncated} />
           ) : null}
           {body.example && (
-            <div class="mt-2 overflow-hidden rounded-lg bg-card ring ring-border">
+            <div class="mt-2 [&_.nb-code-figure]:my-0">
               <Fragment set:html={preparedCode(body.example)} />
             </div>
           )}
@@ -139,25 +218,67 @@ const deprecationHtml = page.deprecated
       ))}
 
       {page.responses.length > 0 && (
-        <section class="scroll-mt-24">
-          <h2 class="mb-3 text-sm font-normal text-muted-foreground">Returns</h2>
+        <section class="scroll-mt-24" data-api-responses>
+          <h2 class="fl-title mb-3">Returns</h2>
           <div class="flex flex-col gap-6">
-            {page.responses.map((r) => (
-              <div id={r.anchor} class="scroll-mt-24">
+            {page.responses.map((r) => {
+              // Error responses start closed so the success shape leads; a
+              // link into one opens it.
+              const collapsed = /^[45]/.test(r.status);
+              const Response = collapsed ? "details" : "div";
+              const Head = collapsed ? "summary" : "div";
+              // A summary holds phrasing content only: a one-paragraph
+              // description goes inline, a longer one into the body.
+              const inline = collapsed
+                ? /^\s*<p>((?:(?!<\/?p\b)[\s\S])*)<\/p>\s*$/.exec(r.descriptionHtml ?? "")?.[1]
+                : undefined;
+              const bodyDescription = collapsed && inline === undefined ? r.descriptionHtml : undefined;
+              return (
+              <Response id={r.anchor} class="group/response scroll-mt-24">
                 {/* The status is the response's heading (h3, under the Returns h2);
                     the JSON badge on the body list marks it, so no "Body" label is
                     needed. Description sits inline as a sibling, not inside the h3. */}
-                <div class="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                  <h3 class={cn("font-mono text-sm font-semibold", statusToneClass(r.status))}>{r.status}</h3>
-                  {r.descriptionHtml && (
+                <Head
+                  class={cn(
+                    "mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-1",
+                    collapsed && "cursor-pointer list-none group-not-open/response:mb-0 [&::-webkit-details-marker]:hidden",
+                  )}
+                >
+                  {collapsed && (
+                    <Icon name="ph:caret-right" class="size-3 self-center text-muted-foreground transition-transform group-open/response:rotate-90 rtl:rotate-180 rtl:group-open/response:rotate-90" />
+                  )}
+                  <h3 class={cn("font-mono text-sm font-medium", statusToneClass(r.status))}>{r.status}</h3>
+                  {inline !== undefined ? (
+                    <span class="nb-md text-sm text-muted-foreground" set:html={inline} />
+                  ) : !collapsed && r.descriptionHtml && (
                     <div class="nb-md text-sm text-muted-foreground" set:html={r.descriptionHtml} />
                   )}
-                </div>
+                </Head>
+                {bodyDescription && <div class="nb-md mb-3 text-sm text-muted-foreground" set:html={bodyDescription} />}
                 <div class="flex flex-col gap-4">
                   {(r.headers?.length ?? 0) > 0 && (
                     <ApiFieldList as="h4" title="Headers" fields={r.headers ?? []} />
                   )}
-                  {r.bodyUnion ? (
+                  {r.additionalMedia ? (
+                    responseBodies(r).map((b) => (
+                      <div id={b.anchor} class="scroll-mt-24">
+                        {b.union ? (
+                          <ApiFieldList badge={mediaBadge(b.mediaType)} collapsible>
+                            <ApiUnionExplorer union={b.union} />
+                          </ApiFieldList>
+                        ) : b.fields.length > 0 ? (
+                          <ApiFieldList badge={mediaBadge(b.mediaType)} fields={b.fields} truncated={b.truncated} />
+                        ) : (
+                          <ApiFieldList badge={mediaBadge(b.mediaType)} />
+                        )}
+                        {b.example && (
+                          <div class="mt-2 [&_.nb-code-figure]:my-0">
+                            <Fragment set:html={preparedCode(b.example)} />
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  ) : r.bodyUnion ? (
                     <ApiFieldList badge="JSON" collapsible>
                       <ApiUnionExplorer union={r.bodyUnion} />
                     </ApiFieldList>
@@ -165,8 +286,9 @@ const deprecationHtml = page.deprecated
                     <ApiFieldList badge="JSON" fields={r.fields} truncated={r.truncated} />
                   )}
                 </div>
-              </div>
-            ))}
+              </Response>
+              );
+            })}
           </div>
         </section>
       )}
@@ -179,8 +301,8 @@ const deprecationHtml = page.deprecated
         <section>
           <p class="text-sm">
             <span class="text-muted-foreground">Type:</span>
-            <code class="ml-1 font-mono text-foreground">{page.scalar.type}</code>
-            {page.scalar.nullable && <span class="ml-1 text-muted-foreground">(nullable)</span>}
+            <code class="ms-1 font-mono text-foreground">{page.scalar.type}</code>
+            {page.scalar.nullable && <span class="ms-1 text-muted-foreground">(nullable)</span>}
           </p>
           {(page.scalar.enum || page.scalar.default !== undefined || page.scalar.example !== undefined) && (
             <p class="mt-1 font-mono text-xs break-words text-muted-foreground">
@@ -205,38 +327,51 @@ const deprecationHtml = page.deprecated
   )}
 
   {page.kind === "section" && (
-    <ul class="flex list-none flex-col gap-1 p-0">
-      {page.operations.map((op) => (
-        <li>
-          <a href={withBase(op.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-2 hover:underline">{op.label}</a>
-        </li>
-      ))}
-    </ul>
-  )}
-
-  {page.kind === "api" && (
     <>
-      {page.version && <p class="text-sm text-muted-foreground">Version: <code class="font-mono">{page.version}</code></p>}
-      {page.servers.length > 0 && (
+      {page.operations.length > 0 && (
         <section>
-          <h2 class="mb-2 text-sm font-semibold text-foreground">Servers</h2>
-          <ul class="flex list-none flex-col gap-1 p-0 font-mono text-xs text-muted-foreground">
-            {page.servers.map((s) => <li>{s}</li>)}
+          <h2 class="fl-title mb-3">
+            Endpoints <span class="fl-badge">{page.operations.length}</span>
+          </h2>
+          <ApiOperationList operations={page.operations} />
+        </section>
+      )}
+      {page.sections && (
+        <section>
+          <h2 class="fl-title mb-3">Sections</h2>
+          <ul class="flex list-none flex-col gap-1 p-0">
+            {page.sections.map((s) => (
+              <li>
+                <a href={withBase(s.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-4 hover:underline">{s.label}</a>
+              </li>
+            ))}
           </ul>
         </section>
       )}
-      {page.sections.length > 0 && (
-        <ul class="flex list-none flex-col gap-1 p-0">
-          {page.sections.map((s) => (
-            <li>
-              <a href={withBase(s.href, import.meta.env.BASE_URL)} class="font-medium underline-offset-2 hover:underline">{s.label}</a>
-            </li>
-          ))}
-        </ul>
-      )}
+    </>
+  )}
+
+  {page.kind === "api" && !homeChunk && <ApiHome page={page} home={home} />}
+
+  {page.kind === "api" && homeChunk && (
+    <>
+      <ApiHomeChunk chunk={homeChunk} grouped={page.index.groups.some((group) => group.label !== null)} />
+      <nav aria-label="Endpoint list" class="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+        <a href={withBase(page.href, import.meta.env.BASE_URL)} class="font-medium text-foreground underline-offset-4 hover:underline">All endpoints</a>
+        {homeNext && (
+          <a href={withBase(homeNext.href, import.meta.env.BASE_URL)} class="font-medium text-foreground underline-offset-4 hover:underline">
+            Next: endpoints {homeNext.start}–{homeNext.end} of {home!.total}
+          </a>
+        )}
+      </nav>
     </>
   )}
 </div>
+
+<script>
+  import "./request-examples.client";
+  import "./responses.client";
+</script>
 
 <style is:global>
   /* Prose treatment for `set:html`-rendered spec descriptions (CommonMark from
@@ -262,7 +397,7 @@ const deprecationHtml = page.deprecated
   .nb-md ul,
   .nb-md ol {
     margin: 0.375rem 0 0;
-    padding-left: 1.25em;
+    padding-inline-start: 1.25em;
   }
   .nb-md ul {
     list-style: disc;

@@ -1,0 +1,22 @@
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string
+        owner:
+          $ref: "#/components/schemas/Owner"
+        friends:
+          type: array
+          items:
+            $ref: "#/components/schemas/Pet"
+    Owner:
+      type: object
+      properties:
+        name:
+          type: string
+        pets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Pet"

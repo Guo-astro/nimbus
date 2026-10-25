@@ -13,6 +13,8 @@ import path from "node:path";
 
 import {
   resolveRuleForCollection,
+  ruleEnabledAnywhere,
+  withRuleOff,
   type CollectionsConfig,
   type RulesConfig,
 } from "./config.js";
@@ -20,6 +22,7 @@ import type { Diagnostic, Severity } from "./diagnostic.js";
 import { collectDisables, isDisabled } from "./disables.js";
 import { applyFixes } from "./fix.js";
 import { parseSource, type ParsedFile } from "./parse.js";
+import { readRouteTruth, ROUTE_TRUTH_FILE } from "./route-truth.js";
 import type { RuleReport } from "./rule.js";
 import { RULES } from "./rules/index.js";
 import type { AuthoringRuleCode } from "./diagnostic.js";
@@ -48,12 +51,33 @@ export interface LintOptions {
    */
   site?: string;
   /**
+   * The deployment base in the renderer's form (`"/docs"`, `""` at the
+   * root), threaded into each rule's `ctx.base`. `image-ref` checks the path
+   * the browser will request with it.
+   */
+  base?: string;
+  /**
    * Cancellation signal — checked between files in `lintPaths`/`fixPaths`.
    * The CLI wires this to SIGINT so Ctrl-C stops the run after the
    * in-progress file finishes (its write is already atomic), instead of
    * killing the process mid-rename.
    */
   signal?: AbortSignal;
+  /**
+   * The collection a file belongs to, for files outside `src/content` (a
+   * page collection whose glob reads another folder). Falls back to the
+   * `src/content/<name>/` path.
+   */
+  collectionOf?: (absPath: string) => string | null;
+  /** How a file is named in findings, when not by its project-relative path. */
+  displayPath?: (absPath: string) => string | undefined;
+  /**
+   * The content source a file's snapshot belongs to. `fixPaths` never
+   * writes such a file: its fixable findings stay in the report.
+   */
+  readOnlySource?: (absPath: string) => string | undefined;
+  /** The folder a snapshot file's collection reads, for rules that resolve relative links. */
+  sourceFolder?: (absPath: string) => string | undefined;
 }
 
 export interface LintSummary {
@@ -139,6 +163,10 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
         file,
         options: resolved.options,
         site: opts.site,
+        base: opts.base,
+        sourceFolder: opts.sourceFolder?.(file.absPath),
+        optionsOf: (code) =>
+          resolveRuleForCollection(code, rules, collections, file.collection).options,
         report: (report) => reports.push(report),
       });
     } catch (err) {
@@ -156,7 +184,7 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
       if (isDisabled(disables, rule.code, report.line)) continue;
       out.push({
         code: rule.code,
-        severity,
+        severity: report.severity === "warn" ? "warn" : severity,
         source: "docs-compiler",
         file: file.path,
         message: report.message,
@@ -178,6 +206,57 @@ export function lintFile(file: ParsedFile, opts: LintOptions = {}): Diagnostic[]
   return out;
 }
 
+/**
+ * True when `code` resolves to `warn` or `error` for at least one
+ * collection under `opts`, including `--rule` force-enabling it (see
+ * `lintFile`). Per-file and inline disables aren't considered.
+ */
+export function ruleWillRun(code: AuthoringRuleCode, opts: LintOptions = {}): boolean {
+  if (opts.only !== undefined && opts.only !== code) return false;
+  const rules = opts.rules ?? {};
+  if (opts.only === code && rules[code] === undefined) return true;
+  return ruleEnabledAnywhere(code, rules, opts.collections ?? {});
+}
+
+/** Rules that resolve links against `.nimbus/routes.json`. */
+const ROUTE_TRUTH_RULES = [
+  "nimbus/internal-link",
+  "nimbus/redirected-link",
+] as const satisfies readonly AuthoringRuleCode[];
+
+/**
+ * Fail closed. When a rule that needs `.nimbus/routes.json` will run and
+ * the file is missing, unreadable, or has an unknown version, return one
+ * `error` diagnostic on that file (whatever the configured severity) and
+ * options with those rules off, so they don't run against nothing.
+ * Otherwise return the options unchanged and no diagnostic.
+ */
+export function guardRouteTruth(
+  projectRoot: string,
+  opts: LintOptions,
+): { opts: LintOptions; diagnostic: Diagnostic | null } {
+  const enabled = ROUTE_TRUTH_RULES.filter((code) => ruleWillRun(code, opts));
+  const [first] = enabled;
+  if (first === undefined) return { opts, diagnostic: null };
+  const { problem } = readRouteTruth(projectRoot);
+  if (problem === undefined) return { opts, diagnostic: null };
+
+  let guarded = { ...opts, rules: opts.rules ?? {}, collections: opts.collections ?? {} };
+  for (const code of enabled) guarded = withRuleOff(guarded, code);
+  return {
+    opts: guarded,
+    diagnostic: {
+      code: first,
+      severity: "error",
+      source: "docs-compiler",
+      file: ROUTE_TRUTH_FILE,
+      message: `links can't be checked: ${problem}`,
+      line: 1,
+      column: 1,
+    },
+  };
+}
+
 /** Lint a set of absolute file paths, reading + parsing each one. */
 export function lintPaths(
   absPaths: string[],
@@ -187,13 +266,14 @@ export function lintPaths(
   const out: Diagnostic[] = [];
   for (const abs of absPaths) {
     if (opts.signal?.aborted) break;
-    const rel = path.relative(projectRoot, abs);
+    const rel = opts.displayPath?.(abs) ?? path.relative(projectRoot, abs);
     try {
       const source = fs.readFileSync(abs, "utf8");
       const parsed = parseSource(source, {
         path: rel,
         absPath: abs,
-        collection: inferCollection(rel),
+        collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
       });
       out.push(...lintFile(parsed, opts));
     } catch (err) {
@@ -254,7 +334,12 @@ export function fixPaths(
 
   for (const abs of absPaths) {
     if (opts.signal?.aborted) break;
-    const rel = path.relative(projectRoot, abs);
+    const rel = opts.displayPath?.(abs) ?? path.relative(projectRoot, abs);
+    // A source snapshot stays byte-identical to its commit: report, never write.
+    if (opts.readOnlySource?.(abs) !== undefined) {
+      remaining.push(...lintPaths([abs], projectRoot, opts));
+      continue;
+    }
     try {
       const original = fs.readFileSync(abs, "utf8");
       let current = original;
@@ -265,7 +350,8 @@ export function fixPaths(
         const parsed = parseSource(current, {
           path: rel,
           absPath: abs,
-          collection: inferCollection(rel),
+          collection: opts.collectionOf?.(abs) ?? inferCollection(rel),
+        projectRoot,
         });
         const diagnostics = lintFile(parsed, opts);
         const result = applyFixes(current, diagnostics);

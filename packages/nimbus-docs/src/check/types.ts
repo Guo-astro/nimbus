@@ -20,9 +20,15 @@ import path from "node:path";
 
 import type TS from "typescript";
 
+import { dependenciesMissing } from "../_internal/upgrades.js";
 import type { CheckFinding, ScopeReport } from "./finding.js";
 
 export function checkTypes(cwd: string): ScopeReport {
+  // The env scope reports the missing install; the tsconfig's `extends` and
+  // `typescript` itself come from it.
+  if (dependenciesMissing(cwd)) {
+    return notEvaluated("dependencies aren't installed yet — skipping the type-check.");
+  }
   if (!fs.existsSync(path.join(cwd, "tsconfig.json"))) {
     return notEvaluated(
       "no `tsconfig.json` here — skipping the type-check. A scaffolded Nimbus project ships one; add it to enable this scope.",

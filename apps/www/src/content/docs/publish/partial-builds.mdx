@@ -1,0 +1,236 @@
+---
+title: Partial builds
+description: Build one collection, or a set, and deploy each slice on its own under one hostname.
+aiGenerated: true
+sidebar:
+  order: 3
+  label: Partial builds
+---
+
+A site with several products or a large API reference rebuilds everything for every change. A partial build takes one collection, or a set, and builds only that: its pages, its agent files, its search index. Each slice is a static site of its own; your host routes each slice's path prefix to it, so visitors see one hostname.
+
+The unit is a collection: a product's guides, an API reference, or any part you keep separate. Set the collections up first as you would without slices, as a [new collection](/writing/collections) or an [API reference](/api-reference/openapi/setup).
+
+## Build a slice
+
+Set `NIMBUS_BUILD_ONLY` to a collection name, or several separated by commas, and build:
+
+```sh
+NIMBUS_BUILD_ONLY=sdk pnpm build
+NIMBUS_BUILD_ONLY=docs,api pnpm build
+```
+
+Every other page collection is empty in that build: Astro never compiles, renders or indexes its pages, and build time and memory scale with the slice. The build says what it holds:
+
+```text
+[@cloudflare/nimbus-docs] building only sdk (NIMBUS_BUILD_ONLY); docs, api are empty in this build.
+```
+
+Only `astro build` honours the variable. `astro dev`, `astro sync` and `nimbus-docs check` use the whole site and say so once, so a job-level variable doesn't change what the other steps of a CI job do.
+
+A build fails when:
+
+- a name isn't one of the site's page collections. Page collections are known after content sync, so a mistyped name costs one sync before failing;
+- the docs version collections (`docs` and every `docs-<version>`) are split across slices. They build together.
+
+## What a slice writes
+
+The slice that holds `docs` is the **root slice**: it writes where a whole-site build does, and serves the homepage, `robots.txt`, `llms.txt`, `.well-known` and the rest of the origin root.
+
+Any other slice writes its site-wide files under its prefix, where its own deployment serves them, and drops the root files the root slice serves:
+
+| Under the slice's prefix (`/sdk/…`) | Dropped from the output | At the asset root |
+|---|---|---|
+| `sitemap-index.xml`, `sitemap-0.xml`, `sitemap.xml` | `/`, `/robots.txt`, `/og.png`, `/nimbus-api/coordinates.json` | `_headers`, with rules for the slice's files only |
+| `pagefind/` | `/llms.txt`, `/llms-full.txt`, `/index.md` | `404.html` |
+| `llms-full.txt`, one per collection in the slice | `/.well-known/` | `_redirects`, when the site emits one; both files for hosts that read them |
+| `_nimbus/shiki.css`, `_astro/` (bundled CSS and JS) | another collection's `openapi.json` and nav lists | |
+
+A slice of several collections keeps these under the first collection's prefix. OG images keep their path: `/og/sdk/…` for a page under `/sdk/`, and `/og/sdk.png` for the collection's index page, so the slice takes those too (below).
+
+The root slice's `llms.txt` links every collection's `llms.txt`, including the slices it didn't build, so agents find them all. A collection it didn't build is named from its collection name (`Sdk` for `sdk`) or its API label.
+
+Its sitemap index lists only its own files; `robots.txt` announces the other slices' sitemaps (below).
+
+## Deploy each slice
+
+Deploy every slice's `dist/` as its own site, then route by path prefix on the hostname. Everything else goes to the root slice, the most specific prefix wins, and slices deploy in any order. Each slice needs four paths:
+
+- the prefix itself, `/sdk`, so the slashless form doesn't reach the root slice;
+- everything under it, `/sdk/*`;
+- its pages' OG images, `/og/sdk/*`;
+- its index page's OG image, `/og/sdk.png`.
+
+A slice's pages load their CSS, JS, stylesheet and search bundle from under their own prefix, so a slice never depends on another slice's deploy being current. Files in `public/` (the favicon, fonts, root-path images) keep their root paths and come from the root slice, so a change there deploys the root slice.
+
+Give every collection to exactly one slice: two deployments that both hold `api` would answer the same URLs. Any host that routes by prefix works. Three ways:
+
+**Cloudflare**, one Worker per slice with zone routes (`workers.dev` hostnames take no routes):
+
+```jsonc title="wrangler.sdk.jsonc (the sdk slice)"
+{
+  "name": "docs-site-es",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./dist", "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "docs.example.com/sdk", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/sdk/*", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/og/sdk/*", "zone_name": "example.com" },
+    { "pattern": "docs.example.com/og/sdk.png", "zone_name": "example.com" }
+  ]
+}
+```
+
+The root slice's `wrangler.jsonc` keeps `"pattern": "docs.example.com/*"`. Then `NIMBUS_BUILD_ONLY=sdk pnpm build && npx wrangler deploy --config wrangler.sdk.jsonc`.
+
+**A reverse proxy** in front of one static origin per slice:
+
+```nginx
+location = /sdk      { proxy_pass https://sdk.internal; }
+location /sdk/       { proxy_pass https://sdk.internal; }
+location /og/sdk/    { proxy_pass https://sdk.internal; }
+location = /og/sdk.png { proxy_pass https://sdk.internal; }
+location /                { proxy_pass https://docs-root.internal; }
+```
+
+**A static host with rewrites**, such as Netlify or Vercel: deploy each slice as its own site and add rewrites on the root site to the slice's deployment, for example `/sdk/* https://sdk.example.app/sdk/:splat 200` in `_redirects`, or the equivalent `rewrites` entries in `vercel.json`, for the four paths.
+
+Each slice's `_headers` and `_redirects` cover that slice's files; hosts that don't read those files need the same rules in their own configuration, as for a whole-site build ([Docs for agents](/ai/docs-for-agents#agent-discovery)).
+
+### Under a base
+
+With `base: "/docs"` in `astro.config`, a slice writes the same files, and every URL it serves and advertises is under the base. Each slice's prefix becomes `<base><prefix>`:
+
+| | At the origin root | Under `base: "/docs"` |
+|---|---|---|
+| The slice's routes | `/sdk`, `/sdk/*`, `/og/sdk/*`, `/og/sdk.png` | `/docs/sdk`, `/docs/sdk/*`, `/docs/og/sdk/*`, `/docs/og/sdk.png` |
+| The root slice's routes | `/*` | `/docs`, `/docs/*` |
+| The slice's sitemap | `/sdk/sitemap-index.xml` | `/docs/sdk/sitemap-index.xml` |
+
+Deploy each slice the way the whole site deploys under the base: its origin serves the output under `/docs`, and the router passes the path through unchanged. Astro leaves the base out of `dist/`, so a slice's pages are at `dist/sdk/…` and are served at `/docs/sdk/…`.
+
+**Cloudflare:** add `@astrojs/cloudflare` (`~14.3.0`, with `wrangler` `^4.127.1`) and keep `output: "static"`. The adapter nests the output under the base (`dist/client/docs/…`) and keeps `_headers` and `_redirects` at `dist/client`, where Workers reads them; `404.html` stays under the base, where Workers' `404-page` handling still finds it. Install it by hand: `nimbus-docs add adapter-cloudflare` also switches the site to `output: "server"`.
+
+```js title="astro.config.mjs"
+import cloudflare from "@astrojs/cloudflare";
+
+export default defineConfig({
+  base: "/docs",
+  output: "static",
+  adapter: cloudflare({ prerenderEnvironment: "node" }),
+  // …
+});
+```
+
+```jsonc title="wrangler.sdk.jsonc (the sdk slice)"
+{
+  "name": "docs-site-es",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./dist/client", "not_found_handling": "404-page" },
+  "routes": [
+    { "pattern": "example.com/docs/sdk", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/sdk/*", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/og/sdk/*", "zone_name": "example.com" },
+    { "pattern": "example.com/docs/og/sdk.png", "zone_name": "example.com" }
+  ]
+}
+```
+
+The root slice's file has the same `assets` block and the routes `example.com/docs` and `example.com/docs/*`.
+
+The adapter also copies the root slice's [discovery files](/ai/agent-discovery) to the origin root. If the origin root is yours, add `example.com/.well-known/*` to its routes; otherwise serve them from the site that owns it.
+
+Deploy every slice, the root one too, with `npx wrangler deploy --config wrangler.jsonc`. Without `--config`, wrangler uses the adapter's generated configuration instead of yours.
+
+**A reverse proxy:** the same `location` blocks with `/docs` in front (`location /docs/sdk/ { proxy_pass https://sdk.internal; }`). `proxy_pass` without a path passes the request path through, base included, so each origin serves its slice under `/docs`.
+
+**A static host with rewrites:** publish each slice with its output under `/docs` (move the contents of `dist/` into `dist/docs/` before publishing), and rewrite `/docs/sdk/*` to `https://sdk.example.app/docs/sdk/:splat`.
+
+To check slices locally, serve each output under the base (with the adapter, `npx serve dist/client` already does), and match each slice in `compose.mjs` under the base. OG images are under the base too (`/docs/og/sdk/…`), so the base goes in front of `/og` as well, not only in front of the prefix:
+
+```js title="scripts/compose.mjs"
+const base = "/docs";
+// …
+const slice = slices.find(
+  ({ prefix }) =>
+    path === `${base}${prefix}` ||
+    path.startsWith(`${base}${prefix}/`) ||
+    path.startsWith(`${base}/og${prefix}/`) ||
+    path === `${base}/og${prefix}.png`,
+);
+```
+
+### Announce every sitemap
+
+`robots.txt` is yours (`src/pages/robots.txt.ts`), and search engines read sitemaps from it. Add one `Sitemap:` line per slice:
+
+```ts title="src/pages/robots.txt.ts"
+`Sitemap: ${new URL(withBase("/sitemap-index.xml", import.meta.env.BASE_URL), config.site).href}`,
+`Sitemap: ${new URL(withBase("/sdk/sitemap-index.xml", import.meta.env.BASE_URL), config.site).href}`,
+```
+
+Search engines read `robots.txt` only at the origin root. Under a base, the site's own file is served at `/docs/robots.txt`, so add the `Sitemap:` lines to the origin's `robots.txt`, or submit each slice's sitemap to the search engines directly.
+
+### Check a slice before it's live
+
+A slice's own deployment serves its own pages, so check them on that deployment's preview URL. The composition, links from one slice into another, needs the routing in front: a staging hostname with the same prefixes, or locally, one static server per slice's `dist/` and a small router in front that applies the rule:
+
+```js title="scripts/compose.mjs"
+// node scripts/compose.mjs  →  http://localhost:8788, with each slice's
+// dist/ served by `npx serve -l <port> <dir>` (or any static server).
+import { createServer, request } from "node:http";
+
+const slices = [
+  { prefix: "/sdk", port: 8791 },
+  { prefix: "/api", port: 8792 },
+];
+const root = 8790;
+
+createServer((req, res) => {
+  const path = new URL(req.url, "http://x").pathname;
+  const slice = slices.find(
+    ({ prefix }) =>
+      path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`/og${prefix}/`) || path === `/og${prefix}.png`,
+  );
+  const upstream = request({ port: slice?.port ?? root, path: req.url, method: req.method, headers: req.headers }, (up) => {
+    res.writeHead(up.statusCode ?? 502, up.headers);
+    up.pipe(res);
+  });
+  req.pipe(upstream);
+}).listen(8788);
+```
+
+## Search across slices
+
+Each slice builds its own Pagefind index. The search client loads its slice's bundle and merges the other slices' bundles into it, so one search box still covers the site. The merge is paid on the first search: about 127 KB for a 40-page slice, growing with each slice's size.
+
+The starter's provider does this. A custom provider reads the same configuration from `virtual:nimbus/config`:
+
+```ts
+import { searchIndex } from "virtual:nimbus/config";
+
+searchIndex.bundle; // "/sdk/pagefind/" in the sdk slice, "/pagefind/" otherwise
+searchIndex.merge; // the other slices' bundles, [] in a whole-site build
+```
+
+Both are served URLs: under `base: "/docs"`, the bundle is `/docs/sdk/pagefind/`. Fetch them as they are, and set Pagefind's `baseUrl` to the base with one trailing slash (`/docs/`).
+
+A slice of several collections writes one bundle; the other collections' bundle URLs answer 404 and the client skips them.
+
+## Links between slices
+
+A slice build knows only its own routes. It keeps the other slices' routes from the previous build's `.nimbus/routes.json`, so `nimbus-docs lint` still checks links into them, as warnings. Without a previous build, those links are skipped with one notice. A whole-site build restores the full check.
+
+In CI, cache `.nimbus/routes.json` from the whole-site build of the base branch and restore it before a slice build; [Build only changed slices](/publish/changed-slices) shows the workflow.
+
+## Build only what a pull request touched
+
+To build and preview only the slices a pull request changed, see [Build only changed slices](/publish/changed-slices).
+
+## Limits
+
+- Request rendering holds only the slice: a slice's server renders its own collections' pages on request and nothing else. Nimbus has no cache layer to invalidate.
+- The site's WebMCP search uses the root slice's bundle.
+- Cross-slice version pickers aren't supported: the docs version collections build together.
+- A slice can't span part of a collection.
+- A slice fetches only the content sources its collections and `api` entries read, and every source when `src/content.config.ts` sets one in a way the build can't read: see [Build without a source](/content-sources/git#build-without-a-source).

@@ -1,0 +1,70 @@
+---
+/* Experiment: a ribbon. Two slow rows of live components drift past; hover one to pause and see how it lands in your repo. */
+import { Icon } from "@/home/icon";
+
+const { bare = false } = Astro.props;
+// Each chip is a flat muted surface with the component floating on it as it
+// would sit on a page: on a white surface, with the window shadow.
+const chip = "group/c relative flex h-[128px] w-[340px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted px-6";
+const panel = "rounded-lg border border-border bg-card px-4 py-3 shadow-(--www-shadow-win)";
+const lift = "bg-card shadow-(--www-shadow-win)";
+const rows = [
+  ["aside", "steps", "tabs", "package-managers", "pagination", "search"],
+  ["sidebar", "file-tree", "accordion", "link-card", "code-group", "copy-prompt"],
+];
+// Starter components arrive with the scaffold as files in your repo; registry
+// components arrive with one command. Each chip says which, by its real name.
+const starter = new Set(["aside", "steps", "tabs", "package-managers", "pagination", "search", "sidebar"]);
+const key = "grid size-5 place-items-center rounded-[5px] bg-card font-mono text-[10px] leading-none text-muted-foreground shadow-[0_0_0_1px_var(--color-border-strong),0_1px_0_1px_var(--color-border-strong)]";
+---
+<div data-exp-ribbon>
+  {!bare && (
+  <div class="flex flex-wrap items-end justify-between gap-6">
+    <div>
+      <p class="text-[13px] leading-none text-muted-foreground">Registry</p>
+      <h3 class="mt-4 text-[22px] leading-7 tracking-tight">Every piece lands as source.</h3>
+    </div>
+    <p class="max-w-sm text-[15px] leading-7 text-foreground/70">One command copies a component into your repo. From then on it's yours. Hover one to see the command.</p>
+  </div>
+  )}
+
+  <div class:list={["space-y-4 overflow-hidden py-2 [mask-image:linear-gradient(90deg,transparent,black_8%,black_92%,transparent)] hover:[&_[data-track]]:[animation-play-state:paused]", !bare && "mt-10"]}>
+    {rows.map((row, r) => (
+      <div class="flex w-max gap-4 motion-safe:animate-[ribbon_60s_linear_infinite] data-[reverse]:[animation-direction:reverse]" data-track data-reverse={r === 1 ? "" : undefined}>
+        {[0, 1].map((copy) => row.map((id) => (
+          <div class={chip} aria-hidden={copy === 1 ? "true" : undefined}>
+            {id === "aside" && <div class:list={[lift, "rounded-lg"]}><div class="flex w-64 gap-2 rounded-lg border border-info/30 bg-info-muted px-3 py-2 text-[12px] leading-5"><Icon name="ph:info" class="mt-0.5 size-3.5 shrink-0 text-info" /><p><span class="block font-medium text-info">Note</span>Forecasts refresh every 10 minutes.</p></div></div>}
+            {id === "steps" && <div class={panel}><ol class="relative w-44 space-y-2.5 text-[12px] leading-5 before:absolute before:top-5 before:bottom-5 before:left-[9.5px] before:w-px before:bg-border">{["Get a key", "Call /forecast"].map((t, i) => (<li class="relative flex items-center gap-2.5"><span class="grid size-5 place-items-center rounded-md border border-border bg-card text-[10px] font-medium">{i + 1}</span><span class="font-medium">{t}</span></li>))}</ol></div>}
+            {id === "tabs" && <div class:list={[panel, "w-60 text-[12px] leading-4"]}><p class="flex gap-4 border-b border-border"><span class="-mb-px border-b-2 border-foreground pb-2 font-medium">macOS</span><span class="pb-2 text-muted-foreground">Windows</span><span class="pb-2 text-muted-foreground">Linux</span></p><p class="pt-2 text-muted-foreground">Press <span class="font-mono text-foreground">⌘K</span> to search.</p></div>}
+            {id === "package-managers" && <div class:list={[lift, "w-64 overflow-hidden rounded-lg border border-border text-[11px] leading-4"]}><p class="flex gap-1 border-b border-border bg-muted p-1"><span class="rounded bg-accent px-2 py-1 font-medium">npm</span><span class="px-2 py-1 text-muted-foreground">pnpm</span><span class="px-2 py-1 text-muted-foreground">yarn</span><span class="px-2 py-1 text-muted-foreground">bun</span></p><p class="flex h-8 items-center"><span class="flex-1 px-2.5 font-mono"><span class="text-info">npm</span> i @sample-co/weather</span><span class="grid h-full w-8 place-items-center border-l border-border text-muted-foreground"><Icon name="ph:copy" class="size-3.5" /></span></p></div>}
+            {id === "pagination" && <div class:list={[lift, "flex w-64 items-center rounded-full border border-border py-1 text-[12px] leading-4"]}><span class="flex flex-1 items-center gap-2 pl-2"><span class={key}>[</span><span><span class="block text-[10px] text-muted-foreground">Previous</span><span class="font-medium">Quickstart</span></span></span><span class="h-6 w-px bg-border"></span><span class="flex flex-1 items-center justify-end gap-2 pr-2 text-right"><span><span class="block text-[10px] text-muted-foreground">Next</span><span class="font-medium">Errors</span></span><span class={key}>]</span></span></div>}
+            {id === "search" && <div class:list={[lift, "flex w-56 items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-[12px] leading-4 text-muted-foreground"]}><Icon name="ph:magnifying-glass" class="size-3.5" /><span class="flex-1">Search</span><kbd class="rounded border border-border bg-muted px-1 font-mono text-[10px] leading-4">⌘K</kbd></div>}
+            {id === "sidebar" && <div class={panel}><div class="w-56 border-l border-border pl-2 text-[12px] leading-4"><p class="flex h-6 items-center gap-2 px-1.5"><span class="w-9 rounded border border-success/30 bg-success-muted text-center font-mono text-[9px] leading-[14px] text-success">GET</span>List stations</p><p class="flex h-6 items-center gap-2 rounded-md bg-accent px-1.5 font-medium"><span class="w-9 rounded border border-info/30 bg-info-muted text-center font-mono text-[9px] leading-[14px] text-info">POST</span>Create a subscription</p><p class="flex h-6 items-center gap-2 px-1.5"><span class="w-9 rounded border border-danger/30 bg-danger-muted text-center font-mono text-[9px] leading-[14px] text-danger">DEL</span>Delete a subscription</p></div></div>}
+            {id === "file-tree" && <div class:list={[panel, "w-48 font-mono text-[11px] leading-5"]}><p class="flex items-center gap-1.5"><Icon name="ph:caret-down" class="size-3 text-muted-foreground" /><Icon name="ph:folder" class="size-3.5 text-muted-foreground" />src</p><p class="ml-[5px] flex items-center gap-1.5 border-l border-border pl-[13px]"><Icon name="ph:file" class="size-3.5 text-muted-foreground" />index.ts</p><p class="flex items-center gap-1.5 pl-[18px]"><Icon name="ph:file" class="size-3.5 text-muted-foreground" />wrangler.jsonc</p></div>}
+            {id === "accordion" && <div class:list={[lift, "w-64 overflow-hidden rounded-lg border border-border text-[12px] leading-4"]}><p class="flex h-8 items-center justify-between border-b border-border px-3 font-medium">How often do forecasts update?<Icon name="ph:caret-down" class="size-3.5 text-muted-foreground" /></p><p class="flex h-8 items-center justify-between px-3">Which cities are covered?<Icon name="ph:caret-right" class="size-3.5 text-muted-foreground" /></p></div>}
+            {id === "link-card" && <div class:list={[lift, "flex w-60 items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-3 text-[12px] leading-4"]}><span><span class="block font-medium">Build a rain alert</span><span class="block text-muted-foreground">Alerts pushed to your server</span></span><Icon name="ph:caret-right" class="size-3.5 shrink-0 text-muted-foreground" /></div>}
+            {id === "code-group" && <div class:list={[lift, "w-64 overflow-hidden rounded-lg border border-border text-[11px] leading-4"]}><p class="flex gap-1 border-b border-border bg-muted p-1"><span class="rounded bg-accent px-2 py-1 font-mono">index.ts</span><span class="px-2 py-1 font-mono text-muted-foreground">wrangler.jsonc</span></p><p class="flex h-8 items-center px-2.5 font-mono"><span class="text-danger">export default</span>&nbsp;{"{ fetch }"}</p></div>}
+            {id === "copy-prompt" && <div class:list={[lift, "rounded-lg"]}><div class="flex w-64 items-center gap-2 rounded-lg border border-border bg-muted p-1.5 pl-3 text-[12px] leading-4"><span class="flex-1">Add a page about rain alerts.</span><span class="rounded-md bg-foreground px-2.5 py-1.5 text-[11px] font-medium text-background">Copy prompt</span></div></div>}
+            <span class="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-card/95 px-4 font-mono text-[12px] leading-4 whitespace-nowrap opacity-0 transition-opacity group-hover/c:opacity-100">{starter.has(id) ? <span><span class="text-muted-foreground">in your repo ·</span> src/components/ui/{id}/</span> : <span><span class="text-muted-foreground">npx @cloudflare/nimbus-docs add</span> {id}</span>}</span>
+          </div>
+        )))}
+      </div>
+    ))}
+  </div>
+</div>
+
+<style is:global>
+  @keyframes ribbon { to { transform: translateX(calc(-50% - 0.5rem)); } }
+  /* The chips show the starter as it ships, so they keep its blue, which the
+     monochrome www palette otherwise greys out. */
+  [data-exp-ribbon] {
+    --nb-info: oklch(0.424 0.199 265.638);
+    --nb-info-muted: oklch(0.932 0.032 255.6 / 0.45);
+    --color-info: var(--nb-info);
+    --color-info-muted: var(--nb-info-muted);
+  }
+  [data-mode="dark"] [data-exp-ribbon] {
+    --nb-info: oklch(0.707 0.165 254.624);
+    --nb-info-muted: oklch(0.38 0.145 265.5 / 0.22);
+  }
+</style>

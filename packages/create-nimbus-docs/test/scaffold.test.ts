@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 
 import {
@@ -67,7 +68,16 @@ function makeTemplate(pkgJson = `{ "name": "template", "version": "0.0.0" }`): s
 }
 
 function makeCwd(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "nimbus-cwd-"));
+  // A wrangler the scaffold target resolves from its parent, the way a
+  // workspace hoists it: a new wrangler.jsonc takes its compatibility date
+  // from this workerd, and no test reaches the registry.
+  fs.mkdirSync(path.join(cwd, "node_modules", "wrangler"), { recursive: true });
+  fs.writeFileSync(
+    path.join(cwd, "node_modules", "wrangler", "package.json"),
+    JSON.stringify({ name: "wrangler", version: "4.150.0", dependencies: { workerd: "1.20250101.1" } }),
+  );
+  return cwd;
 }
 
 function makeGeneratedTemplates(): string {
@@ -132,6 +142,8 @@ test("happy path writes and transforms the project", async () => {
     assert.equal(typeof nimbus.version, "string");
     assert.equal(nimbus.lastReviewedNimbusVersion, null);
     assert.equal(nimbus.templatesTag, `templates-v${nimbus.version}`);
+    assert.equal(nimbus.registry, "https://nimbus-docs.com/registry");
+    assert.equal(fs.existsSync(path.join(target, ".env")), false);
     assert.equal(nimbus.install.root, "src");
     assert.deepEqual(nimbus.install.aliases, { "@/*": "src/*" });
     assert.deepEqual(nimbus.components, []);
@@ -225,7 +237,13 @@ test("preview mode scaffolds bundled templates and records preview provenance", 
   try {
     await scaffold(
       { ...BASE_OPTIONS, dir: "my-docs" },
-      { cwd, previewMode: true, previewPr: "42", previewTemplatesDir: templates },
+      {
+        cwd,
+        previewMode: true,
+        previewPr: "42",
+        previewTemplatesDir: templates,
+        previewRegistryUrl: "https://pr-42-nimbus-docs.example.workers.dev/registry",
+      },
     );
 
     const nimbus = JSON.parse(
@@ -233,7 +251,16 @@ test("preview mode scaffolds bundled templates and records preview provenance", 
     );
     assert.equal(nimbus.templatesTag, null);
     assert.equal(nimbus.lastReviewedNimbusVersion, null);
-    assert.deepEqual(nimbus.preview, { pr: "42", templates: "bundled" });
+    assert.deepEqual(nimbus.preview, {
+      pr: "42",
+      templates: "bundled",
+      registry: "https://pr-42-nimbus-docs.example.workers.dev/registry",
+    });
+    assert.equal(nimbus.registry, nimbus.preview.registry);
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "my-docs", ".env"), "utf8"),
+      `NIMBUS_REGISTRY_URL=${nimbus.registry}\n`,
+    );
   } finally {
     cleanup(cwd, templates);
   }
@@ -262,7 +289,7 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
   const tmpl = makeTemplate();
   try {
     await scaffold(
-      { ...BASE_OPTIONS, deploy: "cloudflare", dir: "my-docs" },
+      { ...BASE_OPTIONS, packageManager: "pnpm", deploy: "cloudflare", dir: "my-docs" },
       internals(cwd, tmpl),
     );
     const target = path.join(cwd, "my-docs");
@@ -272,6 +299,9 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
       fs.readFileSync(path.join(target, "package.json"), "utf8"),
     );
     assert.ok(pkg.devDependencies?.wrangler, "wrangler injected for cloudflare");
+    // Its compatibility date is the resolved wrangler's workerd date, not today's.
+    const wrangler = JSON.parse(fs.readFileSync(path.join(target, "wrangler.jsonc"), "utf8"));
+    assert.equal(wrangler.compatibility_date, "2025-01-01");
 
     // workerd is declined in BOTH schemes, without a blanket approval.
     const ws = fs.readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8");
@@ -289,12 +319,42 @@ test("cloudflare target declines workerd's build script alongside wrangler", asy
   }
 });
 
+test("only pnpm scaffolds keep pnpm-workspace.yaml, and only yarn ones get .yarnrc.yml", async () => {
+  for (const packageManager of ["npm", "pnpm", "yarn", "bun"] as const) {
+    const cwd = makeCwd();
+    const tmpl = makeTemplate();
+    try {
+      await scaffold(
+        { ...BASE_OPTIONS, packageManager, deploy: "cloudflare", dir: "my-docs" },
+        internals(cwd, tmpl),
+      );
+      assert.equal(
+        fs.existsSync(path.join(cwd, "my-docs", "pnpm-workspace.yaml")),
+        packageManager === "pnpm",
+        packageManager,
+      );
+      const yarnrc = path.join(cwd, "my-docs", ".yarnrc.yml");
+      assert.equal(fs.existsSync(yarnrc), packageManager === "yarn", packageManager);
+      if (packageManager === "yarn") assert.equal(fs.readFileSync(yarnrc, "utf8"), "nodeLinker: node-modules\n");
+      // No lockfile up front: inside a Yarn workspace, the site stays a member.
+      assert.equal(fs.existsSync(path.join(cwd, "my-docs", "yarn.lock")), false, packageManager);
+      assert.equal(
+        /^\.yarn\/\*\n!\.yarn\/patches$/m.test(fs.readFileSync(path.join(cwd, "my-docs", ".gitignore"), "utf8")),
+        packageManager === "yarn",
+        packageManager,
+      );
+    } finally {
+      cleanup(cwd, tmpl);
+    }
+  }
+});
+
 test("non-cloudflare target leaves the build-scripts config untouched", async () => {
   const cwd = makeCwd();
   const tmpl = makeTemplate();
   try {
     await scaffold(
-      { ...BASE_OPTIONS, deploy: "other", dir: "my-docs" },
+      { ...BASE_OPTIONS, packageManager: "pnpm", deploy: "other", dir: "my-docs" },
       internals(cwd, tmpl),
     );
     const ws = fs.readFileSync(
@@ -310,7 +370,7 @@ test("non-cloudflare target leaves the build-scripts config untouched", async ()
   }
 });
 
-test("aborts when the target directory already exists, leaving it untouched", async () => {
+test("refuses a folder that isn't empty, leaving it untouched", async () => {
   const cwd = makeCwd();
   const tmpl = makeTemplate();
   try {
@@ -321,7 +381,7 @@ test("aborts when the target directory already exists, leaving it untouched", as
     await assert.rejects(
       scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, tmpl)),
       (err: unknown) =>
-        err instanceof ScaffoldError && /already exists/.test(err.message),
+        err instanceof ScaffoldError && /"my-docs" isn't empty \(keep\.txt\)/.test(err.message),
     );
 
     // The pre-existing content must be untouched — no partial overwrite.
@@ -330,6 +390,135 @@ test("aborts when the target directory already exists, leaving it untouched", as
       "precious",
     );
   } finally {
+    cleanup(cwd, tmpl);
+  }
+});
+
+test("scaffolds into the current folder, named after it", async () => {
+  const cwd = path.join(makeCwd(), "team-docs");
+  fs.mkdirSync(cwd);
+  const tmpl = makeTemplate();
+  try {
+    await scaffold({ ...BASE_OPTIONS, dir: "." }, internals(cwd, tmpl));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(cwd, "package.json"), "utf8")).name, "team-docs");
+  } finally {
+    cleanup(path.dirname(cwd), tmpl);
+  }
+});
+
+test("preview mode replaces a template's registry override and keeps its other variables", async () => {
+  const cwd = makeCwd();
+  const templates = makeGeneratedTemplates();
+  fs.writeFileSync(
+    path.join(templates, "template", ".env"),
+    "FOO=1\nNIMBUS_REGISTRY_URL=https://old.example/registry\n\nBAR=2",
+  );
+  try {
+    await scaffold(
+      { ...BASE_OPTIONS, dir: "my-docs" },
+      {
+        cwd,
+        previewMode: true,
+        previewTemplatesDir: templates,
+        previewRegistryUrl: "https://new.example/registry",
+      },
+    );
+
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "my-docs", ".env"), "utf8"),
+      "FOO=1\n\nBAR=2\nNIMBUS_REGISTRY_URL=https://new.example/registry\n",
+    );
+  } finally {
+    cleanup(cwd, templates);
+  }
+});
+
+test("scaffolds into a cloned repository, and a failure keeps its .git", async () => {
+  const cwd = makeCwd();
+  const good = makeTemplate();
+  const bad = makeTemplate(`{ not valid json`);
+  try {
+    const target = path.join(cwd, "my-docs");
+    fs.mkdirSync(path.join(target, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    await assert.rejects(scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, bad)), ScaffoldError);
+    assert.deepEqual(fs.readdirSync(target), [".git"]);
+
+    await scaffold({ ...BASE_OPTIONS, dir: "my-docs" }, internals(cwd, good));
+    assert.ok(fs.existsSync(path.join(target, "astro.config.ts")));
+    assert.equal(fs.readFileSync(path.join(target, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+  } finally {
+    cleanup(cwd, good, bad);
+  }
+});
+
+test("a template's own .git never reaches the site's repository", async () => {
+  const cwd = makeCwd();
+  const bad = makeTemplate(`{ not valid json`);
+  try {
+    fs.mkdirSync(path.join(bad, ".git"));
+    fs.writeFileSync(path.join(bad, ".git", "HEAD"), "ref: refs/heads/template\n");
+    const target = path.join(cwd, "my-docs");
+    fs.mkdirSync(path.join(target, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(target, ".git", "HEAD"), "ref: refs/heads/main\n");
+
+    await assert.rejects(
+      scaffold({ ...BASE_OPTIONS, dir: "my-docs", templateDir: bad }, { cwd }),
+      (err) => err instanceof ScaffoldError && /files it added were removed/.test(err.message),
+    );
+    assert.deepEqual(fs.readdirSync(target), [".git"]);
+    assert.deepEqual(fs.readdirSync(path.join(target, ".git")), ["HEAD"]);
+    assert.equal(fs.readFileSync(path.join(target, ".git", "HEAD"), "utf8"), "ref: refs/heads/main\n");
+  } finally {
+    cleanup(cwd, bad);
+  }
+});
+
+test("a fresh repository gets a first commit; an existing one gets neither init nor commit", async () => {
+  const identity = {
+    GIT_AUTHOR_NAME: "Test",
+    GIT_AUTHOR_EMAIL: "test@example.com",
+    GIT_COMMITTER_NAME: "Test",
+    GIT_COMMITTER_EMAIL: "test@example.com",
+  };
+  const saved = Object.fromEntries(Object.keys(identity).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, identity);
+  const cwd = makeCwd();
+  const tmpl = makeTemplate();
+  const git = (cwd: string, ...args: string[]) =>
+    spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
+  try {
+    await scaffold({ ...BASE_OPTIONS, git: true, dir: "fresh" }, internals(cwd, tmpl));
+    assert.equal(git(path.join(cwd, "fresh"), "rev-list", "--count", "HEAD"), "1");
+    assert.equal(git(path.join(cwd, "fresh"), "status", "--porcelain"), "");
+
+    git(cwd, "init");
+    await scaffold({ ...BASE_OPTIONS, git: true, dir: "nested" }, internals(cwd, tmpl));
+    assert.equal(fs.existsSync(path.join(cwd, "nested", ".git")), false);
+    assert.equal(spawnSync("git", ["rev-parse", "HEAD"], { cwd }).status, 128, "no commit in the outer repo");
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    cleanup(cwd, tmpl);
+  }
+});
+
+test("a missing package manager fails before anything is written", async () => {
+  const cwd = makeCwd();
+  const tmpl = makeTemplate();
+  const savedPath = process.env.PATH;
+  process.env.PATH = cwd;
+  try {
+    await assert.rejects(
+      scaffold({ ...BASE_OPTIONS, packageManager: "bun", skipInstall: false, dir: "my-docs" }, internals(cwd, tmpl)),
+      (err: unknown) => err instanceof ScaffoldError && /bun isn't installed or isn't on your PATH/.test(err.message),
+    );
+    assert.equal(fs.existsSync(path.join(cwd, "my-docs")), false);
+  } finally {
+    process.env.PATH = savedPath;
     cleanup(cwd, tmpl);
   }
 });

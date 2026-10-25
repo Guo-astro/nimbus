@@ -7,11 +7,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, posix } from "node:path";
 
 import { z } from "astro/zod";
 
+import { writeFileAtomic } from "./fs-atomic.js";
 import { invocation } from "./pm.js";
 import type { ComponentItem, RegistryFile } from "./resolver.js";
 
@@ -22,6 +23,7 @@ const DEFAULT_ROOT = "src";
 //   version       registry release the item was pulled from (provenance); null when
 //                 the registry doesn't publish versions yet.
 //   hash          `sha256:…` of the source (registry) bytes — the drift signal; `null` = unknown.
+//   fileHashes    `sha256:…` of each file as installed, by its `files` path: which file was edited.
 //   modified      `init` only: on-disk bytes already differ from the recorded source.
 //   handAuthored  `init` only: found on disk, matched to no registry item.
 const installedComponentSchema = z
@@ -34,6 +36,7 @@ const installedComponentSchema = z
     source: z.string().nullable(),
     hash: z.string().nullable(),
     files: z.array(z.string()),
+    fileHashes: z.record(z.string(), z.string()).optional(),
     modified: z.boolean().optional(),
     handAuthored: z.boolean().optional(),
   })
@@ -49,7 +52,20 @@ const nimbusJsonSchema = z
     version: z.string().nullable().optional(),
     lastReviewedNimbusVersion: z.string().nullable().optional(),
     templatesTag: z.string().nullable().optional(),
+    // Starter files taken with `diff --apply`, keyed by template-tree path
+    // (`src/pages/index.astro`, `AGENT.md`): the tag each was taken from, which
+    // later diffs use as that file's base instead of `templatesTag`.
+    templatesTagByFile: z.record(z.string(), z.string()).optional(),
     variant: z.string().nullable().optional(),
+    // What `create-nimbus-docs` built beyond the docs starter (an API reference),
+    // so upgrades rebuild the same starter tree. Absent means docs only.
+    site: z
+      .object({
+        template: z.enum(["docs", "api"]),
+        api: z.union([z.object({ spec: z.string() }).passthrough(), z.literal(false)]),
+      })
+      .passthrough()
+      .optional(),
     registry: z.string().optional(),
     // `init` sets this when it rebuilt a record it couldn't fully recover.
     reconstructed: z.boolean().optional(),
@@ -101,7 +117,8 @@ export function readNimbusJson(cwd: string): NimbusJson | null {
 }
 
 export function writeNimbusJson(cwd: string, data: NimbusJson): void {
-  writeFileSync(join(cwd, NIMBUS_JSON), JSON.stringify(data, null, 2) + "\n");
+  // Atomic: a write cut short must not leave the provenance record half-written.
+  writeFileAtomic(join(cwd, NIMBUS_JSON), JSON.stringify(data, null, 2) + "\n");
 }
 
 // Registry paths are src-relative, so one root routes the whole install —
@@ -133,6 +150,10 @@ export function bytesHash(files: RegistryFile[]): string {
   return `sha256:${hash.digest("hex")}`;
 }
 
+export function fileHash(content: string): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
 export function toInstalledComponent(
   item: ComponentItem,
   opts: { source: string; files: string[] },
@@ -144,6 +165,8 @@ export function toInstalledComponent(
     source: opts.source,
     hash: bytesHash(item.files),
     files: opts.files,
+    // `opts.files` names `item.files` in order, as `recordInstalled` builds it.
+    fileHashes: Object.fromEntries(opts.files.map((file, i) => [file, fileHash(item.files[i]!.content)])),
   };
 }
 

@@ -15,7 +15,7 @@ import { isBuildValidator, isRuleCode, type Diagnostic } from "../lint/diagnosti
 
 export type CheckScope = "env" | "structure" | "migrations" | "authoring" | "types";
 
-export type CheckSeverity = "error" | "warn";
+export type CheckSeverity = "error" | "warn" | "info";
 
 /** Per-scope verdict, derived from findings + `evaluated`. */
 export type ScopeStatus = "passed" | "failed" | "not_evaluated";
@@ -27,7 +27,7 @@ export type TopStatus = "passed" | "failed" | "partial";
 export type Readiness = "buildable" | "blocked" | "unknown";
 
 export interface CheckFix {
-  kind: "set-config" | "install-dep" | "lint-fix" | "suggestion";
+  kind: "set-config" | "install-dep" | "lint-fix" | "route-file" | "suggestion";
   path?: string;
   package?: string;
   dev?: boolean;
@@ -61,10 +61,23 @@ export interface Note {
   requiresInput?: boolean;
 }
 
+/** Where a page collection is served, and why. */
+export interface CollectionUrl {
+  name: string;
+  /** `/` or `/products/sdk`. */
+  url: string;
+  /** The route file that sets it, or why it's the default. */
+  source: string;
+  /** A route serves it away from `/<name>`. */
+  moved: boolean;
+}
+
 export interface ScopeReport {
   scope: CheckScope;
   findings: CheckFinding[];
   notes: Note[];
+  /** `structure` only: where each page collection is served. */
+  collections?: CollectionUrl[];
   /** Did the scope's core actually run? `false` only when it produced no verdict. */
   evaluated: boolean;
   /** Whole-scope not-evaluated reason (types pre-build); omitted otherwise. */
@@ -89,7 +102,7 @@ export function summarize(
   let fixable = 0;
   for (const f of findings) {
     if (f.severity === "error") errors++;
-    else warnings++;
+    else if (f.severity === "warn") warnings++;
     if (f.fixable) fixable++;
   }
   return { errors, warnings, notes: noteCount, fixable, durationMs };

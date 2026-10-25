@@ -18,6 +18,8 @@
  * @typedef {Object} TemplateVariant
  * @property {string} contentDir Path under packages/nimbus-starter-source/
  *   whose contents replace src/content/docs/ for that variant.
+ * @property {string[]} [excludePaths] Starter files (relative to the starter
+ *   root) the variant doesn't ship, e.g. a page its content replaces.
  *
  * @typedef {Object} StarterManifest
  * @property {string[]} registryOnlyComponents UI slugs present in the
@@ -36,10 +38,18 @@
  * @property {string[]} devOnlyPaths Path prefixes (relative to the
  *   starter root) stripped from shipped templates. Use directory paths
  *   ending with "/" to filter whole trees.
+ * @property {string[]} trackedRootFiles Root files every site keeps in the
+ *   starter's shape. `nimbus-docs outdated` and `diff` compare them against
+ *   upstream like `src/`; the CLI mirrors this list (a nimbus-docs test keeps
+ *   them equal). Package-manager files and files the scaffolder rewrites
+ *   (package.json, wrangler.jsonc, nimbus.json, …) differ on every site and
+ *   stay out; their changes ship as upgrade entries.
  * @property {string[]} declinedBuildScripts Dependency names whose install
  *   scripts the generator declines in the shipped template's
  *   pnpm-workspace.yaml (pnpm's build-scripts gate). Named exactly, never a
  *   blanket approval; both ship working prebuilds.
+ * @property {{ components: string[], dependencies: Record<string, string> }} apiPart
+ *   The API reference site part: registry components and peer pins.
  * @property {Record<string, TemplateVariant>} templates Per-template
  *   content overrides. Key = output dir name under create-nimbus-docs/
  *   (e.g. "template" → packages/create-nimbus-docs/template/).
@@ -54,6 +64,7 @@ export const STARTER_MANIFEST = {
     "api-layout",
     "api-sidebar",
     "code-group",
+    "copy-prompt",
     "embed",
     "file-tree",
     "frame",
@@ -83,15 +94,33 @@ export const STARTER_MANIFEST = {
   // dev tree. Nothing is currently dev-only.
   devOnlyPaths: [],
 
+  // Root files upgrades track alongside src/. Every variant must ship each one.
+  trackedRootFiles: ["AGENT.md", "CLAUDE.md", "tsconfig.json"],
+
   // Install scripts declined in shipped templates to clear pnpm's build-scripts
   // gate. Both ship prebuilds, so declining is strictly narrower than allowing.
   declinedBuildScripts: ["esbuild", "sharp"],
 
+  // The API reference, a site part `create-nimbus-docs` adds (`--api`) or makes
+  // the whole site (`--template api`). Its files live in `parts/`; the
+  // generator ships them in each variant's `.nimbus-parts/`. `components` and
+  // `dependencies` are the `api-layout` registry item's closure among the
+  // registry-only components and its pinned peers (a www registry test keeps
+  // them equal), installed and recorded as `add api-layout` would.
+  apiPart: {
+    components: ["api-code-rail", "api-field-row", "api-layout", "api-sidebar", "popover", "version-switcher"],
+    dependencies: {
+      "@scalar/openapi-parser": "0.28.12",
+      "openapi-sampler": "1.7.4",
+      "@readme/httpsnippet": "11.4.0",
+    },
+  },
+
   templates: {
     template: {
-      // The default template ships the kitchen-sink content (welcome /
-      // getting-started / components). Reusing src/content/docs/ keeps
-      // a single canonical copy; no override needed.
+      // The default template ships the starter content (a fill-in
+      // Introduction and the Components page). Reusing src/content/docs/
+      // keeps a single canonical copy; no override needed.
       contentDir: "src/content/docs/",
     },
     "template-empty": {

@@ -228,6 +228,27 @@ describe("api resilience — two pages that collide on a route slug are fatal", 
     components: { schemas: { User: { type: "object", properties: { id: { type: "string" } } } } },
   });
 
+  test("text that is neither JSON nor YAML fails with a pointed could-not-be-parsed error", async () => {
+    await assert.rejects(
+      () => parseOpenApi({ collection: "bad", spec: "{ not a document", label: "garbage.json" }),
+      (err: unknown) =>
+        err instanceof ApiBuildError &&
+        err.diagnostics.some((d) => d.level === "error" && /could not be parsed/.test(d.message)),
+    );
+  });
+
+  test("a JSON spec and its YAML twin parse to the same model, union links included", async () => {
+    const yaml = fixtureText("smallco.yaml");
+    const fromYaml = await parseOpenApi({ collection: "twin", label: "smallco.yaml", spec: yaml });
+    const { parse } = await import("yaml");
+    const fromJson = await parseOpenApi({
+      collection: "twin",
+      label: "smallco.json",
+      spec: JSON.stringify(parse(yaml)),
+    });
+    assert.deepEqual(fromJson.model, fromYaml.model);
+  });
+
   test("colliding slugs fail at buildApiModel with a pointed error", async () => {
     await assert.rejects(
       () => buildApiModel({ collection: "collide", spec: collidingSpec, label: "collide.json" }),
@@ -610,5 +631,51 @@ describe("api resilience — Swagger 2.0 is fatal, with a pointer to conversion"
       });
       assert.equal(getApiPageProps(model, "listPets").kind, "operation", openapi);
     }
+  });
+});
+
+describe("api resilience — a property named $ref", () => {
+  const spec = (thing: string) => `
+openapi: 3.1.0
+info: { title: Refs, version: "1" }
+paths:
+  /things:
+    get:
+      operationId: listThings
+      tags: [things]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+components:
+  schemas:
+    Thing:
+      type: object
+      properties:
+${thing}
+`;
+
+  test("a schema property named $ref is a name and draws no reference warning", async () => {
+    const { diagnostics } = await parseOpenApi({
+      collection: "refs",
+      spec: spec(`        $ref: { type: string }\n        properties: { type: object, properties: { $ref: { type: string } } }`),
+      label: "refs.yaml",
+    });
+    const references = diagnostics.filter((d) => /reference/i.test(d.message));
+    assert.deepEqual(references, []);
+    assert.ok(!warnings.some((w) => w.includes("[object Object]")), warnings.join("\n"));
+  });
+
+  test("a $ref whose value is not a string is reported by location, not by its printed value", async () => {
+    const { diagnostics } = await parseOpenApi({
+      collection: "refs",
+      spec: spec(`        ends_at: { $ref: 7 }`),
+      label: "refs.yaml",
+    });
+    const located = diagnostics.filter((d) => d.message.includes("#/components/schemas/Thing/properties/ends_at/$ref"));
+    assert.ok(located.length >= 1, diagnostics.map((d) => d.message).join("\n"));
+    assert.ok(!diagnostics.some((d) => d.message.includes("Can't resolve reference: 7")), diagnostics.map((d) => d.message).join("\n"));
   });
 });

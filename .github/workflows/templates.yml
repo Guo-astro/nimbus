@@ -42,7 +42,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [static, vercel, node, netlify, cloudflare]
+        # netlify runs under pnpm@latest below: under pnpm 9 its site's
+        # esbuild 0.28.1 postinstall intermittently finds 0.28.2's binary.
+        lane: [static, vercel, node, cloudflare]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -91,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [static, cloudflare]
+        lane: [static, cloudflare, netlify]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

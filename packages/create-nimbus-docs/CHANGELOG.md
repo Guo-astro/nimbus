@@ -1,5 +1,13 @@
 # @cloudflare/create-nimbus-docs
 
+## 0.8.1
+
+### Patch Changes
+
+- [#135](https://github.com/cloudflare/nimbus/pull/135) [`1ee21b9`](https://github.com/cloudflare/nimbus/commit/1ee21b92916d354b2deb5d1f074f0f8f4eefd1e4) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update the interactive prompts to @clack/prompts 1.8.
+
+- [#290](https://github.com/cloudflare/nimbus/pull/290) [`9ae48e4`](https://github.com/cloudflare/nimbus/commit/9ae48e4355145866788dad9aa5b340a077139560) Thanks [@dependabot](https://github.com/apps/dependabot)! - New projects start on Astro 7.3.3, which includes a security fix in its SVG optimizer.
+
 ## 0.8.0
 
 ### Minor Changes

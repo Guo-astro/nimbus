@@ -1,5 +1,21 @@
 # @cloudflare/nimbus-docs
 
+## 0.19.1
+
+### Patch Changes
+
+- [#293](https://github.com/cloudflare/nimbus/pull/293) [`ff3ad76`](https://github.com/cloudflare/nimbus/commit/ff3ad76c62b74cfbc3f8af3bddaf14b9241b9cd2) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Authored code samples render without `openapi-sampler` and `@readme/httpsnippet`: set `samples.generate: []` to publish authored samples only, or one warning says what to install. Authored samples highlight in every language Shiki bundles. A spec with a schema property named `$ref` builds and publishes without reference warnings, and a `$ref` whose value is not a string is reported by its location.
+
+- [#293](https://github.com/cloudflare/nimbus/pull/293) [`85366b6`](https://github.com/cloudflare/nimbus/commit/85366b6f66fe8e1320f0bb79d495941cdab0d1c4) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Cheaper API builds and a lighter Worker. The spec is parsed once for the walk and its ref-preserving copy, with a second parse only if the parser ever resolves in place. For an API with `bundle: false`, the "Prepared API pages" line says what changed when a version is rebuilt. Agent files are staged by clone and the search inventory reads the Markdown twins instead of rendering every page again. A server build reads the agent-endpoint manifest from `_nimbus/agent-endpoint-assets/manifest.json` instead of inlining it, and staging fails with a clear error if that file would exceed Cloudflare's 25 MiB static file limit.
+
+- [#293](https://github.com/cloudflare/nimbus/pull/293) [`a806887`](https://github.com/cloudflare/nimbus/commit/a806887d2c18176c7893fad20abe29590f12ff16) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - `nimbus-docs check` no longer asks for `rendering.collections` when the `api` config is computed. It takes a zero-argument `apiCollection()` registration as an API collection, skips matching registrations against `api` entries, and says so in a "needs a build" note; the build enforces both.
+
+- [#135](https://github.com/cloudflare/nimbus/pull/135) [`1ee21b9`](https://github.com/cloudflare/nimbus/commit/1ee21b92916d354b2deb5d1f074f0f8f4eefd1e4) Thanks [@dependabot](https://github.com/apps/dependabot)! - Update the interactive prompts to @clack/prompts 1.8.
+
+- [#300](https://github.com/cloudflare/nimbus/pull/300) [`678d1e9`](https://github.com/cloudflare/nimbus/commit/678d1e9b432850a1f7cea19f73fe1049d077e6e8) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - The dev server works with Astro 7.3.3: content edits refresh Markdown, `llms.txt` and discovery files again, and editing `astro.config` re-indexes collections before the restarted server serves.
+
+- [#293](https://github.com/cloudflare/nimbus/pull/293) [`796f348`](https://github.com/cloudflare/nimbus/commit/796f34858f69e31790eca71373deee5d9a576b32) Thanks [@MohamedH1998](https://github.com/MohamedH1998)! - Add `routes.sections: "hierarchical"` so an API collection's tag pages are served at the tag hierarchy's path (`/api/zero-trust/devices/`) instead of `tags/<segment>/`, and `routes.tagSegments` to set one tag's URL segment. Opt-in under `resource-action-v2`; coordinates and operation URLs do not change.
+
 ## 0.19.0
 
 ### Minor Changes

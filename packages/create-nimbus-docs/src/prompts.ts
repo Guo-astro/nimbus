@@ -265,11 +265,11 @@ export async function getPromptResponses(opts: PromptOptions): Promise<PromptRes
 }
 
 /** Show one prompt; a cancelled prompt exits cleanly. */
-async function ask<T>(prompt: () => Promise<T | symbol>): Promise<T> {
+async function ask<T>(prompt: () => Promise<T>): Promise<Exclude<T, symbol>> {
   const value = await prompt();
   if (p.isCancel(value)) {
     p.cancel("Cancelled.");
     process.exit(0);
   }
-  return value as T;
+  return value as Exclude<T, symbol>;
 }
